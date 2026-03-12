@@ -1,0 +1,1441 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>09 - 反向传播 | 前置知识</title>
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+SC:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <style>
+        /* ===== Module-specific styles ===== */
+        .hero-section {
+            text-align: center;
+            padding: 2rem 0 1.5rem;
+        }
+        .hero-section h1 {
+            font-size: 2.4rem;
+            background: linear-gradient(135deg, var(--accent-orange), var(--accent-green));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .hero-section .subtitle { color: var(--text-secondary); font-size: 1.05rem; }
+
+        /* Graph nodes */
+        .cg-node { cursor: pointer; }
+        .cg-node circle { transition: all 0.3s; }
+        .cg-node text { font-family: var(--font-mono); font-size: 12px; fill: var(--text-primary); text-anchor: middle; dominant-baseline: central; pointer-events: none; }
+        .cg-node .value-label { font-size: 10px; fill: var(--accent-green); }
+        .cg-node .grad-label { font-size: 10px; fill: var(--accent-orange); }
+        .cg-edge { stroke: var(--border-color); stroke-width: 2; fill: none; }
+        .cg-edge.forward-active { stroke: var(--accent-green); stroke-width: 3; }
+        .cg-edge.backward-active { stroke: var(--accent-orange); stroke-width: 3; }
+        .cg-edge-arrow { fill: var(--border-color); }
+
+        /* Interactive inputs */
+        .param-input {
+            display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;
+        }
+        .param-input label { font-size: 0.85rem; color: var(--text-secondary); min-width: 2rem; }
+        .param-input input[type="number"] {
+            width: 70px; padding: 0.3rem 0.5rem; background: var(--bg-primary);
+            border: 1px solid var(--border-color); border-radius: var(--radius-sm);
+            color: var(--accent-green); font-family: var(--font-mono); font-size: 0.85rem;
+            outline: none; text-align: center;
+        }
+        .param-input input[type="number"]:focus { border-color: var(--accent-green); }
+
+        /* Gradient display */
+        .grad-display {
+            font-family: var(--font-mono); font-size: 0.85rem; padding: 0.75rem;
+            background: var(--bg-primary); border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm); margin-top: 0.75rem; line-height: 1.8;
+        }
+        .grad-display .fwd { color: var(--accent-green); }
+        .grad-display .bwd { color: var(--accent-orange); }
+        .grad-display .val { color: var(--accent-blue); }
+
+        /* Network SVG */
+        .nn-node circle { stroke-width: 2; }
+        .nn-weight { stroke-width: 2; transition: all 0.3s; }
+
+        /* Bar chart for gradient magnitudes */
+        .gradient-bars {
+            display: flex; align-items: flex-end; gap: 6px;
+            height: 200px; padding: 1rem; background: var(--bg-primary);
+            border: 1px solid var(--border-color); border-radius: var(--radius-sm);
+        }
+        .gradient-bar-wrapper {
+            flex: 1; display: flex; flex-direction: column; align-items: center; height: 100%;
+            justify-content: flex-end;
+        }
+        .gradient-bar {
+            width: 100%; min-height: 2px; border-radius: 3px 3px 0 0;
+            transition: height 0.5s ease, background 0.5s ease;
+        }
+        .gradient-bar-label { font-size: 0.7rem; color: var(--text-muted); margin-top: 4px; text-align: center; }
+        .gradient-bar-value { font-size: 0.65rem; color: var(--text-secondary); font-family: var(--font-mono); margin-bottom: 2px; }
+
+        /* XOR decision boundary canvas */
+        #xor-canvas { border-radius: var(--radius-sm); border: 1px solid var(--border-color); }
+
+        /* Training stats */
+        .train-stats {
+            display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.75rem; margin-top: 1rem;
+        }
+        .stat-box {
+            background: var(--bg-primary); border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm); padding: 0.6rem; text-align: center;
+        }
+        .stat-box .stat-label { font-size: 0.75rem; color: var(--text-muted); }
+        .stat-box .stat-value { font-size: 1.1rem; font-family: var(--font-mono); color: var(--accent-green); font-weight: 600; }
+
+        /* Section description */
+        .section-desc { color: var(--text-secondary); font-size: 0.95rem; margin-bottom: 1.5rem; max-width: 800px; }
+
+        /* Formula highlight box */
+        .formula-box {
+            background: rgba(22,199,154,0.05); border: 1px solid rgba(22,199,154,0.2);
+            border-radius: var(--radius-sm); padding: 1rem; margin: 0.75rem 0;
+            text-align: center;
+        }
+
+        /* Step description */
+        .step-desc {
+            padding: 0.5rem 0.75rem; background: rgba(255,171,64,0.08);
+            border-left: 3px solid var(--accent-orange); border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+            font-size: 0.9rem; color: var(--text-secondary); margin-top: 0.5rem; min-height: 2.5em;
+        }
+
+        /* Speed controls for section 5 */
+        .speed-controls { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+
+        svg text { user-select: none; }
+
+        /* Activation derivative plot */
+        .deriv-plot { margin-top: 1rem; }
+        .deriv-plot canvas {
+            width: 100%; border-radius: var(--radius-sm);
+            border: 1px solid var(--border-color); background: var(--bg-secondary);
+        }
+
+        /* Gradient flow mini diagram */
+        .gradient-flow-svg { width: 100%; margin-top: 0.75rem; }
+        .gradient-flow-svg .layer-node { fill: var(--bg-card); stroke: var(--accent-purple); stroke-width: 1.5; }
+        .gradient-flow-svg .layer-label { fill: var(--text-secondary); font-size: 10px; font-family: var(--font-mono); text-anchor: middle; }
+        .gradient-flow-svg .flow-arrow { stroke: var(--accent-orange); stroke-width: 2; fill: none; marker-end: url(#gp-flow-arrow); }
+        .gradient-flow-svg .flow-value { fill: var(--accent-orange); font-size: 9px; font-family: var(--font-mono); text-anchor: middle; }
+
+        /* Numerical verification badge */
+        .verify-badge {
+            display: inline-flex; align-items: center; gap: 0.3rem;
+            padding: 0.2rem 0.6rem; border-radius: 9999px; font-size: 0.75rem;
+            font-family: var(--font-mono);
+        }
+        .verify-badge.pass { background: rgba(22,199,154,0.15); color: var(--accent-green); }
+        .verify-badge.fail { background: rgba(255,82,82,0.15); color: var(--accent-red); }
+
+        /* XOR prediction table */
+        .xor-pred-table {
+            width: 100%; border-collapse: collapse; font-family: var(--font-mono);
+            font-size: 0.8rem; margin-top: 0.75rem;
+        }
+        .xor-pred-table th, .xor-pred-table td {
+            padding: 0.4rem 0.6rem; text-align: center;
+            border: 1px solid var(--border-color);
+        }
+        .xor-pred-table th { background: var(--bg-card); color: var(--accent-green); font-weight: 600; }
+        .xor-pred-table .correct { color: var(--accent-green); }
+        .xor-pred-table .wrong { color: var(--accent-red); }
+    </style>
+</head>
+<body>
+
+<div class="page-container">
+    <!-- Hero -->
+    <div class="hero-section">
+        <h1>09 - 反向传播</h1>
+        <p class="subtitle">从计算图到链式法则, 从梯度流动到完整训练循环 -- 深度学习的核心引擎</p>
+    </div>
+
+    <!-- ==================== Section 1: 计算图 ==================== -->
+    <div class="section" id="sec-compgraph">
+        <div class="section-title">
+            <div class="icon">1</div>
+            <h2>计算图</h2>
+            <span class="badge badge-green">可视化</span>
+        </div>
+        <p class="section-desc">任何数学表达式都可以分解为一个有向无环图(DAG)。前向传播从输入到输出计算值, 反向传播从输出到输入计算梯度。</p>
+        <div class="formula-box">
+            $$y = (x_1 w_1 + x_2 w_2) \times \sigma(x_1 w_1)$$
+        </div>
+        <div class="split-layout">
+            <div class="text-panel">
+                <div class="card">
+                    <h4>参数设置</h4>
+                    <div class="param-input"><label>$x_1$</label><input type="number" id="cg-x1" value="2" step="0.5"></div>
+                    <div class="param-input"><label>$w_1$</label><input type="number" id="cg-w1" value="0.5" step="0.1"></div>
+                    <div class="param-input"><label>$x_2$</label><input type="number" id="cg-x2" value="3" step="0.5"></div>
+                    <div class="param-input"><label>$w_2$</label><input type="number" id="cg-w2" value="-0.3" step="0.1"></div>
+                </div>
+                <div id="cg-step-desc" class="step-desc">点击播放观察前向/反向传播过程</div>
+                <div id="cg-controls" style="margin-top:0.75rem;"></div>
+                <div id="cg-grad-display" class="grad-display" style="margin-top:0.75rem;"></div>
+            </div>
+            <div class="viz-panel">
+                <div class="viz-area" id="cg-viz" style="min-height:420px;"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== Section 2: 链式法则在行动 ==================== -->
+    <div class="section" id="sec-chainrule">
+        <div class="section-title">
+            <div class="icon">2</div>
+            <h2>链式法则在行动</h2>
+            <span class="badge badge-orange">交互</span>
+        </div>
+        <p class="section-desc">反向传播的数学本质是链式法则。对于损失函数 $L = (y - t)^2$, 其中 $y = wx + b$, 我们逐步计算每个参数的梯度。</p>
+        <div class="split-layout">
+            <div class="text-panel">
+                <div class="card">
+                    <h4>调整参数</h4>
+                    <div class="param-input"><label>$x$</label><input type="number" id="cr-x" value="2" step="0.5"></div>
+                    <div class="param-input"><label>$w$</label><input type="number" id="cr-w" value="1.5" step="0.1"></div>
+                    <div class="param-input"><label>$b$</label><input type="number" id="cr-b" value="0.5" step="0.1"></div>
+                    <div class="param-input"><label>$t$</label><input type="number" id="cr-t" value="4" step="0.5"></div>
+                </div>
+                <div id="cr-step-desc" class="step-desc">修改参数查看梯度如何变化</div>
+                <div id="cr-controls" style="margin-top:0.75rem;"></div>
+            </div>
+            <div class="viz-panel">
+                <div class="viz-area" id="cr-viz" style="min-height:380px;"></div>
+                <div id="cr-grad-display" class="grad-display" style="margin-top:0.75rem;"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== Section 3: 全网络反向传播 ==================== -->
+    <div class="section" id="sec-fullbp">
+        <div class="section-title">
+            <div class="icon">3</div>
+            <h2>全网络反向传播</h2>
+            <span class="badge badge-purple">核心</span>
+        </div>
+        <p class="section-desc">将链式法则应用到真实的 2-1-1 神经网络。前向传播计算预测值, 反向传播计算每个权重的梯度。</p>
+        <div class="formula-box">
+            $$\frac{\partial L}{\partial W_2} = \delta_2 \cdot a_1^T \qquad \frac{\partial L}{\partial W_1} = \delta_1 \cdot x^T$$
+        </div>
+        <div class="split-layout">
+            <div class="text-panel">
+                <div class="card">
+                    <h4>网络结构: 2 - 1 - 1</h4>
+                    <p class="text-sm text-muted">2个输入, 1个隐藏神经元(sigmoid), 1个输出</p>
+                    <p class="text-sm" style="margin-top:0.5rem;">输入: $x_1=1.0,\ x_2=0.5$ &nbsp; 目标: $t=1.0$</p>
+                </div>
+                <div id="bp-step-desc" class="step-desc">点击播放观察完整的前向-反向传播过程</div>
+                <div id="bp-controls" style="margin-top:0.75rem;"></div>
+                <div id="bp-grad-display" class="grad-display" style="margin-top:0.75rem;"></div>
+            </div>
+            <div class="viz-panel">
+                <div class="viz-area" id="bp-viz" style="min-height:400px;"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== Section 4: 梯度问题 ==================== -->
+    <div class="section" id="sec-gradproblems">
+        <div class="section-title">
+            <div class="icon">4</div>
+            <h2>梯度问题</h2>
+            <span class="badge badge-orange">重要</span>
+        </div>
+        <p class="section-desc">深层网络中, 梯度在反向传播时可能逐层衰减(消失)或指数增长(爆炸)。这是选择激活函数的关键原因。</p>
+        <div class="split-layout">
+            <div class="text-panel">
+                <div class="card">
+                    <h4>控制面板</h4>
+                    <div class="slider-group" style="margin-bottom:0.75rem;">
+                        <label>网络深度:</label>
+                        <input type="range" id="gp-depth" min="2" max="10" value="6">
+                        <span class="slider-value" id="gp-depth-val">6</span>
+                    </div>
+                    <div style="display:flex;gap:0.5rem;">
+                        <button class="btn btn-sm active" id="gp-btn-sigmoid" onclick="gpSetActivation('sigmoid')">Sigmoid</button>
+                        <button class="btn btn-sm" id="gp-btn-relu" onclick="gpSetActivation('relu')">ReLU</button>
+                        <button class="btn btn-sm" id="gp-btn-tanh" onclick="gpSetActivation('tanh')">Tanh</button>
+                    </div>
+                </div>
+                <div class="info-box warning" style="margin-top:1rem;">
+                    <p id="gp-explanation">Sigmoid 的导数最大值仅 0.25, 多层相乘后梯度迅速趋近于零 -- 这就是梯度消失问题。</p>
+                </div>
+            </div>
+            <div class="viz-panel">
+                <h4 style="margin-bottom:0.5rem;">各层梯度幅度</h4>
+                <div class="gradient-bars" id="gp-bars"></div>
+                <div class="legend" style="margin-top:0.5rem;">
+                    <div class="legend-item"><div class="swatch" style="background:var(--accent-orange);"></div>梯度幅度</div>
+                    <div class="legend-item"><div class="swatch" style="background:var(--accent-green);opacity:0.3;"></div>健康梯度范围</div>
+                </div>
+                <h4 style="margin-top:1.25rem; margin-bottom:0.5rem;">梯度流经网络</h4>
+                <svg id="gp-flow-svg" class="gradient-flow-svg" viewBox="0 0 600 80" style="background:var(--bg-secondary);border-radius:var(--radius-sm);border:1px solid var(--border-color);"></svg>
+                <h4 style="margin-top:1.25rem; margin-bottom:0.5rem;">激活函数导数对比</h4>
+                <canvas id="gp-deriv-canvas" class="deriv-plot" width="600" height="180"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== Section 5: 完整训练循环 ==================== -->
+    <div class="section" id="sec-training">
+        <div class="section-title">
+            <div class="icon">5</div>
+            <h2>完整训练循环</h2>
+            <span class="badge badge-green">综合</span>
+        </div>
+        <p class="section-desc">在经典的 XOR 问题上训练神经网络。XOR 无法被单层感知机解决, 必须借助隐藏层和反向传播进行学习。</p>
+        <div class="split-layout" style="grid-template-columns:1fr 1fr;">
+            <div class="text-panel" style="position:static;">
+                <div class="card">
+                    <h4>训练控制</h4>
+                    <div class="speed-controls" style="margin-bottom:0.75rem;">
+                        <button class="btn btn-primary btn-sm" id="xor-play" onclick="xorTogglePlay()">▶ 开始训练</button>
+                        <button class="btn btn-sm" onclick="xorReset()">⟲ 重置</button>
+                        <div class="slider-group" style="flex:1;">
+                            <label>学习率:</label>
+                            <input type="range" id="xor-lr" min="0.1" max="3" step="0.1" value="1.0">
+                            <span class="slider-value" id="xor-lr-val">1.0</span>
+                        </div>
+                    </div>
+                    <div class="train-stats">
+                        <div class="stat-box"><div class="stat-label">Epoch</div><div class="stat-value" id="xor-epoch">0</div></div>
+                        <div class="stat-box"><div class="stat-label">Loss</div><div class="stat-value" id="xor-loss">-</div></div>
+                        <div class="stat-box"><div class="stat-label">准确率</div><div class="stat-value" id="xor-acc">0%</div></div>
+                    </div>
+                </div>
+                <div style="margin-top:1rem;">
+                    <h4 style="margin-bottom:0.5rem;">损失曲线</h4>
+                    <canvas id="xor-loss-chart" width="400" height="200" style="width:100%;background:var(--bg-secondary);border-radius:var(--radius-sm);border:1px solid var(--border-color);"></canvas>
+                </div>
+                <div class="info-box success" style="margin-top:1rem;" id="xor-info">
+                    <p>XOR 真值表: (0,0)→0, (0,1)→1, (1,0)→1, (1,1)→0。单层感知机无法学会这个非线性分类。</p>
+                </div>
+                <table class="xor-pred-table" id="xor-pred-table">
+                    <thead><tr><th>输入</th><th>目标</th><th>预测</th><th>状态</th></tr></thead>
+                    <tbody id="xor-pred-tbody"></tbody>
+                </table>
+            </div>
+            <div class="viz-panel">
+                <h4 style="margin-bottom:0.5rem;">决策边界</h4>
+                <canvas id="xor-canvas" width="400" height="400" style="width:100%;max-width:400px;"></canvas>
+                <div style="margin-top:1rem;">
+                    <h4 style="margin-bottom:0.5rem;">网络权重</h4>
+                    <svg id="xor-network" width="100%" viewBox="0 0 400 200" style="background:var(--bg-secondary);border-radius:var(--radius-sm);border:1px solid var(--border-color);"></svg>
+                </div>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<!-- CDN Scripts -->
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/gsap.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+<!-- Shared Scripts -->
+<script src="../shared/scripts/math-utils.js"></script>
+<script src="../shared/scripts/animation-controller.js"></script>
+<script src="../shared/scripts/nav.js"></script>
+<script src="../shared/scripts/katex-init.js"></script>
+
+<script>
+// ============================================================
+// Utility
+// ============================================================
+const fmt = (v, d=4) => Number(v).toFixed(d);
+const fmt2 = (v) => fmt(v, 2);
+const sigmoid = MathUtils.sigmoid;
+const sigmoidDeriv = MathUtils.sigmoidDeriv;
+
+// ============================================================
+// SECTION 1: 计算图
+// ============================================================
+(function() {
+    const W = 700, H = 400;
+    const svg = d3.select('#cg-viz').append('svg')
+        .attr('width', '100%').attr('viewBox', `0 0 ${W} ${H}`)
+        .style('display', 'block');
+
+    // Define graph nodes
+    // y = (x1*w1 + x2*w2) * sigmoid(x1*w1)
+    // Nodes: x1, w1, x2, w2, mul1(x1*w1), mul2(x2*w2), sig(sigmoid(mul1)), add(mul1+mul2), out(add*sig)
+    const nodePositions = {
+        x1:   {x: 50,  y: 80,  label: 'x₁', type: 'input'},
+        w1:   {x: 50,  y: 180, label: 'w₁', type: 'input'},
+        x2:   {x: 50,  y: 280, label: 'x₂', type: 'input'},
+        w2:   {x: 50,  y: 370, label: 'w₂', type: 'input'},
+        mul1: {x: 200, y: 130, label: '×',  type: 'op'},
+        mul2: {x: 200, y: 320, label: '×',  type: 'op'},
+        sig:  {x: 380, y: 130, label: 'σ',  type: 'op'},
+        add:  {x: 380, y: 260, label: '+',  type: 'op'},
+        out:  {x: 560, y: 200, label: '×',  type: 'op'},
+        y:    {x: 650, y: 200, label: 'y',  type: 'output'},
+    };
+
+    const edges = [
+        ['x1','mul1'], ['w1','mul1'], ['x2','mul2'], ['w2','mul2'],
+        ['mul1','sig'], ['mul1','add'], ['mul2','add'],
+        ['sig','out'], ['add','out'], ['out','y']
+    ];
+
+    // Arrow marker
+    svg.append('defs').append('marker')
+        .attr('id','arrow').attr('viewBox','0 0 10 10')
+        .attr('refX',10).attr('refY',5)
+        .attr('markerWidth',6).attr('markerHeight',6)
+        .attr('orient','auto-start-reverse')
+        .append('path').attr('d','M 0 0 L 10 5 L 0 10 z').attr('fill','#6c6c7c');
+
+    svg.append('defs').append('marker')
+        .attr('id','arrow-fwd').attr('viewBox','0 0 10 10')
+        .attr('refX',10).attr('refY',5)
+        .attr('markerWidth',6).attr('markerHeight',6)
+        .attr('orient','auto-start-reverse')
+        .append('path').attr('d','M 0 0 L 10 5 L 0 10 z').attr('fill','var(--accent-green)');
+
+    svg.append('defs').append('marker')
+        .attr('id','arrow-bwd').attr('viewBox','0 0 10 10')
+        .attr('refX',0).attr('refY',5)
+        .attr('markerWidth',6).attr('markerHeight',6)
+        .attr('orient','auto-start-reverse')
+        .append('path').attr('d','M 10 0 L 0 5 L 10 10 z').attr('fill','var(--accent-orange)');
+
+    // Draw edges
+    const edgeGroup = svg.append('g');
+    const edgeEls = {};
+    edges.forEach(([from, to]) => {
+        const key = `${from}-${to}`;
+        const f = nodePositions[from], t = nodePositions[to];
+        edgeEls[key] = edgeGroup.append('line')
+            .attr('x1', f.x+20).attr('y1', f.y)
+            .attr('x2', t.x-20).attr('y2', t.y)
+            .attr('class', 'cg-edge')
+            .attr('marker-end', 'url(#arrow)');
+    });
+
+    // Draw nodes
+    const nodeGroup = svg.append('g');
+    const nodeEls = {};
+    Object.entries(nodePositions).forEach(([id, n]) => {
+        const g = nodeGroup.append('g').attr('class','cg-node').attr('transform',`translate(${n.x},${n.y})`);
+        const r = n.type === 'input' ? 22 : n.type === 'output' ? 22 : 24;
+        const fill = n.type === 'input' ? 'var(--bg-card)' : n.type === 'output' ? 'rgba(22,199,154,0.2)' : 'var(--bg-secondary)';
+        const stroke = n.type === 'input' ? 'var(--accent-blue)' : n.type === 'output' ? 'var(--accent-green)' : 'var(--accent-purple)';
+        g.append('circle').attr('r', r).attr('fill', fill).attr('stroke', stroke).attr('stroke-width', 2);
+        g.append('text').text(n.label).attr('dy', 1);
+        // Value label (shown above)
+        g.append('text').attr('class','value-label').attr('y', -r-8).attr('opacity',0).attr('text-anchor','middle');
+        // Gradient label (shown below)
+        g.append('text').attr('class','grad-label').attr('y', r+14).attr('opacity',0).attr('text-anchor','middle');
+        nodeEls[id] = g;
+    });
+
+    function getParams() {
+        return {
+            x1: parseFloat(document.getElementById('cg-x1').value) || 0,
+            w1: parseFloat(document.getElementById('cg-w1').value) || 0,
+            x2: parseFloat(document.getElementById('cg-x2').value) || 0,
+            w2: parseFloat(document.getElementById('cg-w2').value) || 0,
+        };
+    }
+
+    function computeForwardBackward() {
+        const p = getParams();
+        const mul1_v = p.x1 * p.w1;
+        const mul2_v = p.x2 * p.w2;
+        const sig_v = sigmoid(mul1_v);
+        const add_v = mul1_v + mul2_v;
+        const out_v = add_v * sig_v;
+        const y_v = out_v;
+
+        // Backward: dy/dy=1
+        const dy = 1;
+        const dout = dy;
+        const dadd = dout * sig_v;            // d(add*sig)/dadd = sig
+        const dsig = dout * add_v;            // d(add*sig)/dsig = add
+        const dsig_in = dsig * sigmoidDeriv(mul1_v); // dsig/d(mul1) = sig'(mul1)
+        const dmul1_from_add = dadd;          // dadd/dmul1 = 1
+        const dmul1_from_sig = dsig_in;       // from sigmoid path
+        const dmul1 = dmul1_from_add + dmul1_from_sig; // total gradient at mul1
+        const dmul2 = dadd;                   // dadd/dmul2 = 1
+        const dx1 = dmul1 * p.w1;
+        const dw1 = dmul1 * p.x1;
+        const dx2 = dmul2 * p.w2;
+        const dw2 = dmul2 * p.x2;
+
+        return {
+            values: { x1: p.x1, w1: p.w1, x2: p.x2, w2: p.w2, mul1: mul1_v, mul2: mul2_v, sig: sig_v, add: add_v, out: out_v, y: y_v },
+            grads: { x1: dx1, w1: dw1, x2: dx2, w2: dw2, mul1: dmul1, mul2: dmul2, sig: dsig_in, add: dadd, out: dout, y: dy }
+        };
+    }
+
+    function showValue(nodeId, val) {
+        nodeEls[nodeId].select('.value-label').attr('opacity',1).text(fmt2(val));
+    }
+    function showGrad(nodeId, val) {
+        nodeEls[nodeId].select('.grad-label').attr('opacity',1).text('∇'+fmt2(val));
+    }
+    function highlightEdgeFwd(from, to) {
+        const key = `${from}-${to}`;
+        if (edgeEls[key]) edgeEls[key].attr('class','cg-edge forward-active').attr('marker-end','url(#arrow-fwd)');
+    }
+    function highlightEdgeBwd(from, to) {
+        const key = `${from}-${to}`;
+        if (edgeEls[key]) edgeEls[key].attr('class','cg-edge backward-active').attr('marker-end','url(#arrow-bwd)');
+    }
+    function resetGraph() {
+        Object.values(nodeEls).forEach(g => {
+            g.select('.value-label').attr('opacity', 0);
+            g.select('.grad-label').attr('opacity', 0);
+            g.select('circle').attr('stroke-width', 2);
+        });
+        Object.values(edgeEls).forEach(e => e.attr('class','cg-edge').attr('marker-end','url(#arrow)'));
+        document.getElementById('cg-grad-display').innerHTML = '';
+    }
+
+    function pulseNode(nodeId) {
+        const circle = nodeEls[nodeId].select('circle');
+        gsap.fromTo(circle.node(), {attr:{strokeWidth:4}}, {attr:{strokeWidth:2}, duration:0.5});
+    }
+
+    const descriptions = [
+        '前向 1: 计算 x₁×w₁',
+        '前向 2: 计算 x₂×w₂',
+        '前向 3: 计算 σ(x₁w₁)',
+        '前向 4: 计算 x₁w₁ + x₂w₂',
+        '前向 5: 计算 (x₁w₁+x₂w₂) × σ(x₁w₁)',
+        '前向 6: 输出 y',
+        '反向 1: ∂y/∂y = 1',
+        '反向 2: 梯度流经乘法节点 → add 和 sig',
+        '反向 3: 梯度流经 sigmoid → mul1',
+        '反向 4: 梯度汇聚到 mul1 (两条路径相加)',
+        '反向 5: 梯度传到输入 x₁, w₁, x₂, w₂',
+    ];
+
+    const steps = [];
+    // Forward steps
+    steps.push({ name: 'fwd-mul1', duration: 600, action: (i, instant) => {
+        const d = computeForwardBackward();
+        showValue('x1', d.values.x1); showValue('w1', d.values.w1); showValue('mul1', d.values.mul1);
+        highlightEdgeFwd('x1','mul1'); highlightEdgeFwd('w1','mul1');
+        pulseNode('mul1');
+    }});
+    steps.push({ name: 'fwd-mul2', duration: 600, action: (i, instant) => {
+        const d = computeForwardBackward();
+        showValue('x2', d.values.x2); showValue('w2', d.values.w2); showValue('mul2', d.values.mul2);
+        highlightEdgeFwd('x2','mul2'); highlightEdgeFwd('w2','mul2');
+        pulseNode('mul2');
+    }});
+    steps.push({ name: 'fwd-sig', duration: 600, action: (i, instant) => {
+        const d = computeForwardBackward();
+        showValue('sig', d.values.sig);
+        highlightEdgeFwd('mul1','sig'); pulseNode('sig');
+    }});
+    steps.push({ name: 'fwd-add', duration: 600, action: (i, instant) => {
+        const d = computeForwardBackward();
+        showValue('add', d.values.add);
+        highlightEdgeFwd('mul1','add'); highlightEdgeFwd('mul2','add'); pulseNode('add');
+    }});
+    steps.push({ name: 'fwd-out', duration: 600, action: (i, instant) => {
+        const d = computeForwardBackward();
+        showValue('out', d.values.out);
+        highlightEdgeFwd('sig','out'); highlightEdgeFwd('add','out'); pulseNode('out');
+    }});
+    steps.push({ name: 'fwd-y', duration: 600, action: (i, instant) => {
+        const d = computeForwardBackward();
+        showValue('y', d.values.y);
+        highlightEdgeFwd('out','y'); pulseNode('y');
+    }});
+    // Backward steps
+    steps.push({ name: 'bwd-y', duration: 600, action: (i, instant) => {
+        const d = computeForwardBackward();
+        showGrad('y', d.grads.y); pulseNode('y');
+    }});
+    steps.push({ name: 'bwd-out', duration: 600, action: (i, instant) => {
+        const d = computeForwardBackward();
+        showGrad('out', d.grads.out);
+        showGrad('add', d.grads.add);
+        showGrad('sig', d.grads.sig);
+        highlightEdgeBwd('out','y'); highlightEdgeBwd('sig','out'); highlightEdgeBwd('add','out');
+        pulseNode('out'); pulseNode('add'); pulseNode('sig');
+    }});
+    steps.push({ name: 'bwd-sig', duration: 600, action: (i, instant) => {
+        const d = computeForwardBackward();
+        // sig path contribution to mul1
+        highlightEdgeBwd('mul1','sig');
+    }});
+    steps.push({ name: 'bwd-mul1-merge', duration: 600, action: (i, instant) => {
+        const d = computeForwardBackward();
+        showGrad('mul1', d.grads.mul1); showGrad('mul2', d.grads.mul2);
+        highlightEdgeBwd('mul1','add'); highlightEdgeBwd('mul2','add');
+        pulseNode('mul1'); pulseNode('mul2');
+    }});
+    steps.push({ name: 'bwd-inputs', duration: 600, action: (i, instant) => {
+        const d = computeForwardBackward();
+        showGrad('x1', d.grads.x1); showGrad('w1', d.grads.w1);
+        showGrad('x2', d.grads.x2); showGrad('w2', d.grads.w2);
+        highlightEdgeBwd('x1','mul1'); highlightEdgeBwd('w1','mul1');
+        highlightEdgeBwd('x2','mul2'); highlightEdgeBwd('w2','mul2');
+        pulseNode('x1'); pulseNode('w1'); pulseNode('x2'); pulseNode('w2');
+        // Update display
+        const el = document.getElementById('cg-grad-display');
+        el.innerHTML = `<span class="fwd">前向值:</span> y = ${fmt2(d.values.y)}<br>` +
+            `<span class="bwd">∂y/∂w₁</span> = ${fmt(d.grads.w1)} &nbsp; <span class="bwd">∂y/∂w₂</span> = ${fmt(d.grads.w2)}<br>` +
+            `<span class="bwd">∂y/∂x₁</span> = ${fmt(d.grads.x1)} &nbsp; <span class="bwd">∂y/∂x₂</span> = ${fmt(d.grads.x2)}`;
+    }});
+
+    const cgCtrl = new AnimationController({
+        container: document.getElementById('cg-controls'),
+        steps: steps,
+        defaultDuration: 700,
+        onStepChange: (i) => {
+            if (i < 0) { resetGraph(); document.getElementById('cg-step-desc').textContent = '点击播放观察前向/反向传播过程'; }
+            else document.getElementById('cg-step-desc').textContent = descriptions[i] || '';
+        }
+    });
+
+    // Re-run on param change
+    ['cg-x1','cg-w1','cg-x2','cg-w2'].forEach(id => {
+        document.getElementById(id).addEventListener('input', () => {
+            if (cgCtrl.currentStep >= 0) { cgCtrl.reset(); resetGraph(); }
+        });
+    });
+})();
+
+// ============================================================
+// SECTION 2: 链式法则在行动
+// ============================================================
+(function() {
+    const W = 600, H = 350;
+    const svg = d3.select('#cr-viz').append('svg')
+        .attr('width','100%').attr('viewBox',`0 0 ${W} ${H}`).style('display','block');
+
+    // Chain: x,w,b → y=wx+b → L=(y-t)^2
+    const nodes = [
+        {id:'x',  x:50,  y:100, label:'x',  type:'input'},
+        {id:'w',  x:50,  y:200, label:'w',  type:'input'},
+        {id:'b',  x:50,  y:290, label:'b',  type:'input'},
+        {id:'wx', x:180, y:150, label:'w×x', type:'op'},
+        {id:'y',  x:320, y:180, label:'y=wx+b', type:'op'},
+        {id:'t',  x:320, y:290, label:'t',  type:'input'},
+        {id:'diff',x:440, y:220, label:'y-t', type:'op'},
+        {id:'L',  x:550, y:220, label:'L=(y-t)²', type:'output'},
+    ];
+    const edgeList = [
+        ['x','wx'],['w','wx'],['wx','y'],['b','y'],['y','diff'],['t','diff'],['diff','L']
+    ];
+
+    svg.append('defs').append('marker')
+        .attr('id','cr-arrow').attr('viewBox','0 0 10 10')
+        .attr('refX',10).attr('refY',5).attr('markerWidth',6).attr('markerHeight',6)
+        .attr('orient','auto-start-reverse')
+        .append('path').attr('d','M 0 0 L 10 5 L 0 10 z').attr('fill','#6c6c7c');
+
+    const edgeEls = {};
+    edgeList.forEach(([f,t]) => {
+        const fn = nodes.find(n=>n.id===f), tn = nodes.find(n=>n.id===t);
+        edgeEls[`${f}-${t}`] = svg.append('line')
+            .attr('x1',fn.x+25).attr('y1',fn.y).attr('x2',tn.x-25).attr('y2',tn.y)
+            .attr('class','cg-edge').attr('marker-end','url(#cr-arrow)');
+    });
+
+    const nodeEls = {};
+    nodes.forEach(n => {
+        const g = svg.append('g').attr('transform',`translate(${n.x},${n.y})`);
+        const r = n.type==='output' ? 26 : n.type==='input' ? 20 : 22;
+        const fill = n.type==='input' ? 'var(--bg-card)' : n.type==='output' ? 'rgba(255,82,82,0.15)' : 'var(--bg-secondary)';
+        const stroke = n.type==='input' ? 'var(--accent-blue)' : n.type==='output' ? 'var(--accent-red)' : 'var(--accent-purple)';
+        g.append('circle').attr('r',r).attr('fill',fill).attr('stroke',stroke).attr('stroke-width',2);
+        g.append('text').attr('text-anchor','middle').attr('dy',1).attr('fill','var(--text-primary)').attr('font-size','10px').attr('font-family','var(--font-mono)').text(n.label);
+        g.append('text').attr('class','value-label').attr('y',-r-8).attr('text-anchor','middle').attr('font-size','10px').attr('fill','var(--accent-green)').attr('opacity',0);
+        g.append('text').attr('class','grad-label').attr('y',r+14).attr('text-anchor','middle').attr('font-size','10px').attr('fill','var(--accent-orange)').attr('opacity',0);
+        nodeEls[n.id] = g;
+    });
+
+    function getP() {
+        return {
+            x: parseFloat(document.getElementById('cr-x').value)||0,
+            w: parseFloat(document.getElementById('cr-w').value)||0,
+            b: parseFloat(document.getElementById('cr-b').value)||0,
+            t: parseFloat(document.getElementById('cr-t').value)||0,
+        };
+    }
+
+    function compute() {
+        const p = getP();
+        const wx = p.w * p.x;
+        const y = wx + p.b;
+        const diff = y - p.t;
+        const L = diff * diff;
+        // Backward
+        const dL = 1;
+        const ddiff = 2 * diff;
+        const dy = ddiff;
+        const dt = -ddiff;
+        const dwx = dy;
+        const db = dy;
+        const dw = dwx * p.x;
+        const dx = dwx * p.w;
+        return {
+            vals: {x:p.x, w:p.w, b:p.b, t:p.t, wx, y, diff, L},
+            grads: {x:dx, w:dw, b:db, t:dt, wx:dwx, y:dy, diff:ddiff, L:dL}
+        };
+    }
+
+    function crReset() {
+        Object.values(nodeEls).forEach(g => {
+            g.select('.value-label').attr('opacity',0);
+            g.select('.grad-label').attr('opacity',0);
+        });
+        Object.values(edgeEls).forEach(e => e.attr('class','cg-edge').attr('marker-end','url(#cr-arrow)'));
+        document.getElementById('cr-grad-display').innerHTML = '';
+    }
+
+    const descs = [
+        '前向 1: 计算 w×x',
+        '前向 2: 计算 y = wx + b',
+        '前向 3: 计算 y - t',
+        '前向 4: 计算 L = (y-t)²',
+        '反向 1: ∂L/∂L = 1',
+        '反向 2: ∂L/∂(y-t) = 2(y-t)',
+        '反向 3: ∂L/∂y = 2(y-t), ∂L/∂b = 2(y-t)',
+        '反向 4: ∂L/∂w = ∂L/∂y × ∂y/∂w = 2(y-t)×x',
+    ];
+
+    const crSteps = [
+        { name:'fwd1', duration:600, action:()=>{ const d=compute(); show('x',d.vals.x); show('w',d.vals.w); show('wx',d.vals.wx); hfwd('x','wx'); hfwd('w','wx'); }},
+        { name:'fwd2', duration:600, action:()=>{ const d=compute(); show('b',d.vals.b); show('y',d.vals.y); hfwd('wx','y'); hfwd('b','y'); }},
+        { name:'fwd3', duration:600, action:()=>{ const d=compute(); show('t',d.vals.t); show('diff',d.vals.diff); hfwd('y','diff'); hfwd('t','diff'); }},
+        { name:'fwd4', duration:600, action:()=>{ const d=compute(); show('L',d.vals.L); hfwd('diff','L'); }},
+        { name:'bwd1', duration:600, action:()=>{ const d=compute(); grad('L',d.grads.L); }},
+        { name:'bwd2', duration:600, action:()=>{ const d=compute(); grad('diff',d.grads.diff); hbwd('diff','L'); }},
+        { name:'bwd3', duration:600, action:()=>{ const d=compute(); grad('y',d.grads.y); grad('b',d.grads.b); hbwd('y','diff'); hbwd('t','diff'); hbwd('b','y'); hbwd('wx','y'); }},
+        { name:'bwd4', duration:600, action:()=>{
+            const d=compute(); grad('w',d.grads.w); grad('x',d.grads.x); hbwd('x','wx'); hbwd('w','wx');
+            const el = document.getElementById('cr-grad-display');
+            // Numerical gradient verification
+            const p = getP();
+            const lossF = (params) => { const yy = params[0]*params[1]+params[2]; return (yy-params[3])**2; };
+            const numGrads = MathUtils.numericalGradient(lossF, [p.w, p.x, p.b, p.t]);
+            const wMatch = Math.abs(numGrads[0] - d.grads.w) < 0.01;
+            const bMatch = Math.abs(numGrads[2] - d.grads.b) < 0.01;
+            const verifyW = wMatch ? '<span class="verify-badge pass">&#10003; 验证通过</span>' : '<span class="verify-badge fail">&#10007; 不匹配</span>';
+            const verifyB = bMatch ? '<span class="verify-badge pass">&#10003; 验证通过</span>' : '<span class="verify-badge fail">&#10007; 不匹配</span>';
+            el.innerHTML = `<span class="fwd">y</span> = ${fmt2(d.vals.y)}, <span class="fwd">L</span> = ${fmt(d.vals.L)}<br>` +
+                `<span class="bwd">∂L/∂w</span> = 2(y-t)·x = 2×${fmt2(d.vals.diff)}×${fmt2(d.vals.x)} = <b>${fmt(d.grads.w)}</b> ${verifyW}<br>` +
+                `<span class="bwd">∂L/∂b</span> = 2(y-t) = <b>${fmt(d.grads.b)}</b> ${verifyB}<br>` +
+                `<span class="bwd">∂L/∂x</span> = 2(y-t)·w = <b>${fmt(d.grads.x)}</b><br>` +
+                `<span class="text-sm text-muted">数值梯度: ∂L/∂w≈${fmt(numGrads[0])}, ∂L/∂b≈${fmt(numGrads[2])}</span>`;
+        }},
+    ];
+
+    function show(id,v) { nodeEls[id].select('.value-label').attr('opacity',1).text(fmt2(v)); }
+    function grad(id,v) { nodeEls[id].select('.grad-label').attr('opacity',1).text('∇'+fmt2(v)); }
+    function hfwd(f,t) { const k=`${f}-${t}`; if(edgeEls[k]) edgeEls[k].attr('class','cg-edge forward-active'); }
+    function hbwd(f,t) { const k=`${f}-${t}`; if(edgeEls[k]) edgeEls[k].attr('class','cg-edge backward-active'); }
+
+    const crCtrl = new AnimationController({
+        container: document.getElementById('cr-controls'),
+        steps: crSteps, defaultDuration: 700,
+        onStepChange: (i) => {
+            if (i<0) { crReset(); document.getElementById('cr-step-desc').textContent='修改参数查看梯度如何变化'; }
+            else document.getElementById('cr-step-desc').textContent = descs[i]||'';
+        }
+    });
+
+    ['cr-x','cr-w','cr-b','cr-t'].forEach(id => {
+        document.getElementById(id).addEventListener('input', () => { if(crCtrl.currentStep>=0){crCtrl.reset();crReset();} });
+    });
+})();
+
+// ============================================================
+// SECTION 3: 全网络反向传播 (2-1-1)
+// ============================================================
+(function() {
+    const W = 650, H = 380;
+    const svg = d3.select('#bp-viz').append('svg')
+        .attr('width','100%').attr('viewBox',`0 0 ${W} ${H}`).style('display','block');
+
+    // Network: x1,x2 -> h1 -> o1
+    // Weights: w1(x1->h1), w2(x2->h1), b1, w3(h1->o1), b2
+    const net = {
+        x1: 1.0, x2: 0.5, target: 1.0,
+        w1: 0.5, w2: -0.3, b1: 0.1, w3: 0.8, b2: -0.2,
+    };
+
+    // Node positions
+    const npos = {
+        x1: {x:80, y:120}, x2: {x:80, y:260},
+        h1: {x:300, y:190},
+        o1: {x:500, y:190},
+        L:  {x:600, y:190},
+    };
+
+    // Draw connections
+    const connData = [
+        {from:'x1',to:'h1',label:'w₁',weight:'w1'},
+        {from:'x2',to:'h1',label:'w₂',weight:'w2'},
+        {from:'h1',to:'o1',label:'w₃',weight:'w3'},
+    ];
+
+    svg.append('defs').append('marker')
+        .attr('id','bp-arrow').attr('viewBox','0 0 10 10')
+        .attr('refX',10).attr('refY',5).attr('markerWidth',6).attr('markerHeight',6)
+        .attr('orient','auto-start-reverse')
+        .append('path').attr('d','M 0 0 L 10 5 L 0 10 z').attr('fill','#6c6c7c');
+
+    const connEls = {};
+    connData.forEach(c => {
+        const f = npos[c.from], t = npos[c.to];
+        const key = `${c.from}-${c.to}`;
+        const g = svg.append('g');
+        g.append('line').attr('x1',f.x+28).attr('y1',f.y).attr('x2',t.x-28).attr('y2',t.y)
+            .attr('class','cg-edge').attr('marker-end','url(#bp-arrow)');
+        const mx = (f.x+t.x)/2, my = (f.y+t.y)/2;
+        g.append('text').attr('x',mx).attr('y',my-10).attr('text-anchor','middle')
+            .attr('font-size','11px').attr('font-family','var(--font-mono)').attr('fill','var(--text-muted)').text(c.label);
+        g.append('text').attr('x',mx).attr('y',my+6).attr('text-anchor','middle')
+            .attr('font-size','10px').attr('font-family','var(--font-mono)').attr('fill','var(--accent-blue)').attr('class','w-val').text('');
+        g.append('text').attr('x',mx).attr('y',my+20).attr('text-anchor','middle')
+            .attr('font-size','10px').attr('font-family','var(--font-mono)').attr('fill','var(--accent-orange)').attr('class','w-grad').text('').attr('opacity',0);
+        connEls[key] = g;
+    });
+
+    // Draw Loss arrow
+    svg.append('line').attr('x1',npos.o1.x+28).attr('y1',npos.o1.y).attr('x2',npos.L.x-20).attr('y2',npos.L.y)
+        .attr('class','cg-edge').attr('marker-end','url(#bp-arrow)');
+
+    // Draw nodes
+    const nodeEls = {};
+    [{id:'x1',label:'x₁',col:'var(--accent-blue)'},{id:'x2',label:'x₂',col:'var(--accent-blue)'},
+     {id:'h1',label:'h₁',col:'var(--accent-purple)'},{id:'o1',label:'ŷ',col:'var(--accent-green)'},
+     {id:'L',label:'L',col:'var(--accent-red)'}].forEach(n => {
+        const p = npos[n.id];
+        const g = svg.append('g').attr('transform',`translate(${p.x},${p.y})`);
+        const r = n.id==='L' ? 20 : 26;
+        g.append('circle').attr('r',r).attr('fill','var(--bg-secondary)').attr('stroke',n.col).attr('stroke-width',2);
+        g.append('text').attr('text-anchor','middle').attr('dy',1).attr('fill','var(--text-primary)')
+            .attr('font-size','12px').attr('font-family','var(--font-mono)').text(n.label);
+        g.append('text').attr('class','val-text').attr('y',-r-8).attr('text-anchor','middle')
+            .attr('font-size','10px').attr('fill','var(--accent-green)').attr('opacity',0);
+        g.append('text').attr('class','grad-text').attr('y',r+14).attr('text-anchor','middle')
+            .attr('font-size','10px').attr('fill','var(--accent-orange)').attr('opacity',0);
+        nodeEls[n.id] = g;
+    });
+
+    // Bias labels
+    svg.append('text').attr('x',npos.h1.x).attr('y',npos.h1.y+42).attr('text-anchor','middle')
+        .attr('font-size','10px').attr('fill','var(--text-muted)').attr('font-family','var(--font-mono)').text('b₁='+fmt2(net.b1));
+    svg.append('text').attr('x',npos.o1.x).attr('y',npos.o1.y+42).attr('text-anchor','middle')
+        .attr('font-size','10px').attr('fill','var(--text-muted)').attr('font-family','var(--font-mono)').text('b₂='+fmt2(net.b2));
+
+    function forwardBackward() {
+        const z1 = net.w1*net.x1 + net.w2*net.x2 + net.b1;
+        const a1 = sigmoid(z1);
+        const z2 = net.w3*a1 + net.b2;
+        const a2 = sigmoid(z2);
+        const L = 0.5 * (a2 - net.target)**2;
+        // Backward
+        const dL_da2 = a2 - net.target;
+        const da2_dz2 = sigmoidDeriv(z2);
+        const delta2 = dL_da2 * da2_dz2;
+        const dL_dw3 = delta2 * a1;
+        const dL_db2 = delta2;
+        const dL_da1 = delta2 * net.w3;
+        const da1_dz1 = sigmoidDeriv(z1);
+        const delta1 = dL_da1 * da1_dz1;
+        const dL_dw1 = delta1 * net.x1;
+        const dL_dw2 = delta1 * net.x2;
+        const dL_db1 = delta1;
+        return { z1,a1,z2,a2,L, delta2,delta1, dw3:dL_dw3,db2:dL_db2,dw1:dL_dw1,dw2:dL_dw2,db1:dL_db1, dL_da2 };
+    }
+
+    function bpReset() {
+        Object.values(nodeEls).forEach(g=>{g.select('.val-text').attr('opacity',0);g.select('.grad-text').attr('opacity',0);});
+        Object.values(connEls).forEach(g=>{g.select('.w-grad').attr('opacity',0);});
+        document.getElementById('bp-grad-display').innerHTML='';
+    }
+
+    function showN(id,v){nodeEls[id].select('.val-text').attr('opacity',1).text(fmt2(v));}
+    function showNG(id,v){nodeEls[id].select('.grad-text').attr('opacity',1).text('∇'+fmt(v));}
+    function showWV(from,to,v){connEls[`${from}-${to}`].select('.w-val').text(fmt2(v));}
+    function showWG(from,to,v){connEls[`${from}-${to}`].select('.w-grad').attr('opacity',1).text('∇'+fmt(v));}
+
+    const bpDescs = [
+        '设定输入: x₁=1.0, x₂=0.5',
+        '前向: 计算 z₁ = w₁x₁ + w₂x₂ + b₁',
+        '前向: 计算 a₁ = σ(z₁)',
+        '前向: 计算 z₂ = w₃a₁ + b₂',
+        '前向: 计算 ŷ = σ(z₂)',
+        '计算损失: L = ½(ŷ - t)²',
+        '反向: δ₂ = (ŷ-t)·σ\'(z₂)',
+        '反向: ∂L/∂w₃ = δ₂·a₁',
+        '反向: δ₁ = δ₂·w₃·σ\'(z₁)',
+        '反向: ∂L/∂w₁ = δ₁·x₁, ∂L/∂w₂ = δ₁·x₂',
+    ];
+
+    const bpSteps = [
+        {name:'init',duration:500,action:()=>{showN('x1',net.x1);showN('x2',net.x2);showWV('x1','h1',net.w1);showWV('x2','h1',net.w2);showWV('h1','o1',net.w3);}},
+        {name:'z1',duration:600,action:()=>{const d=forwardBackward();}},
+        {name:'a1',duration:600,action:()=>{const d=forwardBackward();showN('h1',d.a1);}},
+        {name:'z2',duration:600,action:()=>{const d=forwardBackward();}},
+        {name:'a2',duration:600,action:()=>{const d=forwardBackward();showN('o1',d.a2);}},
+        {name:'loss',duration:600,action:()=>{const d=forwardBackward();showN('L',d.L);}},
+        {name:'delta2',duration:600,action:()=>{const d=forwardBackward();showNG('o1',d.delta2);}},
+        {name:'dw3',duration:600,action:()=>{const d=forwardBackward();showWG('h1','o1',d.dw3);showNG('L',d.dL_da2);}},
+        {name:'delta1',duration:600,action:()=>{const d=forwardBackward();showNG('h1',d.delta1);}},
+        {name:'dw12',duration:600,action:()=>{
+            const d=forwardBackward();
+            showWG('x1','h1',d.dw1); showWG('x2','h1',d.dw2);
+            const el=document.getElementById('bp-grad-display');
+            el.innerHTML = `<span class="fwd">ŷ</span>=${fmt(d.a2)} &nbsp; <span class="fwd">L</span>=${fmt(d.L)}<br>`+
+                `<span class="bwd">∂L/∂w₃</span> = δ₂·a₁ = ${fmt(d.delta2)}×${fmt(d.a1)} = <b>${fmt(d.dw3)}</b><br>`+
+                `<span class="bwd">∂L/∂w₁</span> = δ₁·x₁ = ${fmt(d.delta1)}×${net.x1} = <b>${fmt(d.dw1)}</b><br>`+
+                `<span class="bwd">∂L/∂w₂</span> = δ₁·x₂ = ${fmt(d.delta1)}×${net.x2} = <b>${fmt(d.dw2)}</b>`;
+        }},
+    ];
+
+    new AnimationController({
+        container: document.getElementById('bp-controls'),
+        steps: bpSteps, defaultDuration: 700,
+        onStepChange: (i)=>{
+            if(i<0){bpReset();document.getElementById('bp-step-desc').textContent='点击播放观察完整的前向-反向传播过程';}
+            else document.getElementById('bp-step-desc').textContent=bpDescs[i]||'';
+        }
+    });
+})();
+
+// ============================================================
+// SECTION 4: 梯度问题
+// ============================================================
+let gpActivation = 'sigmoid';
+
+function gpSetActivation(act) {
+    gpActivation = act;
+    document.querySelectorAll('#sec-gradproblems .btn-sm').forEach(b=>b.classList.remove('active'));
+    document.getElementById('gp-btn-'+act).classList.add('active');
+    gpUpdate();
+}
+
+function gpUpdate() {
+    const depth = parseInt(document.getElementById('gp-depth').value);
+    document.getElementById('gp-depth-val').textContent = depth;
+
+    // Simulate gradient through a network
+    // Each layer: gradient *= activation_deriv * weight_scale
+    // For sigmoid: max deriv = 0.25, typical init weight scale makes product < 1
+    // For relu: deriv = 1 (when active), so gradient stays healthy
+    // For tanh: max deriv = 1 at 0, but typically ~0.5
+    const gradients = [];
+    let grad = 1.0;
+    const weightScale = 1.0; // assume initialized weights
+
+    for (let i = depth-1; i >= 0; i--) {
+        let derivScale;
+        if (gpActivation === 'sigmoid') {
+            // sigmoid'(0)=0.25 max, average around 0.2
+            derivScale = 0.25;
+        } else if (gpActivation === 'relu') {
+            // relu' = 1 when positive, assume 50% active
+            derivScale = 0.8;
+        } else { // tanh
+            derivScale = 0.42;
+        }
+        grad *= derivScale * weightScale;
+        gradients.unshift(grad);
+    }
+
+    // Render bars
+    const container = document.getElementById('gp-bars');
+    container.innerHTML = '';
+    const maxGrad = Math.max(...gradients, 0.001);
+
+    gradients.forEach((g, i) => {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'gradient-bar-wrapper';
+        const valEl = document.createElement('div');
+        valEl.className = 'gradient-bar-value';
+        valEl.textContent = g < 0.0001 ? g.toExponential(1) : g.toFixed(4);
+        const bar = document.createElement('div');
+        bar.className = 'gradient-bar';
+        const heightPct = Math.max(1, (g / maxGrad) * 100);
+        bar.style.height = heightPct + '%';
+        const intensity = Math.min(1, g / maxGrad);
+        if (g < 0.01) {
+            bar.style.background = `rgba(255,82,82,${0.3+intensity*0.7})`;
+        } else if (g > 1) {
+            bar.style.background = `rgba(255,171,64,${0.5+intensity*0.5})`;
+        } else {
+            bar.style.background = `rgba(22,199,154,${0.3+intensity*0.7})`;
+        }
+        const label = document.createElement('div');
+        label.className = 'gradient-bar-label';
+        label.textContent = `层 ${i+1}`;
+        wrapper.append(valEl, bar, label);
+        container.appendChild(wrapper);
+    });
+
+    // Explanation
+    const expEl = document.getElementById('gp-explanation');
+    if (gpActivation === 'sigmoid') {
+        expEl.textContent = `Sigmoid 的导数最大值仅 0.25。经过 ${depth} 层后, 梯度约为 0.25^${depth} ≈ ${Math.pow(0.25,depth).toExponential(2)} -- 这就是梯度消失问题!`;
+    } else if (gpActivation === 'relu') {
+        expEl.textContent = `ReLU 在激活区间的导数恒为 1, 梯度可以无损传递。这就是 ReLU 成为深度网络默认激活函数的原因。`;
+    } else {
+        expEl.textContent = `Tanh 的导数最大值为 1(在 x=0), 但实际中多数值使导数约 0.4。深层后仍有梯度衰减, 但好于 Sigmoid。`;
+    }
+}
+
+document.getElementById('gp-depth').addEventListener('input', gpUpdate);
+
+function gpDrawFlow() {
+    const depth = parseInt(document.getElementById('gp-depth').value);
+    const svg = d3.select('#gp-flow-svg');
+    svg.selectAll('*').remove();
+
+    // Arrow marker
+    svg.append('defs').append('marker')
+        .attr('id','gp-flow-arrow').attr('viewBox','0 0 10 10')
+        .attr('refX',10).attr('refY',5).attr('markerWidth',5).attr('markerHeight',5)
+        .attr('orient','auto-start-reverse')
+        .append('path').attr('d','M 0 0 L 10 5 L 0 10 z').attr('fill','var(--accent-orange)');
+
+    const spacing = 550 / (depth + 1);
+    let grad = 1.0;
+    const derivScale = gpActivation === 'sigmoid' ? 0.25 : gpActivation === 'relu' ? 0.8 : 0.42;
+
+    // Draw from right (output) to left (input)
+    const layers = [];
+    for (let i = 0; i <= depth; i++) {
+        layers.push({ x: 30 + i * spacing, y: 40 });
+    }
+
+    // Draw layer nodes
+    layers.forEach((l, i) => {
+        const isOutput = i === depth;
+        svg.append('circle').attr('cx', l.x).attr('cy', l.y).attr('r', 14)
+            .attr('class', 'layer-node')
+            .attr('stroke', isOutput ? 'var(--accent-red)' : 'var(--accent-purple)');
+        svg.append('text').attr('x', l.x).attr('y', l.y + 2)
+            .attr('class', 'layer-label').text(isOutput ? 'L' : `层${i+1}`);
+    });
+
+    // Draw backward flow arrows with gradient magnitude
+    let g = 1.0;
+    for (let i = depth; i > 0; i--) {
+        const from = layers[i], to = layers[i-1];
+        svg.append('line')
+            .attr('x1', from.x - 16).attr('y1', from.y)
+            .attr('x2', to.x + 16).attr('y2', to.y)
+            .attr('class', 'flow-arrow')
+            .attr('opacity', Math.max(0.15, Math.min(1, g)));
+        svg.append('text')
+            .attr('x', (from.x + to.x) / 2).attr('y', from.y - 18)
+            .attr('class', 'flow-value')
+            .text(g < 0.001 ? g.toExponential(1) : '×' + derivScale);
+        g *= derivScale;
+    }
+}
+
+function gpDrawDerivPlot() {
+    const canvas = document.getElementById('gp-deriv-canvas');
+    const ctx = canvas.getContext('2d');
+    const w = canvas.width, h = canvas.height;
+    ctx.clearRect(0, 0, w, h);
+
+    const range = 6; // -6 to 6
+    const funcs = [
+        { name: 'Sigmoid\'', fn: x => sigmoidDeriv(x), color: '#ff5252', active: gpActivation === 'sigmoid' },
+        { name: 'ReLU\'', fn: x => x > 0 ? 1 : 0, color: '#16c79a', active: gpActivation === 'relu' },
+        { name: 'Tanh\'', fn: x => 1 - Math.tanh(x)**2, color: '#4fc3f7', active: gpActivation === 'tanh' },
+    ];
+
+    // Grid
+    ctx.strokeStyle = 'rgba(42,42,74,0.4)';
+    ctx.lineWidth = 0.5;
+    const cx = w/2, cy = h - 20;
+    ctx.beginPath(); ctx.moveTo(0, cy); ctx.lineTo(w, cy); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(cx, 0); ctx.lineTo(cx, h); ctx.stroke();
+    // y=0.25 line
+    const y025 = cy - 0.25 / 1.1 * (h - 30);
+    ctx.setLineDash([4,4]);
+    ctx.beginPath(); ctx.moveTo(0, y025); ctx.lineTo(w, y025); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = '#6c6c7c'; ctx.font = '9px JetBrains Mono';
+    ctx.fillText('0.25', 4, y025 - 4);
+    ctx.fillText('0', cx + 4, cy - 4);
+
+    // Draw functions
+    funcs.forEach(f => {
+        ctx.beginPath();
+        ctx.strokeStyle = f.color;
+        ctx.lineWidth = f.active ? 3 : 1.5;
+        ctx.globalAlpha = f.active ? 1 : 0.35;
+        for (let px = 0; px < w; px++) {
+            const x = (px / w - 0.5) * range * 2;
+            const y = f.fn(x);
+            const py = cy - y / 1.1 * (h - 30);
+            if (px === 0) ctx.moveTo(px, py);
+            else ctx.lineTo(px, py);
+        }
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+    });
+
+    // Legend
+    let lx = w - 120;
+    funcs.forEach((f, i) => {
+        ctx.fillStyle = f.color;
+        ctx.globalAlpha = f.active ? 1 : 0.4;
+        ctx.font = 'bold 10px JetBrains Mono';
+        ctx.fillText(f.name, lx, 16 + i * 14);
+        ctx.globalAlpha = 1;
+    });
+}
+
+// Wrap original gpUpdate to also draw flow and deriv
+const _origGpUpdate = gpUpdate;
+gpUpdate = function() {
+    _origGpUpdate();
+    gpDrawFlow();
+    gpDrawDerivPlot();
+};
+gpUpdate();
+
+// ============================================================
+// SECTION 5: 完整训练循环 (XOR)
+// ============================================================
+let xorNet, xorPlaying = false, xorAnimId = null, xorLossChart = null, xorEpoch = 0;
+const xorData = [
+    {x:[0,0], y:0},
+    {x:[0,1], y:1},
+    {x:[1,0], y:1},
+    {x:[1,1], y:0},
+];
+let xorLossHistory = [];
+
+function xorInitNet() {
+    // 2-4-1 network (need hidden layer with at least 2 neurons for XOR)
+    const rng = MathUtils.seededRandom(Date.now());
+    const r = () => (rng() * 2 - 1) * 1.5;
+    return {
+        // Hidden layer: 4 neurons
+        w1: [[r(),r()],[r(),r()],[r(),r()],[r(),r()]], // 4x2
+        b1: [r(),r(),r(),r()],
+        // Output: 1 neuron
+        w2: [[r(),r(),r(),r()]], // 1x4
+        b2: [r()],
+    };
+}
+
+function xorForward(net, x) {
+    // Hidden
+    const z1 = net.w1.map((w,i) => w[0]*x[0] + w[1]*x[1] + net.b1[i]);
+    const a1 = z1.map(sigmoid);
+    // Output
+    const z2 = net.w2[0].reduce((s,w,i) => s + w*a1[i], 0) + net.b2[0];
+    const a2 = sigmoid(z2);
+    return {z1, a1, z2, a2};
+}
+
+function xorTrain(net, lr) {
+    let totalLoss = 0;
+    for (const sample of xorData) {
+        const {z1, a1, z2, a2} = xorForward(net, sample.x);
+        const loss = 0.5 * (a2 - sample.y) ** 2;
+        totalLoss += loss;
+
+        // Backward
+        const dL_da2 = a2 - sample.y;
+        const delta2 = dL_da2 * sigmoidDeriv(z2);
+
+        // dw2, db2
+        for (let j = 0; j < 4; j++) {
+            net.w2[0][j] -= lr * delta2 * a1[j];
+        }
+        net.b2[0] -= lr * delta2;
+
+        // Hidden layer
+        for (let j = 0; j < 4; j++) {
+            const delta1 = delta2 * net.w2[0][j] * sigmoidDeriv(z1[j]);
+            net.w1[j][0] -= lr * delta1 * sample.x[0];
+            net.w1[j][1] -= lr * delta1 * sample.x[1];
+            net.b1[j] -= lr * delta1;
+        }
+    }
+    return totalLoss / xorData.length;
+}
+
+function xorReset() {
+    xorPlaying = false;
+    if (xorAnimId) { cancelAnimationFrame(xorAnimId); xorAnimId = null; }
+    document.getElementById('xor-play').textContent = '▶ 开始训练';
+    xorNet = xorInitNet();
+    xorEpoch = 0;
+    xorLossHistory = [];
+    document.getElementById('xor-epoch').textContent = '0';
+    document.getElementById('xor-loss').textContent = '-';
+    document.getElementById('xor-acc').textContent = '0%';
+    document.getElementById('xor-info').querySelector('p').textContent =
+        'XOR 真值表: (0,0)→0, (0,1)→1, (1,0)→1, (1,1)→0。单层感知机无法学会这个非线性分类。';
+    if (xorLossChart) { xorLossChart.destroy(); xorLossChart = null; }
+    initLossChart();
+    xorDrawBoundary();
+    xorDrawNetwork();
+}
+
+function xorTogglePlay() {
+    if (xorPlaying) {
+        xorPlaying = false;
+        document.getElementById('xor-play').textContent = '▶ 继续训练';
+        if (xorAnimId) { cancelAnimationFrame(xorAnimId); xorAnimId = null; }
+    } else {
+        xorPlaying = true;
+        document.getElementById('xor-play').textContent = '⏸ 暂停';
+        xorLoop();
+    }
+}
+
+function xorLoop() {
+    if (!xorPlaying) return;
+    const lr = parseFloat(document.getElementById('xor-lr').value);
+    document.getElementById('xor-lr-val').textContent = lr.toFixed(1);
+
+    // Do multiple epochs per frame for speed
+    const batchSize = 10;
+    let loss = 0;
+    for (let i = 0; i < batchSize; i++) {
+        loss = xorTrain(xorNet, lr);
+        xorEpoch++;
+    }
+
+    xorLossHistory.push(loss);
+    if (xorLossHistory.length > 500) xorLossHistory.shift();
+
+    document.getElementById('xor-epoch').textContent = xorEpoch;
+    document.getElementById('xor-loss').textContent = loss.toFixed(6);
+
+    // Accuracy
+    let correct = 0;
+    xorData.forEach(d => {
+        const pred = xorForward(xorNet, d.x).a2;
+        if (Math.round(pred) === d.y) correct++;
+    });
+    const acc = (correct / 4 * 100);
+    document.getElementById('xor-acc').textContent = acc + '%';
+
+    if (acc === 100 && loss < 0.01) {
+        document.getElementById('xor-info').querySelector('p').textContent =
+            '训练成功! 网络已经学会了 XOR -- 隐藏层创造了非线性决策边界。';
+    }
+
+    // Update chart
+    updateLossChart();
+    xorDrawBoundary();
+    xorDrawNetwork();
+
+    // Update prediction table
+    xorUpdatePredTable();
+
+    xorAnimId = requestAnimationFrame(xorLoop);
+}
+
+function xorUpdatePredTable() {
+    const tbody = document.getElementById('xor-pred-tbody');
+    tbody.innerHTML = '';
+    xorData.forEach(d => {
+        const pred = xorForward(xorNet, d.x).a2;
+        const rounded = Math.round(pred);
+        const ok = rounded === d.y;
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>(${d.x[0]}, ${d.x[1]})</td><td>${d.y}</td>` +
+            `<td>${pred.toFixed(4)}</td>` +
+            `<td class="${ok?'correct':'wrong'}">${ok?'&#10003;':'&#10007;'}</td>`;
+        tbody.appendChild(tr);
+    });
+}
+
+function initLossChart() {
+    const ctx = document.getElementById('xor-loss-chart').getContext('2d');
+    xorLossChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: [],
+            datasets: [{
+                label: 'Loss',
+                data: [],
+                borderColor: '#ff5252',
+                backgroundColor: 'rgba(255,82,82,0.1)',
+                borderWidth: 2,
+                pointRadius: 0,
+                fill: true,
+                tension: 0.3,
+            }]
+        },
+        options: {
+            responsive: false,
+            maintainAspectRatio: false,
+            animation: false,
+            scales: {
+                x: { display: false },
+                y: {
+                    beginAtZero: true,
+                    grid: { color: 'rgba(42,42,74,0.5)' },
+                    ticks: { color: '#a8a8b8', font: { family: 'JetBrains Mono', size: 10 } },
+                }
+            },
+            plugins: {
+                legend: { display: false },
+            }
+        }
+    });
+}
+
+function updateLossChart() {
+    if (!xorLossChart) return;
+    xorLossChart.data.labels = xorLossHistory.map((_,i) => i);
+    xorLossChart.data.datasets[0].data = xorLossHistory;
+    xorLossChart.update();
+}
+
+function xorDrawBoundary() {
+    const canvas = document.getElementById('xor-canvas');
+    const ctx = canvas.getContext('2d');
+    const w = canvas.width, h = canvas.height;
+    const res = 50;
+    const cellW = w / res, cellH = h / res;
+
+    // Draw decision boundary
+    for (let i = 0; i < res; i++) {
+        for (let j = 0; j < res; j++) {
+            const x0 = i / res * 1.4 - 0.2;
+            const x1 = (1 - j / res) * 1.4 - 0.2;
+            const pred = xorForward(xorNet, [x0, x1]).a2;
+            const r = Math.round(82 + (1-pred)*173);
+            const g = Math.round(pred * 199);
+            const b = Math.round(82 + pred*72);
+            ctx.fillStyle = `rgba(${r},${g},${b},0.6)`;
+            ctx.fillRect(i * cellW, j * cellH, cellW+1, cellH+1);
+        }
+    }
+
+    // Draw grid
+    ctx.strokeStyle = 'rgba(42,42,74,0.3)';
+    ctx.lineWidth = 0.5;
+    for (let i = 0; i <= 1; i += 0.5) {
+        const px = (i + 0.2) / 1.4 * w;
+        const py = (1 - (i + 0.2) / 1.4) * h;
+        ctx.beginPath(); ctx.moveTo(px,0); ctx.lineTo(px,h); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(0,py); ctx.lineTo(w,py); ctx.stroke();
+    }
+
+    // Draw data points
+    xorData.forEach(d => {
+        const px = (d.x[0] + 0.2) / 1.4 * w;
+        const py = (1 - (d.x[1] + 0.2) / 1.4) * h;
+        const pred = xorForward(xorNet, d.x).a2;
+
+        ctx.beginPath();
+        ctx.arc(px, py, 14, 0, Math.PI*2);
+        ctx.fillStyle = d.y === 1 ? 'var(--accent-green)' : '#1a1a2e';
+        ctx.fillStyle = d.y === 1 ? '#16c79a' : '#1a1a2e';
+        ctx.fill();
+        ctx.strokeStyle = Math.round(pred) === d.y ? '#16c79a' : '#ff5252';
+        ctx.lineWidth = 3;
+        ctx.stroke();
+
+        // Label
+        ctx.fillStyle = d.y === 1 ? '#1a1a2e' : '#e8e8e8';
+        ctx.font = 'bold 12px JetBrains Mono';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(d.y.toString(), px, py);
+    });
+}
+
+function xorDrawNetwork() {
+    const svgEl = document.getElementById('xor-network');
+    const svg = d3.select(svgEl);
+    svg.selectAll('*').remove();
+
+    const layers = [
+        [{label:'x₁',x:50,y:60},{label:'x₂',x:50,y:140}],
+        [{label:'h₁',x:140,y:30},{label:'h₂',x:140,y:80},{label:'h₃',x:140,y:130},{label:'h₄',x:140,y:180}],
+        [{label:'ŷ',x:280,y:100}],
+    ];
+
+    // Determine max weight for scaling
+    let maxW = 0.01;
+    xorNet.w1.forEach(w => w.forEach(v => maxW = Math.max(maxW, Math.abs(v))));
+    xorNet.w2[0].forEach(v => maxW = Math.max(maxW, Math.abs(v)));
+
+    // Draw weights: layer 0→1
+    layers[0].forEach((n, i) => {
+        layers[1].forEach((h, j) => {
+            const w = xorNet.w1[j][i];
+            const thick = Math.max(0.5, Math.abs(w) / maxW * 5);
+            const col = w > 0 ? '#16c79a' : '#ff5252';
+            svg.append('line').attr('x1',n.x+16).attr('y1',n.y).attr('x2',h.x-16).attr('y2',h.y)
+                .attr('stroke',col).attr('stroke-width',thick).attr('opacity',0.7);
+        });
+    });
+    // Layer 1→2
+    layers[1].forEach((h, j) => {
+        const o = layers[2][0];
+        const w = xorNet.w2[0][j];
+        const thick = Math.max(0.5, Math.abs(w) / maxW * 5);
+        const col = w > 0 ? '#16c79a' : '#ff5252';
+        svg.append('line').attr('x1',h.x+16).attr('y1',h.y).attr('x2',o.x-16).attr('y2',o.y)
+            .attr('stroke',col).attr('stroke-width',thick).attr('opacity',0.7);
+    });
+
+    // Draw nodes
+    [...layers[0],...layers[1],...layers[2]].forEach(n => {
+        svg.append('circle').attr('cx',n.x).attr('cy',n.y).attr('r',14)
+            .attr('fill','var(--bg-primary)').attr('stroke','var(--accent-blue)').attr('stroke-width',1.5);
+        svg.append('text').attr('x',n.x).attr('y',n.y).attr('text-anchor','middle').attr('dominant-baseline','central')
+            .attr('fill','var(--text-primary)').attr('font-size','10px').attr('font-family','var(--font-mono)').text(n.label);
+    });
+
+    // Output prediction
+    const pred = xorForward(xorNet, [0,1]).a2;
+    svg.append('text').attr('x',340).attr('y',100).attr('text-anchor','start').attr('dominant-baseline','central')
+        .attr('fill','var(--accent-green)').attr('font-size','11px').attr('font-family','var(--font-mono)')
+        .text(`${fmt2(pred)}`);
+
+    // Legend
+    svg.append('line').attr('x1',300).attr('y1',170).attr('x2',320).attr('y2',170).attr('stroke','#16c79a').attr('stroke-width',2);
+    svg.append('text').attr('x',324).attr('y',170).attr('dominant-baseline','central').attr('fill','var(--text-muted)').attr('font-size','9px').text('正权重');
+    svg.append('line').attr('x1',300).attr('y1',185).attr('x2',320).attr('y2',185).attr('stroke','#ff5252').attr('stroke-width',2);
+    svg.append('text').attr('x',324).attr('y',185).attr('dominant-baseline','central').attr('fill','var(--text-muted)').attr('font-size','9px').text('负权重');
+}
+
+// Initialize
+xorNet = xorInitNet();
+initLossChart();
+xorDrawBoundary();
+xorDrawNetwork();
+xorUpdatePredTable();
+
+document.getElementById('xor-lr').addEventListener('input', () => {
+    document.getElementById('xor-lr-val').textContent = parseFloat(document.getElementById('xor-lr').value).toFixed(1);
+});
+
+</script>
+</body>
+</html>

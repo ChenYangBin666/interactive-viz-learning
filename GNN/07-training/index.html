@@ -1,0 +1,1450 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>07 - 训练过程 | GNN 交互式可视化学习</title>
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+SC:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+
+    <!-- KaTeX -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+
+    <!-- D3, GSAP, Cytoscape, Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/cytoscape@3.28.1/dist/cytoscape.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+    <!-- Shared CSS -->
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+
+    <style>
+        /* ===== Section-specific styles ===== */
+        .module-header {
+            text-align: center;
+            padding: 2rem 0 1rem;
+        }
+        .module-header h1 {
+            font-size: 2.2rem;
+            background: linear-gradient(135deg, #ffab40, #16c79a);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .module-header .subtitle {
+            color: var(--text-secondary);
+            font-size: 1rem;
+            margin-top: 0.5rem;
+        }
+
+        /* Semi-supervised graph */
+        .semi-graph-container {
+            width: 100%;
+            height: 420px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            position: relative;
+        }
+        .mask-toggles {
+            display: flex;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+        }
+        .mask-toggle {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            padding: 0.4rem 0.8rem;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            font-size: 0.85rem;
+            border: 2px solid transparent;
+            transition: all 0.2s;
+            user-select: none;
+        }
+        .mask-toggle.active { opacity: 1; }
+        .mask-toggle:not(.active) { opacity: 0.4; }
+        .mask-toggle .dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+        }
+        .mask-toggle.train { background: rgba(22, 199, 154, 0.15); border-color: rgba(22, 199, 154, 0.4); }
+        .mask-toggle.train .dot { background: #16c79a; }
+        .mask-toggle.val { background: rgba(79, 195, 247, 0.15); border-color: rgba(79, 195, 247, 0.4); }
+        .mask-toggle.val .dot { background: #4fc3f7; }
+        .mask-toggle.test { background: rgba(255, 171, 64, 0.15); border-color: rgba(255, 171, 64, 0.4); }
+        .mask-toggle.test .dot { background: #ffab40; }
+
+        /* Forward pass pipeline */
+        .pipeline-svg {
+            width: 100%;
+            overflow-x: auto;
+        }
+        .pipeline-svg svg {
+            display: block;
+            margin: 0 auto;
+        }
+        .pipeline-stage {
+            cursor: pointer;
+        }
+        .pipeline-stage:hover rect {
+            stroke: var(--accent-green);
+            stroke-width: 2;
+        }
+        .heatmap-mini {
+            display: inline-block;
+            margin: 0.5rem;
+        }
+
+        /* Ripple canvas */
+        .ripple-container {
+            width: 100%;
+            height: 450px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            position: relative;
+            overflow: hidden;
+        }
+        .ripple-container canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+
+        /* Dashboard */
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+        }
+        .chart-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1rem;
+        }
+        .chart-card canvas {
+            width: 100% !important;
+            max-height: 220px;
+        }
+        .dashboard-graph {
+            width: 100%;
+            height: 350px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+        }
+        .epoch-display {
+            font-family: var(--font-mono);
+            font-size: 1.5rem;
+            color: var(--accent-green);
+            text-align: center;
+            padding: 0.5rem;
+        }
+        .metric-row {
+            display: flex;
+            justify-content: center;
+            gap: 2rem;
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+            margin-bottom: 0.5rem;
+        }
+        .metric-row span.val {
+            font-family: var(--font-mono);
+            color: var(--accent-green);
+            font-weight: 600;
+        }
+
+        /* Over-smoothing */
+        .oversmooth-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+        }
+        .oversmooth-chart {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1rem;
+        }
+        .oversmooth-chart canvas {
+            width: 100% !important;
+            max-height: 250px;
+        }
+        .heatmap-panel {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1rem;
+            overflow-x: auto;
+        }
+        .heatmap-panel .title {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            margin-bottom: 0.5rem;
+            font-weight: 600;
+        }
+
+        /* Play controls */
+        .play-controls {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.75rem;
+            padding: 0.75rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+        }
+
+        /* Responsive */
+        @media (max-width: 900px) {
+            .dashboard-grid { grid-template-columns: 1fr; }
+            .oversmooth-grid { grid-template-columns: 1fr; }
+            .split-layout { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="page-container">
+
+    <!-- Module Header -->
+    <div class="module-header">
+        <h1>07 - 训练过程</h1>
+        <p class="subtitle">从半监督设置到训练循环，理解 GNN 如何从少量标签中学习</p>
+    </div>
+
+    <!-- ========== Section 1: Semi-supervised Setup ========== -->
+    <div class="section" id="sec-semi">
+        <div class="section-title">
+            <div class="icon">1</div>
+            <h2>半监督设置</h2>
+            <span class="badge badge-green">Semi-supervised</span>
+        </div>
+
+        <div class="split-layout">
+            <div class="text-panel">
+                <p>在引文网络节点分类任务中，我们通常只有<strong>少量节点</strong>拥有标签。这就是<strong>半监督学习</strong>的典型场景。</p>
+                <p>数据集中的节点被分为三个互不重叠的集合：</p>
+                <ul style="color: var(--text-secondary); padding-left: 1.2rem; margin-bottom: 1rem;">
+                    <li style="margin-bottom:0.3rem;"><span style="color:#16c79a; font-weight:600;">训练集 (Train)</span> — 用于计算损失、更新参数</li>
+                    <li style="margin-bottom:0.3rem;"><span style="color:#4fc3f7; font-weight:600;">验证集 (Validation)</span> — 用于选择超参数</li>
+                    <li style="margin-bottom:0.3rem;"><span style="color:#ffab40; font-weight:600;">测试集 (Test)</span> — 用于最终评估</li>
+                </ul>
+
+                <div class="info-box success">
+                    <p><strong>关键点：</strong>只有训练集的节点参与损失计算，但所有节点在消息传递中都参与信息的聚合与传播。</p>
+                </div>
+
+                <div class="mask-toggles mt-2">
+                    <div class="mask-toggle train active" onclick="toggleMask('train')" id="toggle-train">
+                        <span class="dot"></span> 训练集 (8)
+                    </div>
+                    <div class="mask-toggle val active" onclick="toggleMask('val')" id="toggle-val">
+                        <span class="dot"></span> 验证集 (6)
+                    </div>
+                    <div class="mask-toggle test active" onclick="toggleMask('test')" id="toggle-test">
+                        <span class="dot"></span> 测试集 (6)
+                    </div>
+                </div>
+
+                <div class="legend mt-2">
+                    <div class="legend-item"><span class="swatch" style="background:#888;"></span> 无标签（灰色）</div>
+                    <div class="legend-item"><span class="swatch" style="background:#16c79a;"></span> 训练节点</div>
+                    <div class="legend-item"><span class="swatch" style="background:#4fc3f7;"></span> 验证节点</div>
+                    <div class="legend-item"><span class="swatch" style="background:#ffab40;"></span> 测试节点</div>
+                </div>
+            </div>
+
+            <div class="viz-panel">
+                <div class="semi-graph-container" id="semi-graph"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========== Section 2: Forward Pass + Loss ========== -->
+    <div class="section" id="sec-forward">
+        <div class="section-title">
+            <div class="icon">2</div>
+            <h2>前向传播 + 损失</h2>
+            <span class="badge badge-blue">Forward Pass</span>
+        </div>
+
+        <p>GCN 节点分类的前向传播流程如下：</p>
+        <p style="text-align:center; margin: 1rem 0;">
+            $$H^{(0)} \xrightarrow{\text{GCN Layer 1}} H^{(1)} \xrightarrow{\text{ReLU}} \xrightarrow{\text{GCN Layer 2}} H^{(2)} \xrightarrow{\text{Softmax}} \hat{Y} \xrightarrow{\text{Cross-Entropy}} \mathcal{L}$$
+        </p>
+
+        <div class="card mt-2">
+            <div id="pipeline-controls" class="anim-controls" style="margin-bottom: 1rem;"></div>
+            <div class="pipeline-svg" id="pipeline-area" style="min-height: 300px;"></div>
+            <div id="pipeline-loss" class="text-center mt-1" style="font-family: var(--font-mono); font-size: 1.2rem; color: var(--accent-green);">
+                损失值: —
+            </div>
+        </div>
+
+        <div class="info-box mt-2">
+            <p>GCN 层的核心操作: $H^{(l+1)} = \sigma(\hat{D}^{-\frac{1}{2}} \hat{A} \hat{D}^{-\frac{1}{2}} H^{(l)} W^{(l)})$，其中 $\hat{A} = A + I$ 是加了自环的邻接矩阵。</p>
+        </div>
+    </div>
+
+    <!-- ========== Section 3: Backpropagation Ripple ========== -->
+    <div class="section" id="sec-backprop">
+        <div class="section-title">
+            <div class="icon">3</div>
+            <h2>反向传播涟漪</h2>
+            <span class="badge badge-purple">Backpropagation</span>
+        </div>
+
+        <div class="split-layout">
+            <div class="text-panel">
+                <p>反向传播时，梯度从<strong>有标签的节点</strong>（训练集）出发，沿着图的边向外扩散，形成类似<strong>涟漪</strong>的传播效果。</p>
+
+                <p>关键观察：</p>
+                <ul style="color: var(--text-secondary); padding-left: 1.2rem; margin-bottom: 1rem;">
+                    <li style="margin-bottom:0.3rem;">梯度首先从损失函数回传到训练节点</li>
+                    <li style="margin-bottom:0.3rem;">通过 GCN 的消息传递机制，梯度传播到邻居节点</li>
+                    <li style="margin-bottom:0.3rem;"><strong>无标签节点也会收到梯度更新</strong>，因为它们参与了前向传播的聚合</li>
+                    <li style="margin-bottom:0.3rem;">多层 GCN = 多跳扩散，梯度可以传播更远</li>
+                </ul>
+
+                <div class="info-box warning">
+                    <p>这正是 GNN 半监督学习有效的原因：信息沿图结构双向流动——前向传播中邻居信息聚合，反向传播中梯度沿边传播。</p>
+                </div>
+
+                <button class="btn btn-primary mt-2" id="btn-ripple" onclick="startRipple()">播放涟漪动画</button>
+                <button class="btn mt-2" onclick="resetRipple()">重置</button>
+            </div>
+
+            <div class="viz-panel">
+                <div class="ripple-container" id="ripple-container">
+                    <canvas id="ripple-canvas"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========== Section 4: Training Dashboard ========== -->
+    <div class="section" id="sec-dashboard">
+        <div class="section-title">
+            <div class="icon">4</div>
+            <h2>训练仪表盘</h2>
+            <span class="badge badge-orange">Dashboard</span>
+        </div>
+
+        <p>观察 GCN 在引文网络上的训练过程——损失下降、准确率上升、节点预测逐渐准确。</p>
+
+        <div class="play-controls mt-2" id="dashboard-controls">
+            <button class="btn btn-icon" onclick="dashboardReset()" title="重置">&#x27F2;</button>
+            <button class="btn btn-icon" onclick="dashboardPrev()" title="上一轮">&#x25C2;</button>
+            <button class="btn btn-icon btn-primary" id="dash-play-btn" onclick="dashboardTogglePlay()" title="播放">&#x25B6;</button>
+            <button class="btn btn-icon" onclick="dashboardNext()" title="下一轮">&#x25B8;</button>
+            <input type="range" id="epoch-slider" min="0" max="49" value="0" style="flex:1; max-width: 300px;" oninput="dashboardGoTo(parseInt(this.value))">
+            <span class="step-label" id="epoch-label">Epoch 0 / 49</span>
+        </div>
+
+        <div class="epoch-display" id="epoch-display">Epoch 0</div>
+        <div class="metric-row" id="metric-row">
+            <span>Train Loss: <span class="val" id="m-loss">—</span></span>
+            <span>Train Acc: <span class="val" id="m-tacc">—</span></span>
+            <span>Val Acc: <span class="val" id="m-vacc">—</span></span>
+        </div>
+
+        <div class="dashboard-grid mt-1">
+            <div class="chart-card">
+                <h4 style="margin-bottom: 0.5rem; color: var(--text-secondary);">Loss 曲线</h4>
+                <canvas id="loss-chart"></canvas>
+            </div>
+            <div class="chart-card">
+                <h4 style="margin-bottom: 0.5rem; color: var(--text-secondary);">Accuracy 曲线</h4>
+                <canvas id="acc-chart"></canvas>
+            </div>
+        </div>
+
+        <div class="dashboard-graph mt-2" id="dashboard-graph"></div>
+        <div class="legend mt-1" id="dashboard-legend"></div>
+    </div>
+
+    <!-- ========== Section 5: Over-smoothing ========== -->
+    <div class="section" id="sec-oversmooth">
+        <div class="section-title">
+            <div class="icon">5</div>
+            <h2>过平滑问题</h2>
+            <span class="badge badge-orange">Over-smoothing</span>
+        </div>
+
+        <div class="split-layout">
+            <div class="text-panel">
+                <p>GNN 层数并非越多越好。当层数过多时，所有节点的特征会趋于<strong>相同</strong>，这就是<strong>过平滑 (Over-smoothing)</strong> 问题。</p>
+
+                <div class="slider-group mt-2">
+                    <label>GCN 层数:</label>
+                    <input type="range" id="layer-slider" min="1" max="10" value="2" oninput="updateOversmooth(parseInt(this.value))">
+                    <span class="slider-value" id="layer-value">2</span>
+                </div>
+
+                <div class="info-box warning mt-2" id="oversmooth-insight">
+                    <p><strong>2 层 GCN:</strong> 准确率最高，节点特征保持区分性。</p>
+                </div>
+
+                <div class="info-box mt-2" style="border-left-color: var(--accent-red); background: rgba(255,82,82,0.05);">
+                    <p><strong>核心洞察：</strong>层数过多 $\rightarrow$ 所有节点特征趋同 $\rightarrow$ 无法区分不同类别的节点</p>
+                </div>
+
+                <p class="mt-2" style="color: var(--text-secondary); font-size: 0.9rem;">
+                    每增加一层 GCN，节点的感受野扩大一跳。当感受野覆盖整个图时，所有节点看到的信息几乎一样，特征自然趋同。
+                </p>
+            </div>
+
+            <div class="viz-panel">
+                <div class="oversmooth-grid">
+                    <div class="oversmooth-chart">
+                        <h4 style="color: var(--text-secondary); margin-bottom: 0.5rem;">准确率 vs 层数</h4>
+                        <canvas id="oversmooth-acc-chart"></canvas>
+                    </div>
+                    <div class="heatmap-panel">
+                        <div class="title">节点特征热力图 (第 <span id="heatmap-layer-label">2</span> 层输出)</div>
+                        <div id="oversmooth-heatmap"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Navigation -->
+    <div class="text-center mt-3" style="padding: 2rem 0;">
+        <div class="mt-2">
+            <a href="../06-graphsage/index.html" class="btn">&#x25C0; 06-GraphSAGE</a>
+            <a href="../08-tasks/index.html" class="btn" style="margin-left: 0.5rem;">08-下游任务 &#x25B6;</a>
+        </div>
+    </div>
+</div>
+
+<!-- Shared JS -->
+<script src="../shared/scripts/graph-utils.js"></script>
+<script src="../shared/scripts/graph-renderer.js"></script>
+<script src="../shared/scripts/matrix-renderer.js"></script>
+<script src="../shared/scripts/animation-controller.js"></script>
+<script src="../shared/scripts/nav.js"></script>
+<script src="../shared/scripts/katex-init.js"></script>
+
+<script>
+// ============================================================
+// Citation graph data (inline from shared/data/citation.json)
+// ============================================================
+const CITATION = {
+    classes: ["案例推理","遗传算法","神经网络","概率方法","强化学习","规则学习","理论"],
+    nodes: [
+        {id:0,label:"P0",group:2},{id:1,label:"P1",group:2},{id:2,label:"P2",group:2},
+        {id:3,label:"P3",group:0},{id:4,label:"P4",group:0},{id:5,label:"P5",group:0},
+        {id:6,label:"P6",group:3},{id:7,label:"P7",group:3},{id:8,label:"P8",group:3},
+        {id:9,label:"P9",group:1},{id:10,label:"P10",group:1},{id:11,label:"P11",group:4},
+        {id:12,label:"P12",group:4},{id:13,label:"P13",group:5},{id:14,label:"P14",group:5},
+        {id:15,label:"P15",group:6},{id:16,label:"P16",group:6},{id:17,label:"P17",group:2},
+        {id:18,label:"P18",group:3},{id:19,label:"P19",group:1}
+    ],
+    edges: [[0,1],[0,2],[0,6],[0,17],[1,2],[1,7],[2,17],[2,8],[3,4],[3,5],[3,13],[4,5],[4,14],
+            [5,11],[6,7],[6,8],[6,18],[7,8],[8,18],[9,10],[9,19],[10,19],[10,12],[11,12],[11,13],
+            [12,14],[13,14],[15,16],[15,0],[16,17],[17,18],[18,19]],
+    trainMask: [0,1,3,6,9,11,13,15],
+    valMask: [2,4,7,10,14,16],
+    testMask: [5,8,12,17,18,19]
+};
+
+const CLASS_COLORS = ['#16c79a','#4fc3f7','#b388ff','#ffab40','#ff80ab','#ffd740','#ff5252'];
+
+// ============================================================
+// Section 1: Semi-supervised Setup
+// ============================================================
+let semiCy = null;
+const maskState = { train: true, val: true, test: true };
+
+function initSemiGraph() {
+    const elements = [];
+    CITATION.nodes.forEach(n => {
+        elements.push({ data: { id: String(n.id), label: n.label, group: n.group } });
+    });
+    CITATION.edges.forEach(([u,v]) => {
+        elements.push({ data: { id: `e${u}-${v}`, source: String(u), target: String(v) } });
+    });
+
+    semiCy = cytoscape({
+        container: document.getElementById('semi-graph'),
+        elements: elements,
+        style: [
+            {
+                selector: 'node',
+                style: {
+                    'label': 'data(label)',
+                    'color': '#e8e8e8',
+                    'text-valign': 'center',
+                    'text-halign': 'center',
+                    'font-size': '10px',
+                    'font-family': 'JetBrains Mono, monospace',
+                    'width': 34,
+                    'height': 34,
+                    'border-width': 2,
+                    'border-color': 'rgba(100,100,100,0.3)',
+                    'background-color': '#555',
+                    'text-outline-width': 2,
+                    'text-outline-color': '#1a1a2e',
+                    'transition-property': 'background-color, border-color, border-width, width, height',
+                    'transition-duration': '300ms',
+                }
+            },
+            {
+                selector: 'edge',
+                style: {
+                    'width': 1.5,
+                    'line-color': 'rgba(150,150,150,0.25)',
+                    'curve-style': 'bezier',
+                }
+            }
+        ],
+        layout: {
+            name: 'cose',
+            animate: false,
+            nodeDimensionsIncludeLabels: true,
+            idealEdgeLength: 75,
+            nodeRepulsion: 5000,
+            gravity: 0.6,
+        },
+        minZoom: 0.5,
+        maxZoom: 2.5,
+        wheelSensitivity: 0.3,
+    });
+    requestAnimationFrame(() => { requestAnimationFrame(() => { semiCy.resize(); semiCy.fit(undefined, 30); }); });
+
+    updateSemiColors();
+}
+
+function updateSemiColors() {
+    if (!semiCy) return;
+    CITATION.nodes.forEach(n => {
+        const node = semiCy.getElementById(String(n.id));
+        let color = '#555';
+        let bcolor = 'rgba(100,100,100,0.3)';
+        let bwidth = 2;
+        let size = 34;
+
+        if (maskState.train && CITATION.trainMask.includes(n.id)) {
+            color = '#16c79a';
+            bcolor = '#16c79a';
+            bwidth = 3;
+            size = 40;
+        } else if (maskState.val && CITATION.valMask.includes(n.id)) {
+            color = '#4fc3f7';
+            bcolor = '#4fc3f7';
+            bwidth = 3;
+            size = 38;
+        } else if (maskState.test && CITATION.testMask.includes(n.id)) {
+            color = '#ffab40';
+            bcolor = '#ffab40';
+            bwidth = 3;
+            size = 38;
+        }
+
+        node.style({
+            'background-color': color,
+            'border-color': bcolor,
+            'border-width': bwidth,
+            'width': size,
+            'height': size,
+        });
+    });
+}
+
+function toggleMask(type) {
+    maskState[type] = !maskState[type];
+    document.getElementById('toggle-' + type).classList.toggle('active', maskState[type]);
+    updateSemiColors();
+}
+
+// ============================================================
+// Section 2: Forward Pass Pipeline
+// ============================================================
+let pipelineCtrl = null;
+
+function initPipeline() {
+    const area = document.getElementById('pipeline-area');
+    const W = 860, H = 280;
+    const svgNS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(svgNS, 'svg');
+    svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+    svg.setAttribute('width', '100%');
+    svg.style.maxWidth = W + 'px';
+    area.appendChild(svg);
+
+    const stages = [
+        { label: 'H^(0)\n输入特征', x: 20, w: 110, color: 'rgba(22,199,154,0.15)' },
+        { label: 'GCN\nLayer 1', x: 165, w: 100, color: 'rgba(79,195,247,0.15)' },
+        { label: 'ReLU', x: 300, w: 70, color: 'rgba(179,136,255,0.15)' },
+        { label: 'GCN\nLayer 2', x: 405, w: 100, color: 'rgba(79,195,247,0.15)' },
+        { label: 'Softmax', x: 540, w: 90, color: 'rgba(255,171,64,0.15)' },
+        { label: 'Cross-\nEntropy', x: 665, w: 100, color: 'rgba(255,82,82,0.15)' },
+        { label: 'Loss\nL', x: 790, w: 60, color: 'rgba(255,82,82,0.3)' },
+    ];
+
+    const stageElements = [];
+
+    stages.forEach((s, i) => {
+        const g = document.createElementNS(svgNS, 'g');
+        g.classList.add('pipeline-stage');
+        g.setAttribute('id', 'stage-' + i);
+
+        const rect = document.createElementNS(svgNS, 'rect');
+        rect.setAttribute('x', s.x);
+        rect.setAttribute('y', 40);
+        rect.setAttribute('width', s.w);
+        rect.setAttribute('height', 100);
+        rect.setAttribute('rx', 8);
+        rect.setAttribute('fill', s.color);
+        rect.setAttribute('stroke', 'rgba(100,100,100,0.3)');
+        rect.setAttribute('stroke-width', '1');
+        rect.style.opacity = '0.3';
+        g.appendChild(rect);
+
+        const lines = s.label.split('\n');
+        lines.forEach((line, li) => {
+            const text = document.createElementNS(svgNS, 'text');
+            text.setAttribute('x', s.x + s.w / 2);
+            text.setAttribute('y', 85 + li * 18);
+            text.setAttribute('text-anchor', 'middle');
+            text.setAttribute('fill', '#e8e8e8');
+            text.setAttribute('font-size', '12');
+            text.setAttribute('font-family', 'JetBrains Mono, monospace');
+            text.style.opacity = '0.3';
+            text.textContent = line;
+            g.appendChild(text);
+        });
+
+        // Mini heatmap placeholder
+        const hmGroup = document.createElementNS(svgNS, 'g');
+        hmGroup.setAttribute('id', 'hm-' + i);
+        hmGroup.setAttribute('transform', `translate(${s.x + 10}, 155)`);
+        hmGroup.style.opacity = '0';
+        g.appendChild(hmGroup);
+
+        svg.appendChild(g);
+        stageElements.push({ g, rect, s });
+
+        // Arrow to next
+        if (i < stages.length - 1) {
+            const nextX = stages[i + 1].x;
+            const arrow = document.createElementNS(svgNS, 'path');
+            const ax = s.x + s.w;
+            const ay = 90;
+            arrow.setAttribute('d', `M${ax + 4},${ay} L${nextX - 4},${ay}`);
+            arrow.setAttribute('stroke', 'rgba(150,150,150,0.3)');
+            arrow.setAttribute('stroke-width', '2');
+            arrow.setAttribute('marker-end', 'url(#arrowhead)');
+            arrow.setAttribute('id', 'arrow-' + i);
+            arrow.style.opacity = '0.3';
+            svg.appendChild(arrow);
+        }
+    });
+
+    // Arrowhead marker
+    const defs = document.createElementNS(svgNS, 'defs');
+    const marker = document.createElementNS(svgNS, 'marker');
+    marker.setAttribute('id', 'arrowhead');
+    marker.setAttribute('markerWidth', '10');
+    marker.setAttribute('markerHeight', '7');
+    marker.setAttribute('refX', '10');
+    marker.setAttribute('refY', '3.5');
+    marker.setAttribute('orient', 'auto');
+    const polygon = document.createElementNS(svgNS, 'polygon');
+    polygon.setAttribute('points', '0 0, 10 3.5, 0 7');
+    polygon.setAttribute('fill', '#16c79a');
+    marker.appendChild(polygon);
+    defs.appendChild(marker);
+    svg.insertBefore(defs, svg.firstChild);
+
+    // Simulated heatmap data for each stage
+    const rng = GraphUtils.seededRandom(42);
+    const hmData = stages.map(() => {
+        const rows = 4, cols = 5;
+        return Array.from({ length: rows }, () =>
+            Array.from({ length: cols }, () => +(rng() * 2 - 0.5).toFixed(2))
+        );
+    });
+
+    function drawMiniHeatmap(stageIdx) {
+        const group = svg.querySelector('#hm-' + stageIdx);
+        group.innerHTML = '';
+        const data = hmData[stageIdx];
+        const cSize = 14;
+        data.forEach((row, ri) => {
+            row.forEach((val, ci) => {
+                const rect = document.createElementNS(svgNS, 'rect');
+                rect.setAttribute('x', ci * (cSize + 1));
+                rect.setAttribute('y', ri * (cSize + 1));
+                rect.setAttribute('width', cSize);
+                rect.setAttribute('height', cSize);
+                const t = Math.max(0, Math.min(1, (val + 0.5) / 2));
+                const r = Math.round(22 + t * 50);
+                const g = Math.round(30 + t * 169);
+                const b = Math.round(46 + t * 108);
+                rect.setAttribute('fill', `rgb(${r},${g},${b})`);
+                rect.setAttribute('rx', '2');
+                group.appendChild(rect);
+            });
+        });
+    }
+
+    // Pre-computed loss values for animation
+    const lossValues = [2.14, 1.87, 1.62, 1.41, 1.22, 1.08, 0.89];
+    let currentLoss = 0;
+
+    // Build animation steps
+    const steps = stages.map((s, i) => ({
+        name: s.label.replace('\n', ' '),
+        duration: 700,
+        action: async (step, instant) => {
+            const dur = instant ? 0 : 0.5;
+
+            // Light up this stage
+            const stg = stageElements[i];
+            gsap.to(stg.rect, { duration: dur, attr: { fill: s.color.replace('0.15', '0.6').replace('0.3', '0.7') }, opacity: 1 });
+            gsap.to(stg.g.querySelectorAll('text'), { duration: dur, opacity: 1 });
+
+            // Light up arrow before this stage
+            if (i > 0) {
+                const arrow = svg.querySelector('#arrow-' + (i - 1));
+                gsap.to(arrow, { duration: dur * 0.5, attr: { stroke: '#16c79a' }, opacity: 1 });
+            }
+
+            // Show mini heatmap
+            drawMiniHeatmap(i);
+            const hm = svg.querySelector('#hm-' + i);
+            gsap.to(hm, { duration: dur, opacity: 1 });
+
+            // Update loss display
+            if (i >= 5) {
+                currentLoss = lossValues[i] || lossValues[lossValues.length - 1];
+                document.getElementById('pipeline-loss').innerHTML =
+                    `损失值: <span style="color:var(--accent-green)">${currentLoss.toFixed(3)}</span>`;
+            }
+
+            if (!instant) {
+                await new Promise(r => setTimeout(r, dur * 1000));
+            }
+        }
+    }));
+
+    const ctrlEl = document.getElementById('pipeline-controls');
+    pipelineCtrl = new AnimationController({
+        container: ctrlEl,
+        steps: steps,
+        defaultDuration: 700,
+        onStepChange: (idx) => {
+            // Dim future stages on reset
+            if (idx < 0) {
+                stageElements.forEach((se, i) => {
+                    gsap.to(se.rect, { duration: 0.2, opacity: 0.3 });
+                    gsap.to(se.g.querySelectorAll('text'), { duration: 0.2, opacity: 0.3 });
+                    const hm = svg.querySelector('#hm-' + i);
+                    gsap.to(hm, { duration: 0.2, opacity: 0 });
+                    if (i > 0) {
+                        const arrow = svg.querySelector('#arrow-' + (i - 1));
+                        gsap.to(arrow, { duration: 0.2, opacity: 0.3, attr: { stroke: 'rgba(150,150,150,0.3)' } });
+                    }
+                });
+                document.getElementById('pipeline-loss').innerHTML = '损失值: —';
+            }
+        }
+    });
+}
+
+// ============================================================
+// Section 3: Backpropagation Ripple
+// ============================================================
+let rippleCanvas, rippleCtx, rippleNodes = [], rippleEdges = [], rippleAnim = null;
+
+function initRipple() {
+    rippleCanvas = document.getElementById('ripple-canvas');
+    const container = document.getElementById('ripple-container');
+    const rect = container.getBoundingClientRect();
+    rippleCanvas.width = rect.width;
+    rippleCanvas.height = rect.height;
+    rippleCtx = rippleCanvas.getContext('2d');
+
+    // Layout nodes in a force-like pattern using precomputed positions
+    const rng = GraphUtils.seededRandom(77);
+    const w = rippleCanvas.width, h = rippleCanvas.height;
+    const cx = w / 2, cy = h / 2;
+
+    CITATION.nodes.forEach((n, i) => {
+        const angle = (i / CITATION.nodes.length) * Math.PI * 2 + rng() * 0.5;
+        const radius = 80 + rng() * 120;
+        rippleNodes.push({
+            id: n.id,
+            x: cx + Math.cos(angle) * radius,
+            y: cy + Math.sin(angle) * radius,
+            group: n.group,
+            isTrain: CITATION.trainMask.includes(n.id),
+            ripplePhase: -1,
+            rippleIntensity: 0,
+        });
+    });
+
+    // Simple force relaxation
+    for (let iter = 0; iter < 100; iter++) {
+        for (let i = 0; i < rippleNodes.length; i++) {
+            for (let j = i + 1; j < rippleNodes.length; j++) {
+                const dx = rippleNodes[j].x - rippleNodes[i].x;
+                const dy = rippleNodes[j].y - rippleNodes[i].y;
+                const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+                if (dist < 70) {
+                    const f = (70 - dist) * 0.1;
+                    rippleNodes[i].x -= (dx / dist) * f;
+                    rippleNodes[i].y -= (dy / dist) * f;
+                    rippleNodes[j].x += (dx / dist) * f;
+                    rippleNodes[j].y += (dy / dist) * f;
+                }
+            }
+        }
+        // Pull edges together
+        CITATION.edges.forEach(([u, v]) => {
+            const nu = rippleNodes[u], nv = rippleNodes[v];
+            const dx = nv.x - nu.x;
+            const dy = nv.y - nu.y;
+            const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+            if (dist > 90) {
+                const f = (dist - 90) * 0.03;
+                nu.x += (dx / dist) * f;
+                nu.y += (dy / dist) * f;
+                nv.x -= (dx / dist) * f;
+                nv.y -= (dy / dist) * f;
+            }
+        });
+        // Contain within bounds
+        rippleNodes.forEach(n => {
+            n.x = Math.max(30, Math.min(w - 30, n.x));
+            n.y = Math.max(30, Math.min(h - 30, n.y));
+        });
+    }
+
+    rippleEdges = CITATION.edges.map(([u, v]) => ({ u, v }));
+    drawRipple();
+}
+
+function drawRipple() {
+    const ctx = rippleCtx;
+    const w = rippleCanvas.width, h = rippleCanvas.height;
+    ctx.clearRect(0, 0, w, h);
+
+    // Draw edges
+    rippleEdges.forEach(e => {
+        const nu = rippleNodes[e.u], nv = rippleNodes[e.v];
+        ctx.strokeStyle = 'rgba(150, 150, 150, 0.2)';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(nu.x, nu.y);
+        ctx.lineTo(nv.x, nv.y);
+        ctx.stroke();
+    });
+
+    // Draw ripple rings from train nodes
+    rippleNodes.forEach(n => {
+        if (n.rippleIntensity > 0 && n.isTrain) {
+            const maxR = 60;
+            for (let ring = 0; ring < 3; ring++) {
+                const r = n.ripplePhase * maxR - ring * 15;
+                if (r > 0 && r < maxR) {
+                    const alpha = (1 - r / maxR) * n.rippleIntensity * 0.5;
+                    ctx.strokeStyle = `rgba(22, 199, 154, ${alpha})`;
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
+                    ctx.stroke();
+                }
+            }
+        }
+    });
+
+    // Draw nodes
+    rippleNodes.forEach(n => {
+        let color = '#555';
+        let r = 10;
+        if (n.isTrain) {
+            color = '#16c79a';
+            r = 13;
+        }
+
+        // Gradient glow if receiving gradient
+        if (n.rippleIntensity > 0) {
+            const glow = ctx.createRadialGradient(n.x, n.y, 0, n.x, n.y, r + 10);
+            glow.addColorStop(0, `rgba(22, 199, 154, ${n.rippleIntensity * 0.6})`);
+            glow.addColorStop(1, 'rgba(22, 199, 154, 0)');
+            ctx.fillStyle = glow;
+            ctx.beginPath();
+            ctx.arc(n.x, n.y, r + 10, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        ctx.fillStyle = n.rippleIntensity > 0 ? mixColor('#555', '#16c79a', n.rippleIntensity) : color;
+        ctx.beginPath();
+        ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.strokeStyle = n.isTrain ? '#16c79a' : 'rgba(100,100,100,0.5)';
+        ctx.lineWidth = n.isTrain ? 2.5 : 1;
+        ctx.beginPath();
+        ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // Label
+        ctx.fillStyle = '#e8e8e8';
+        ctx.font = '9px JetBrains Mono';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('P' + n.id, n.x, n.y);
+    });
+}
+
+function mixColor(c1, c2, t) {
+    // Simple hex/named color mix — hardcode for #555 and #16c79a
+    const r = Math.round(85 + t * (22 - 85));
+    const g = Math.round(85 + t * (199 - 85));
+    const b = Math.round(85 + t * (154 - 85));
+    return `rgb(${r},${g},${b})`;
+}
+
+function startRipple() {
+    resetRipple();
+
+    // Build adjacency for BFS
+    const adj = Array.from({ length: 20 }, () => []);
+    CITATION.edges.forEach(([u, v]) => {
+        adj[u].push(v);
+        adj[v].push(u);
+    });
+
+    // BFS from train nodes
+    const distances = new Array(20).fill(Infinity);
+    const queue = [];
+    CITATION.trainMask.forEach(id => {
+        distances[id] = 0;
+        queue.push(id);
+    });
+    let qi = 0;
+    while (qi < queue.length) {
+        const u = queue[qi++];
+        for (const v of adj[u]) {
+            if (distances[v] > distances[u] + 1) {
+                distances[v] = distances[u] + 1;
+                queue.push(v);
+            }
+        }
+    }
+
+    const maxDist = Math.max(...distances.filter(d => d < Infinity));
+
+    // Animate with GSAP timeline
+    const tl = gsap.timeline();
+    rippleAnim = tl;
+
+    // Phase 1: Highlight train nodes
+    tl.call(() => {
+        rippleNodes.forEach(n => {
+            if (n.isTrain) {
+                n.rippleIntensity = 1;
+                n.ripplePhase = 0;
+            }
+        });
+        drawRipple();
+    });
+
+    // Phase 2: Ripple outward hop by hop
+    for (let hop = 0; hop <= maxDist; hop++) {
+        tl.to({}, {
+            duration: 0.8,
+            onUpdate: function() {
+                const p = this.progress();
+                rippleNodes.forEach(n => {
+                    if (n.isTrain) {
+                        n.ripplePhase = (hop + p) / (maxDist + 1);
+                    }
+                    if (distances[n.id] === hop) {
+                        n.rippleIntensity = Math.min(1, 0.3 + p * 0.7);
+                    } else if (distances[n.id] === hop + 1) {
+                        n.rippleIntensity = p * 0.5;
+                    }
+                });
+                drawRipple();
+            }
+        });
+    }
+
+    // Phase 3: All nodes lit
+    tl.to({}, {
+        duration: 0.5,
+        onUpdate: function() {
+            rippleNodes.forEach(n => {
+                const t = 0.4 + 0.6 * (1 - distances[n.id] / (maxDist + 1));
+                n.rippleIntensity = t;
+            });
+            drawRipple();
+        }
+    });
+}
+
+function resetRipple() {
+    if (rippleAnim) {
+        rippleAnim.kill();
+        rippleAnim = null;
+    }
+    rippleNodes.forEach(n => {
+        n.rippleIntensity = 0;
+        n.ripplePhase = -1;
+    });
+    drawRipple();
+}
+
+// ============================================================
+// Section 4: Training Dashboard
+// ============================================================
+// Pre-computed training snapshots for 50 epochs
+const EPOCHS = 50;
+
+function genTrainingData() {
+    const rng = GraphUtils.seededRandom(101);
+    const losses = [], trainAccs = [], valAccs = [];
+    const snapshots = [];
+
+    // True labels
+    const trueLabels = CITATION.nodes.map(n => n.group);
+
+    for (let e = 0; e < EPOCHS; e++) {
+        const t = e / (EPOCHS - 1);
+        // Loss: exponential decay with noise
+        const loss = 1.95 * Math.exp(-3.2 * t) + 0.12 + (rng() - 0.5) * 0.04;
+        losses.push(+loss.toFixed(4));
+
+        // Train accuracy: sigmoid-like growth
+        const ta = 0.2 + 0.72 * (1 / (1 + Math.exp(-8 * (t - 0.3)))) + (rng() - 0.5) * 0.02;
+        trainAccs.push(+Math.min(0.98, ta).toFixed(4));
+
+        // Val accuracy: slightly lower, with more noise
+        const va = 0.18 + 0.62 * (1 / (1 + Math.exp(-7 * (t - 0.35)))) + (rng() - 0.5) * 0.03;
+        valAccs.push(+Math.min(0.92, va).toFixed(4));
+
+        // Node predictions: as training progresses, more nodes get correct prediction
+        const preds = [];
+        CITATION.nodes.forEach(n => {
+            const correctProb = 0.15 + 0.75 * (1 / (1 + Math.exp(-6 * (t - 0.25))));
+            if (rng() < correctProb) {
+                preds.push(n.group); // correct
+            } else {
+                let g = Math.floor(rng() * 7);
+                while (g === n.group) g = Math.floor(rng() * 7);
+                preds.push(g); // wrong
+            }
+        });
+        snapshots.push(preds);
+    }
+
+    return { losses, trainAccs, valAccs, snapshots };
+}
+
+const TRAIN_DATA = genTrainingData();
+
+let lossChart = null, accChart = null, dashCy = null;
+let dashEpoch = 0, dashPlaying = false, dashTimer = null;
+
+function initDashboard() {
+    // Loss chart
+    const lossCtx = document.getElementById('loss-chart').getContext('2d');
+    lossChart = new Chart(lossCtx, {
+        type: 'line',
+        data: {
+            labels: Array.from({ length: EPOCHS }, (_, i) => i),
+            datasets: [{
+                label: 'Train Loss',
+                data: [],
+                borderColor: '#ff5252',
+                backgroundColor: 'rgba(255, 82, 82, 0.1)',
+                borderWidth: 2,
+                pointRadius: 0,
+                fill: true,
+                tension: 0.3,
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { labels: { color: '#a8a8b8', font: { size: 11 } } }
+            },
+            scales: {
+                x: { title: { display: true, text: 'Epoch', color: '#6c6c7c' }, ticks: { color: '#6c6c7c' }, grid: { color: 'rgba(42,42,74,0.5)' } },
+                y: { title: { display: true, text: 'Loss', color: '#6c6c7c' }, ticks: { color: '#6c6c7c' }, grid: { color: 'rgba(42,42,74,0.5)' }, min: 0 }
+            }
+        }
+    });
+
+    // Accuracy chart
+    const accCtx = document.getElementById('acc-chart').getContext('2d');
+    accChart = new Chart(accCtx, {
+        type: 'line',
+        data: {
+            labels: Array.from({ length: EPOCHS }, (_, i) => i),
+            datasets: [
+                {
+                    label: 'Train Acc',
+                    data: [],
+                    borderColor: '#16c79a',
+                    borderWidth: 2,
+                    pointRadius: 0,
+                    tension: 0.3,
+                },
+                {
+                    label: 'Val Acc',
+                    data: [],
+                    borderColor: '#4fc3f7',
+                    borderWidth: 2,
+                    pointRadius: 0,
+                    borderDash: [5, 3],
+                    tension: 0.3,
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { labels: { color: '#a8a8b8', font: { size: 11 } } }
+            },
+            scales: {
+                x: { title: { display: true, text: 'Epoch', color: '#6c6c7c' }, ticks: { color: '#6c6c7c' }, grid: { color: 'rgba(42,42,74,0.5)' } },
+                y: { title: { display: true, text: 'Accuracy', color: '#6c6c7c' }, ticks: { color: '#6c6c7c' }, grid: { color: 'rgba(42,42,74,0.5)' }, min: 0, max: 1 }
+            }
+        }
+    });
+
+    // Dashboard graph
+    const elements = [];
+    CITATION.nodes.forEach(n => {
+        elements.push({ data: { id: String(n.id), label: n.label, group: n.group } });
+    });
+    CITATION.edges.forEach(([u, v]) => {
+        elements.push({ data: { id: `de${u}-${v}`, source: String(u), target: String(v) } });
+    });
+
+    dashCy = cytoscape({
+        container: document.getElementById('dashboard-graph'),
+        elements: elements,
+        style: [
+            {
+                selector: 'node',
+                style: {
+                    'label': 'data(label)',
+                    'color': '#e8e8e8',
+                    'text-valign': 'center',
+                    'text-halign': 'center',
+                    'font-size': '10px',
+                    'font-family': 'JetBrains Mono, monospace',
+                    'width': 30,
+                    'height': 30,
+                    'border-width': 2,
+                    'border-color': 'rgba(100,100,100,0.3)',
+                    'background-color': '#555',
+                    'text-outline-width': 2,
+                    'text-outline-color': '#1a1a2e',
+                    'transition-property': 'background-color, border-color',
+                    'transition-duration': '200ms',
+                }
+            },
+            {
+                selector: 'edge',
+                style: {
+                    'width': 1.5,
+                    'line-color': 'rgba(150,150,150,0.2)',
+                    'curve-style': 'bezier',
+                }
+            }
+        ],
+        layout: {
+            name: 'cose',
+            animate: false,
+            nodeDimensionsIncludeLabels: true,
+            idealEdgeLength: 70,
+            nodeRepulsion: 4500,
+            gravity: 0.6,
+        },
+        minZoom: 0.4,
+        maxZoom: 2.5,
+        wheelSensitivity: 0.3,
+    });
+    requestAnimationFrame(() => { requestAnimationFrame(() => { dashCy.resize(); dashCy.fit(undefined, 30); }); });
+
+    // Legend
+    const legendEl = document.getElementById('dashboard-legend');
+    legendEl.innerHTML = CITATION.classes.map((cls, i) =>
+        `<div class="legend-item"><span class="swatch" style="background:${CLASS_COLORS[i]}"></span>${cls}</div>`
+    ).join('');
+
+    dashboardGoTo(0);
+}
+
+function dashboardGoTo(epoch) {
+    dashEpoch = epoch;
+    document.getElementById('epoch-slider').value = epoch;
+    document.getElementById('epoch-display').textContent = `Epoch ${epoch}`;
+    document.getElementById('epoch-label').textContent = `Epoch ${epoch} / ${EPOCHS - 1}`;
+
+    // Update metrics
+    document.getElementById('m-loss').textContent = TRAIN_DATA.losses[epoch].toFixed(4);
+    document.getElementById('m-tacc').textContent = (TRAIN_DATA.trainAccs[epoch] * 100).toFixed(1) + '%';
+    document.getElementById('m-vacc').textContent = (TRAIN_DATA.valAccs[epoch] * 100).toFixed(1) + '%';
+
+    // Update charts — show data up to current epoch
+    lossChart.data.datasets[0].data = TRAIN_DATA.losses.slice(0, epoch + 1);
+    lossChart.update('none');
+
+    accChart.data.datasets[0].data = TRAIN_DATA.trainAccs.slice(0, epoch + 1);
+    accChart.data.datasets[1].data = TRAIN_DATA.valAccs.slice(0, epoch + 1);
+    accChart.update('none');
+
+    // Update graph node colors
+    if (dashCy) {
+        const preds = TRAIN_DATA.snapshots[epoch];
+        CITATION.nodes.forEach((n, i) => {
+            const node = dashCy.getElementById(String(n.id));
+            const predGroup = preds[i];
+            const isCorrect = predGroup === n.group;
+            node.style({
+                'background-color': CLASS_COLORS[predGroup],
+                'border-color': isCorrect ? CLASS_COLORS[predGroup] : '#ff5252',
+                'border-width': isCorrect ? 2 : 3,
+            });
+        });
+    }
+}
+
+function dashboardNext() {
+    if (dashEpoch < EPOCHS - 1) dashboardGoTo(dashEpoch + 1);
+}
+
+function dashboardPrev() {
+    if (dashEpoch > 0) dashboardGoTo(dashEpoch - 1);
+}
+
+function dashboardReset() {
+    dashboardPause();
+    dashboardGoTo(0);
+}
+
+function dashboardTogglePlay() {
+    if (dashPlaying) {
+        dashboardPause();
+    } else {
+        dashboardPlay();
+    }
+}
+
+function dashboardPlay() {
+    if (dashEpoch >= EPOCHS - 1) dashboardGoTo(0);
+    dashPlaying = true;
+    document.getElementById('dash-play-btn').innerHTML = '&#x23F8;';
+    dashStep();
+}
+
+function dashboardPause() {
+    dashPlaying = false;
+    document.getElementById('dash-play-btn').innerHTML = '&#x25B6;';
+    if (dashTimer) { clearTimeout(dashTimer); dashTimer = null; }
+}
+
+function dashStep() {
+    if (!dashPlaying) return;
+    if (dashEpoch < EPOCHS - 1) {
+        dashboardGoTo(dashEpoch + 1);
+        dashTimer = setTimeout(dashStep, 150);
+    } else {
+        dashboardPause();
+    }
+}
+
+// ============================================================
+// Section 5: Over-smoothing
+// ============================================================
+let osAccChart = null, osHeatmapRenderer = null;
+
+// Pre-computed accuracy for 1-10 layers (inverted-U)
+const LAYER_ACCS = [0.52, 0.81, 0.78, 0.68, 0.55, 0.44, 0.36, 0.30, 0.26, 0.23];
+
+// Pre-computed feature heatmaps for each layer count
+function genFeatureHeatmaps() {
+    const results = {};
+    const rng = GraphUtils.seededRandom(200);
+
+    for (let layers = 1; layers <= 10; layers++) {
+        const n = CITATION.nodes.length;
+        const dim = 8;
+        const data = [];
+
+        // As layers increase, features become more uniform
+        const uniformity = Math.min(0.95, (layers - 1) * 0.11);
+
+        // Base "center" that all features converge to
+        const center = Array.from({ length: dim }, () => 0.5);
+
+        for (let i = 0; i < n; i++) {
+            const row = [];
+            const group = CITATION.nodes[i].group;
+            for (let d = 0; d < dim; d++) {
+                // Group-specific signal
+                const groupSignal = (Math.sin(group * 1.7 + d * 0.8) + 1) / 2;
+                // Mix between group-specific and uniform center
+                const val = groupSignal * (1 - uniformity) + center[d] * uniformity + (rng() - 0.5) * 0.05 * (1 - uniformity);
+                row.push(+Math.max(0, Math.min(1, val)).toFixed(3));
+            }
+            data.push(row);
+        }
+        results[layers] = data;
+    }
+    return results;
+}
+
+const FEATURE_HEATMAPS = genFeatureHeatmaps();
+
+function initOversmooth() {
+    // Accuracy vs layers chart
+    const ctx = document.getElementById('oversmooth-acc-chart').getContext('2d');
+    osAccChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: Array.from({ length: 10 }, (_, i) => (i + 1) + ' 层'),
+            datasets: [{
+                label: '验证准确率',
+                data: LAYER_ACCS.map(v => +(v * 100).toFixed(1)),
+                backgroundColor: LAYER_ACCS.map((v, i) =>
+                    i === 1 ? 'rgba(22, 199, 154, 0.8)' : 'rgba(22, 199, 154, 0.25)'
+                ),
+                borderColor: LAYER_ACCS.map((v, i) =>
+                    i === 1 ? '#16c79a' : 'rgba(22, 199, 154, 0.4)'
+                ),
+                borderWidth: 2,
+                borderRadius: 4,
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { labels: { color: '#a8a8b8', font: { size: 11 } } },
+                tooltip: {
+                    callbacks: {
+                        label: (ctx) => `准确率: ${ctx.raw}%`
+                    }
+                }
+            },
+            scales: {
+                x: { ticks: { color: '#a8a8b8' }, grid: { color: 'rgba(42,42,74,0.5)' } },
+                y: { title: { display: true, text: '准确率 (%)', color: '#6c6c7c' }, ticks: { color: '#6c6c7c' }, grid: { color: 'rgba(42,42,74,0.5)' }, min: 0, max: 100 }
+            }
+        }
+    });
+
+    // Initial heatmap
+    updateOversmooth(2);
+}
+
+function updateOversmooth(layers) {
+    document.getElementById('layer-value').textContent = layers;
+    document.getElementById('heatmap-layer-label').textContent = layers;
+
+    // Update chart highlight
+    if (osAccChart) {
+        osAccChart.data.datasets[0].backgroundColor = LAYER_ACCS.map((v, i) =>
+            i === layers - 1 ? 'rgba(22, 199, 154, 0.8)' : 'rgba(22, 199, 154, 0.25)'
+        );
+        osAccChart.data.datasets[0].borderColor = LAYER_ACCS.map((v, i) =>
+            i === layers - 1 ? '#16c79a' : 'rgba(22, 199, 154, 0.4)'
+        );
+        osAccChart.update();
+    }
+
+    // Update heatmap
+    const data = FEATURE_HEATMAPS[layers];
+    const container = document.getElementById('oversmooth-heatmap');
+
+    osHeatmapRenderer = new MatrixRenderer({
+        container: container,
+        data: data,
+        cellSize: 28,
+        rowLabels: CITATION.nodes.map(n => n.label),
+        colLabels: ['d0', 'd1', 'd2', 'd3', 'd4', 'd5', 'd6', 'd7'],
+        colorScale: (val) => {
+            const t = Math.max(0, Math.min(1, val));
+            const r = Math.round(26 + t * 0);
+            const g = Math.round(26 + t * 199);
+            const b = Math.round(46 + t * 108);
+            return `rgb(${r}, ${g}, ${b})`;
+        },
+        showValues: false,
+        title: '',
+    });
+
+    // Update insight text
+    const insightEl = document.getElementById('oversmooth-insight');
+    const acc = (LAYER_ACCS[layers - 1] * 100).toFixed(1);
+    if (layers <= 2) {
+        insightEl.innerHTML = `<p><strong>${layers} 层 GCN:</strong> 准确率 ${acc}%，节点特征保持良好的区分性。</p>`;
+        insightEl.className = 'info-box success mt-2';
+    } else if (layers <= 4) {
+        insightEl.innerHTML = `<p><strong>${layers} 层 GCN:</strong> 准确率 ${acc}%，特征开始趋同，区分性下降。</p>`;
+        insightEl.className = 'info-box warning mt-2';
+    } else {
+        insightEl.innerHTML = `<p><strong>${layers} 层 GCN:</strong> 准确率 ${acc}%，严重过平滑！所有节点特征几乎相同，无法有效分类。</p>`;
+        insightEl.className = 'info-box mt-2';
+        insightEl.style.borderLeftColor = 'var(--accent-red)';
+        insightEl.style.background = 'rgba(255,82,82,0.05)';
+    }
+}
+
+// ============================================================
+// Initialize everything on DOMContentLoaded
+// ============================================================
+document.addEventListener('DOMContentLoaded', () => {
+    initSemiGraph();
+    initPipeline();
+    initRipple();
+    initDashboard();
+    initOversmooth();
+});
+
+// Handle resize for ripple canvas
+window.addEventListener('resize', () => {
+    const container = document.getElementById('ripple-container');
+    if (!container || !rippleCanvas) return;
+    const rect = container.getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0) {
+        const scaleX = rect.width / rippleCanvas.width;
+        const scaleY = rect.height / rippleCanvas.height;
+        rippleCanvas.width = rect.width;
+        rippleCanvas.height = rect.height;
+        rippleNodes.forEach(n => {
+            n.x *= scaleX;
+            n.y *= scaleY;
+        });
+        drawRipple();
+    }
+});
+</script>
+</body>
+</html>

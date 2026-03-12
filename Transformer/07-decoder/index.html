@@ -1,0 +1,1218 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>模块 07 — Transformer 解码器 | Transformer 学习</title>
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <style>
+        /* ===== Module-specific styles ===== */
+        .token-box {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0.4rem 0.8rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            font-size: 0.9rem;
+            cursor: pointer;
+            transition: all 0.3s;
+            user-select: none;
+        }
+        .token-box:hover { border-color: var(--accent-blue); }
+        .token-box.active {
+            border-color: var(--accent-green);
+            background: rgba(22,199,154,0.15);
+            box-shadow: 0 0 12px rgba(22,199,154,0.25);
+        }
+        .token-box.masked {
+            opacity: 0.2;
+            border-color: var(--border-color);
+            background: var(--bg-card);
+        }
+        .token-box.visible {
+            border-color: var(--accent-green);
+            background: rgba(22,199,154,0.12);
+        }
+        .token-box.source {
+            border-color: var(--accent-purple);
+            background: rgba(179,136,255,0.1);
+        }
+        .token-box.target {
+            border-color: var(--accent-blue);
+            background: rgba(79,195,247,0.1);
+        }
+        .token-box.generated {
+            border-color: var(--accent-orange);
+            background: rgba(255,171,64,0.12);
+        }
+
+        .token-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            padding: 1rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+        }
+
+        .matrix-pair {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5rem;
+            align-items: start;
+        }
+
+        .matrix-wrap {
+            padding: 1rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+        }
+        .matrix-wrap h4 {
+            margin-bottom: 0.8rem;
+            font-size: 0.95rem;
+        }
+
+        .info-label {
+            display: inline-block;
+            padding: 0.2rem 0.6rem;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+        }
+        .info-label.q-label { background: rgba(179,136,255,0.15); color: var(--accent-purple); }
+        .info-label.k-label { background: rgba(79,195,247,0.15); color: var(--accent-blue); }
+        .info-label.v-label { background: rgba(22,199,154,0.15); color: var(--accent-green); }
+
+        .arch-svg { width: 100%; height: auto; display: block; }
+        .arch-svg text { font-family: var(--font-cn), var(--font-sans); }
+
+        .cross-attn-viz {
+            position: relative;
+            padding: 1rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+        }
+
+        .gen-step {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 0.6rem 1rem;
+            margin-bottom: 0.5rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            font-size: 0.9rem;
+            transition: all 0.3s;
+        }
+        .gen-step.active-step {
+            border-color: var(--accent-green);
+            background: rgba(22,199,154,0.08);
+        }
+        .gen-step .step-num {
+            width: 28px; height: 28px;
+            border-radius: 50%;
+            background: var(--border-color);
+            display: flex; align-items: center; justify-content: center;
+            font-weight: 700; font-size: 0.8rem;
+            flex-shrink: 0;
+        }
+        .gen-step.active-step .step-num {
+            background: var(--accent-green);
+            color: var(--bg-primary);
+        }
+
+        .prob-bar-container {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            padding: 1rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+        }
+        .prob-bar-row {
+            display: grid;
+            grid-template-columns: 80px 1fr 50px;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.82rem;
+        }
+        .prob-bar-row .token-name {
+            text-align: right;
+            color: var(--text-secondary);
+            font-family: var(--font-mono);
+        }
+        .prob-bar-row .bar-track {
+            height: 20px;
+            background: var(--border-color);
+            border-radius: 3px;
+            overflow: hidden;
+        }
+        .prob-bar-row .bar-fill {
+            height: 100%;
+            border-radius: 3px;
+            transition: width 0.5s ease;
+        }
+        .prob-bar-row .bar-fill.selected { background: var(--accent-green); }
+        .prob-bar-row .bar-fill.other { background: var(--accent-blue); opacity: 0.6; }
+        .prob-bar-row .prob-val {
+            font-family: var(--font-mono);
+            color: var(--text-muted);
+            font-size: 0.78rem;
+        }
+
+        .compare-card {
+            padding: 1.2rem;
+            border-radius: var(--radius-md);
+            border: 1px solid var(--border-color);
+            background: var(--bg-secondary);
+        }
+        .compare-card h4 {
+            margin-bottom: 0.75rem;
+            display: flex; align-items: center; gap: 0.5rem;
+        }
+        .compare-card .token-reveal {
+            display: flex; gap: 6px; flex-wrap: wrap;
+            margin-top: 0.5rem;
+        }
+
+        .flow-node {
+            transition: all 0.4s ease;
+        }
+        .flow-node.highlight {
+            filter: drop-shadow(0 0 8px rgba(22,199,154,0.5));
+        }
+
+        .section-intro {
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+            margin-bottom: 1.2rem;
+            line-height: 1.8;
+        }
+
+        @media (max-width: 768px) {
+            .matrix-pair { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="page-container">
+    <!-- ============ Header ============ -->
+    <header class="section" style="text-align:center; padding-top:1rem;">
+        <div style="display:flex; align-items:center; justify-content:center; gap:0.75rem; margin-bottom:0.5rem;">
+            <span style="font-size:2rem;">&#x229F;</span>
+            <h1 style="margin-bottom:0;">模块 07 — Transformer 解码器</h1>
+        </div>
+        <p style="max-width:700px; margin:0 auto;">
+            解码器是 Transformer 中负责"生成"的核心组件。它通过<strong>掩码自注意力</strong>防止看到未来信息，
+            通过<strong>交叉注意力</strong>关注编码器输出，并以<strong>自回归</strong>方式逐步生成序列。
+        </p>
+    </header>
+
+    <!-- ============ Section 1: 掩码自注意力 ============ -->
+    <div class="section" id="sec-masked-attn">
+        <div class="section-title">
+            <div class="icon">&#x25E9;</div>
+            <h2>1. 掩码自注意力 (Masked Self-Attention)</h2>
+        </div>
+
+        <div class="section-intro">
+            <p>在解码器中，自注意力必须加上<strong>因果掩码（Causal Mask）</strong>：每个位置只能关注它自身及之前的位置，不能"偷看"未来的 token。</p>
+            <p>掩码是一个下三角矩阵：对角线及以下为 1（允许），对角线以上为 0（禁止，用 $-\infty$ 填充使 softmax 输出为 0）。</p>
+        </div>
+
+        <p class="text-sm text-muted mb-2">点击下方 token 查看该位置能关注到哪些 token：</p>
+        <div id="mask-tokens" class="token-row mb-2"></div>
+        <div id="mask-info" class="info-box success mb-2" style="min-height:2.5rem;">
+            <p id="mask-info-text">点击上方任意 token 查看注意力范围</p>
+        </div>
+
+        <div class="matrix-pair mt-2">
+            <div class="matrix-wrap">
+                <h4>因果掩码矩阵</h4>
+                <div id="mask-matrix-container"></div>
+            </div>
+            <div class="matrix-wrap">
+                <h4>掩码后注意力分数</h4>
+                <p class="text-sm text-muted mb-1">被掩码位置 → $-\infty$，softmax 后变为 0</p>
+                <div id="masked-scores-container"></div>
+            </div>
+        </div>
+
+        <div class="matrix-pair mt-2">
+            <div class="matrix-wrap">
+                <h4>掩码前注意力权重 (编码器风格)</h4>
+                <div id="before-mask-container"></div>
+            </div>
+            <div class="matrix-wrap">
+                <h4>掩码后注意力权重 (解码器风格)</h4>
+                <div id="after-mask-container"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============ Section 2: 为什么需要掩码 ============ -->
+    <div class="section" id="sec-why-mask">
+        <div class="section-title">
+            <div class="icon">&#x2753;</div>
+            <h2>2. 为什么需要掩码？</h2>
+        </div>
+
+        <div class="section-intro">
+            <p><strong>训练时</strong>，所有 token 并行处理以加速训练。但如果没有掩码，每个 token 可以看到整个序列（包括未来），这是<strong>信息泄露</strong>。
+            掩码确保即使并行计算，每个位置也只能看到过去。</p>
+        </div>
+
+        <div class="compare-grid cols-2 mb-2">
+            <div class="compare-card">
+                <h4><span class="badge badge-blue">编码器</span> 双向注意力</h4>
+                <p class="text-sm text-muted">每个 token 可以看到<strong>所有</strong>其他 token</p>
+                <div id="encoder-reveal" class="token-reveal"></div>
+                <svg id="encoder-attn-svg" width="100%" height="60" style="margin-top:0.5rem;"></svg>
+            </div>
+            <div class="compare-card">
+                <h4><span class="badge badge-green">解码器</span> 单向注意力</h4>
+                <p class="text-sm text-muted">每个 token 只能看到<strong>自身及之前</strong>的 token</p>
+                <div id="decoder-reveal" class="token-reveal"></div>
+                <svg id="decoder-attn-svg" width="100%" height="60" style="margin-top:0.5rem;"></svg>
+            </div>
+        </div>
+
+        <p class="text-sm text-muted mb-1">点击"逐步揭示"查看 token 从左到右逐步可见的过程：</p>
+        <div class="flex gap-sm mb-2">
+            <button class="btn btn-primary" id="btn-reveal-play">逐步揭示</button>
+            <button class="btn" id="btn-reveal-reset">重置</button>
+        </div>
+
+        <div class="info-box mt-2">
+            <p><strong>关键区别：</strong>编码器用于理解输入（双向），解码器用于生成输出（单向）。掩码让解码器在训练时模拟推理时的逐步生成过程。</p>
+        </div>
+    </div>
+
+    <!-- ============ Section 3: 交叉注意力 ============ -->
+    <div class="section" id="sec-cross-attn">
+        <div class="section-title">
+            <div class="icon">&#x21C4;</div>
+            <h2>3. 交叉注意力 (Cross-Attention)</h2>
+        </div>
+
+        <div class="section-intro">
+            <p>交叉注意力是解码器独有的机制：<span class="info-label q-label">Q 来自解码器</span>，
+            <span class="info-label k-label">K 来自编码器</span>，
+            <span class="info-label v-label">V 来自编码器</span>。
+            这让解码器在生成每个 token 时"关注"源序列的相关部分。</p>
+        </div>
+
+        <!-- Cross-attention architecture diagram -->
+        <div class="card mb-2">
+            <h4 style="margin-bottom:1rem;">交叉注意力数据流</h4>
+            <svg id="cross-attn-arch" class="arch-svg" viewBox="0 0 700 220"></svg>
+        </div>
+
+        <!-- Translation example -->
+        <div class="cross-attn-viz">
+            <h4 style="margin-bottom:0.75rem;">翻译示例：交叉注意力对齐</h4>
+            <div style="display:flex; gap:2rem; margin-bottom:0.75rem; flex-wrap:wrap;">
+                <div>
+                    <span class="info-label" style="background:rgba(179,136,255,0.15);color:var(--accent-purple);">源 (编码器)</span>
+                    <div id="source-tokens" class="flex gap-sm" style="margin-top:0.4rem;"></div>
+                </div>
+                <div>
+                    <span class="info-label" style="background:rgba(79,195,247,0.15);color:var(--accent-blue);">目标 (解码器)</span>
+                    <div id="target-tokens" class="flex gap-sm" style="margin-top:0.4rem;"></div>
+                </div>
+            </div>
+            <h4 style="margin-bottom:0.5rem;">交叉注意力热力图</h4>
+            <p class="text-sm text-muted mb-1">悬停查看对齐强度 — 行 = 目标 token (Q), 列 = 源 token (K)</p>
+            <div id="cross-heatmap-container"></div>
+        </div>
+    </div>
+
+    <!-- ============ Section 4: 完整解码器块 ============ -->
+    <div class="section" id="sec-decoder-block">
+        <div class="section-title">
+            <div class="icon">&#x229F;</div>
+            <h2>4. 完整解码器块</h2>
+        </div>
+
+        <div class="section-intro">
+            <p>一个完整的解码器块包含 <strong>3 个子层</strong>（编码器只有 2 个）：
+            掩码自注意力 → 交叉注意力 → 前馈网络。每个子层都包裹着<strong>残差连接 + 层归一化</strong>。</p>
+        </div>
+
+        <div class="split-layout">
+            <div class="text-panel">
+                <div class="info-box mb-2">
+                    <p><strong>解码器块 vs 编码器块：</strong></p>
+                    <p class="text-sm" style="margin-top:0.4rem;">编码器：自注意力 → Add&Norm → FFN → Add&Norm (2 子层)</p>
+                    <p class="text-sm">解码器：掩码自注意力 → Add&Norm → 交叉注意力 → Add&Norm → FFN → Add&Norm (3 子层)</p>
+                </div>
+                <div id="decoder-block-controls" class="mt-2"></div>
+                <div id="decoder-step-desc" class="info-box success mt-2" style="min-height:3rem;">
+                    <p id="decoder-step-text">点击播放按钮开始数据流动画</p>
+                </div>
+            </div>
+            <div class="viz-panel">
+                <div class="viz-area" style="min-height:550px; padding:1rem;">
+                    <svg id="decoder-block-svg" class="arch-svg" viewBox="0 0 500 520"></svg>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============ Section 5: 自回归生成 ============ -->
+    <div class="section" id="sec-autoregressive">
+        <div class="section-title">
+            <div class="icon">&#x27F3;</div>
+            <h2>5. 自回归生成</h2>
+        </div>
+
+        <div class="section-intro">
+            <p>推理时，解码器以<strong>自回归（Autoregressive）</strong>方式生成输出：每一步输入已生成的 token，
+            运行解码器得到下一个 token 的概率分布，选择概率最高的 token（贪心）或采样，然后将其加入输入继续生成。</p>
+            <p>翻译任务：<code>机器学习改变了世界</code> → <code>Machine learning changed the world</code></p>
+        </div>
+
+        <div class="split-layout">
+            <div class="text-panel">
+                <h4 class="mb-1">生成步骤</h4>
+                <div id="gen-steps-list"></div>
+                <div id="gen-controls" class="mt-2"></div>
+            </div>
+            <div class="viz-panel">
+                <h4 class="mb-1">当前输入序列</h4>
+                <div id="gen-current-seq" class="token-row mb-2"></div>
+
+                <h4 class="mb-1">下一个 token 的概率分布</h4>
+                <div id="gen-prob-chart" class="prob-bar-container mb-2"></div>
+
+                <h4 class="mb-1">已生成序列</h4>
+                <div id="gen-output-seq" class="token-row"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="section" style="text-align:center; padding:2rem 0; border-top:1px solid var(--border-color);">
+        <p class="text-muted text-sm">
+            模块 07 / 09 — Transformer 解码器 &nbsp;|&nbsp;
+            <a href="../06-encoder/index.html">&#x2190; 上一模块</a> &nbsp;|&nbsp;
+            <a href="../08-training/index.html">下一模块 &#x2192;</a>
+        </p>
+    </footer>
+</div>
+
+<!-- ============ Scripts ============ -->
+<script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+<script src="../shared/scripts/transformer-utils.js"></script>
+<script src="../shared/scripts/animation-controller.js"></script>
+<script src="../shared/scripts/matrix-renderer.js"></script>
+<script src="../shared/scripts/nav.js"></script>
+<script src="../shared/scripts/katex-init.js"></script>
+
+<script>
+(() => {
+    'use strict';
+    const TU = TransformerUtils;
+
+    /* ================================================================
+       Section 1: 掩码自注意力
+    ================================================================ */
+    const tokens = ["Machine", "learning", "changed", "the", "world"];
+    const seqLen = tokens.length;
+    const dModel = 8;
+
+    // Generate deterministic Q, K, V
+    const Q = TU.randomMatrix(seqLen, dModel, 101, 0.4);
+    const K = TU.randomMatrix(seqLen, dModel, 202, 0.4);
+    const V = TU.randomMatrix(seqLen, dModel, 303, 0.4);
+
+    // Causal mask
+    const causalMask = TU.createCausalMask(seqLen);
+
+    // Attention without mask (encoder style)
+    const attnNoMask = TU.scaledDotProductAttention(Q, K, V, null);
+    // Attention with mask (decoder style)
+    const attnMasked = TU.scaledDotProductAttention(Q, K, V, causalMask);
+
+    // Build masked scores for display (with -inf symbols)
+    const rawScores = TU.scale(TU.matmul(Q, TU.transpose(K)), 1 / Math.sqrt(dModel));
+    const maskedScoresDisplay = rawScores.map((row, i) =>
+        row.map((v, j) => causalMask[i][j] === 1 ? parseFloat(v.toFixed(2)) : -Infinity)
+    );
+
+    // Token click interaction
+    const maskTokensEl = document.getElementById('mask-tokens');
+    let selectedTokenIdx = -1;
+
+    tokens.forEach((tok, idx) => {
+        const box = document.createElement('div');
+        box.className = 'token-box';
+        box.textContent = tok;
+        box.addEventListener('click', () => selectMaskToken(idx));
+        maskTokensEl.appendChild(box);
+    });
+
+    function selectMaskToken(idx) {
+        selectedTokenIdx = idx;
+        const boxes = maskTokensEl.querySelectorAll('.token-box');
+        boxes.forEach((b, i) => {
+            b.classList.remove('active', 'visible', 'masked');
+            if (i === idx) {
+                b.classList.add('active');
+            } else if (i <= idx) {
+                b.classList.add('visible');
+            } else {
+                b.classList.add('masked');
+            }
+        });
+
+        const visibleTokens = tokens.slice(0, idx + 1).join(', ');
+        document.getElementById('mask-info-text').innerHTML =
+            `<strong>"${tokens[idx]}"</strong> (位置 ${idx}) 可以关注：${visibleTokens}（共 ${idx + 1} 个 token）`;
+
+        // Highlight row in matrices
+        if (maskMatrixRenderer) {
+            maskMatrixRenderer.clearHighlights();
+            maskMatrixRenderer.highlightRow(idx, 'rgba(22,199,154,0.5)');
+        }
+        if (maskedScoresRenderer) {
+            maskedScoresRenderer.clearHighlights();
+            maskedScoresRenderer.highlightRow(idx, 'rgba(22,199,154,0.5)');
+        }
+        if (beforeMaskRenderer) {
+            beforeMaskRenderer.clearHighlights();
+            beforeMaskRenderer.highlightRow(idx, 'rgba(22,199,154,0.5)');
+        }
+        if (afterMaskRenderer) {
+            afterMaskRenderer.clearHighlights();
+            afterMaskRenderer.highlightRow(idx, 'rgba(22,199,154,0.5)');
+        }
+    }
+
+    // Causal mask matrix
+    const maskMatrixRenderer = new MatrixRenderer({
+        container: document.getElementById('mask-matrix-container'),
+        data: causalMask,
+        rowLabels: tokens.map((t, i) => t.slice(0, 4)),
+        colLabels: tokens.map((t, i) => t.slice(0, 4)),
+        cellSize: 48,
+        showValues: true,
+        colorScale(v) {
+            return v === 1 ? 'rgba(22,199,154,0.5)' : 'rgba(255,82,82,0.35)';
+        },
+        onCellClick(row) { selectMaskToken(row); }
+    });
+
+    // Masked scores matrix (show -inf)
+    const maskedScoresForRender = rawScores.map((row, i) =>
+        row.map((v, j) => causalMask[i][j] === 1 ? parseFloat(v.toFixed(2)) : -99)
+    );
+
+    const maskedScoresRenderer = new MatrixRenderer({
+        container: document.getElementById('masked-scores-container'),
+        data: maskedScoresForRender,
+        rowLabels: tokens.map(t => t.slice(0, 4)),
+        colLabels: tokens.map(t => t.slice(0, 4)),
+        cellSize: 48,
+        showValues: true,
+        colorScale(v) {
+            if (v <= -90) return 'rgba(255,82,82,0.25)';
+            const t = Math.max(0, Math.min(1, (v + 1) / 2));
+            return `rgba(22,199,154,${0.1 + t * 0.7})`;
+        }
+    });
+
+    // Override text for -inf cells
+    if (maskedScoresRenderer.textElements) {
+        for (let i = 0; i < seqLen; i++) {
+            for (let j = 0; j < seqLen; j++) {
+                if (causalMask[i][j] === 0 && maskedScoresRenderer.textElements[i]?.[j]) {
+                    maskedScoresRenderer.textElements[i][j].textContent = '-inf';
+                    maskedScoresRenderer.textElements[i][j].setAttribute('fill', '#ff5252');
+                    maskedScoresRenderer.textElements[i][j].setAttribute('font-size', '9');
+                }
+            }
+        }
+    }
+
+    // Before mask (encoder-style weights)
+    const beforeMaskRenderer = new MatrixRenderer({
+        container: document.getElementById('before-mask-container'),
+        data: attnNoMask.weights.map(r => r.map(v => parseFloat(v.toFixed(3)))),
+        rowLabels: tokens.map(t => t.slice(0, 4)),
+        colLabels: tokens.map(t => t.slice(0, 4)),
+        cellSize: 48,
+        showValues: true,
+        colorScale: v => TU.attentionColor(v),
+        onCellClick(row) { selectMaskToken(row); }
+    });
+
+    // After mask (decoder-style weights)
+    const afterMaskRenderer = new MatrixRenderer({
+        container: document.getElementById('after-mask-container'),
+        data: attnMasked.weights.map(r => r.map(v => parseFloat(v.toFixed(3)))),
+        rowLabels: tokens.map(t => t.slice(0, 4)),
+        colLabels: tokens.map(t => t.slice(0, 4)),
+        cellSize: 48,
+        showValues: true,
+        colorScale: v => TU.attentionColor(v),
+        onCellClick(row) { selectMaskToken(row); }
+    });
+
+
+    /* ================================================================
+       Section 2: 为什么需要掩码
+    ================================================================ */
+    const revealTokens = ["Machine", "learning", "changed", "the", "world"];
+
+    function buildRevealTokens(containerId, svgId, isDecoder) {
+        const container = document.getElementById(containerId);
+        container.innerHTML = '';
+        revealTokens.forEach(tok => {
+            const box = document.createElement('div');
+            box.className = 'token-box';
+            box.textContent = tok;
+            box.style.fontSize = '0.82rem';
+            box.style.padding = '0.3rem 0.5rem';
+            container.appendChild(box);
+        });
+    }
+
+    buildRevealTokens('encoder-reveal', 'encoder-attn-svg', false);
+    buildRevealTokens('decoder-reveal', 'decoder-attn-svg', true);
+
+    // Draw attention arcs
+    function drawAttnArcs(svgId, activeIdx, isDecoder) {
+        const svg = d3.select('#' + svgId);
+        svg.selectAll('*').remove();
+        const w = svg.node().getBoundingClientRect().width || 400;
+        const n = revealTokens.length;
+        const spacing = w / (n + 1);
+
+        for (let j = 0; j < n; j++) {
+            const canAttend = isDecoder ? j <= activeIdx : true;
+            if (!canAttend) continue;
+            if (j === activeIdx) continue;
+
+            const x1 = spacing * (activeIdx + 1);
+            const x2 = spacing * (j + 1);
+            const midX = (x1 + x2) / 2;
+            const curveH = 15 + Math.abs(activeIdx - j) * 8;
+
+            svg.append('path')
+                .attr('d', `M${x1},50 Q${midX},${50 - curveH} ${x2},50`)
+                .attr('fill', 'none')
+                .attr('stroke', isDecoder ? '#16c79a' : '#4fc3f7')
+                .attr('stroke-width', 2)
+                .attr('opacity', 0.6);
+
+            svg.append('circle')
+                .attr('cx', x2).attr('cy', 50).attr('r', 3)
+                .attr('fill', isDecoder ? '#16c79a' : '#4fc3f7');
+        }
+
+        // Active dot
+        svg.append('circle')
+            .attr('cx', spacing * (activeIdx + 1)).attr('cy', 50).attr('r', 5)
+            .attr('fill', isDecoder ? '#16c79a' : '#4fc3f7')
+            .attr('stroke', '#fff').attr('stroke-width', 1.5);
+    }
+
+    let revealStep = -1;
+    const totalRevealSteps = revealTokens.length;
+
+    function updateReveal(step) {
+        revealStep = step;
+
+        // Encoder: all tokens always visible, arcs show bidirectional
+        const encBoxes = document.getElementById('encoder-reveal').querySelectorAll('.token-box');
+        encBoxes.forEach((b, i) => {
+            b.classList.remove('active', 'visible', 'masked');
+            if (step >= 0) {
+                if (i === step) b.classList.add('active');
+                else b.classList.add('visible');
+            }
+        });
+        if (step >= 0) drawAttnArcs('encoder-attn-svg', step, false);
+        else d3.select('#encoder-attn-svg').selectAll('*').remove();
+
+        // Decoder: only past tokens visible
+        const decBoxes = document.getElementById('decoder-reveal').querySelectorAll('.token-box');
+        decBoxes.forEach((b, i) => {
+            b.classList.remove('active', 'visible', 'masked');
+            if (step >= 0) {
+                if (i === step) b.classList.add('active');
+                else if (i < step) b.classList.add('visible');
+                else b.classList.add('masked');
+            }
+        });
+        if (step >= 0) drawAttnArcs('decoder-attn-svg', step, true);
+        else d3.select('#decoder-attn-svg').selectAll('*').remove();
+    }
+
+    document.getElementById('btn-reveal-play').addEventListener('click', () => {
+        revealStep = -1;
+        updateReveal(-1);
+        let i = 0;
+        const interval = setInterval(() => {
+            if (i >= totalRevealSteps) { clearInterval(interval); return; }
+            updateReveal(i);
+            i++;
+        }, 800);
+    });
+
+    document.getElementById('btn-reveal-reset').addEventListener('click', () => {
+        updateReveal(-1);
+    });
+
+
+    /* ================================================================
+       Section 3: 交叉注意力
+    ================================================================ */
+    const sourceTokens = ["机器", "学习", "改变", "了", "世界"];
+    const targetTokens = ["Machine", "learning", "changed", "the", "world"];
+
+    // Build token elements
+    const srcContainer = document.getElementById('source-tokens');
+    sourceTokens.forEach(tok => {
+        const box = document.createElement('div');
+        box.className = 'token-box source';
+        box.textContent = tok;
+        box.style.fontSize = '0.85rem';
+        srcContainer.appendChild(box);
+    });
+
+    const tgtContainer = document.getElementById('target-tokens');
+    targetTokens.forEach(tok => {
+        const box = document.createElement('div');
+        box.className = 'token-box target';
+        box.textContent = tok;
+        box.style.fontSize = '0.85rem';
+        tgtContainer.appendChild(box);
+    });
+
+    // Cross-attention heatmap (pre-computed realistic alignment)
+    const crossAttnWeights = [
+        [0.72, 0.08, 0.05, 0.03, 0.12],  // Machine -> 机器
+        [0.06, 0.74, 0.07, 0.04, 0.09],  // learning -> 学习
+        [0.04, 0.05, 0.76, 0.08, 0.07],  // changed -> 改变
+        [0.08, 0.06, 0.12, 0.62, 0.12],  // the -> 了
+        [0.10, 0.07, 0.05, 0.06, 0.72],  // world -> 世界
+    ];
+
+    const crossHeatmapRenderer = new MatrixRenderer({
+        container: document.getElementById('cross-heatmap-container'),
+        data: crossAttnWeights,
+        rowLabels: targetTokens.map(t => t.slice(0, 6)),
+        colLabels: sourceTokens,
+        cellSize: 56,
+        showValues: true,
+        colorScale: v => TU.attentionColor(v),
+        onCellHover(row, col) {
+            // Highlight source and target tokens
+            srcContainer.querySelectorAll('.token-box').forEach((b, i) => {
+                b.style.transform = i === col ? 'scale(1.1)' : '';
+                b.style.borderColor = i === col ? 'var(--accent-green)' : '';
+            });
+            tgtContainer.querySelectorAll('.token-box').forEach((b, i) => {
+                b.style.transform = i === row ? 'scale(1.1)' : '';
+                b.style.borderColor = i === row ? 'var(--accent-green)' : '';
+            });
+        }
+    });
+
+    // Cross-attention architecture SVG
+    (function drawCrossAttnArch() {
+        const svg = d3.select('#cross-attn-arch');
+        const w = 700, h = 220;
+
+        // Encoder output box
+        svg.append('rect').attr('x', 30).attr('y', 20).attr('width', 140).attr('height', 50)
+            .attr('rx', 8).attr('fill', 'rgba(179,136,255,0.15)').attr('stroke', '#b388ff');
+        svg.append('text').attr('x', 100).attr('y', 50).attr('text-anchor', 'middle')
+            .attr('fill', '#b388ff').attr('font-size', 14).text('编码器输出');
+
+        // Decoder state box
+        svg.append('rect').attr('x', 30).attr('y', 150).attr('width', 140).attr('height', 50)
+            .attr('rx', 8).attr('fill', 'rgba(79,195,247,0.15)').attr('stroke', '#4fc3f7');
+        svg.append('text').attr('x', 100).attr('y', 180).attr('text-anchor', 'middle')
+            .attr('fill', '#4fc3f7').attr('font-size', 14).text('解码器状态');
+
+        // K, V from encoder
+        svg.append('rect').attr('x', 250).attr('y', 10).attr('width', 60).attr('height', 30)
+            .attr('rx', 6).attr('fill', 'rgba(79,195,247,0.2)').attr('stroke', '#4fc3f7');
+        svg.append('text').attr('x', 280).attr('y', 30).attr('text-anchor', 'middle')
+            .attr('fill', '#4fc3f7').attr('font-size', 13).attr('font-weight', 700).text('K');
+
+        svg.append('rect').attr('x', 250).attr('y', 50).attr('width', 60).attr('height', 30)
+            .attr('rx', 6).attr('fill', 'rgba(22,199,154,0.2)').attr('stroke', '#16c79a');
+        svg.append('text').attr('x', 280).attr('y', 70).attr('text-anchor', 'middle')
+            .attr('fill', '#16c79a').attr('font-size', 13).attr('font-weight', 700).text('V');
+
+        // Q from decoder
+        svg.append('rect').attr('x', 250).attr('y', 160).attr('width', 60).attr('height', 30)
+            .attr('rx', 6).attr('fill', 'rgba(179,136,255,0.2)').attr('stroke', '#b388ff');
+        svg.append('text').attr('x', 280).attr('y', 180).attr('text-anchor', 'middle')
+            .attr('fill', '#b388ff').attr('font-size', 13).attr('font-weight', 700).text('Q');
+
+        // Arrows: encoder -> K,V
+        svg.append('line').attr('x1', 170).attr('y1', 35).attr('x2', 248).attr('y2', 25)
+            .attr('stroke', '#4fc3f7').attr('stroke-width', 2).attr('marker-end', 'url(#arrow-blue)');
+        svg.append('line').attr('x1', 170).attr('y1', 55).attr('x2', 248).attr('y2', 65)
+            .attr('stroke', '#16c79a').attr('stroke-width', 2).attr('marker-end', 'url(#arrow-green)');
+
+        // Arrow: decoder -> Q
+        svg.append('line').attr('x1', 170).attr('y1', 175).attr('x2', 248).attr('y2', 175)
+            .attr('stroke', '#b388ff').attr('stroke-width', 2).attr('marker-end', 'url(#arrow-purple)');
+
+        // Attention box
+        svg.append('rect').attr('x', 380).attr('y', 70).attr('width', 140).attr('height', 70)
+            .attr('rx', 10).attr('fill', 'rgba(22,199,154,0.1)').attr('stroke', '#16c79a').attr('stroke-width', 2);
+        svg.append('text').attr('x', 450).attr('y', 100).attr('text-anchor', 'middle')
+            .attr('fill', '#16c79a').attr('font-size', 13).attr('font-weight', 700).text('交叉注意力');
+        svg.append('text').attr('x', 450).attr('y', 120).attr('text-anchor', 'middle')
+            .attr('fill', '#a8a8b8').attr('font-size', 11).text('Attention(Q, K, V)');
+
+        // Arrows into attention
+        svg.append('line').attr('x1', 312).attr('y1', 25).attr('x2', 378).attr('y2', 85)
+            .attr('stroke', '#4fc3f7').attr('stroke-width', 2).attr('marker-end', 'url(#arrow-blue)');
+        svg.append('line').attr('x1', 312).attr('y1', 65).attr('x2', 378).attr('y2', 100)
+            .attr('stroke', '#16c79a').attr('stroke-width', 2).attr('marker-end', 'url(#arrow-green)');
+        svg.append('line').attr('x1', 312).attr('y1', 175).attr('x2', 378).attr('y2', 115)
+            .attr('stroke', '#b388ff').attr('stroke-width', 2).attr('marker-end', 'url(#arrow-purple)');
+
+        // Output
+        svg.append('rect').attr('x', 580).attr('y', 85).attr('width', 100).attr('height', 40)
+            .attr('rx', 8).attr('fill', 'rgba(255,171,64,0.15)').attr('stroke', '#ffab40');
+        svg.append('text').attr('x', 630).attr('y', 110).attr('text-anchor', 'middle')
+            .attr('fill', '#ffab40').attr('font-size', 13).text('输出');
+
+        svg.append('line').attr('x1', 522).attr('y1', 105).attr('x2', 578).attr('y2', 105)
+            .attr('stroke', '#ffab40').attr('stroke-width', 2).attr('marker-end', 'url(#arrow-orange)');
+
+        // Arrow markers
+        const defs = svg.append('defs');
+        ['blue', 'green', 'purple', 'orange'].forEach((color, i) => {
+            const colors = ['#4fc3f7', '#16c79a', '#b388ff', '#ffab40'];
+            defs.append('marker').attr('id', `arrow-${color}`).attr('viewBox', '0 0 10 10')
+                .attr('refX', 9).attr('refY', 5).attr('markerWidth', 6).attr('markerHeight', 6)
+                .attr('orient', 'auto-start-reverse')
+                .append('path').attr('d', 'M0,0 L10,5 L0,10 Z').attr('fill', colors[i]);
+        });
+    })();
+
+
+    /* ================================================================
+       Section 4: 完整解码器块
+    ================================================================ */
+    (function buildDecoderBlockSVG() {
+        const svg = d3.select('#decoder-block-svg');
+        const w = 500, h = 520;
+        const cx = 250;
+        const boxW = 220, boxH = 44;
+        const normW = 180, normH = 32;
+        const gap = 12;
+
+        // Component definitions with positions
+        const components = [
+            { id: 'input', label: '解码器输入', y: 10, w: boxW, h: 36, color: '#4fc3f7', bg: 'rgba(79,195,247,0.12)' },
+            { id: 'masked-sa', label: '掩码自注意力', y: 60, w: boxW, h: boxH, color: '#b388ff', bg: 'rgba(179,136,255,0.12)' },
+            { id: 'an1', label: 'Add & Norm', y: 118, w: normW, h: normH, color: '#ffab40', bg: 'rgba(255,171,64,0.08)' },
+            { id: 'cross-attn', label: '交叉注意力', y: 168, w: boxW, h: boxH, color: '#16c79a', bg: 'rgba(22,199,154,0.12)' },
+            { id: 'enc-input', label: '编码器输出 (K, V)', y: 182, w: 130, h: 28, color: '#b388ff', bg: 'rgba(179,136,255,0.12)', x: cx + boxW/2 + 30 },
+            { id: 'an2', label: 'Add & Norm', y: 226, w: normW, h: normH, color: '#ffab40', bg: 'rgba(255,171,64,0.08)' },
+            { id: 'ffn', label: '前馈网络 (FFN)', y: 276, w: boxW, h: boxH, color: '#4fc3f7', bg: 'rgba(79,195,247,0.12)' },
+            { id: 'an3', label: 'Add & Norm', y: 334, w: normW, h: normH, color: '#ffab40', bg: 'rgba(255,171,64,0.08)' },
+            { id: 'output', label: '解码器输出', y: 384, w: boxW, h: 36, color: '#16c79a', bg: 'rgba(22,199,154,0.12)' },
+        ];
+
+        // Draw boxes
+        components.forEach(comp => {
+            const gx = comp.x || cx;
+            const isCenter = !comp.x;
+            const xPos = isCenter ? gx - comp.w / 2 : comp.x;
+
+            const g = svg.append('g').attr('class', 'flow-node').attr('id', `node-${comp.id}`);
+
+            g.append('rect')
+                .attr('x', xPos).attr('y', comp.y)
+                .attr('width', comp.w).attr('height', comp.h)
+                .attr('rx', 8)
+                .attr('fill', comp.bg).attr('stroke', comp.color)
+                .attr('stroke-width', 1.5);
+
+            g.append('text')
+                .attr('x', isCenter ? gx : xPos + comp.w / 2)
+                .attr('y', comp.y + comp.h / 2 + 5)
+                .attr('text-anchor', 'middle')
+                .attr('fill', comp.color).attr('font-size', comp.h < 36 ? 12 : 13)
+                .attr('font-weight', 600)
+                .text(comp.label);
+        });
+
+        // Draw arrows (vertical flow)
+        const arrowDefs = svg.append('defs');
+        arrowDefs.append('marker').attr('id', 'flow-arrow').attr('viewBox', '0 0 10 10')
+            .attr('refX', 9).attr('refY', 5).attr('markerWidth', 6).attr('markerHeight', 6)
+            .attr('orient', 'auto')
+            .append('path').attr('d', 'M0,0 L10,5 L0,10 Z').attr('fill', '#6c6c7c');
+
+        const connections = [
+            { from: 'input', to: 'masked-sa' },
+            { from: 'masked-sa', to: 'an1' },
+            { from: 'an1', to: 'cross-attn' },
+            { from: 'cross-attn', to: 'an2' },
+            { from: 'an2', to: 'ffn' },
+            { from: 'ffn', to: 'an3' },
+            { from: 'an3', to: 'output' },
+        ];
+
+        connections.forEach(conn => {
+            const fromComp = components.find(c => c.id === conn.from);
+            const toComp = components.find(c => c.id === conn.to);
+            const fromX = fromComp.x || cx;
+            const toX = toComp.x || cx;
+
+            svg.append('line')
+                .attr('x1', fromX).attr('y1', fromComp.y + fromComp.h)
+                .attr('x2', toX).attr('y2', toComp.y)
+                .attr('stroke', '#6c6c7c').attr('stroke-width', 1.5)
+                .attr('marker-end', 'url(#flow-arrow)');
+        });
+
+        // Encoder output -> cross attention arrow (horizontal)
+        const encComp = components.find(c => c.id === 'enc-input');
+        const crossComp = components.find(c => c.id === 'cross-attn');
+        svg.append('line')
+            .attr('x1', encComp.x).attr('y1', encComp.y + encComp.h / 2)
+            .attr('x2', cx + boxW / 2).attr('y2', crossComp.y + crossComp.h / 2)
+            .attr('stroke', '#b388ff').attr('stroke-width', 1.5)
+            .attr('marker-end', 'url(#flow-arrow)');
+
+        // Residual connections (curved bypass arrows)
+        function drawResidual(fromComp, toComp, side = 'left') {
+            const compFrom = components.find(c => c.id === fromComp);
+            const compTo = components.find(c => c.id === toComp);
+            const offset = side === 'left' ? -boxW / 2 - 25 : boxW / 2 + 25;
+            const x1 = cx + offset;
+            const y1 = compFrom.y + compFrom.h / 2;
+            const y2 = compTo.y + compTo.h / 2;
+
+            svg.append('path')
+                .attr('d', `M${cx - boxW/2},${y1} L${x1},${y1} L${x1},${y2} L${cx - normW/2},${y2}`)
+                .attr('fill', 'none').attr('stroke', '#ffab40').attr('stroke-width', 1)
+                .attr('stroke-dasharray', '4,3').attr('opacity', 0.5);
+        }
+
+        drawResidual('input', 'an1');
+        drawResidual('an1', 'an2');
+        drawResidual('an2', 'an3');
+
+        // Data flow animation ball
+        const ball = svg.append('circle')
+            .attr('cx', cx).attr('cy', -10).attr('r', 6)
+            .attr('fill', '#16c79a').attr('opacity', 0)
+            .attr('filter', 'url(#glow)');
+
+        // Glow filter
+        const filter = arrowDefs.append('filter').attr('id', 'glow');
+        filter.append('feGaussianBlur').attr('stdDeviation', 3).attr('result', 'glow');
+        const merge = filter.append('feMerge');
+        merge.append('feMergeNode').attr('in', 'glow');
+        merge.append('feMergeNode').attr('in', 'SourceGraphic');
+
+        // Animation controller for decoder block
+        const stepDescriptions = [
+            { name: '输入', desc: '解码器接收已生成的 token 嵌入（含位置编码）作为输入。' },
+            { name: '掩码自注意力', desc: '对输入施加因果掩码自注意力，每个位置只能关注自身和之前的位置。' },
+            { name: 'Add & Norm 1', desc: '残差连接：将自注意力的输出与输入相加，然后进行层归一化。' },
+            { name: '交叉注意力', desc: 'Q 来自上一步输出，K 和 V 来自编码器输出。让解码器"关注"源序列。' },
+            { name: 'Add & Norm 2', desc: '残差连接：将交叉注意力的输出与上一步相加，然后层归一化。' },
+            { name: '前馈网络', desc: '两层全连接网络 + ReLU 激活，对每个位置独立地进行非线性变换。' },
+            { name: 'Add & Norm 3', desc: '残差连接 + 层归一化，产生该解码器层的最终输出。' },
+            { name: '输出', desc: '解码器块的输出，可以送入下一个解码器层或最终的线性 + softmax 层。' },
+        ];
+
+        const componentIds = ['input', 'masked-sa', 'an1', 'cross-attn', 'an2', 'ffn', 'an3', 'output'];
+
+        const decoderCtrl = new AnimationController({
+            container: document.getElementById('decoder-block-controls'),
+            steps: stepDescriptions.map((s, i) => ({
+                name: s.name,
+                duration: 1000,
+                action: async (stepIdx, instant) => {
+                    // Reset all
+                    componentIds.forEach(id => {
+                        const node = document.getElementById(`node-${id}`);
+                        if (node) node.classList.remove('highlight');
+                    });
+
+                    // Highlight current
+                    const nodeId = componentIds[i];
+                    const node = document.getElementById(`node-${nodeId}`);
+                    if (node) node.classList.add('highlight');
+
+                    // Animate ball
+                    const comp = components.find(c => c.id === nodeId);
+                    const targetY = comp.y + comp.h / 2;
+                    const targetX = comp.x || cx;
+
+                    if (instant) {
+                        ball.attr('cx', targetX).attr('cy', targetY).attr('opacity', 1);
+                    } else {
+                        await new Promise(resolve => {
+                            gsap.to(ball.node(), {
+                                duration: 0.5,
+                                attr: { cx: targetX, cy: targetY, opacity: 1 },
+                                ease: 'power2.out',
+                                onComplete: resolve
+                            });
+                        });
+                    }
+
+                    // Update description
+                    document.getElementById('decoder-step-text').innerHTML =
+                        `<strong>步骤 ${i + 1}：${s.name}</strong> — ${s.desc}`;
+                }
+            })),
+            onComplete() {
+                document.getElementById('decoder-step-text').innerHTML =
+                    '<strong>完成！</strong>数据已流经解码器块的所有子层。';
+            }
+        });
+    })();
+
+
+    /* ================================================================
+       Section 5: 自回归生成
+    ================================================================ */
+    (function buildAutoregressive() {
+        const srcSentence = "机器学习改变了世界";
+        const genSequence = ["[SOS]", "Machine", "learning", "changed", "the", "world", "[EOS]"];
+
+        // Pre-computed probability distributions at each generation step
+        const probDists = [
+            // Step 0: predicting first token after [SOS]
+            { tokens: ["Machine", "The", "A", "It", "Learning"], probs: [0.82, 0.07, 0.04, 0.04, 0.03], selected: 0 },
+            // Step 1: predicting after [SOS] Machine
+            { tokens: ["learning", "translation", "vision", "intelligence", "model"], probs: [0.78, 0.09, 0.05, 0.05, 0.03], selected: 0 },
+            // Step 2: predicting after [SOS] Machine learning
+            { tokens: ["changed", "has", "is", "transforms", "can"], probs: [0.71, 0.12, 0.08, 0.06, 0.03], selected: 0 },
+            // Step 3: predicting after [SOS] Machine learning changed
+            { tokens: ["the", "our", "this", "a", "every"], probs: [0.76, 0.10, 0.06, 0.05, 0.03], selected: 0 },
+            // Step 4: predicting after [SOS] Machine learning changed the
+            { tokens: ["world", "field", "way", "game", "future"], probs: [0.80, 0.08, 0.05, 0.04, 0.03], selected: 0 },
+            // Step 5: predicting EOS after world
+            { tokens: ["[EOS]", ".", "forever", "greatly", "today"], probs: [0.85, 0.07, 0.04, 0.02, 0.02], selected: 0 },
+        ];
+
+        const stepsListEl = document.getElementById('gen-steps-list');
+        const currentSeqEl = document.getElementById('gen-current-seq');
+        const probChartEl = document.getElementById('gen-prob-chart');
+        const outputSeqEl = document.getElementById('gen-output-seq');
+
+        // Build step list items
+        genSequence.slice(1).forEach((tok, i) => {
+            const stepEl = document.createElement('div');
+            stepEl.className = 'gen-step';
+            stepEl.id = `gen-step-${i}`;
+            stepEl.innerHTML = `
+                <div class="step-num">${i + 1}</div>
+                <div>
+                    <span style="color:var(--text-secondary);font-size:0.82rem;">输入：${genSequence.slice(0, i + 1).join(' ')}</span>
+                    <br>
+                    <span style="color:var(--accent-green);font-size:0.85rem;">→ 生成：<strong>${tok}</strong></span>
+                </div>
+            `;
+            stepsListEl.appendChild(stepEl);
+        });
+
+        function renderCurrentSeq(upToStep) {
+            currentSeqEl.innerHTML = '';
+            const seq = genSequence.slice(0, upToStep + 2); // +2 because index 0 is SOS
+            seq.forEach((tok, i) => {
+                const box = document.createElement('div');
+                box.className = 'token-box';
+                if (tok === '[SOS]' || tok === '[EOS]') {
+                    box.style.borderColor = 'var(--accent-orange)';
+                    box.style.background = 'rgba(255,171,64,0.12)';
+                    box.style.fontSize = '0.78rem';
+                } else {
+                    box.classList.add('generated');
+                }
+                box.textContent = tok;
+                if (i === seq.length - 1 && upToStep >= 0) {
+                    box.style.animation = 'fadeInToken 0.5s ease';
+                }
+                currentSeqEl.appendChild(box);
+            });
+        }
+
+        function renderProbChart(stepIdx) {
+            probChartEl.innerHTML = '';
+            if (stepIdx < 0 || stepIdx >= probDists.length) {
+                probChartEl.innerHTML = '<p class="text-muted text-sm" style="padding:0.5rem;">等待生成开始...</p>';
+                return;
+            }
+            const dist = probDists[stepIdx];
+            dist.tokens.forEach((tok, i) => {
+                const row = document.createElement('div');
+                row.className = 'prob-bar-row';
+
+                const nameEl = document.createElement('span');
+                nameEl.className = 'token-name';
+                nameEl.textContent = tok;
+
+                const trackEl = document.createElement('div');
+                trackEl.className = 'bar-track';
+                const fillEl = document.createElement('div');
+                fillEl.className = `bar-fill ${i === dist.selected ? 'selected' : 'other'}`;
+                fillEl.style.width = '0%';
+                trackEl.appendChild(fillEl);
+
+                const valEl = document.createElement('span');
+                valEl.className = 'prob-val';
+                valEl.textContent = (dist.probs[i] * 100).toFixed(1) + '%';
+
+                row.appendChild(nameEl);
+                row.appendChild(trackEl);
+                row.appendChild(valEl);
+                probChartEl.appendChild(row);
+
+                // Animate bar width
+                requestAnimationFrame(() => {
+                    requestAnimationFrame(() => {
+                        fillEl.style.width = (dist.probs[i] * 100) + '%';
+                    });
+                });
+            });
+        }
+
+        function renderOutputSeq(upToStep) {
+            outputSeqEl.innerHTML = '';
+            if (upToStep < 0) {
+                outputSeqEl.innerHTML = '<span class="text-muted text-sm">尚未生成</span>';
+                return;
+            }
+            for (let i = 1; i <= upToStep + 1 && i < genSequence.length; i++) {
+                const box = document.createElement('div');
+                box.className = 'token-box generated';
+                box.textContent = genSequence[i];
+                if (genSequence[i] === '[EOS]') {
+                    box.style.borderColor = 'var(--accent-orange)';
+                    box.style.background = 'rgba(255,171,64,0.12)';
+                    box.style.fontSize = '0.78rem';
+                }
+                outputSeqEl.appendChild(box);
+            }
+        }
+
+        function highlightStep(stepIdx) {
+            genSequence.slice(1).forEach((_, i) => {
+                const el = document.getElementById(`gen-step-${i}`);
+                if (el) {
+                    el.classList.toggle('active-step', i === stepIdx);
+                    if (i < stepIdx) {
+                        el.querySelector('.step-num').style.background = 'rgba(22,199,154,0.3)';
+                        el.querySelector('.step-num').style.color = 'var(--accent-green)';
+                    } else if (i === stepIdx) {
+                        el.querySelector('.step-num').style.background = '';
+                        el.querySelector('.step-num').style.color = '';
+                    } else {
+                        el.querySelector('.step-num').style.background = '';
+                        el.querySelector('.step-num').style.color = '';
+                    }
+                }
+            });
+        }
+
+        // Initialize
+        renderCurrentSeq(-1);
+        renderProbChart(-1);
+        renderOutputSeq(-1);
+
+        // Animation controller
+        const genCtrl = new AnimationController({
+            container: document.getElementById('gen-controls'),
+            steps: probDists.map((dist, i) => ({
+                name: `生成: ${genSequence[i + 1]}`,
+                duration: 1200,
+                action: async (stepIdx, instant) => {
+                    highlightStep(i);
+                    renderCurrentSeq(i);
+                    renderProbChart(i);
+                    renderOutputSeq(i);
+
+                    if (!instant) {
+                        // Animate the new token appearing
+                        const lastToken = currentSeqEl.lastElementChild;
+                        if (lastToken) {
+                            gsap.from(lastToken, {
+                                duration: 0.4,
+                                opacity: 0,
+                                y: -15,
+                                scale: 0.8,
+                                ease: 'back.out(1.5)'
+                            });
+                        }
+                    }
+                }
+            })),
+            onStepChange(step) {
+                if (step < 0) {
+                    renderCurrentSeq(-1);
+                    renderProbChart(-1);
+                    renderOutputSeq(-1);
+                    highlightStep(-1);
+                }
+            },
+            onComplete() {
+                // Show completion message
+                const completeBox = document.createElement('div');
+                completeBox.className = 'info-box success mt-2';
+                completeBox.innerHTML = `<p><strong>生成完成！</strong>"${srcSentence}" → "${genSequence.slice(1, -1).join(' ')}"</p>`;
+                const existing = outputSeqEl.parentElement.querySelector('.info-box.success');
+                if (!existing) outputSeqEl.parentElement.appendChild(completeBox);
+            }
+        });
+
+        // Add CSS animation keyframes
+        if (!document.getElementById('gen-keyframes')) {
+            const styleEl = document.createElement('style');
+            styleEl.id = 'gen-keyframes';
+            styleEl.textContent = `
+                @keyframes fadeInToken {
+                    from { opacity: 0; transform: translateY(-10px) scale(0.85); }
+                    to { opacity: 1; transform: translateY(0) scale(1); }
+                }
+            `;
+            document.head.appendChild(styleEl);
+        }
+    })();
+
+
+    /* ================================================================
+       KaTeX re-render after dynamic content
+    ================================================================ */
+    setTimeout(() => {
+        if (typeof renderMath === 'function') renderMath(document.body);
+    }, 200);
+
+})();
+</script>
+</body>
+</html>

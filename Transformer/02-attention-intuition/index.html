@@ -1,0 +1,1168 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>模块 02 — 注意力机制直觉 | Transformer 学习</title>
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <style>
+        /* ===== Module-specific styles ===== */
+        .token-box {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0.4rem 0.8rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            font-size: 0.95rem;
+            cursor: pointer;
+            transition: all 0.3s;
+            user-select: none;
+        }
+        .token-box:hover { border-color: var(--accent-blue); }
+        .token-box.active {
+            border-color: var(--accent-green);
+            background: rgba(22,199,154,0.15);
+            box-shadow: 0 0 12px rgba(22,199,154,0.25);
+        }
+        .token-box.highlight-target {
+            border-color: var(--accent-orange);
+            background: rgba(255,171,64,0.15);
+        }
+        .token-box.faded { opacity: 0.3; }
+
+        .sentence-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            padding: 1rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+        }
+
+        .arc-svg {
+            width: 100%;
+            overflow: visible;
+        }
+
+        .question-box {
+            margin-top: 1rem;
+            padding: 1rem 1.2rem;
+            background: rgba(79,195,247,0.08);
+            border: 1px solid rgba(79,195,247,0.25);
+            border-radius: var(--radius-md);
+            font-size: 0.95rem;
+        }
+
+        .qkv-card {
+            padding: 1.2rem;
+            border-radius: var(--radius-md);
+            border: 1px solid var(--border-color);
+            text-align: center;
+            transition: all 0.3s;
+        }
+        .qkv-card.q-card { background: rgba(179,136,255,0.08); border-color: rgba(179,136,255,0.3); }
+        .qkv-card.k-card { background: rgba(79,195,247,0.08); border-color: rgba(79,195,247,0.3); }
+        .qkv-card.v-card { background: rgba(22,199,154,0.08); border-color: rgba(22,199,154,0.3); }
+        .qkv-card .qkv-icon { font-size: 2rem; margin-bottom: 0.5rem; }
+        .qkv-card h4 { margin-bottom: 0.3rem; }
+
+        .weight-row {
+            display: grid;
+            grid-template-columns: 60px 1fr 50px;
+            align-items: center;
+            gap: 0.75rem;
+            margin-bottom: 0.6rem;
+        }
+        .weight-row label { font-size: 0.85rem; color: var(--text-secondary); text-align: right; }
+        .weight-row .val {
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            color: var(--accent-green);
+            text-align: center;
+        }
+
+        .vec-bar-group {
+            display: flex;
+            gap: 3px;
+            align-items: flex-end;
+            height: 60px;
+        }
+        .vec-bar {
+            width: 14px;
+            border-radius: 2px 2px 0 0;
+            transition: height 0.4s ease, background 0.4s ease;
+            min-height: 2px;
+        }
+
+        .output-vector-area {
+            margin-top: 1rem;
+            padding: 1rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+        }
+
+        .rnn-cell {
+            transition: all 0.3s;
+        }
+
+        .compare-box {
+            padding: 1rem;
+            border-radius: var(--radius-md);
+            border: 1px solid var(--border-color);
+            text-align: center;
+        }
+        .compare-box.bad { border-color: var(--accent-red); background: rgba(255,82,82,0.05); }
+        .compare-box.good { border-color: var(--accent-green); background: rgba(22,199,154,0.05); }
+
+        .step-flow {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+            margin: 1rem 0;
+        }
+        .step-flow .flow-arrow {
+            color: var(--text-muted);
+            font-size: 1.2rem;
+        }
+        .step-flow .flow-item {
+            padding: 0.4rem 0.8rem;
+            border-radius: var(--radius-sm);
+            font-size: 0.85rem;
+            border: 1px solid var(--border-color);
+            background: var(--bg-secondary);
+            transition: all 0.4s;
+        }
+        .step-flow .flow-item.active-step {
+            border-color: var(--accent-green);
+            background: rgba(22,199,154,0.15);
+            color: var(--accent-green);
+        }
+
+        .insight-box {
+            margin-top: 1.5rem;
+            padding: 1rem 1.2rem;
+            border-left: 3px solid var(--accent-green);
+            background: rgba(22,199,154,0.05);
+            border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+        }
+        .insight-box h4 { color: var(--accent-green); margin-bottom: 0.3rem; }
+    </style>
+</head>
+<body>
+
+<div class="page-container">
+    <!-- ===== Page Header ===== -->
+    <header class="section" style="text-align:center; padding-top:1rem;">
+        <div style="display:inline-flex;align-items:center;gap:0.5rem;margin-bottom:0.5rem;">
+            <span class="badge badge-green">模块 02</span>
+        </div>
+        <h1>注意力机制直觉</h1>
+        <p style="max-width:600px;margin:0 auto;">
+            从 RNN 的瓶颈出发，理解为什么我们需要注意力机制，
+            以及它如何通过 查询-键-值 实现加权求和。
+        </p>
+    </header>
+
+    <!-- ============================================================
+         Section 1: RNN 的瓶颈
+         ============================================================ -->
+    <section class="section" id="sec-rnn">
+        <div class="section-title">
+            <span class="icon">1</span>
+            <h2>RNN 的瓶颈</h2>
+        </div>
+
+        <div class="split-layout">
+            <div class="text-panel">
+                <p>循环神经网络 (RNN) 按<strong>顺序</strong>处理每个词元。
+                   每一步将当前输入与上一步的隐藏状态合并。</p>
+                <p>问题：当序列很长时，<strong>早期信息</strong>在经过多次压缩后逐渐丢失，
+                   就像口口相传的故事越传越失真。</p>
+
+                <div class="info-box warning mt-2">
+                    <p><strong>瓶颈向量：</strong>整个输入序列被压缩到一个固定大小的向量中，
+                    无论序列有多长，容量都不变。</p>
+                </div>
+
+                <div class="flex gap-sm mt-2" style="flex-wrap:wrap;">
+                    <button class="btn btn-primary" id="btn-rnn-play">播放 RNN 动画</button>
+                    <button class="btn" id="btn-rnn-reset">重置</button>
+                </div>
+
+                <div class="compare-grid cols-2 mt-2">
+                    <div class="compare-box bad">
+                        <h4 style="color:var(--accent-red);">顺序处理</h4>
+                        <p class="text-sm text-muted">逐词处理，无法并行<br>长距离信息损失严重</p>
+                    </div>
+                    <div class="compare-box good">
+                        <h4 style="color:var(--accent-green);">并行处理 (Attention)</h4>
+                        <p class="text-sm text-muted">所有词同时参与计算<br>直接访问任意位置</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="viz-panel">
+                <div class="viz-area" id="rnn-viz" style="min-height:320px;">
+                    <svg id="rnn-svg" width="100%" height="320"></svg>
+                    <span class="watermark">RNN sequential processing</span>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ============================================================
+         Section 2: 远距离依赖问题
+         ============================================================ -->
+    <section class="section" id="sec-dependency">
+        <div class="section-title">
+            <span class="icon">2</span>
+            <h2>远距离依赖问题</h2>
+        </div>
+
+        <div class="split-layout">
+            <div class="text-panel">
+                <p>自然语言中，词的含义常常依赖于<strong>远处</strong>的词。
+                   注意力机制让模型可以直接在任意两个位置之间建立连接。</p>
+
+                <div class="info-box mt-1">
+                    <p>点击句子中的 <strong style="color:var(--accent-green);">「它」</strong> ，
+                       看看它指代的到底是哪个词。</p>
+                </div>
+
+                <div class="question-box hidden" id="dep-question">
+                    <span style="color:var(--accent-blue);">思考：</span>
+                    <span id="dep-question-text"></span>
+                </div>
+
+                <div class="flex gap-sm mt-2" style="flex-wrap:wrap;">
+                    <button class="btn" id="btn-dep-example1">例句 1</button>
+                    <button class="btn" id="btn-dep-example2">例句 2</button>
+                    <button class="btn" id="btn-dep-reset">重置</button>
+                </div>
+
+                <div class="insight-box mt-2 hidden" id="dep-insight">
+                    <h4>关键洞察</h4>
+                    <p class="text-sm" id="dep-insight-text"></p>
+                </div>
+            </div>
+
+            <div class="viz-panel">
+                <div class="viz-area" style="padding:1.5rem;" id="dep-viz">
+                    <div class="sentence-container" id="dep-sentence"></div>
+                    <svg id="dep-arc-svg" class="arc-svg" height="80"></svg>
+                    <span class="watermark">long-range dependency</span>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ============================================================
+         Section 3: 查询-键-值 类比
+         ============================================================ -->
+    <section class="section" id="sec-qkv">
+        <div class="section-title">
+            <span class="icon">3</span>
+            <h2>查询-键-值 类比</h2>
+        </div>
+
+        <p style="max-width:700px;">
+            注意力机制的核心是三个角色：<strong>查询 (Query)</strong>、
+            <strong>键 (Key)</strong>、<strong>值 (Value)</strong>。
+            想象你在图书馆查资料——
+        </p>
+
+        <div class="compare-grid cols-3 mt-1 mb-2">
+            <div class="qkv-card q-card">
+                <div class="qkv-icon" style="color:var(--accent-purple);">Q</div>
+                <h4 style="color:var(--accent-purple);">查询 Query</h4>
+                <p class="text-sm text-muted">「我在找什么？」<br>你心中的问题</p>
+            </div>
+            <div class="qkv-card k-card">
+                <div class="qkv-icon" style="color:var(--accent-blue);">K</div>
+                <h4 style="color:var(--accent-blue);">键 Key</h4>
+                <p class="text-sm text-muted">「每本书的标签」<br>索引 / 目录信息</p>
+            </div>
+            <div class="qkv-card v-card">
+                <div class="qkv-icon" style="color:var(--accent-green);">V</div>
+                <h4 style="color:var(--accent-green);">值 Value</h4>
+                <p class="text-sm text-muted">「书的实际内容」<br>我们想获取的信息</p>
+            </div>
+        </div>
+
+        <div class="split-layout">
+            <div class="text-panel">
+                <h3>交互演示</h3>
+                <p>选择一个查询词，观察它如何与所有键匹配，然后检索对应的值。</p>
+
+                <div class="step-flow" id="qkv-flow">
+                    <div class="flow-item" data-step="0">选择 Query</div>
+                    <span class="flow-arrow">→</span>
+                    <div class="flow-item" data-step="1">匹配 Keys</div>
+                    <span class="flow-arrow">→</span>
+                    <div class="flow-item" data-step="2">计算分数</div>
+                    <span class="flow-arrow">→</span>
+                    <div class="flow-item" data-step="3">检索 Values</div>
+                </div>
+
+                <div id="qkv-controls" class="anim-controls mt-1"></div>
+
+                <div class="info-box success mt-1 hidden" id="qkv-result-box">
+                    <p id="qkv-result-text"></p>
+                </div>
+            </div>
+
+            <div class="viz-panel">
+                <div class="viz-area" id="qkv-viz" style="min-height:400px;">
+                    <svg id="qkv-svg" width="100%" height="400"></svg>
+                    <span class="watermark">Query-Key-Value</span>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ============================================================
+         Section 4: 注意力 = 加权求和
+         ============================================================ -->
+    <section class="section" id="sec-weighted">
+        <div class="section-title">
+            <span class="icon">4</span>
+            <h2>注意力 = 加权求和</h2>
+        </div>
+
+        <p style="max-width:700px;">
+            注意力的输出就是对所有值向量的<strong>加权求和</strong>。
+            权重决定了每个词对最终结果的贡献比例。公式：
+        </p>
+        <div style="text-align:center;margin:1rem 0;">
+            $$\text{Output} = \sum_{i} \alpha_i \cdot V_i \quad \text{其中} \quad \sum_i \alpha_i = 1$$
+        </div>
+
+        <div class="split-layout">
+            <div class="text-panel">
+                <h3>调整注意力权重</h3>
+                <p>拖动滑块改变每个词元的权重，观察输出向量如何变化。
+                   权重会自动归一化，使总和为 1。</p>
+
+                <div id="weight-sliders"></div>
+
+                <div class="info-box mt-1" id="weight-sum-info">
+                    <p>权重总和：<strong id="weight-sum-display">1.00</strong>（自动归一化）</p>
+                </div>
+
+                <div class="insight-box mt-2">
+                    <h4>关键洞察</h4>
+                    <p class="text-sm">注意力机制本质上就是一个<strong>可学习的加权平均</strong>。
+                    模型学会了哪些词更重要、更相关，然后分配更大的权重。
+                    这比简单的平均（所有权重相等）强大得多。</p>
+                </div>
+            </div>
+
+            <div class="viz-panel">
+                <div class="viz-area" style="padding:1.5rem;" id="weighted-viz">
+                    <h4 style="margin-bottom:0.75rem;">各词元的值向量 (Value)</h4>
+                    <div id="value-vectors" style="display:grid;grid-template-columns:repeat(4,1fr);gap:1rem;"></div>
+
+                    <div class="output-vector-area" id="output-area">
+                        <h4 style="margin-bottom:0.5rem;">输出向量（加权求和结果）</h4>
+                        <div id="output-vector-display"></div>
+                        <div id="output-equation" style="margin-top:0.75rem;font-family:var(--font-mono);font-size:0.8rem;color:var(--text-muted);word-break:break-all;"></div>
+                    </div>
+                    <span class="watermark">weighted sum</span>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ===== Navigation Footer ===== -->
+    <div class="flex justify-between items-center mt-3" style="padding:1.5rem 0;border-top:1px solid var(--border-color);">
+        <a href="../01-sequence-embedding/index.html" class="btn">← 上一模块：序列与嵌入</a>
+        <a href="../03-scaled-dot-product/index.html" class="btn btn-primary">下一模块：缩放点积注意力 →</a>
+    </div>
+</div>
+
+<!-- ===== CDN Scripts ===== -->
+<script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+
+<!-- ===== Shared Scripts ===== -->
+<script src="../shared/scripts/transformer-utils.js"></script>
+<script src="../shared/scripts/animation-controller.js"></script>
+<script src="../shared/scripts/matrix-renderer.js"></script>
+<script src="../shared/scripts/nav.js"></script>
+<script src="../shared/scripts/katex-init.js"></script>
+
+<script>
+// ================================================================
+// Section 1: RNN 的瓶颈 — 顺序处理动画
+// ================================================================
+(() => {
+    const svg = d3.select('#rnn-svg');
+    const container = document.getElementById('rnn-viz');
+    const tokens = ['我', '喜欢', '深度', '学习', '中的', 'Transformer', '架构'];
+    const numTokens = tokens.length;
+
+    // 布局参数
+    const cellW = 56, cellH = 44, gap = 12;
+    const startX = 30, startY = 200;
+    const tokenY = startY + cellH + 40;
+
+    let isPlaying = false;
+
+    function drawStatic() {
+        svg.selectAll('*').remove();
+        const w = container.clientWidth;
+        svg.attr('viewBox', `0 0 ${w} 320`);
+
+        // 绘制 RNN 单元格
+        for (let i = 0; i < numTokens; i++) {
+            const x = startX + i * (cellW + gap);
+            const g = svg.append('g').attr('class', 'rnn-cell').attr('id', `rnn-cell-${i}`);
+
+            // 单元格矩形
+            g.append('rect')
+                .attr('x', x).attr('y', startY)
+                .attr('width', cellW).attr('height', cellH)
+                .attr('rx', 6).attr('fill', 'var(--bg-card)')
+                .attr('stroke', 'var(--border-color)').attr('stroke-width', 1.5);
+
+            g.append('text')
+                .attr('x', x + cellW / 2).attr('y', startY + cellH / 2 + 4)
+                .attr('text-anchor', 'middle').attr('fill', 'var(--text-muted)')
+                .attr('font-size', 11).text('h' + i);
+
+            // 连接箭头（到下一个单元格）
+            if (i < numTokens - 1) {
+                svg.append('line')
+                    .attr('class', 'rnn-arrow')
+                    .attr('x1', x + cellW).attr('y1', startY + cellH / 2)
+                    .attr('x2', x + cellW + gap).attr('y2', startY + cellH / 2)
+                    .attr('stroke', 'var(--border-color)').attr('stroke-width', 1.5)
+                    .attr('marker-end', 'url(#arrowRNN)');
+            }
+
+            // 输入词（下方）
+            svg.append('text')
+                .attr('id', `rnn-token-${i}`)
+                .attr('x', x + cellW / 2).attr('y', tokenY)
+                .attr('text-anchor', 'middle')
+                .attr('fill', 'var(--text-muted)').attr('font-size', 13)
+                .text(tokens[i]);
+
+            // 输入箭头（从词到单元格）
+            svg.append('line')
+                .attr('class', 'rnn-input-arrow')
+                .attr('x1', x + cellW / 2).attr('y1', tokenY - 14)
+                .attr('x2', x + cellW / 2).attr('y2', startY + cellH)
+                .attr('stroke', 'var(--border-color)').attr('stroke-width', 1)
+                .attr('stroke-dasharray', '3,3');
+        }
+
+        // 瓶颈标签
+        const lastX = startX + (numTokens - 1) * (cellW + gap);
+        svg.append('text')
+            .attr('x', lastX + cellW / 2).attr('y', startY - 16)
+            .attr('text-anchor', 'middle')
+            .attr('fill', 'var(--accent-orange)').attr('font-size', 11)
+            .attr('font-weight', 600).attr('opacity', 0)
+            .attr('id', 'bottleneck-label')
+            .text('瓶颈向量');
+
+        svg.append('text')
+            .attr('x', startX + cellW / 2).attr('y', startY - 16)
+            .attr('text-anchor', 'middle')
+            .attr('fill', 'var(--text-muted)').attr('font-size', 10)
+            .text('输入端');
+
+        // 定义箭头 marker
+        svg.append('defs').append('marker')
+            .attr('id', 'arrowRNN').attr('viewBox', '0 0 10 10')
+            .attr('refX', 9).attr('refY', 5)
+            .attr('markerWidth', 6).attr('markerHeight', 6)
+            .attr('orient', 'auto-start-reverse')
+            .append('path').attr('d', 'M 0 0 L 10 5 L 0 10 z')
+            .attr('fill', 'var(--accent-green)');
+    }
+
+    async function playRNNAnimation() {
+        if (isPlaying) return;
+        isPlaying = true;
+
+        // 重置所有颜色
+        for (let i = 0; i < numTokens; i++) {
+            gsap.set(`#rnn-cell-${i} rect`, { attr: { fill: 'var(--bg-card)', stroke: 'var(--border-color)' } });
+            gsap.set(`#rnn-token-${i}`, { attr: { fill: 'var(--text-muted)' } });
+        }
+        gsap.set('#bottleneck-label', { attr: { opacity: 0 } });
+
+        for (let i = 0; i < numTokens; i++) {
+            // 高亮当前词
+            gsap.to(`#rnn-token-${i}`, { attr: { fill: '#16c79a' }, duration: 0.2 });
+
+            // 信息传入单元格
+            const intensity = 1 - (i / numTokens) * 0.65;
+            const green = Math.round(199 * intensity);
+            const alpha = 0.3 + intensity * 0.5;
+
+            gsap.to(`#rnn-cell-${i} rect`, {
+                attr: {
+                    fill: `rgba(22,${green},154,${alpha})`,
+                    stroke: '#16c79a'
+                },
+                duration: 0.4,
+                ease: 'power2.out'
+            });
+
+            // 淡化之前的单元格（信息损耗）
+            for (let j = 0; j < i; j++) {
+                const fade = 1 - ((i - j) / numTokens) * 0.7;
+                const g2 = Math.round(199 * fade * 0.5);
+                const a2 = Math.max(0.08, 0.3 * fade);
+                gsap.to(`#rnn-cell-${j} rect`, {
+                    attr: { fill: `rgba(22,${g2},154,${a2})`, stroke: 'var(--border-color)' },
+                    duration: 0.3
+                });
+            }
+
+            await new Promise(r => setTimeout(r, 500));
+        }
+
+        // 显示瓶颈标签
+        gsap.to('#bottleneck-label', { attr: { opacity: 1 }, duration: 0.5 });
+
+        // 闪烁最后一个单元格
+        gsap.to(`#rnn-cell-${numTokens - 1} rect`, {
+            attr: { stroke: '#ffab40' },
+            duration: 0.3,
+            repeat: 3,
+            yoyo: true
+        });
+
+        isPlaying = false;
+    }
+
+    function resetRNN() {
+        isPlaying = false;
+        gsap.killTweensOf('*');
+        drawStatic();
+    }
+
+    document.getElementById('btn-rnn-play').addEventListener('click', playRNNAnimation);
+    document.getElementById('btn-rnn-reset').addEventListener('click', resetRNN);
+
+    drawStatic();
+    window.addEventListener('resize', () => { if (!isPlaying) drawStatic(); });
+})();
+
+
+// ================================================================
+// Section 2: 远距离依赖问题
+// ================================================================
+(() => {
+    const sentenceEl = document.getElementById('dep-sentence');
+    const arcSvg = d3.select('#dep-arc-svg');
+    const questionBox = document.getElementById('dep-question');
+    const questionText = document.getElementById('dep-question-text');
+    const insightBox = document.getElementById('dep-insight');
+    const insightText = document.getElementById('dep-insight-text');
+
+    const examples = [
+        {
+            tokens: ['小猫', '坐在', '垫子', '上', '因为', '它', '很', '柔软'],
+            pronoun: 5,           // "它" 的索引
+            target: 2,            // "垫子" 的索引
+            question: '「它」指的是什么？是小猫，还是垫子？',
+            answer: '「它」指代「垫子」——因为「柔软」形容的是垫子。注意力机制能直接从第 6 个词跳到第 3 个词，不受距离影响。'
+        },
+        {
+            tokens: ['那个', '男孩', '看到', '那条', '狗', '追着', '它', '自己', '的', '尾巴'],
+            pronoun: 6,
+            target: 4,
+            question: '「它」指的是什么？是男孩，还是狗？',
+            answer: '「它」指代「狗」——因为「追着尾巴」是狗的行为。注意力可以跨越 2 个词直达目标，轻松解析指代。'
+        }
+    ];
+
+    let currentExample = 0;
+    let arcAnimated = false;
+
+    function renderSentence(idx) {
+        currentExample = idx;
+        arcAnimated = false;
+        const ex = examples[idx];
+        sentenceEl.innerHTML = '';
+        questionBox.classList.add('hidden');
+        insightBox.classList.add('hidden');
+        arcSvg.selectAll('*').remove();
+
+        ex.tokens.forEach((t, i) => {
+            const box = document.createElement('span');
+            box.className = 'token-box';
+            box.textContent = t;
+            box.dataset.idx = i;
+
+            if (i === ex.pronoun) {
+                box.style.borderColor = 'var(--accent-green)';
+                box.style.color = 'var(--accent-green)';
+                box.style.cursor = 'pointer';
+                box.title = '点击我！';
+                box.addEventListener('click', () => onPronounClick(idx));
+            }
+
+            sentenceEl.appendChild(box);
+        });
+    }
+
+    function onPronounClick(idx) {
+        if (arcAnimated) return;
+        arcAnimated = true;
+        const ex = examples[idx];
+        const boxes = sentenceEl.querySelectorAll('.token-box');
+
+        // 高亮代词
+        boxes[ex.pronoun].classList.add('active');
+
+        // 显示问题
+        questionText.textContent = ex.question;
+        questionBox.classList.remove('hidden');
+
+        // 延迟后画弧线
+        setTimeout(() => {
+            boxes[ex.target].classList.add('highlight-target');
+            drawArc(ex.pronoun, ex.target, boxes);
+
+            // 显示洞察
+            setTimeout(() => {
+                insightText.textContent = ex.answer;
+                insightBox.classList.remove('hidden');
+            }, 600);
+        }, 800);
+    }
+
+    function drawArc(fromIdx, toIdx, boxes) {
+        const containerRect = sentenceEl.getBoundingClientRect();
+        const fromBox = boxes[fromIdx].getBoundingClientRect();
+        const toBox = boxes[toIdx].getBoundingClientRect();
+
+        const x1 = fromBox.left + fromBox.width / 2 - containerRect.left;
+        const x2 = toBox.left + toBox.width / 2 - containerRect.left;
+        const w = containerRect.width;
+
+        arcSvg.attr('viewBox', `0 0 ${w} 80`).attr('width', w);
+
+        const midX = (x1 + x2) / 2;
+        const height = Math.abs(x1 - x2) * 0.4 + 20;
+
+        // 定义箭头
+        arcSvg.append('defs').append('marker')
+            .attr('id', 'arcArrow').attr('viewBox', '0 0 10 10')
+            .attr('refX', 9).attr('refY', 5)
+            .attr('markerWidth', 5).attr('markerHeight', 5)
+            .attr('orient', 'auto-start-reverse')
+            .append('path').attr('d', 'M 0 0 L 10 5 L 0 10 z')
+            .attr('fill', 'var(--accent-green)');
+
+        const path = arcSvg.append('path')
+            .attr('d', `M ${x1} 10 Q ${midX} ${10 + height} ${x2} 10`)
+            .attr('fill', 'none')
+            .attr('stroke', 'var(--accent-green)')
+            .attr('stroke-width', 2.5)
+            .attr('marker-end', 'url(#arcArrow)')
+            .attr('opacity', 0);
+
+        // 发光效果
+        arcSvg.append('path')
+            .attr('d', `M ${x1} 10 Q ${midX} ${10 + height} ${x2} 10`)
+            .attr('fill', 'none')
+            .attr('stroke', 'var(--accent-green)')
+            .attr('stroke-width', 6)
+            .attr('opacity', 0)
+            .attr('filter', 'blur(4px)')
+            .transition().duration(400).attr('opacity', 0.3);
+
+        // 标签
+        arcSvg.append('text')
+            .attr('x', midX).attr('y', height + 8)
+            .attr('text-anchor', 'middle')
+            .attr('fill', 'var(--accent-green)')
+            .attr('font-size', 11)
+            .attr('opacity', 0)
+            .text('注意力连接')
+            .transition().delay(400).duration(300).attr('opacity', 1);
+
+        // GSAP 动画弧线
+        gsap.to(path.node(), { attr: { opacity: 1 }, duration: 0.5, ease: 'power2.out' });
+
+        // 描边动画
+        const totalLen = path.node().getTotalLength();
+        path.attr('stroke-dasharray', totalLen)
+            .attr('stroke-dashoffset', totalLen)
+            .attr('opacity', 1);
+        gsap.to(path.node(), {
+            attr: { 'stroke-dashoffset': 0 },
+            duration: 0.8,
+            ease: 'power2.inOut'
+        });
+    }
+
+    document.getElementById('btn-dep-example1').addEventListener('click', () => renderSentence(0));
+    document.getElementById('btn-dep-example2').addEventListener('click', () => renderSentence(1));
+    document.getElementById('btn-dep-reset').addEventListener('click', () => renderSentence(currentExample));
+
+    renderSentence(0);
+})();
+
+
+// ================================================================
+// Section 3: 查询-键-值 类比
+// ================================================================
+(() => {
+    const svgEl = document.getElementById('qkv-svg');
+    const svg = d3.select('#qkv-svg');
+    const vizContainer = document.getElementById('qkv-viz');
+    const resultBox = document.getElementById('qkv-result-box');
+    const resultText = document.getElementById('qkv-result-text');
+    const flowItems = document.querySelectorAll('#qkv-flow .flow-item');
+
+    // 模拟数据: 图书馆场景
+    const queryWord = '动物';
+    const entries = [
+        { key: '猫科动物', value: '猫是灵活的猎手', score: 0 },
+        { key: '烹饪食谱', value: '如何做红烧肉', score: 0 },
+        { key: '犬类品种', value: '金毛是温顺的狗', score: 0 },
+        { key: '编程语言', value: 'Python 很流行', score: 0 },
+        { key: '海洋生物', value: '鲸鱼是哺乳动物', score: 0 },
+    ];
+
+    // 预定义相似度分数
+    const matchScores = [0.85, 0.05, 0.78, 0.02, 0.72];
+    entries.forEach((e, i) => e.score = matchScores[i]);
+
+    const colors = {
+        q: '#b388ff',
+        k: '#4fc3f7',
+        v: '#16c79a',
+        dim: 'var(--text-muted)',
+        bg: 'var(--bg-card)'
+    };
+
+    // 布局
+    const colQ = 60, colK = 220, colScore = 380, colV = 500;
+    const rowStart = 50, rowGap = 56;
+
+    function getWidth() { return vizContainer.clientWidth; }
+
+    function drawBase() {
+        svg.selectAll('*').remove();
+        const w = getWidth();
+        svg.attr('viewBox', `0 0 ${w} 380`);
+
+        // 列标题
+        const headers = [
+            { x: colQ, text: 'Query', color: colors.q },
+            { x: colK, text: 'Key', color: colors.k },
+            { x: colScore, text: '分数', color: 'var(--accent-orange)' },
+            { x: colV, text: 'Value', color: colors.v },
+        ];
+        headers.forEach(h => {
+            svg.append('text')
+                .attr('x', h.x).attr('y', 28)
+                .attr('fill', h.color).attr('font-size', 13)
+                .attr('font-weight', 600).text(h.text);
+        });
+
+        // Query 词
+        const qg = svg.append('g').attr('id', 'qkv-query-group');
+        qg.append('rect')
+            .attr('x', colQ - 10).attr('y', rowStart)
+            .attr('width', 100).attr('height', 34)
+            .attr('rx', 6).attr('fill', 'rgba(179,136,255,0.12)')
+            .attr('stroke', colors.q).attr('stroke-width', 1.5);
+        qg.append('text')
+            .attr('x', colQ + 40).attr('y', rowStart + 22)
+            .attr('text-anchor', 'middle')
+            .attr('fill', colors.q).attr('font-size', 14)
+            .attr('font-weight', 600).text(queryWord);
+
+        // Key-Value 行
+        entries.forEach((entry, i) => {
+            const y = rowStart + i * rowGap + (i === 0 ? 0 : 20);
+
+            // Key 框
+            svg.append('rect').attr('id', `key-box-${i}`)
+                .attr('x', colK - 10).attr('y', y)
+                .attr('width', 120).attr('height', 34)
+                .attr('rx', 6).attr('fill', colors.bg)
+                .attr('stroke', 'var(--border-color)').attr('stroke-width', 1.5);
+            svg.append('text').attr('id', `key-text-${i}`)
+                .attr('x', colK + 50).attr('y', y + 22)
+                .attr('text-anchor', 'middle')
+                .attr('fill', colors.dim).attr('font-size', 12)
+                .text(entry.key);
+
+            // 分数（初始隐藏）
+            svg.append('text').attr('id', `score-text-${i}`)
+                .attr('x', colScore + 20).attr('y', y + 22)
+                .attr('text-anchor', 'middle')
+                .attr('fill', 'var(--accent-orange)').attr('font-size', 13)
+                .attr('font-weight', 600).attr('opacity', 0)
+                .text(entry.score.toFixed(2));
+
+            // Value 框
+            svg.append('rect').attr('id', `val-box-${i}`)
+                .attr('x', colV - 10).attr('y', y)
+                .attr('width', 140).attr('height', 34)
+                .attr('rx', 6).attr('fill', colors.bg)
+                .attr('stroke', 'var(--border-color)').attr('stroke-width', 1.5)
+                .attr('opacity', 0.4);
+            svg.append('text').attr('id', `val-text-${i}`)
+                .attr('x', colV + 60).attr('y', y + 22)
+                .attr('text-anchor', 'middle')
+                .attr('fill', colors.dim).attr('font-size', 11)
+                .attr('opacity', 0.4)
+                .text(entry.value);
+
+            // 连接线 Query → Key（初始隐藏）
+            const qy = rowStart + 17;
+            svg.append('line').attr('id', `qk-line-${i}`)
+                .attr('x1', colQ + 90).attr('y1', qy)
+                .attr('x2', colK - 10).attr('y2', y + 17)
+                .attr('stroke', colors.q).attr('stroke-width', 1.5)
+                .attr('stroke-dasharray', '4,3')
+                .attr('opacity', 0);
+        });
+    }
+
+    // 动画步骤
+    const qkvSteps = [
+        {
+            name: '选择 Query',
+            duration: 800,
+            action: async (_, instant) => {
+                const dur = instant ? 0 : 0.5;
+                highlightFlow(0);
+                gsap.to('#qkv-query-group rect', {
+                    attr: { stroke: colors.q, 'stroke-width': 2.5 },
+                    duration: dur
+                });
+                // Query 脉冲
+                if (!instant) {
+                    gsap.fromTo('#qkv-query-group rect',
+                        { attr: { filter: '' } },
+                        { boxShadow: `0 0 20px ${colors.q}`, duration: 0.3, yoyo: true, repeat: 1 }
+                    );
+                }
+            }
+        },
+        {
+            name: '匹配 Keys',
+            duration: 1200,
+            action: async (_, instant) => {
+                const dur = instant ? 0 : 0.4;
+                highlightFlow(1);
+                for (let i = 0; i < entries.length; i++) {
+                    const delay = instant ? 0 : i * 0.15;
+                    // 显示连接线
+                    gsap.to(`#qk-line-${i}`, { attr: { opacity: 0.6 }, duration: dur, delay });
+                    // 根据分数高亮 Key 框
+                    const score = entries[i].score;
+                    if (score > 0.5) {
+                        gsap.to(`#key-box-${i}`, {
+                            attr: { fill: `rgba(79,195,247,${score * 0.25})`, stroke: colors.k, 'stroke-width': 2 },
+                            duration: dur, delay
+                        });
+                        gsap.to(`#key-text-${i}`, { attr: { fill: colors.k }, duration: dur, delay });
+                    }
+                }
+            }
+        },
+        {
+            name: '计算分数',
+            duration: 1000,
+            action: async (_, instant) => {
+                const dur = instant ? 0 : 0.3;
+                highlightFlow(2);
+                for (let i = 0; i < entries.length; i++) {
+                    const delay = instant ? 0 : i * 0.12;
+                    gsap.to(`#score-text-${i}`, { attr: { opacity: 1 }, duration: dur, delay });
+                    // 分数条（背景宽度表示分数）
+                    const y = rowStart + i * rowGap + (i === 0 ? 0 : 20);
+                    const barWidth = entries[i].score * 50;
+                    svg.append('rect').attr('class', 'score-bar')
+                        .attr('x', colScore - 5).attr('y', y + 28)
+                        .attr('width', 0).attr('height', 3)
+                        .attr('rx', 1.5)
+                        .attr('fill', 'var(--accent-orange)');
+                    if (!instant) {
+                        gsap.to(svg.selectAll('.score-bar').nodes()[i], {
+                            attr: { width: barWidth }, duration: 0.4, delay: delay + 0.1
+                        });
+                    } else {
+                        d3.select(svg.selectAll('.score-bar').nodes()[i]).attr('width', barWidth);
+                    }
+                }
+            }
+        },
+        {
+            name: '检索 Values',
+            duration: 1000,
+            action: async (_, instant) => {
+                const dur = instant ? 0 : 0.4;
+                highlightFlow(3);
+                // 高亮高分 Value
+                for (let i = 0; i < entries.length; i++) {
+                    const score = entries[i].score;
+                    const opacity = score > 0.5 ? 1 : 0.2;
+                    const delay = instant ? 0 : i * 0.1;
+                    gsap.to(`#val-box-${i}`, {
+                        attr: {
+                            opacity: 1,
+                            stroke: score > 0.5 ? colors.v : 'var(--border-color)',
+                            'stroke-width': score > 0.5 ? 2 : 1,
+                            fill: score > 0.5 ? `rgba(22,199,154,${score * 0.15})` : colors.bg
+                        },
+                        duration: dur, delay
+                    });
+                    gsap.to(`#val-text-${i}`, {
+                        attr: { opacity, fill: score > 0.5 ? colors.v : colors.dim },
+                        duration: dur, delay
+                    });
+                }
+                // 结果提示
+                resultText.textContent =
+                    `查询「${queryWord}」匹配到相关内容：猫科动物(0.85)、犬类品种(0.78)、海洋生物(0.72)。 高分项的 Value 被提取并加权组合成输出。`;
+                resultBox.classList.remove('hidden');
+            }
+        }
+    ];
+
+    function highlightFlow(step) {
+        flowItems.forEach((el, i) => {
+            el.classList.toggle('active-step', i === step);
+        });
+    }
+
+    // 使用 AnimationController
+    const qkvController = new AnimationController({
+        container: document.getElementById('qkv-controls'),
+        steps: qkvSteps,
+        defaultDuration: 1000,
+        onStepChange: (step) => {
+            if (step < 0) {
+                resultBox.classList.add('hidden');
+                flowItems.forEach(el => el.classList.remove('active-step'));
+                drawBase();
+            }
+        }
+    });
+
+    drawBase();
+    window.addEventListener('resize', () => {
+        qkvController.reset();
+        drawBase();
+    });
+})();
+
+
+// ================================================================
+// Section 4: 注意力 = 加权求和
+// ================================================================
+(() => {
+    const tokenNames = ['猫', '坐', '垫子', '上'];
+    const numTokens = tokenNames.length;
+    const vecDim = 6;
+    const tokenColors = ['#b388ff', '#4fc3f7', '#16c79a', '#ffab40'];
+
+    // 生成随机值向量（使用确定性种子）
+    const valueVectors = tokenNames.map((_, i) =>
+        TransformerUtils.randomVector(vecDim, 100 + i * 7, 0.8)
+    );
+
+    // 初始权重
+    let weights = [0.1, 0.15, 0.6, 0.15];
+
+    const slidersContainer = document.getElementById('weight-sliders');
+    const valueVecContainer = document.getElementById('value-vectors');
+    const outputDisplay = document.getElementById('output-vector-display');
+    const outputEquation = document.getElementById('output-equation');
+    const sumDisplay = document.getElementById('weight-sum-display');
+
+    // 创建滑块
+    function createSliders() {
+        slidersContainer.innerHTML = '';
+        tokenNames.forEach((name, i) => {
+            const row = document.createElement('div');
+            row.className = 'weight-row';
+
+            const label = document.createElement('label');
+            label.textContent = name;
+            label.style.color = tokenColors[i];
+            label.style.fontWeight = '600';
+
+            const slider = document.createElement('input');
+            slider.type = 'range';
+            slider.min = '0';
+            slider.max = '100';
+            slider.value = Math.round(weights[i] * 100);
+            slider.dataset.idx = i;
+            slider.addEventListener('input', onSliderChange);
+
+            const val = document.createElement('span');
+            val.className = 'val';
+            val.id = `weight-val-${i}`;
+            val.textContent = weights[i].toFixed(2);
+
+            row.append(label, slider, val);
+            slidersContainer.appendChild(row);
+        });
+    }
+
+    function onSliderChange(e) {
+        const idx = parseInt(e.target.dataset.idx);
+        const rawVal = parseInt(e.target.value);
+
+        // 收集所有原始值
+        const raws = [];
+        slidersContainer.querySelectorAll('input[type="range"]').forEach((sl, i) => {
+            raws[i] = i === idx ? rawVal : parseInt(sl.value);
+        });
+
+        // 归一化
+        const total = raws.reduce((a, b) => a + b, 0);
+        if (total === 0) {
+            weights = raws.map(() => 1 / numTokens);
+        } else {
+            weights = raws.map(r => r / total);
+        }
+
+        // 更新显示
+        slidersContainer.querySelectorAll('input[type="range"]').forEach((sl, i) => {
+            sl.value = Math.round(weights[i] * 100);
+            document.getElementById(`weight-val-${i}`).textContent = weights[i].toFixed(2);
+        });
+
+        sumDisplay.textContent = weights.reduce((a, b) => a + b, 0).toFixed(2);
+        renderOutput();
+    }
+
+    // 绘制值向量柱状图
+    function renderValueVectors() {
+        valueVecContainer.innerHTML = '';
+        tokenNames.forEach((name, i) => {
+            const card = document.createElement('div');
+            card.style.textAlign = 'center';
+
+            const title = document.createElement('div');
+            title.style.cssText = `font-size:0.85rem;color:${tokenColors[i]};font-weight:600;margin-bottom:0.4rem;`;
+            title.textContent = `V(${name})`;
+
+            const barGroup = document.createElement('div');
+            barGroup.className = 'vec-bar-group';
+            barGroup.style.justifyContent = 'center';
+            barGroup.id = `vec-bars-${i}`;
+
+            valueVectors[i].forEach((v, d) => {
+                const bar = document.createElement('div');
+                bar.className = 'vec-bar';
+                const absVal = Math.abs(v);
+                const h = Math.max(4, absVal * 60);
+                bar.style.height = h + 'px';
+                bar.style.background = v >= 0
+                    ? tokenColors[i]
+                    : `color-mix(in srgb, ${tokenColors[i]} 50%, var(--accent-red))`;
+                bar.style.opacity = 0.4 + absVal * 0.6;
+                bar.title = `维度${d}: ${v.toFixed(3)}`;
+                barGroup.appendChild(bar);
+            });
+
+            // 权重标签
+            const wLabel = document.createElement('div');
+            wLabel.className = `weight-label-${i}`;
+            wLabel.style.cssText = 'font-family:var(--font-mono);font-size:0.8rem;color:var(--text-muted);margin-top:0.3rem;';
+            wLabel.id = `w-label-${i}`;
+            wLabel.textContent = `α=${weights[i].toFixed(2)}`;
+
+            card.append(title, barGroup, wLabel);
+            valueVecContainer.appendChild(card);
+        });
+    }
+
+    function computeOutput() {
+        const out = new Array(vecDim).fill(0);
+        for (let i = 0; i < numTokens; i++) {
+            for (let d = 0; d < vecDim; d++) {
+                out[d] += weights[i] * valueVectors[i][d];
+            }
+        }
+        return out;
+    }
+
+    function renderOutput() {
+        const output = computeOutput();
+
+        // 更新权重标签
+        tokenNames.forEach((_, i) => {
+            const el = document.getElementById(`w-label-${i}`);
+            if (el) el.textContent = `α=${weights[i].toFixed(2)}`;
+        });
+
+        // 输出向量柱状图
+        outputDisplay.innerHTML = '';
+        const barGroup = document.createElement('div');
+        barGroup.className = 'vec-bar-group';
+        barGroup.style.justifyContent = 'center';
+        barGroup.style.height = '70px';
+
+        output.forEach((v, d) => {
+            const bar = document.createElement('div');
+            bar.className = 'vec-bar';
+            const absVal = Math.abs(v);
+            const h = Math.max(4, absVal * 70);
+            bar.style.height = h + 'px';
+            bar.style.width = '20px';
+
+            // 混合颜色：按权重混合各 token 颜色
+            const maxWIdx = weights.indexOf(Math.max(...weights));
+            bar.style.background = v >= 0
+                ? tokenColors[maxWIdx]
+                : `color-mix(in srgb, ${tokenColors[maxWIdx]} 50%, var(--accent-red))`;
+            bar.style.opacity = 0.5 + absVal * 0.5;
+            bar.title = `维度${d}: ${v.toFixed(3)}`;
+            barGroup.appendChild(bar);
+        });
+
+        outputDisplay.appendChild(barGroup);
+
+        // 数值显示
+        const numDisplay = document.createElement('div');
+        numDisplay.style.cssText = 'font-family:var(--font-mono);font-size:0.8rem;color:var(--text-secondary);margin-top:0.5rem;text-align:center;';
+        numDisplay.textContent = `[${output.map(v => v.toFixed(3)).join(', ')}]`;
+        outputDisplay.appendChild(numDisplay);
+
+        // 公式显示
+        const parts = tokenNames.map((name, i) => {
+            const w = weights[i].toFixed(2);
+            return `${w} × V(${name})`;
+        });
+        outputEquation.textContent = `Output = ${parts.join(' + ')}`;
+
+        // GSAP 动画高亮输出
+        gsap.fromTo(outputDisplay, { opacity: 0.6 }, { opacity: 1, duration: 0.3 });
+    }
+
+    createSliders();
+    renderValueVectors();
+    renderOutput();
+})();
+</script>
+
+</body>
+</html>

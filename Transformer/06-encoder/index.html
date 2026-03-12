@@ -1,0 +1,1237 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>06 - Transformer 编码器 | Transformer 学习</title>
+
+    <!-- Shared Styles -->
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+
+    <!-- KaTeX -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+
+    <!-- CDN Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+
+    <style>
+        /* ========== Module-specific Styles ========== */
+        .hero-banner {
+            text-align: center;
+            padding: 2rem 0 1.5rem;
+        }
+        .hero-banner h1 {
+            font-size: 2.2rem;
+            background: linear-gradient(135deg, var(--accent-green), var(--accent-blue));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .hero-banner .subtitle {
+            color: var(--text-secondary);
+            font-size: 1.05rem;
+            margin-top: 0.3rem;
+        }
+
+        .section-anchor { scroll-margin-top: calc(var(--header-height) + 1rem); }
+
+        /* Architecture diagram */
+        .arch-svg { cursor: pointer; }
+        .arch-block {
+            transition: filter 0.3s, transform 0.3s;
+        }
+        .arch-block:hover {
+            filter: brightness(1.3);
+        }
+        .arch-block.attention-block rect { fill: rgba(79, 195, 247, 0.2); stroke: var(--accent-blue); }
+        .arch-block.addnorm-block rect { fill: rgba(22, 199, 154, 0.2); stroke: var(--accent-green); }
+        .arch-block.ffn-block rect { fill: rgba(179, 136, 255, 0.2); stroke: var(--accent-purple); }
+
+        /* Heatmap container */
+        .heatmap-wrap {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1.5rem;
+            justify-content: center;
+            align-items: flex-start;
+        }
+
+        /* Residual animation */
+        .residual-svg-wrap {
+            display: flex;
+            justify-content: center;
+            margin: 1rem 0;
+        }
+
+        /* LayerNorm interactive */
+        .ln-input-group {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            align-items: center;
+            margin: 1rem 0;
+        }
+        .ln-input-group input[type="number"] {
+            width: 60px;
+            padding: 0.4rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            color: var(--text-primary);
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            text-align: center;
+        }
+        .ln-input-group input[type="number"]:focus {
+            outline: none;
+            border-color: var(--accent-green);
+        }
+        .ln-result {
+            padding: 1rem;
+            background: var(--bg-card);
+            border-radius: var(--radius-md);
+            border: 1px solid var(--border-color);
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            line-height: 1.8;
+            margin-top: 0.5rem;
+        }
+        .ln-result .val-positive { color: var(--accent-green); }
+        .ln-result .val-negative { color: var(--accent-red); }
+        .ln-result .label { color: var(--text-muted); }
+
+        /* FFN diagram */
+        .ffn-svg-wrap {
+            display: flex;
+            justify-content: center;
+            margin: 1rem 0;
+        }
+
+        /* Full pipeline */
+        .pipeline-viz {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+        .pipeline-heatmaps {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1rem;
+            justify-content: center;
+            align-items: flex-start;
+        }
+        .pipeline-step-label {
+            text-align: center;
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: var(--accent-green);
+            margin-bottom: 0.5rem;
+            padding: 0.3rem 0.8rem;
+            background: rgba(22, 199, 154, 0.1);
+            border-radius: var(--radius-sm);
+            display: inline-block;
+        }
+        .pipeline-step-wrap {
+            text-align: center;
+        }
+
+        /* Layer slider */
+        .layer-control {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            padding: 1rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            margin-bottom: 1rem;
+        }
+        .layer-control label {
+            white-space: nowrap;
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+        }
+        .layer-control .layer-val {
+            font-family: var(--font-mono);
+            color: var(--accent-green);
+            font-weight: 700;
+            min-width: 1.5rem;
+            text-align: center;
+        }
+
+        /* Bidirectional indicator */
+        .bidir-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.3rem;
+            padding: 0.2rem 0.6rem;
+            background: rgba(79, 195, 247, 0.15);
+            color: var(--accent-blue);
+            border-radius: 9999px;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+
+        /* Bar chart for LayerNorm */
+        .bar-chart-wrap {
+            display: flex;
+            gap: 2rem;
+            justify-content: center;
+            flex-wrap: wrap;
+            margin: 1rem 0;
+        }
+        .bar-chart-group { text-align: center; }
+        .bar-chart-group .chart-label {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            margin-bottom: 0.5rem;
+        }
+
+        /* Stacking indicator */
+        .stack-indicator {
+            display: flex;
+            align-items: center;
+            gap: 0.3rem;
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            color: var(--accent-orange);
+            font-weight: 700;
+        }
+    </style>
+</head>
+<body>
+<div class="page-container">
+    <!-- Hero -->
+    <div class="hero-banner">
+        <h1>06 - Transformer 编码器</h1>
+        <p class="subtitle">将所有子模块组装：自注意力、残差连接、层归一化、前馈网络</p>
+    </div>
+
+    <!-- ===== Section 1: 编码器架构总览 ===== -->
+    <div id="sec-overview" class="section section-anchor">
+        <div class="section-title">
+            <div class="icon">⊞</div>
+            <h2>编码器架构总览</h2>
+        </div>
+        <p>Transformer 编码器由 $N$ 个相同的层堆叠而成。每一层包含两个子层：<strong>多头自注意力</strong>和<strong>前馈网络</strong>，每个子层都带有<strong>残差连接</strong>与<strong>层归一化</strong>。</p>
+        <div class="info-box success">
+            <p>点击下方架构图中的各个组件，可跳转到对应的详解部分。</p>
+        </div>
+        <div class="card" style="overflow-x:auto;">
+            <div id="arch-diagram" style="display:flex;justify-content:center;"></div>
+            <div class="legend" style="justify-content:center;margin-top:0.5rem;">
+                <div class="legend-item"><div class="swatch" style="background:var(--accent-blue)"></div>多头自注意力</div>
+                <div class="legend-item"><div class="swatch" style="background:var(--accent-green)"></div>Add & Norm</div>
+                <div class="legend-item"><div class="swatch" style="background:var(--accent-purple)"></div>前馈网络</div>
+                <div class="legend-item"><div class="swatch" style="background:var(--accent-orange)"></div>数据流向</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== Section 2: 自注意力子层 ===== -->
+    <div id="sec-self-attn" class="section section-anchor">
+        <div class="section-title">
+            <div class="icon">◉</div>
+            <h2>自注意力子层</h2>
+        </div>
+        <div class="split-layout">
+            <div class="text-panel">
+                <p>在编码器中，自注意力的查询(Q)、键(K)、值(V) 全部来自同一输入 $X$：</p>
+                <p>$$Q = XW^Q, \quad K = XW^K, \quad V = XW^V$$</p>
+                <p>每个 token 都可以关注序列中所有其他 token（包括自身），这使得编码器具有<strong>双向</strong>注意力能力。</p>
+                <div class="bidir-badge" style="margin:0.5rem 0;">双向注意力 — 每个 token 看到全部上下文</div>
+                <p class="mt-2">下面用 4 个 token 演示完整的自注意力计算过程：</p>
+                <div style="margin:0.5rem 0;">
+                    <span class="badge badge-blue">我</span>
+                    <span class="badge badge-blue">喜欢</span>
+                    <span class="badge badge-blue">深度</span>
+                    <span class="badge badge-blue">学习</span>
+                </div>
+                <button class="btn btn-primary mt-2" id="btn-run-attn">运行自注意力计算</button>
+                <div id="attn-info" class="info-box mt-2" style="display:none;"></div>
+            </div>
+            <div class="viz-panel">
+                <div id="attn-heatmap-area" class="heatmap-wrap"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== Section 3: 残差连接 & 层归一化 ===== -->
+    <div id="sec-residual-ln" class="section section-anchor">
+        <div class="section-title">
+            <div class="icon">⟳</div>
+            <h2>残差连接 & 层归一化</h2>
+        </div>
+        <p>每个子层的输出都经过残差连接和层归一化：</p>
+        <p>$$\text{output} = \text{LayerNorm}(x + \text{Sublayer}(x))$$</p>
+
+        <h3 class="mt-3">残差连接动画</h3>
+        <p>数据同时经过子层处理和直接跳过（skip connection），然后相加：</p>
+        <div class="card">
+            <div class="residual-svg-wrap" id="residual-anim-area"></div>
+            <div style="text-align:center;">
+                <button class="btn btn-primary" id="btn-play-residual">播放残差连接动画</button>
+            </div>
+        </div>
+
+        <h3 class="mt-3">层归一化</h3>
+        <p>对每个 token 的特征向量独立地归一化（注意：是沿特征维度，不是 batch 维度）：</p>
+        <p>$$\text{LayerNorm}(x) = \frac{x - \mu}{\sqrt{\sigma^2 + \epsilon}} \cdot \gamma + \beta$$</p>
+
+        <div class="split-layout mt-2">
+            <div class="text-panel">
+                <h4>可视化：归一化前后对比</h4>
+                <div id="ln-bar-charts" class="bar-chart-wrap"></div>
+                <button class="btn btn-sm" id="btn-randomize-ln">随机新数据</button>
+            </div>
+            <div class="viz-panel">
+                <h4>交互：输入你的向量</h4>
+                <p class="text-sm text-muted">修改下方数值后点击"计算"查看归一化过程</p>
+                <div class="ln-input-group" id="ln-inputs"></div>
+                <button class="btn btn-primary btn-sm mt-1" id="btn-calc-ln">计算 LayerNorm</button>
+                <div class="ln-result mt-1" id="ln-result" style="display:none;"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== Section 4: 前馈网络 (FFN) ===== -->
+    <div id="sec-ffn" class="section section-anchor">
+        <div class="section-title">
+            <div class="icon">⊕</div>
+            <h2>前馈网络 (FFN)</h2>
+        </div>
+        <p>每个编码器层的第二个子层是一个逐位置的前馈网络，对每个 token 独立地进行非线性变换：</p>
+        <p>$$\text{FFN}(x) = \max(0,\; xW_1 + b_1)\,W_2 + b_2$$</p>
+        <p>典型配置：$d_{ff} = 4 \times d_{model}$，先扩展再压缩，让模型在更高维空间进行特征变换。</p>
+
+        <div class="card mt-2">
+            <h4>FFN 架构图</h4>
+            <div class="ffn-svg-wrap" id="ffn-diagram"></div>
+            <div style="text-align:center;">
+                <button class="btn btn-primary" id="btn-play-ffn">播放数据流动画</button>
+                <button class="btn btn-sm" id="btn-reset-ffn" style="margin-left:0.5rem;">重置</button>
+            </div>
+        </div>
+
+        <div class="split-layout mt-2">
+            <div class="text-panel">
+                <h4>ReLU 激活效果</h4>
+                <p>ReLU 将所有负值置零，只保留正值。这引入了稀疏性——网络学会用不同的"专家神经元"处理不同特征。</p>
+                <div class="info-box">
+                    <p>原始论文使用 ReLU，后续变体（GPT-2, BERT 等）常使用 GELU。</p>
+                </div>
+            </div>
+            <div class="viz-panel">
+                <div id="relu-viz" class="heatmap-wrap"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== Section 5: 完整数据流动画 ===== -->
+    <div id="sec-pipeline" class="section section-anchor">
+        <div class="section-title">
+            <div class="icon">▶</div>
+            <h2>完整数据流动画</h2>
+        </div>
+        <p>观察数据如何在编码器中一步步被处理：输入 4 个 token，每个 8 维。调节层数滑块可查看多层堆叠的效果。</p>
+
+        <div class="layer-control">
+            <label>编码器层数：</label>
+            <input type="range" id="layer-slider" min="1" max="4" value="1" style="max-width:200px;">
+            <span class="layer-val" id="layer-val">1</span>
+            <span class="stack-indicator">N = <span id="stack-n">1</span></span>
+        </div>
+
+        <div class="card">
+            <div id="pipeline-controls"></div>
+            <div id="pipeline-step-info" class="info-box mt-1" style="display:none;"></div>
+            <div id="pipeline-heatmaps" class="pipeline-heatmaps mt-2"></div>
+        </div>
+    </div>
+
+</div><!-- /page-container -->
+
+<!-- Shared Scripts -->
+<script src="../shared/scripts/transformer-utils.js"></script>
+<script src="../shared/scripts/animation-controller.js"></script>
+<script src="../shared/scripts/matrix-renderer.js"></script>
+<script src="../shared/scripts/nav.js"></script>
+<script src="../shared/scripts/katex-init.js"></script>
+
+<script>
+// ============================================================
+// Globals & Utility
+// ============================================================
+const TU = TransformerUtils;
+const TOKENS = ['我', '喜欢', '深度', '学习'];
+const SEQ_LEN = 4;
+const D_MODEL = 8;
+const D_FF = D_MODEL * 4; // 32
+const NUM_HEADS = 2;
+const D_K = D_MODEL / NUM_HEADS; // 4
+
+// Seed-based weights for reproducibility
+const X_input = TU.randomMatrix(SEQ_LEN, D_MODEL, 100, 0.6);
+const Wq = TU.randomMatrix(D_MODEL, D_MODEL, 200, 0.4);
+const Wk = TU.randomMatrix(D_MODEL, D_MODEL, 300, 0.4);
+const Wv = TU.randomMatrix(D_MODEL, D_MODEL, 400, 0.4);
+const W1 = TU.randomMatrix(D_MODEL, D_FF, 500, 0.3);
+const W2 = TU.randomMatrix(D_FF, D_MODEL, 600, 0.3);
+
+function fmt(v) { return typeof v === 'number' ? v.toFixed(3) : v; }
+function colorVal(v) { return v >= 0 ? 'val-positive' : 'val-negative'; }
+
+// ============================================================
+// Section 1: Architecture Diagram
+// ============================================================
+(function buildArchDiagram() {
+    const container = document.getElementById('arch-diagram');
+    const W = 480, H = 580;
+    const svg = d3.select(container).append('svg')
+        .attr('viewBox', `0 0 ${W} ${H}`)
+        .attr('width', '100%').attr('height', H)
+        .style('max-width', W + 'px');
+
+    const defs = svg.append('defs');
+    defs.append('marker').attr('id', 'arrow-orange')
+        .attr('viewBox', '0 0 10 10').attr('refX', 8).attr('refY', 5)
+        .attr('markerWidth', 7).attr('markerHeight', 7).attr('orient', 'auto')
+        .append('path').attr('d', 'M0,0 L10,5 L0,10 Z').attr('fill', '#ffab40');
+
+    const cx = W / 2;
+
+    // Helper: draw block
+    function drawBlock(y, w, h, label, cls, targetId) {
+        const g = svg.append('g').attr('class', `arch-block ${cls}`)
+            .style('cursor', 'pointer')
+            .on('click', () => {
+                if (targetId) document.getElementById(targetId)?.scrollIntoView({ behavior: 'smooth' });
+            });
+        g.append('rect')
+            .attr('x', cx - w / 2).attr('y', y)
+            .attr('width', w).attr('height', h)
+            .attr('rx', 8).attr('stroke-width', 2);
+        g.append('text')
+            .attr('x', cx).attr('y', y + h / 2 + 5)
+            .attr('text-anchor', 'middle')
+            .attr('fill', '#e8e8e8').attr('font-size', 14).attr('font-weight', 600)
+            .text(label);
+        return g;
+    }
+
+    // Helper: draw arrow
+    function drawArrow(y1, y2) {
+        svg.append('line')
+            .attr('x1', cx).attr('y1', y1).attr('x2', cx).attr('y2', y2)
+            .attr('stroke', '#ffab40').attr('stroke-width', 2)
+            .attr('marker-end', 'url(#arrow-orange)');
+    }
+
+    // Helper: draw skip arrow
+    function drawSkip(yStart, yEnd, side) {
+        const offset = side === 'left' ? -150 : 150;
+        const xOff = cx + offset;
+        const path = `M ${cx - 140} ${yStart} L ${xOff - 10} ${yStart} L ${xOff - 10} ${yEnd} L ${cx - 140} ${yEnd}`;
+        svg.append('path').attr('d', path)
+            .attr('fill', 'none').attr('stroke', 'var(--accent-green)')
+            .attr('stroke-width', 1.5).attr('stroke-dasharray', '5,4')
+            .attr('marker-end', 'url(#arrow-orange)');
+    }
+
+    // Stack indicator
+    const stackG = svg.append('g');
+    stackG.append('rect')
+        .attr('x', cx + 160).attr('y', 100).attr('width', 50).attr('height', 380)
+        .attr('rx', 6).attr('fill', 'none').attr('stroke', 'var(--accent-orange)')
+        .attr('stroke-width', 1.5).attr('stroke-dasharray', '6,4');
+    stackG.append('text')
+        .attr('x', cx + 185).attr('y', 295)
+        .attr('text-anchor', 'middle')
+        .attr('fill', 'var(--accent-orange)').attr('font-size', 22).attr('font-weight', 700)
+        .text('N\u00d7');
+
+    // Input
+    svg.append('text')
+        .attr('x', cx).attr('y', 38).attr('text-anchor', 'middle')
+        .attr('fill', 'var(--text-secondary)').attr('font-size', 14).attr('font-weight', 600)
+        .text('输入嵌入 + 位置编码');
+    svg.append('rect')
+        .attr('x', cx - 90).attr('y', 45).attr('width', 180).attr('height', 36)
+        .attr('rx', 6).attr('fill', 'rgba(255,171,64,0.15)').attr('stroke', 'var(--accent-orange)')
+        .attr('stroke-width', 1.5);
+    svg.append('text')
+        .attr('x', cx).attr('y', 68).attr('text-anchor', 'middle')
+        .attr('fill', '#ffab40').attr('font-size', 13).attr('font-weight', 600)
+        .text('X + PE');
+
+    drawArrow(81, 110);
+
+    // Multi-Head Attention
+    drawBlock(115, 260, 50, '多头自注意力', 'attention-block', 'sec-self-attn');
+    drawArrow(165, 195);
+
+    // Skip connection 1
+    const skip1path = `M ${cx - 130} 135 Q ${cx - 170} 135, ${cx - 170} 170 L ${cx - 170} 215 Q ${cx - 170} 230, ${cx - 130} 230`;
+    svg.append('path').attr('d', skip1path)
+        .attr('fill', 'none').attr('stroke', 'var(--accent-green)')
+        .attr('stroke-width', 1.5).attr('stroke-dasharray', '5,4');
+    svg.append('text')
+        .attr('x', cx - 182).attr('y', 180).attr('text-anchor', 'end')
+        .attr('fill', 'var(--accent-green)').attr('font-size', 11)
+        .text('残差');
+
+    // Add & Norm 1
+    drawBlock(200, 260, 44, 'Add & LayerNorm', 'addnorm-block', 'sec-residual-ln');
+    drawArrow(244, 275);
+
+    // FFN
+    drawBlock(280, 260, 50, '前馈网络 (FFN)', 'ffn-block', 'sec-ffn');
+    drawArrow(330, 365);
+
+    // Skip connection 2
+    const skip2path = `M ${cx - 130} 300 Q ${cx - 170} 300, ${cx - 170} 340 L ${cx - 170} 385 Q ${cx - 170} 400, ${cx - 130} 400`;
+    svg.append('path').attr('d', skip2path)
+        .attr('fill', 'none').attr('stroke', 'var(--accent-green)')
+        .attr('stroke-width', 1.5).attr('stroke-dasharray', '5,4');
+    svg.append('text')
+        .attr('x', cx - 182).attr('y', 348).attr('text-anchor', 'end')
+        .attr('fill', 'var(--accent-green)').attr('font-size', 11)
+        .text('残差');
+
+    // Add & Norm 2
+    drawBlock(370, 260, 44, 'Add & LayerNorm', 'addnorm-block', 'sec-residual-ln');
+    drawArrow(414, 455);
+
+    // Output
+    svg.append('rect')
+        .attr('x', cx - 90).attr('y', 460).attr('width', 180).attr('height', 36)
+        .attr('rx', 6).attr('fill', 'rgba(22,199,154,0.15)').attr('stroke', 'var(--accent-green)')
+        .attr('stroke-width', 1.5);
+    svg.append('text')
+        .attr('x', cx).attr('y', 483).attr('text-anchor', 'middle')
+        .attr('fill', 'var(--accent-green)').attr('font-size', 14).attr('font-weight', 600)
+        .text('编码器输出');
+
+    // Arrow to next layer
+    svg.append('text')
+        .attr('x', cx).attr('y', 525).attr('text-anchor', 'middle')
+        .attr('fill', 'var(--text-muted)').attr('font-size', 12)
+        .text('传递给下一层编码器 / 解码器');
+})();
+
+// ============================================================
+// Section 2: Self-Attention
+// ============================================================
+(function initSelfAttention() {
+    const area = document.getElementById('attn-heatmap-area');
+    const btnRun = document.getElementById('btn-run-attn');
+    const infoEl = document.getElementById('attn-info');
+
+    // Compute Q, K, V
+    const Q = TU.matmul(X_input, Wq);
+    const K = TU.matmul(X_input, Wk);
+    const V = TU.matmul(X_input, Wv);
+    const { output: attnOut, weights: attnWeights, scores: attnScores } = TU.scaledDotProductAttention(Q, K, V);
+
+    let rendered = false;
+
+    function renderAttention() {
+        area.innerHTML = '';
+
+        // Attention weights heatmap
+        const wrapWeights = document.createElement('div');
+        wrapWeights.className = 'pipeline-step-wrap';
+        const labelW = document.createElement('div');
+        labelW.className = 'pipeline-step-label';
+        labelW.textContent = '注意力权重';
+        wrapWeights.appendChild(labelW);
+        const wDiv = document.createElement('div');
+        wrapWeights.appendChild(wDiv);
+        area.appendChild(wrapWeights);
+
+        new MatrixRenderer({
+            container: wDiv,
+            data: attnWeights,
+            rowLabels: TOKENS,
+            colLabels: TOKENS,
+            cellSize: 56,
+            showValues: true,
+            colorScale: (v) => TU.attentionColor(v),
+        });
+
+        // Attention output heatmap
+        const wrapOut = document.createElement('div');
+        wrapOut.className = 'pipeline-step-wrap';
+        const labelO = document.createElement('div');
+        labelO.className = 'pipeline-step-label';
+        labelO.textContent = '注意力输出';
+        wrapOut.appendChild(labelO);
+        const oDiv = document.createElement('div');
+        wrapOut.appendChild(oDiv);
+        area.appendChild(wrapOut);
+
+        const colLabels = Array.from({ length: D_MODEL }, (_, i) => 'd' + i);
+        new MatrixRenderer({
+            container: oDiv,
+            data: attnOut,
+            rowLabels: TOKENS,
+            colLabels: colLabels,
+            cellSize: 42,
+            showValues: true,
+        });
+    }
+
+    btnRun.addEventListener('click', () => {
+        if (rendered) return;
+        rendered = true;
+        btnRun.disabled = true;
+        btnRun.textContent = '计算完成';
+
+        // Animate step info
+        infoEl.style.display = 'block';
+        const steps = [
+            '1. 线性投影: Q = XW^Q, K = XW^K, V = XW^V',
+            '2. 计算注意力分数: scores = QK^T / sqrt(d_k)',
+            '3. Softmax 归一化得到权重',
+            '4. 加权求和: output = weights * V',
+        ];
+        let html = '<p style="margin:0;font-weight:600;color:var(--accent-blue);">计算步骤：</p>';
+        steps.forEach(s => html += `<p style="margin:0.2rem 0;font-size:0.85rem;">${s}</p>`);
+        infoEl.innerHTML = html;
+
+        gsap.from(infoEl, { opacity: 0, y: 10, duration: 0.4 });
+
+        // Render heatmaps with animation
+        setTimeout(() => {
+            renderAttention();
+            gsap.from(area.children, { opacity: 0, y: 20, stagger: 0.3, duration: 0.6 });
+        }, 300);
+    });
+
+    // Pre-render if desired
+    renderAttention();
+    rendered = true;
+    btnRun.textContent = '已完成';
+    btnRun.disabled = true;
+    infoEl.style.display = 'block';
+    infoEl.innerHTML = `
+        <p style="margin:0;font-weight:600;color:var(--accent-blue);">注意力矩阵说明：</p>
+        <p style="margin:0.2rem 0;font-size:0.85rem;">左侧：每一行表示一个查询 token 对所有键 token 的注意力权重（行和为 1）。</p>
+        <p style="margin:0.2rem 0;font-size:0.85rem;">右侧：注意力加权后的输出表示——每个 token 已融合了上下文信息。</p>
+        <p style="margin:0.2rem 0;font-size:0.85rem;"><strong>双向性</strong>：注意"我"可以看到"学习"，"学习"也可以看到"我"——没有遮挡。</p>
+    `;
+})();
+
+// ============================================================
+// Section 3: Residual Connection & Layer Norm
+// ============================================================
+(function initResidualAnim() {
+    const container = document.getElementById('residual-anim-area');
+    const W = 500, H = 200;
+    const svg = d3.select(container).append('svg')
+        .attr('viewBox', `0 0 ${W} ${H}`)
+        .attr('width', '100%').attr('height', H)
+        .style('max-width', W + 'px');
+
+    const defs = svg.append('defs');
+    defs.append('marker').attr('id', 'arr-res')
+        .attr('viewBox', '0 0 10 10').attr('refX', 8).attr('refY', 5)
+        .attr('markerWidth', 6).attr('markerHeight', 6).attr('orient', 'auto')
+        .append('path').attr('d', 'M0,0 L10,5 L0,10 Z').attr('fill', '#ffab40');
+
+    // Main path (through sublayer)
+    svg.append('rect')
+        .attr('x', 30).attr('y', 75).attr('width', 60).attr('height', 36).attr('rx', 6)
+        .attr('fill', 'rgba(255,171,64,0.15)').attr('stroke', '#ffab40').attr('stroke-width', 1.5);
+    svg.append('text').attr('x', 60).attr('y', 98).attr('text-anchor', 'middle')
+        .attr('fill', '#ffab40').attr('font-size', 12).attr('font-weight', 600).text('x');
+
+    // Sublayer block
+    svg.append('rect')
+        .attr('x', 150).attr('y', 70).attr('width', 120).attr('height', 44).attr('rx', 8)
+        .attr('fill', 'rgba(79,195,247,0.15)').attr('stroke', 'var(--accent-blue)').attr('stroke-width', 2);
+    svg.append('text').attr('x', 210).attr('y', 97).attr('text-anchor', 'middle')
+        .attr('fill', 'var(--accent-blue)').attr('font-size', 13).attr('font-weight', 600).text('Sublayer(x)');
+
+    // Arrow: input -> sublayer
+    svg.append('line').attr('x1', 90).attr('y1', 93).attr('x2', 148).attr('y2', 93)
+        .attr('stroke', '#ffab40').attr('stroke-width', 2).attr('marker-end', 'url(#arr-res)');
+
+    // Plus circle
+    svg.append('circle')
+        .attr('cx', 330).attr('cy', 93).attr('r', 18)
+        .attr('fill', 'rgba(22,199,154,0.2)').attr('stroke', 'var(--accent-green)').attr('stroke-width', 2);
+    svg.append('text').attr('x', 330).attr('y', 99).attr('text-anchor', 'middle')
+        .attr('fill', 'var(--accent-green)').attr('font-size', 20).attr('font-weight', 700).text('+');
+
+    // Arrow: sublayer -> plus
+    svg.append('line').attr('x1', 270).attr('y1', 93).attr('x2', 310).attr('y2', 93)
+        .attr('stroke', '#ffab40').attr('stroke-width', 2).attr('marker-end', 'url(#arr-res)');
+
+    // Skip connection (curved path on top)
+    svg.append('path')
+        .attr('d', 'M 60 75 Q 60 30, 180 30 L 330 30 Q 330 30, 330 75')
+        .attr('fill', 'none').attr('stroke', 'var(--accent-green)').attr('stroke-width', 2)
+        .attr('stroke-dasharray', '6,4').attr('marker-end', 'url(#arr-res)');
+    svg.append('text').attr('x', 195).attr('y', 22).attr('text-anchor', 'middle')
+        .attr('fill', 'var(--accent-green)').attr('font-size', 11).text('残差跳跃连接');
+
+    // LayerNorm block
+    svg.append('rect')
+        .attr('x', 380).attr('y', 70).attr('width', 90).attr('height', 44).attr('rx', 8)
+        .attr('fill', 'rgba(22,199,154,0.15)').attr('stroke', 'var(--accent-green)').attr('stroke-width', 2);
+    svg.append('text').attr('x', 425).attr('y', 97).attr('text-anchor', 'middle')
+        .attr('fill', 'var(--accent-green)').attr('font-size', 12).attr('font-weight', 600).text('LayerNorm');
+
+    // Arrow: plus -> LN
+    svg.append('line').attr('x1', 348).attr('y1', 93).attr('x2', 378).attr('y2', 93)
+        .attr('stroke', '#ffab40').attr('stroke-width', 2).attr('marker-end', 'url(#arr-res)');
+
+    // Animated data dots
+    const dataDot1 = svg.append('circle').attr('r', 5).attr('fill', '#ffab40').attr('opacity', 0);
+    const dataDot2 = svg.append('circle').attr('r', 5).attr('fill', 'var(--accent-green)').attr('opacity', 0);
+
+    document.getElementById('btn-play-residual').addEventListener('click', () => {
+        const tl = gsap.timeline();
+        // Dot through sublayer
+        tl.set(dataDot1.node(), { attr: { cx: 60, cy: 93 }, opacity: 1 });
+        tl.to(dataDot1.node(), { attr: { cx: 210, cy: 93 }, duration: 0.6, ease: 'power2.inOut' });
+        tl.to(dataDot1.node(), { attr: { cx: 330, cy: 93 }, duration: 0.4, ease: 'power2.inOut' });
+
+        // Dot through skip
+        tl.set(dataDot2.node(), { attr: { cx: 60, cy: 75 }, opacity: 1 }, 0);
+        tl.to(dataDot2.node(), { attr: { cx: 60, cy: 30 }, duration: 0.25, ease: 'power2.out' }, 0);
+        tl.to(dataDot2.node(), { attr: { cx: 330, cy: 30 }, duration: 0.5, ease: 'power2.inOut' });
+        tl.to(dataDot2.node(), { attr: { cx: 330, cy: 75 }, duration: 0.25, ease: 'power2.in' });
+
+        // Merge flash
+        tl.to([dataDot1.node(), dataDot2.node()], { attr: { r: 10 }, opacity: 0.5, duration: 0.15 }, '+=0.1');
+        tl.to([dataDot1.node(), dataDot2.node()], { attr: { r: 5 }, opacity: 0, duration: 0.2 });
+
+        // Result dot to LN
+        const dotResult = svg.append('circle').attr('r', 6).attr('fill', 'var(--accent-green)').attr('opacity', 0);
+        tl.set(dotResult.node(), { attr: { cx: 330, cy: 93 }, opacity: 1 });
+        tl.to(dotResult.node(), { attr: { cx: 425, cy: 93 }, duration: 0.4, ease: 'power2.inOut' });
+        tl.to(dotResult.node(), { attr: { r: 10 }, opacity: 0.6, duration: 0.15 });
+        tl.to(dotResult.node(), { attr: { r: 0 }, opacity: 0, duration: 0.3, onComplete: () => dotResult.remove() });
+    });
+})();
+
+// Layer Normalization visualization
+(function initLayerNorm() {
+    const chartsArea = document.getElementById('ln-bar-charts');
+    const inputsArea = document.getElementById('ln-inputs');
+    const resultEl = document.getElementById('ln-result');
+    const VEC_LEN = 6;
+
+    let currentVec = [2.1, -0.5, 1.3, -1.8, 0.7, 3.2];
+
+    function drawBarChart(container, data, label, barColor) {
+        container.innerHTML = '';
+        const groupDiv = document.createElement('div');
+        groupDiv.className = 'bar-chart-group';
+        const lbl = document.createElement('div');
+        lbl.className = 'chart-label';
+        lbl.textContent = label;
+        groupDiv.appendChild(lbl);
+
+        const W = 180, H = 140, pad = 20;
+        const svg = d3.select(groupDiv).append('svg').attr('width', W).attr('height', H);
+
+        const maxAbs = Math.max(3, ...data.map(Math.abs));
+        const barW = (W - pad * 2) / data.length - 4;
+        const midY = H / 2;
+        const scaleY = (midY - 15) / maxAbs;
+
+        // Zero line
+        svg.append('line')
+            .attr('x1', pad).attr('y1', midY).attr('x2', W - pad).attr('y2', midY)
+            .attr('stroke', 'var(--border-color)').attr('stroke-width', 1);
+
+        data.forEach((v, i) => {
+            const x = pad + i * ((W - pad * 2) / data.length) + 2;
+            const barH = Math.abs(v) * scaleY;
+            const y = v >= 0 ? midY - barH : midY;
+            svg.append('rect')
+                .attr('x', x).attr('y', y).attr('width', barW).attr('height', barH)
+                .attr('rx', 2).attr('fill', barColor).attr('opacity', 0.8);
+            svg.append('text')
+                .attr('x', x + barW / 2).attr('y', v >= 0 ? y - 4 : y + barH + 12)
+                .attr('text-anchor', 'middle').attr('font-size', 9)
+                .attr('fill', 'var(--text-secondary)').attr('font-family', 'var(--font-mono)')
+                .text(v.toFixed(1));
+        });
+
+        container.appendChild(groupDiv);
+    }
+
+    function renderCharts() {
+        chartsArea.innerHTML = '';
+        const beforeDiv = document.createElement('div');
+        const afterDiv = document.createElement('div');
+        chartsArea.appendChild(beforeDiv);
+        chartsArea.appendChild(afterDiv);
+
+        const normed = TU.layerNorm(currentVec);
+        drawBarChart(beforeDiv, currentVec, '归一化前', 'var(--accent-orange)');
+        drawBarChart(afterDiv, normed, '归一化后', 'var(--accent-green)');
+    }
+
+    function buildInputs() {
+        inputsArea.innerHTML = '';
+        currentVec.forEach((v, i) => {
+            const inp = document.createElement('input');
+            inp.type = 'number';
+            inp.step = '0.1';
+            inp.value = v.toFixed(1);
+            inp.dataset.idx = i;
+            inp.addEventListener('change', () => {
+                currentVec[i] = parseFloat(inp.value) || 0;
+            });
+            inputsArea.appendChild(inp);
+        });
+    }
+
+    document.getElementById('btn-calc-ln').addEventListener('click', () => {
+        // Read current inputs
+        inputsArea.querySelectorAll('input').forEach(inp => {
+            currentVec[parseInt(inp.dataset.idx)] = parseFloat(inp.value) || 0;
+        });
+
+        const vec = currentVec;
+        const mean = vec.reduce((a, b) => a + b, 0) / vec.length;
+        const variance = vec.reduce((a, b) => a + (b - mean) ** 2, 0) / vec.length;
+        const std = Math.sqrt(variance + 1e-5);
+        const normed = vec.map(v => (v - mean) / std);
+
+        resultEl.style.display = 'block';
+        resultEl.innerHTML = `
+            <span class="label">输入 x = </span>[${vec.map(v => `<span class="${colorVal(v)}">${fmt(v)}</span>`).join(', ')}]<br>
+            <span class="label">均值 &mu; = </span><span class="${colorVal(mean)}">${fmt(mean)}</span><br>
+            <span class="label">方差 &sigma;&sup2; = </span><span class="val-positive">${fmt(variance)}</span><br>
+            <span class="label">标准差 &sigma; = </span><span class="val-positive">${fmt(std)}</span><br>
+            <span class="label">归一化结果 = </span>[${normed.map(v => `<span class="${colorVal(v)}">${fmt(v)}</span>`).join(', ')}]
+        `;
+        gsap.from(resultEl, { opacity: 0, y: 6, duration: 0.3 });
+
+        renderCharts();
+    });
+
+    document.getElementById('btn-randomize-ln').addEventListener('click', () => {
+        const rng = TU.seededRandom(Date.now());
+        currentVec = Array.from({ length: VEC_LEN }, () => (rng() * 6 - 3));
+        buildInputs();
+        renderCharts();
+        resultEl.style.display = 'none';
+    });
+
+    buildInputs();
+    renderCharts();
+})();
+
+// ============================================================
+// Section 4: FFN Diagram & Animation
+// ============================================================
+(function initFFN() {
+    const container = document.getElementById('ffn-diagram');
+    const W = 560, H = 260;
+    const svg = d3.select(container).append('svg')
+        .attr('viewBox', `0 0 ${W} ${H}`)
+        .attr('width', '100%').attr('height', H)
+        .style('max-width', W + 'px');
+
+    const defs = svg.append('defs');
+    defs.append('marker').attr('id', 'arr-ffn')
+        .attr('viewBox', '0 0 10 10').attr('refX', 8).attr('refY', 5)
+        .attr('markerWidth', 6).attr('markerHeight', 6).attr('orient', 'auto')
+        .append('path').attr('d', 'M0,0 L10,5 L0,10 Z').attr('fill', '#ffab40');
+
+    const cy = H / 2;
+    const layerH_in = 80;
+    const layerH_mid = 180;
+    const layerH_out = 80;
+    const layerW = 50;
+
+    // Input layer (d_model = 8)
+    const x1 = 60;
+    svg.append('rect').attr('x', x1).attr('y', cy - layerH_in / 2)
+        .attr('width', layerW).attr('height', layerH_in).attr('rx', 6)
+        .attr('fill', 'rgba(79,195,247,0.2)').attr('stroke', 'var(--accent-blue)').attr('stroke-width', 1.5);
+    svg.append('text').attr('x', x1 + layerW / 2).attr('y', cy + 4)
+        .attr('text-anchor', 'middle').attr('fill', 'var(--accent-blue)').attr('font-size', 11).attr('font-weight', 600)
+        .text('d=8');
+    svg.append('text').attr('x', x1 + layerW / 2).attr('y', cy - layerH_in / 2 - 8)
+        .attr('text-anchor', 'middle').attr('fill', 'var(--text-muted)').attr('font-size', 10)
+        .text('输入');
+
+    // Hidden layer (d_ff = 32)
+    const x2 = 200;
+    svg.append('rect').attr('x', x2).attr('y', cy - layerH_mid / 2)
+        .attr('width', layerW).attr('height', layerH_mid).attr('rx', 6)
+        .attr('fill', 'rgba(179,136,255,0.2)').attr('stroke', 'var(--accent-purple)').attr('stroke-width', 1.5);
+    svg.append('text').attr('x', x2 + layerW / 2).attr('y', cy + 4)
+        .attr('text-anchor', 'middle').attr('fill', 'var(--accent-purple)').attr('font-size', 11).attr('font-weight', 600)
+        .text('d=32');
+    svg.append('text').attr('x', x2 + layerW / 2).attr('y', cy - layerH_mid / 2 - 8)
+        .attr('text-anchor', 'middle').attr('fill', 'var(--text-muted)').attr('font-size', 10)
+        .text('隐藏层');
+
+    // ReLU
+    const xRelu = 305;
+    svg.append('rect').attr('x', xRelu).attr('y', cy - 20)
+        .attr('width', 50).attr('height', 40).attr('rx', 8)
+        .attr('fill', 'rgba(255,171,64,0.15)').attr('stroke', 'var(--accent-orange)').attr('stroke-width', 1.5);
+    svg.append('text').attr('x', xRelu + 25).attr('y', cy + 5)
+        .attr('text-anchor', 'middle').attr('fill', 'var(--accent-orange)').attr('font-size', 12).attr('font-weight', 700)
+        .text('ReLU');
+
+    // Output layer (d_model = 8)
+    const x3 = 420;
+    svg.append('rect').attr('x', x3).attr('y', cy - layerH_out / 2)
+        .attr('width', layerW).attr('height', layerH_out).attr('rx', 6)
+        .attr('fill', 'rgba(22,199,154,0.2)').attr('stroke', 'var(--accent-green)').attr('stroke-width', 1.5);
+    svg.append('text').attr('x', x3 + layerW / 2).attr('y', cy + 4)
+        .attr('text-anchor', 'middle').attr('fill', 'var(--accent-green)').attr('font-size', 11).attr('font-weight', 600)
+        .text('d=8');
+    svg.append('text').attr('x', x3 + layerW / 2).attr('y', cy - layerH_out / 2 - 8)
+        .attr('text-anchor', 'middle').attr('fill', 'var(--text-muted)').attr('font-size', 10)
+        .text('输出');
+
+    // Connection lines: input -> hidden
+    for (let i = 0; i < 4; i++) {
+        const fromY = cy - layerH_in / 2 + (i + 0.5) * (layerH_in / 4);
+        for (let j = 0; j < 6; j++) {
+            const toY = cy - layerH_mid / 2 + (j + 0.5) * (layerH_mid / 6);
+            svg.append('line')
+                .attr('x1', x1 + layerW).attr('y1', fromY)
+                .attr('x2', x2).attr('y2', toY)
+                .attr('stroke', 'rgba(179,136,255,0.15)').attr('stroke-width', 0.8);
+        }
+    }
+
+    // Connection lines: hidden -> output
+    for (let i = 0; i < 6; i++) {
+        const fromY = cy - layerH_mid / 2 + (i + 0.5) * (layerH_mid / 6);
+        for (let j = 0; j < 4; j++) {
+            const toY = cy - layerH_out / 2 + (j + 0.5) * (layerH_out / 4);
+            svg.append('line')
+                .attr('x1', xRelu + 50).attr('y1', fromY)
+                .attr('x2', x3).attr('y2', toY)
+                .attr('stroke', 'rgba(22,199,154,0.15)').attr('stroke-width', 0.8);
+        }
+    }
+
+    // Arrows between stages
+    svg.append('line').attr('x1', x1 + layerW + 5).attr('y1', cy).attr('x2', x2 - 5).attr('y2', cy)
+        .attr('stroke', '#ffab40').attr('stroke-width', 2).attr('marker-end', 'url(#arr-ffn)');
+    svg.append('text').attr('x', (x1 + layerW + x2) / 2).attr('y', cy - 10)
+        .attr('text-anchor', 'middle').attr('fill', 'var(--text-muted)').attr('font-size', 10).text('W1');
+
+    svg.append('line').attr('x1', x2 + layerW + 5).attr('y1', cy).attr('x2', xRelu - 5).attr('y2', cy)
+        .attr('stroke', '#ffab40').attr('stroke-width', 2).attr('marker-end', 'url(#arr-ffn)');
+
+    svg.append('line').attr('x1', xRelu + 55).attr('y1', cy).attr('x2', x3 - 5).attr('y2', cy)
+        .attr('stroke', '#ffab40').attr('stroke-width', 2).attr('marker-end', 'url(#arr-ffn)');
+    svg.append('text').attr('x', (xRelu + 50 + x3) / 2).attr('y', cy - 10)
+        .attr('text-anchor', 'middle').attr('fill', 'var(--text-muted)').attr('font-size', 10).text('W2');
+
+    // Dimension labels
+    svg.append('text').attr('x', W / 2).attr('y', H - 10)
+        .attr('text-anchor', 'middle').attr('fill', 'var(--text-muted)').attr('font-size', 11)
+        .text('d_model=8  \u2192  d_ff=32  \u2192  d_model=8   (4\u00d7 扩展)');
+
+    // Animated data flow dot
+    const flowDot = svg.append('circle').attr('r', 6).attr('fill', '#ffab40').attr('opacity', 0);
+
+    document.getElementById('btn-play-ffn').addEventListener('click', () => {
+        const tl = gsap.timeline();
+        tl.set(flowDot.node(), { attr: { cx: x1, cy: cy }, opacity: 1 });
+        tl.to(flowDot.node(), { attr: { cx: x1 + layerW / 2, cy: cy }, duration: 0.2 });
+        // Expand
+        tl.to(flowDot.node(), { attr: { cx: x2 + layerW / 2, cy: cy, r: 10 }, duration: 0.5, ease: 'power2.inOut' });
+        // ReLU
+        tl.to(flowDot.node(), { attr: { cx: xRelu + 25, r: 8 }, duration: 0.3, ease: 'power2.inOut' });
+        tl.to(flowDot.node(), { attr: { fill: 'var(--accent-orange)' }, duration: 0.15 });
+        // Compress
+        tl.to(flowDot.node(), { attr: { cx: x3 + layerW / 2, r: 6 }, duration: 0.5, ease: 'power2.inOut' });
+        tl.to(flowDot.node(), { attr: { fill: 'var(--accent-green)' }, duration: 0.15 });
+        tl.to(flowDot.node(), { attr: { r: 10 }, opacity: 0.5, duration: 0.15 });
+        tl.to(flowDot.node(), { attr: { r: 0 }, opacity: 0, duration: 0.3 });
+    });
+
+    document.getElementById('btn-reset-ffn').addEventListener('click', () => {
+        gsap.set(flowDot.node(), { attr: { r: 6, cx: x1, cy: cy }, opacity: 0 });
+    });
+
+    // ReLU visualization
+    const reluArea = document.getElementById('relu-viz');
+
+    // Before ReLU
+    const beforeData = TU.randomMatrix(4, 8, 789, 1.0);
+    const afterData = TU.relu(beforeData);
+
+    const bDiv = document.createElement('div');
+    bDiv.className = 'pipeline-step-wrap';
+    const bLabel = document.createElement('div');
+    bLabel.className = 'pipeline-step-label';
+    bLabel.style.background = 'rgba(179,136,255,0.15)';
+    bLabel.style.color = 'var(--accent-purple)';
+    bLabel.textContent = 'ReLU 前';
+    bDiv.appendChild(bLabel);
+    const bInner = document.createElement('div');
+    bDiv.appendChild(bInner);
+    reluArea.appendChild(bDiv);
+
+    new MatrixRenderer({
+        container: bInner,
+        data: beforeData,
+        cellSize: 38,
+        showValues: true,
+    });
+
+    // After ReLU
+    const aDiv = document.createElement('div');
+    aDiv.className = 'pipeline-step-wrap';
+    const aLabel = document.createElement('div');
+    aLabel.className = 'pipeline-step-label';
+    aLabel.textContent = 'ReLU 后';
+    aDiv.appendChild(aLabel);
+    const aInner = document.createElement('div');
+    aDiv.appendChild(aInner);
+    reluArea.appendChild(aDiv);
+
+    new MatrixRenderer({
+        container: aInner,
+        data: afterData,
+        cellSize: 38,
+        showValues: true,
+    });
+})();
+
+// ============================================================
+// Section 5: Complete Pipeline Animation
+// ============================================================
+(function initPipeline() {
+    const controlsEl = document.getElementById('pipeline-controls');
+    const heatmapsEl = document.getElementById('pipeline-heatmaps');
+    const stepInfoEl = document.getElementById('pipeline-step-info');
+    const layerSlider = document.getElementById('layer-slider');
+    const layerVal = document.getElementById('layer-val');
+    const stackN = document.getElementById('stack-n');
+
+    const colLabels = Array.from({ length: D_MODEL }, (_, i) => 'd' + i);
+
+    // Generate weights for multiple layers
+    function makeLayerWeights(seed) {
+        return {
+            Wq: TU.randomMatrix(D_MODEL, D_MODEL, seed, 0.4),
+            Wk: TU.randomMatrix(D_MODEL, D_MODEL, seed + 1, 0.4),
+            Wv: TU.randomMatrix(D_MODEL, D_MODEL, seed + 2, 0.4),
+            W1: TU.randomMatrix(D_MODEL, D_FF, seed + 3, 0.25),
+            W2: TU.randomMatrix(D_FF, D_MODEL, seed + 4, 0.25),
+        };
+    }
+
+    const layerWeights = [
+        makeLayerWeights(1000),
+        makeLayerWeights(2000),
+        makeLayerWeights(3000),
+        makeLayerWeights(4000),
+    ];
+
+    const PE = TU.positionalEncoding(SEQ_LEN, D_MODEL);
+
+    // Run one encoder layer
+    function runEncoderLayer(input, weights) {
+        const Q = TU.matmul(input, weights.Wq);
+        const K = TU.matmul(input, weights.Wk);
+        const V = TU.matmul(input, weights.Wv);
+        const { output: attnOut } = TU.scaledDotProductAttention(Q, K, V);
+        const afterResidual1 = TU.add(input, attnOut);
+        const afterLN1 = TU.layerNormMatrix(afterResidual1);
+        const ffnOut = TU.feedForward(afterLN1, weights.W1, weights.W2);
+        const afterResidual2 = TU.add(afterLN1, ffnOut);
+        const afterLN2 = TU.layerNormMatrix(afterResidual2);
+        return { attnOut, afterResidual1, afterLN1, ffnOut, afterResidual2, afterLN2 };
+    }
+
+    let currentLayers = 1;
+    let animController = null;
+
+    function renderHeatmap(container, data, title) {
+        const wrap = document.createElement('div');
+        wrap.className = 'pipeline-step-wrap';
+        const lbl = document.createElement('div');
+        lbl.className = 'pipeline-step-label';
+        lbl.textContent = title;
+        wrap.appendChild(lbl);
+        const inner = document.createElement('div');
+        wrap.appendChild(inner);
+        container.appendChild(wrap);
+
+        new MatrixRenderer({
+            container: inner,
+            data: data,
+            rowLabels: TOKENS,
+            colLabels: colLabels,
+            cellSize: 36,
+            showValues: true,
+        });
+        return wrap;
+    }
+
+    function buildPipeline(numLayers) {
+        heatmapsEl.innerHTML = '';
+        stepInfoEl.style.display = 'none';
+
+        const stepsData = [];
+
+        // Step 0: Raw Input
+        stepsData.push({
+            name: '原始输入 X',
+            data: X_input,
+            desc: '4 个 token 的初始嵌入向量 (4\u00d78)',
+        });
+
+        // Step 1: X + PE
+        const xpe = TU.add(X_input, PE);
+        stepsData.push({
+            name: '加入位置编码 X+PE',
+            data: xpe,
+            desc: '嵌入加上正弦位置编码，赋予位置信息',
+        });
+
+        let current = xpe;
+        for (let L = 0; L < numLayers; L++) {
+            const w = layerWeights[L];
+            const result = runEncoderLayer(current, w);
+            const prefix = numLayers > 1 ? `层${L + 1}: ` : '';
+
+            stepsData.push({
+                name: `${prefix}自注意力输出`,
+                data: result.attnOut,
+                desc: `${prefix}多头自注意力计算完成，每个 token 融合了上下文`,
+            });
+            stepsData.push({
+                name: `${prefix}Add & Norm (1)`,
+                data: result.afterLN1,
+                desc: `${prefix}残差连接后层归一化 — 稳定数值分布`,
+            });
+            stepsData.push({
+                name: `${prefix}FFN 输出`,
+                data: result.ffnOut,
+                desc: `${prefix}前馈网络: 8\u219232\u21928 维度变换 + ReLU 激活`,
+            });
+            stepsData.push({
+                name: `${prefix}Add & Norm (2)`,
+                data: result.afterLN2,
+                desc: `${prefix}第二次残差连接 + 层归一化 — 该层输出`,
+            });
+
+            current = result.afterLN2;
+        }
+
+        // Final output
+        stepsData.push({
+            name: '编码器最终输出',
+            data: current,
+            desc: `经过 ${numLayers} 层编码器后的表示——特征已被充分提炼`,
+        });
+
+        // Build animation steps
+        const renderedWraps = [];
+        const animSteps = stepsData.map((s, idx) => ({
+            name: s.name,
+            duration: 1200,
+            action: async (stepIdx, instant) => {
+                stepInfoEl.style.display = 'block';
+                stepInfoEl.innerHTML = `<p style="margin:0;"><strong style="color:var(--accent-green);">步骤 ${idx + 1}/${stepsData.length}：</strong>${s.name}</p><p style="margin:0.2rem 0 0;font-size:0.85rem;">${s.desc}</p>`;
+
+                // Render heatmap if not already
+                if (!renderedWraps[idx]) {
+                    renderedWraps[idx] = renderHeatmap(heatmapsEl, s.data, s.name);
+                }
+
+                // Highlight current, dim others
+                renderedWraps.forEach((w, i) => {
+                    if (!w) return;
+                    if (i === idx) {
+                        w.style.opacity = '1';
+                        w.style.transform = 'scale(1)';
+                        w.style.border = '2px solid var(--accent-green)';
+                        w.style.borderRadius = '8px';
+                        w.style.padding = '6px';
+                        if (!instant) {
+                            gsap.from(w, { opacity: 0, y: 20, scale: 0.95, duration: 0.5 });
+                        }
+                        w.scrollIntoView({ behavior: instant ? 'auto' : 'smooth', block: 'nearest' });
+                    } else if (i < idx) {
+                        w.style.opacity = '0.5';
+                        w.style.transform = 'scale(0.92)';
+                        w.style.border = '2px solid transparent';
+                    } else {
+                        w.style.opacity = '0.3';
+                        w.style.transform = 'scale(0.9)';
+                        w.style.border = '2px solid transparent';
+                    }
+                });
+            }
+        }));
+
+        // Create controller
+        if (animController) animController.pause();
+        animController = new AnimationController({
+            container: controlsEl,
+            steps: animSteps,
+            defaultDuration: 1200,
+            onComplete: () => {
+                stepInfoEl.innerHTML = `<p style="margin:0;color:var(--accent-green);font-weight:600;">完成！数据已通过 ${numLayers} 层编码器处理。</p><p style="margin:0.2rem 0 0;font-size:0.85rem;">每一层都进一步提炼了 token 的表示。层数越多，表示越抽象和全局化。</p>`;
+                renderedWraps.forEach(w => {
+                    if (w) {
+                        w.style.opacity = '1';
+                        w.style.transform = 'scale(1)';
+                        w.style.border = '2px solid transparent';
+                    }
+                });
+            }
+        });
+    }
+
+    layerSlider.addEventListener('input', () => {
+        const val = parseInt(layerSlider.value);
+        layerVal.textContent = val;
+        stackN.textContent = val;
+        if (val !== currentLayers) {
+            currentLayers = val;
+            buildPipeline(val);
+        }
+    });
+
+    buildPipeline(1);
+})();
+
+// ============================================================
+// Scroll-based section highlighting (optional enhancement)
+// ============================================================
+(function initScrollHighlight() {
+    const sections = document.querySelectorAll('.section-anchor');
+    const observer = new IntersectionObserver((entries) => {
+        entries.forEach(e => {
+            if (e.isIntersecting) {
+                e.target.style.borderLeft = '3px solid var(--accent-green)';
+                e.target.style.paddingLeft = '1rem';
+                e.target.style.transition = 'all 0.3s';
+            } else {
+                e.target.style.borderLeft = '3px solid transparent';
+            }
+        });
+    }, { threshold: 0.15 });
+    sections.forEach(s => observer.observe(s));
+})();
+</script>
+</body>
+</html>

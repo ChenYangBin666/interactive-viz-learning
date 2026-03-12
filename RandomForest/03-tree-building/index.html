@@ -1,0 +1,1012 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>树的构建 — 随机森林可视化</title>
+    <!-- KaTeX -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+    <!-- D3.js -->
+    <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+    <!-- GSAP -->
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.2/dist/gsap.min.js"></script>
+    <!-- Project styles -->
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+    <style>
+        .dual-panel { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
+        .panel-label { font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.5rem; text-transform: uppercase; letter-spacing: 0.05em; }
+        .scatter-svg, .tree-svg { width: 100%; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-md); }
+        .scatter-svg { height: 360px; }
+        .tree-svg { height: 360px; }
+        .controls-row { display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; margin: 1rem 0; }
+        .stat-bar { display: flex; gap: 1.5rem; flex-wrap: wrap; padding: 0.75rem 1rem; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-md); margin: 0.75rem 0; }
+        .stat-item { display: flex; flex-direction: column; align-items: center; }
+        .stat-item .stat-val { font-family: var(--font-mono); font-size: 1.3rem; font-weight: 700; color: var(--accent-green); }
+        .stat-item .stat-lbl { font-size: 0.75rem; color: var(--text-muted); }
+        .slider-row { display: flex; align-items: center; gap: 0.75rem; min-width: 220px; }
+        .slider-row label { font-size: 0.85rem; color: var(--text-secondary); white-space: nowrap; min-width: 80px; }
+        .slider-row .val { font-family: var(--font-mono); font-size: 0.85rem; color: var(--accent-green); min-width: 2.5rem; text-align: right; }
+        .pruning-toggle { display: flex; gap: 0.5rem; }
+        .accuracy-chart { width: 100%; height: 240px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-md); }
+        .summary-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+        .summary-card { background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 1.25rem; }
+        .summary-card h4 { color: var(--accent-green); margin-bottom: 0.5rem; }
+        .summary-card .step-list { list-style: none; padding: 0; counter-reset: step; }
+        .summary-card .step-list li { counter-increment: step; padding: 0.35rem 0; padding-left: 2rem; position: relative; font-size: 0.9rem; color: var(--text-secondary); border-left: 2px solid var(--border-color); margin-left: 0.5rem; }
+        .summary-card .step-list li::before { content: counter(step); position: absolute; left: -0.85rem; top: 0.3rem; width: 1.5rem; height: 1.5rem; background: var(--bg-card); border: 2px solid var(--accent-green); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.7rem; color: var(--accent-green); font-weight: 700; }
+        .summary-card .step-list li.active { color: var(--text-primary); border-left-color: var(--accent-green); }
+        .summary-card .step-list li.active::before { background: var(--accent-green); color: var(--bg-primary); }
+        .pseudocode { font-family: var(--font-mono); font-size: 0.82rem; line-height: 1.8; padding: 1rem; background: rgba(0,0,0,0.2); border-radius: var(--radius-sm); overflow-x: auto; }
+        .pseudocode .hl { background: rgba(22,199,154,0.2); display: inline-block; width: 100%; padding: 0 0.3rem; border-radius: 3px; }
+        .pseudocode .kw { color: var(--accent-purple); }
+        .pseudocode .fn { color: var(--accent-blue); }
+        .pseudocode .cm { color: var(--text-muted); font-style: italic; }
+        .compare-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+        .compare-table th, .compare-table td { padding: 0.5rem 0.75rem; border: 1px solid var(--border-color); text-align: left; }
+        .compare-table th { background: var(--bg-card); color: var(--accent-green); }
+        .compare-table td { color: var(--text-secondary); }
+        .user-scatter { cursor: crosshair; }
+        .score-display { display: flex; gap: 2rem; justify-content: center; padding: 1rem; }
+        .score-box { text-align: center; padding: 0.75rem 1.5rem; border-radius: var(--radius-md); background: var(--bg-secondary); border: 1px solid var(--border-color); }
+        .score-box .score-val { font-family: var(--font-mono); font-size: 1.6rem; font-weight: 700; }
+        .score-box .score-lbl { font-size: 0.8rem; color: var(--text-muted); }
+        .user-score .score-val { color: var(--accent-orange); }
+        .auto-score .score-val { color: var(--accent-green); }
+        .node-info-popup { position: absolute; padding: 0.5rem 0.75rem; background: var(--bg-card); border: 1px solid var(--accent-green); border-radius: var(--radius-sm); font-size: 0.78rem; color: var(--text-primary); pointer-events: none; z-index: 50; white-space: nowrap; }
+        @media (max-width: 900px) {
+            .dual-panel { grid-template-columns: 1fr; }
+            .summary-cards { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+<div class="page-container">
+    <div class="page-header" style="margin-bottom: 2rem;">
+        <div class="breadcrumb"><a href="../index.html">随机森林</a> / 模块 03</div>
+        <h1>树的构建</h1>
+        <p>从数据出发，一步步递归构建决策树，理解分裂、停止与剪枝的完整流程。</p>
+    </div>
+
+    <!-- ===== Section 1: 递归分裂过程 ===== -->
+    <div class="section" id="sec-recursive">
+        <div class="section-title"><div class="icon">🔨</div><h2>递归分裂过程</h2></div>
+        <p>决策树通过递归地选择最优特征和阈值来划分数据。左侧散点图展示数据空间中的分割线，右侧同步生长出对应的树结构。</p>
+        <div id="anim-controls-1" style="margin: 1rem 0;"></div>
+        <div id="step-desc" class="info-box" style="min-height:2.5rem;"><p>点击播放按钮，观察树的构建过程。</p></div>
+        <div class="dual-panel">
+            <div>
+                <div class="panel-label">数据空间 &amp; 分割线</div>
+                <svg id="scatter1" class="scatter-svg"></svg>
+            </div>
+            <div>
+                <div class="panel-label">决策树结构</div>
+                <svg id="tree1" class="tree-svg"></svg>
+            </div>
+        </div>
+        <div class="stat-bar" id="stats1">
+            <div class="stat-item"><span class="stat-val" id="s1-depth">0</span><span class="stat-lbl">深度</span></div>
+            <div class="stat-item"><span class="stat-val" id="s1-nodes">0</span><span class="stat-lbl">节点数</span></div>
+            <div class="stat-item"><span class="stat-val" id="s1-leaves">0</span><span class="stat-lbl">叶节点</span></div>
+            <div class="stat-item"><span class="stat-val" id="s1-acc">—</span><span class="stat-lbl">准确率</span></div>
+        </div>
+    </div>
+
+    <!-- ===== Section 2: 停止条件 ===== -->
+    <div class="section" id="sec-stopping">
+        <div class="section-title"><div class="icon">🛑</div><h2>停止条件</h2></div>
+        <p>调整下方参数，观察不同停止条件如何影响树的复杂度和决策边界。</p>
+        <div class="controls-row">
+            <div class="slider-row">
+                <label>最大深度</label>
+                <input type="range" id="sl-depth" min="1" max="8" value="4" step="1">
+                <span class="val" id="sl-depth-val">4</span>
+            </div>
+            <div class="slider-row">
+                <label>最小样本数</label>
+                <input type="range" id="sl-samples" min="1" max="20" value="2" step="1">
+                <span class="val" id="sl-samples-val">2</span>
+            </div>
+            <div class="slider-row">
+                <label>最小增益</label>
+                <input type="range" id="sl-gain" min="0" max="0.5" value="0" step="0.01">
+                <span class="val" id="sl-gain-val">0.00</span>
+            </div>
+        </div>
+        <div class="dual-panel">
+            <div>
+                <div class="panel-label">决策边界</div>
+                <svg id="scatter2" class="scatter-svg"></svg>
+            </div>
+            <div>
+                <div class="panel-label">树结构</div>
+                <svg id="tree2" class="tree-svg"></svg>
+            </div>
+        </div>
+        <div class="stat-bar">
+            <div class="stat-item"><span class="stat-val" id="s2-depth">0</span><span class="stat-lbl">实际深度</span></div>
+            <div class="stat-item"><span class="stat-val" id="s2-nodes">0</span><span class="stat-lbl">节点数</span></div>
+            <div class="stat-item"><span class="stat-val" id="s2-leaves">0</span><span class="stat-lbl">叶节点</span></div>
+            <div class="stat-item"><span class="stat-val" id="s2-acc">—</span><span class="stat-lbl">训练准确率</span></div>
+        </div>
+    </div>
+
+    <!-- ===== Section 3: 剪枝 ===== -->
+    <div class="section" id="sec-pruning">
+        <div class="section-title"><div class="icon">✂</div><h2>剪枝</h2></div>
+        <p>完全生长的树容易过拟合。剪枝通过去除不必要的分支来提高泛化能力。</p>
+        <div class="controls-row">
+            <div class="btn-group pruning-toggle">
+                <button class="btn active" data-mode="none" id="prune-none">无剪枝</button>
+                <button class="btn" data-mode="pre" id="prune-pre">预剪枝</button>
+                <button class="btn" data-mode="post" id="prune-post">后剪枝</button>
+            </div>
+            <div class="slider-row" id="prune-slider-row" style="display:none;">
+                <label id="prune-slider-label">剪枝强度</label>
+                <input type="range" id="sl-prune" min="0" max="10" value="0" step="1">
+                <span class="val" id="sl-prune-val">0</span>
+            </div>
+        </div>
+        <div class="dual-panel">
+            <div>
+                <div class="panel-label">树结构</div>
+                <svg id="tree3" class="tree-svg" style="height:300px;"></svg>
+            </div>
+            <div>
+                <div class="panel-label">训练 vs 验证准确率</div>
+                <svg id="acc-chart" class="accuracy-chart"></svg>
+            </div>
+        </div>
+        <div class="stat-bar">
+            <div class="stat-item"><span class="stat-val" id="s3-nodes">0</span><span class="stat-lbl">节点数</span></div>
+            <div class="stat-item"><span class="stat-val" id="s3-train">—</span><span class="stat-lbl">训练准确率</span></div>
+            <div class="stat-item"><span class="stat-val" id="s3-val">—</span><span class="stat-lbl">验证准确率</span></div>
+        </div>
+    </div>
+
+    <!-- ===== Section 4: CART 算法总结 ===== -->
+    <div class="section" id="sec-cart">
+        <div class="section-title"><div class="icon">📋</div><h2>CART 算法总结</h2></div>
+        <p>CART（Classification and Regression Trees）是最经典的决策树算法之一，生成二叉树结构。</p>
+        <div class="summary-cards">
+            <div class="summary-card">
+                <h4>分类树（Classification）</h4>
+                <p style="font-size:0.85rem;">使用基尼不纯度选择最优分裂：</p>
+                <div class="katex-formula" style="margin:0.75rem 0;">$$Gini(D) = 1 - \sum_{k=1}^{K} p_k^2$$</div>
+                <div class="katex-formula">$$\Delta Gini = Gini(D) - \frac{|D_L|}{|D|}Gini(D_L) - \frac{|D_R|}{|D|}Gini(D_R)$$</div>
+                <ul class="step-list" id="cart-class-steps">
+                    <li>选择使 $\Delta Gini$ 最大的特征和阈值</li>
+                    <li>将数据按阈值分为左右子集</li>
+                    <li>递归地在子集上重复步骤 1-2</li>
+                    <li>满足停止条件时创建叶节点</li>
+                    <li>叶节点预测值 = 多数类别</li>
+                </ul>
+            </div>
+            <div class="summary-card">
+                <h4>回归树（Regression）</h4>
+                <p style="font-size:0.85rem;">使用方差缩减（MSE）选择最优分裂：</p>
+                <div class="katex-formula" style="margin:0.75rem 0;">$$MSE(D) = \frac{1}{|D|}\sum_{i \in D}(y_i - \bar{y})^2$$</div>
+                <div class="katex-formula">$$\Delta MSE = MSE(D) - \frac{|D_L|}{|D|}MSE(D_L) - \frac{|D_R|}{|D|}MSE(D_R)$$</div>
+                <ul class="step-list" id="cart-reg-steps">
+                    <li>选择使 $\Delta MSE$ 最大的特征和阈值</li>
+                    <li>将数据按阈值分为左右子集</li>
+                    <li>递归地在子集上重复步骤 1-2</li>
+                    <li>满足停止条件时创建叶节点</li>
+                    <li>叶节点预测值 = 子集均值 $\bar{y}$</li>
+                </ul>
+            </div>
+        </div>
+
+        <div style="margin-top:1.5rem;">
+            <h3 style="margin-bottom:0.75rem;">伪代码</h3>
+            <div class="pseudocode" id="pseudocode">
+<span class="kw">function</span> <span class="fn">BuildTree</span>(D, depth):
+    <span class="kw">if</span> 停止条件满足(D, depth):
+        <span class="kw">return</span> 创建叶节点(D)
+
+    bestFeature, bestThreshold ← <span class="fn">FindBestSplit</span>(D)
+    <span class="kw">if</span> bestGain ≤ 0:
+        <span class="kw">return</span> 创建叶节点(D)
+
+    D_L ← {x ∈ D | x[bestFeature] ≤ bestThreshold}
+    D_R ← {x ∈ D | x[bestFeature] &gt; bestThreshold}
+
+    node.left  ← <span class="fn">BuildTree</span>(D_L, depth + 1)
+    node.right ← <span class="fn">BuildTree</span>(D_R, depth + 1)
+    <span class="kw">return</span> node
+            </div>
+        </div>
+
+        <div style="margin-top:1.5rem;">
+            <h3 style="margin-bottom:0.75rem;">分类树 vs 回归树</h3>
+            <table class="compare-table">
+                <thead><tr><th>特性</th><th>分类树</th><th>回归树</th></tr></thead>
+                <tbody>
+                    <tr><td>目标变量</td><td>离散类别</td><td>连续数值</td></tr>
+                    <tr><td>分裂准则</td><td>基尼不纯度 / 信息增益</td><td>方差缩减（MSE）</td></tr>
+                    <tr><td>叶节点预测</td><td>多数投票</td><td>均值</td></tr>
+                    <tr><td>评估指标</td><td>准确率、F1</td><td>MSE、$R^2$</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- ===== Section 5: 自己构建一棵树 ===== -->
+    <div class="section" id="sec-build">
+        <div class="section-title"><div class="icon">🎯</div><h2>自己构建一棵树</h2></div>
+        <p>在散点图上点击来放置分割线，系统会实时构建对应的决策树。与自动构建的最优树比较准确率！</p>
+        <div class="controls-row">
+            <div class="btn-group">
+                <button class="btn active" id="split-x">水平分割 (X)</button>
+                <button class="btn" id="split-y">垂直分割 (Y)</button>
+            </div>
+            <button class="btn" id="undo-split">撤销上一步</button>
+            <button class="btn" id="clear-splits">清除所有</button>
+            <button class="btn btn-primary" id="auto-build">自动构建</button>
+        </div>
+        <div class="dual-panel">
+            <div>
+                <div class="panel-label">点击放置分割线</div>
+                <svg id="scatter5" class="scatter-svg user-scatter"></svg>
+            </div>
+            <div>
+                <div class="panel-label">你的决策树</div>
+                <svg id="tree5" class="tree-svg"></svg>
+            </div>
+        </div>
+        <div class="score-display">
+            <div class="score-box user-score">
+                <div class="score-val" id="user-acc">—</div>
+                <div class="score-lbl">你的准确率</div>
+            </div>
+            <div class="score-box auto-score">
+                <div class="score-val" id="auto-acc">—</div>
+                <div class="score-lbl">最优树准确率</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Scripts -->
+<script src="../shared/scripts/rf-utils.js"></script>
+<script src="../shared/scripts/animation-controller.js"></script>
+<script src="../shared/scripts/matrix-renderer.js"></script>
+<script src="../shared/scripts/nav.js"></script>
+<script src="../shared/scripts/katex-init.js"></script>
+<script>
+(function() {
+'use strict';
+
+/* ============================================================
+   共享工具
+   ============================================================ */
+const { generateClassificationData, buildTree, predictTree, treeDepth, treeNodeCount,
+        giniImpurity, classColor, findBestSplit, flattenTree, seededRandom } = RFUtils;
+
+const COLORS = { c0: '#ff5252', c1: '#4fc3f7', green: '#16c79a', orange: '#ffab40',
+                 purple: '#b388ff', bg: '#1a1a2e', bgSec: '#16213e', border: '#2a2a4a', text: '#e8e8e8', muted: '#6c6c7c' };
+const FEATURE_NAMES = ['x₁', 'x₂'];
+
+// 全局数据
+const DATA = generateClassificationData(120, 42, 0.35);
+const DATA_TRAIN = DATA.slice(0, 80);
+const DATA_VAL = DATA.slice(80);
+
+function accuracy(tree, data) {
+    let correct = 0;
+    for (const d of data) {
+        const { prediction } = predictTree(tree, d);
+        if (prediction === d.label) correct++;
+    }
+    return data.length > 0 ? correct / data.length : 0;
+}
+
+function countLeaves(node) {
+    if (!node) return 0;
+    if (node.isLeaf) return 1;
+    return countLeaves(node.left) + countLeaves(node.right);
+}
+
+/* ---- D3 散点图通用绘制 ---- */
+function setupScatter(svgId, data, margin) {
+    const svg = d3.select('#' + svgId);
+    const rect = svg.node().getBoundingClientRect();
+    const W = rect.width, H = rect.height;
+    const m = margin || { top: 20, right: 20, bottom: 30, left: 35 };
+    const w = W - m.left - m.right, h = H - m.top - m.bottom;
+    svg.selectAll('*').remove();
+    const g = svg.append('g').attr('transform', `translate(${m.left},${m.top})`);
+    const xE = d3.extent(data, d => d.x), yE = d3.extent(data, d => d.y);
+    const xPad = (xE[1] - xE[0]) * 0.05, yPad = (yE[1] - yE[0]) * 0.05;
+    const xS = d3.scaleLinear().domain([xE[0] - xPad, xE[1] + xPad]).range([0, w]);
+    const yS = d3.scaleLinear().domain([yE[0] - yPad, yE[1] + yPad]).range([h, 0]);
+    // axes
+    g.append('g').attr('transform', `translate(0,${h})`).call(d3.axisBottom(xS).ticks(6))
+        .selectAll('text').style('fill', COLORS.muted).style('font-size', '0.7rem');
+    g.append('g').call(d3.axisLeft(yS).ticks(6))
+        .selectAll('text').style('fill', COLORS.muted).style('font-size', '0.7rem');
+    g.selectAll('.domain, .tick line').style('stroke', COLORS.border);
+    // points
+    g.selectAll('.pt').data(data).enter().append('circle').attr('class', 'pt')
+        .attr('cx', d => xS(d.x)).attr('cy', d => yS(d.y)).attr('r', 3.5)
+        .attr('fill', d => classColor(d.label)).attr('opacity', 0.8);
+    return { svg, g, xS, yS, w, h, W, H, m };
+}
+
+/* ---- 决策边界绘制 ---- */
+function drawBoundary(g, tree, xS, yS, w, h) {
+    g.selectAll('.boundary-rect').remove();
+    if (!tree) return;
+    const res = 40;
+    const xD = xS.domain(), yD = yS.domain();
+    const dx = (xD[1] - xD[0]) / res, dy = (yD[1] - yD[0]) / res;
+    for (let i = 0; i < res; i++) {
+        for (let j = 0; j < res; j++) {
+            const px = xD[0] + (i + 0.5) * dx, py = yD[0] + (j + 0.5) * dy;
+            const { prediction } = predictTree(tree, { x: px, y: py });
+            g.append('rect').attr('class', 'boundary-rect')
+                .attr('x', xS(xD[0] + i * dx)).attr('y', yS(yD[0] + (j + 1) * dy))
+                .attr('width', Math.ceil(w / res) + 1).attr('height', Math.ceil(h / res) + 1)
+                .attr('fill', classColor(prediction)).attr('opacity', 0.12);
+        }
+    }
+    // Bring points to front
+    g.selectAll('.pt').raise();
+    g.selectAll('.split-line').raise();
+}
+
+/* ---- 分割线绘制 ---- */
+function drawSplitLines(g, tree, xS, yS, w, h) {
+    g.selectAll('.split-line').remove();
+    if (!tree) return;
+    const xD = xS.domain(), yD = yS.domain();
+    function _draw(node, xMin, xMax, yMin, yMax) {
+        if (!node || node.isLeaf) return;
+        const feat = node.splitFeature, thr = node.splitThreshold;
+        if (feat === 0) { // vertical split at x = thr
+            if (thr >= xMin && thr <= xMax) {
+                g.append('line').attr('class', 'split-line')
+                    .attr('x1', xS(thr)).attr('y1', yS(yMin)).attr('x2', xS(thr)).attr('y2', yS(yMax))
+                    .attr('stroke', COLORS.orange).attr('stroke-width', 1.8).attr('stroke-dasharray', '4,3').attr('opacity', 0.9);
+            }
+            _draw(node.left, xMin, thr, yMin, yMax);
+            _draw(node.right, thr, xMax, yMin, yMax);
+        } else { // horizontal split at y = thr
+            if (thr >= yMin && thr <= yMax) {
+                g.append('line').attr('class', 'split-line')
+                    .attr('x1', xS(xMin)).attr('y1', yS(thr)).attr('x2', xS(xMax)).attr('y2', yS(thr))
+                    .attr('stroke', COLORS.green).attr('stroke-width', 1.8).attr('stroke-dasharray', '4,3').attr('opacity', 0.9);
+            }
+            _draw(node.left, xMin, xMax, yMin, thr);
+            _draw(node.right, xMin, xMax, thr, yMax);
+        }
+    }
+    _draw(tree, xD[0], xD[1], yD[0], yD[1]);
+}
+
+/* ---- 树形可视化 ---- */
+function drawTreeViz(svgId, tree, highlightIds) {
+    const svg = d3.select('#' + svgId);
+    const rect = svg.node().getBoundingClientRect();
+    const W = rect.width, H = rect.height;
+    svg.selectAll('*').remove();
+    if (!tree) return;
+    const nodes = [];
+    function flatten(node, depth, pos, left, right) {
+        if (!node) return;
+        const x = (left + right) / 2;
+        nodes.push({ ...node, _x: x, _y: depth, _left: left, _right: right });
+        if (!node.isLeaf) {
+            const mid = (left + right) / 2;
+            flatten(node.left, depth + 1, 'left', left, mid);
+            flatten(node.right, depth + 1, 'right', mid, right);
+        }
+    }
+    flatten(tree, 0, 'root', 0, 1);
+    const maxD = d3.max(nodes, n => n._y) || 0;
+    const padX = 30, padY = 35;
+    const xS = d3.scaleLinear().domain([0, 1]).range([padX, W - padX]);
+    const yS = d3.scaleLinear().domain([-0.3, maxD + 0.5]).range([padY, H - padY]);
+    const g = svg.append('g');
+    // edges
+    for (const n of nodes) {
+        if (!n.isLeaf) {
+            const leftChild = nodes.find(c => c._y === n._y + 1 && c._x === (n._left + n._x) / 2);
+            const rightChild = nodes.find(c => c._y === n._y + 1 && c._x === (n._x + n._right) / 2);
+            for (const child of [leftChild, rightChild]) {
+                if (child) {
+                    g.append('line')
+                        .attr('x1', xS(n._x)).attr('y1', yS(n._y))
+                        .attr('x2', xS(child._x)).attr('y2', yS(child._y))
+                        .attr('stroke', COLORS.border).attr('stroke-width', 1.5);
+                }
+            }
+        }
+    }
+    // nodes
+    const hl = new Set(highlightIds || []);
+    for (const n of nodes) {
+        const isHL = hl.has(n.id);
+        const r = n.isLeaf ? 14 : 16;
+        g.append('circle')
+            .attr('cx', xS(n._x)).attr('cy', yS(n._y)).attr('r', r)
+            .attr('fill', n.isLeaf ? classColor(n.prediction) : COLORS.bgSec)
+            .attr('stroke', isHL ? COLORS.green : (n.isLeaf ? 'none' : COLORS.border))
+            .attr('stroke-width', isHL ? 3 : 1.5)
+            .attr('opacity', isHL ? 1 : 0.9);
+        if (!n.isLeaf) {
+            g.append('text').attr('x', xS(n._x)).attr('y', yS(n._y) - 2)
+                .attr('text-anchor', 'middle').attr('fill', COLORS.text).attr('font-size', '0.6rem')
+                .text(FEATURE_NAMES[n.splitFeature]);
+            g.append('text').attr('x', xS(n._x)).attr('y', yS(n._y) + 10)
+                .attr('text-anchor', 'middle').attr('fill', COLORS.muted).attr('font-size', '0.55rem')
+                .text('≤' + n.splitThreshold.toFixed(2));
+        } else {
+            g.append('text').attr('x', xS(n._x)).attr('y', yS(n._y) + 4)
+                .attr('text-anchor', 'middle').attr('fill', '#fff').attr('font-size', '0.65rem').attr('font-weight', '700')
+                .text(n.prediction);
+        }
+    }
+}
+
+/* ============================================================
+   Section 1 — 递归分裂过程（动画）
+   ============================================================ */
+(function initSection1() {
+    const data = DATA_TRAIN;
+    // 预先构建完整树用于提取步骤
+    const fullTree = buildTree(data, { maxDepth: 4, minSamples: 3, criterion: 'gini' });
+
+    // 收集构建步骤（BFS序）
+    const buildSteps = [];
+    function collectSteps(node, depth) {
+        if (!node) return;
+        buildSteps.push({ node, depth });
+        if (!node.isLeaf) {
+            collectSteps(node.left, depth + 1);
+            collectSteps(node.right, depth + 1);
+        }
+    }
+    collectSteps(fullTree, 0);
+
+    let sc = null;
+    function initViz() {
+        sc = setupScatter('scatter1', data);
+    }
+
+    // 构建一棵部分树（只包含前 n 个节点）
+    function partialTree(maxSteps) {
+        if (maxSteps <= 0) return null;
+        function clonePartial(node, idx) {
+            if (!node || idx.val >= maxSteps) return null;
+            const cur = idx.val;
+            idx.val++;
+            const n = { ...node, left: undefined, right: undefined };
+            if (cur >= maxSteps) { n.isLeaf = true; return n; }
+            if (!node.isLeaf) {
+                n.left = clonePartial(node.left, idx);
+                n.right = clonePartial(node.right, idx);
+                if (!n.left && !n.right) n.isLeaf = true;
+            }
+            return n;
+        }
+        return clonePartial(fullTree, { val: 0 });
+    }
+
+    function updateViz(step) {
+        const tree = partialTree(step + 1);
+        // Scatter
+        if (sc) {
+            drawSplitLines(sc.g, tree, sc.xS, sc.yS, sc.w, sc.h);
+            drawBoundary(sc.g, tree, sc.xS, sc.yS, sc.w, sc.h);
+        }
+        drawTreeViz('tree1', tree, tree ? [buildSteps[step].node.id] : []);
+        // Stats
+        if (tree) {
+            document.getElementById('s1-depth').textContent = treeDepth(tree);
+            document.getElementById('s1-nodes').textContent = treeNodeCount(tree);
+            document.getElementById('s1-leaves').textContent = countLeaves(tree);
+            const acc = accuracy(tree, data);
+            document.getElementById('s1-acc').textContent = (acc * 100).toFixed(1) + '%';
+        }
+        // Step description
+        const s = buildSteps[step];
+        const desc = document.getElementById('step-desc').querySelector('p');
+        if (s.node.isLeaf) {
+            desc.textContent = `步骤 ${step + 1}/${buildSteps.length}：创建叶节点（预测类别 ${s.node.prediction}，${s.node.samples} 个样本）`;
+        } else {
+            desc.textContent = `步骤 ${step + 1}/${buildSteps.length}：在 ${FEATURE_NAMES[s.node.splitFeature]} ≤ ${s.node.splitThreshold.toFixed(2)} 处分裂（增益 ${(s.node.gain || 0).toFixed(4)}，${s.node.samples} 个样本）`;
+        }
+    }
+
+    const steps = buildSteps.map((s, i) => ({
+        name: `节点 ${i}`,
+        duration: 900,
+        action: async (idx, instant) => {
+            updateViz(idx);
+            if (!instant) {
+                await new Promise(r => setTimeout(r, 100));
+            }
+        }
+    }));
+
+    initViz();
+
+    const ctrl = new AnimationController({
+        container: document.getElementById('anim-controls-1'),
+        steps,
+        defaultDuration: 900,
+        onStepChange(idx) {
+            if (idx < 0) {
+                // reset
+                if (sc) { sc.g.selectAll('.split-line,.boundary-rect').remove(); }
+                d3.select('#tree1').selectAll('*').remove();
+                document.getElementById('s1-depth').textContent = '0';
+                document.getElementById('s1-nodes').textContent = '0';
+                document.getElementById('s1-leaves').textContent = '0';
+                document.getElementById('s1-acc').textContent = '—';
+                document.getElementById('step-desc').querySelector('p').textContent = '点击播放按钮，观察树的构建过程。';
+            }
+        }
+    });
+})();
+
+/* ============================================================
+   Section 2 — 停止条件
+   ============================================================ */
+(function initSection2() {
+    const data = DATA_TRAIN;
+    const slDepth = document.getElementById('sl-depth');
+    const slSamples = document.getElementById('sl-samples');
+    const slGain = document.getElementById('sl-gain');
+
+    function update() {
+        const maxDepth = +slDepth.value;
+        const minSamples = +slSamples.value;
+        const minGain = +slGain.value;
+        document.getElementById('sl-depth-val').textContent = maxDepth;
+        document.getElementById('sl-samples-val').textContent = minSamples;
+        document.getElementById('sl-gain-val').textContent = minGain.toFixed(2);
+
+        // Build tree with min gain filter
+        const tree = buildTreeWithGain(data, { maxDepth, minSamples, criterion: 'gini', minGain });
+
+        const sc = setupScatter('scatter2', data);
+        drawBoundary(sc.g, tree, sc.xS, sc.yS, sc.w, sc.h);
+        drawSplitLines(sc.g, tree, sc.xS, sc.yS, sc.w, sc.h);
+        drawTreeViz('tree2', tree);
+
+        document.getElementById('s2-depth').textContent = treeDepth(tree);
+        document.getElementById('s2-nodes').textContent = treeNodeCount(tree);
+        document.getElementById('s2-leaves').textContent = countLeaves(tree);
+        const acc = accuracy(tree, data);
+        document.getElementById('s2-acc').textContent = (acc * 100).toFixed(1) + '%';
+    }
+
+    // Build tree supporting minGain
+    function buildTreeWithGain(data, opts) {
+        const { maxDepth = 5, minSamples = 2, criterion = 'gini', minGain = 0 } = opts;
+        function _build(subset, depth, nodeId) {
+            const node = { id: nodeId, depth, samples: subset.length };
+            const counts = RFUtils.countClasses(subset);
+            node.classCounts = counts;
+            node.prediction = RFUtils.majorityClass(subset);
+            if (depth >= maxDepth || subset.length < minSamples) { node.isLeaf = true; return node; }
+            const uniqueLabels = new Set(subset.map(d => d.label));
+            if (uniqueLabels.size <= 1) { node.isLeaf = true; return node; }
+            let bestSplit = null;
+            for (let fi = 0; fi < 2; fi++) {
+                const split = findBestSplit(subset, fi, criterion);
+                if (!bestSplit || split.gain > bestSplit.gain) bestSplit = split;
+            }
+            if (!bestSplit || bestSplit.gain <= minGain) { node.isLeaf = true; return node; }
+            node.isLeaf = false;
+            node.splitFeature = bestSplit.featureIndex;
+            node.splitThreshold = bestSplit.threshold;
+            node.gain = bestSplit.gain;
+            const getVal = d => bestSplit.featureIndex === 0 ? d.x : d.y;
+            const left = subset.filter(d => getVal(d) <= bestSplit.threshold);
+            const right = subset.filter(d => getVal(d) > bestSplit.threshold);
+            if (left.length === 0 || right.length === 0) { node.isLeaf = true; return node; }
+            node.left = _build(left, depth + 1, nodeId * 2 + 1);
+            node.right = _build(right, depth + 1, nodeId * 2 + 2);
+            return node;
+        }
+        return _build(data, 0, 0);
+    }
+
+    slDepth.addEventListener('input', update);
+    slSamples.addEventListener('input', update);
+    slGain.addEventListener('input', update);
+    update();
+})();
+
+/* ============================================================
+   Section 3 — 剪枝
+   ============================================================ */
+(function initSection3() {
+    const trainData = DATA_TRAIN;
+    const valData = DATA_VAL;
+
+    // Full tree (overfitted)
+    const fullTree = buildTree(trainData, { maxDepth: 8, minSamples: 1, criterion: 'gini' });
+
+    let currentMode = 'none';
+    const btnNone = document.getElementById('prune-none');
+    const btnPre = document.getElementById('prune-pre');
+    const btnPost = document.getElementById('prune-post');
+    const sliderRow = document.getElementById('prune-slider-row');
+    const slPrune = document.getElementById('sl-prune');
+    const slPruneVal = document.getElementById('sl-prune-val');
+    const pruneLabel = document.getElementById('prune-slider-label');
+
+    function setMode(mode) {
+        currentMode = mode;
+        [btnNone, btnPre, btnPost].forEach(b => b.classList.remove('active'));
+        document.querySelector(`[data-mode="${mode}"]`).classList.add('active');
+        if (mode === 'none') {
+            sliderRow.style.display = 'none';
+        } else if (mode === 'pre') {
+            sliderRow.style.display = 'flex';
+            pruneLabel.textContent = '最大深度';
+            slPrune.min = 1; slPrune.max = 8; slPrune.value = 3; slPrune.step = 1;
+        } else {
+            sliderRow.style.display = 'flex';
+            pruneLabel.textContent = '剪除叶数';
+            slPrune.min = 0; slPrune.max = 20; slPrune.value = 0; slPrune.step = 1;
+        }
+        update();
+    }
+
+    // Post-pruning: remove leaves with smallest gain
+    function postPrune(tree, nRemove) {
+        const copy = JSON.parse(JSON.stringify(tree));
+        for (let i = 0; i < nRemove; i++) {
+            // Find internal node with two leaf children and smallest gain
+            let bestNode = null, bestGain = Infinity, bestParent = null;
+            function findLeafParent(node, parent) {
+                if (!node || node.isLeaf) return;
+                if (node.left && node.left.isLeaf && node.right && node.right.isLeaf) {
+                    const g = node.gain || 0;
+                    if (g < bestGain) { bestGain = g; bestNode = node; bestParent = parent; }
+                }
+                findLeafParent(node.left, node);
+                findLeafParent(node.right, node);
+            }
+            findLeafParent(copy, null);
+            if (!bestNode) break;
+            // Convert to leaf
+            bestNode.isLeaf = true;
+            delete bestNode.left;
+            delete bestNode.right;
+            delete bestNode.splitFeature;
+            delete bestNode.splitThreshold;
+        }
+        return copy;
+    }
+
+    function update() {
+        let tree;
+        if (currentMode === 'none') {
+            tree = fullTree;
+        } else if (currentMode === 'pre') {
+            const md = +slPrune.value;
+            slPruneVal.textContent = md;
+            tree = buildTree(trainData, { maxDepth: md, minSamples: 1, criterion: 'gini' });
+        } else {
+            const nr = +slPrune.value;
+            slPruneVal.textContent = nr;
+            tree = postPrune(fullTree, nr);
+        }
+
+        drawTreeViz('tree3', tree);
+        const trainAcc = accuracy(tree, trainData);
+        const valAcc = accuracy(tree, valData);
+        document.getElementById('s3-nodes').textContent = treeNodeCount(tree);
+        document.getElementById('s3-train').textContent = (trainAcc * 100).toFixed(1) + '%';
+        document.getElementById('s3-val').textContent = (valAcc * 100).toFixed(1) + '%';
+
+        drawAccuracyChart(currentMode);
+    }
+
+    function drawAccuracyChart(mode) {
+        const svg = d3.select('#acc-chart');
+        const rect = svg.node().getBoundingClientRect();
+        const W = rect.width, H = rect.height;
+        svg.selectAll('*').remove();
+        const m = { top: 25, right: 20, bottom: 35, left: 45 };
+        const w = W - m.left - m.right, h = H - m.top - m.bottom;
+        const g = svg.append('g').attr('transform', `translate(${m.left},${m.top})`);
+
+        let points = [];
+        if (mode === 'post') {
+            for (let nr = 0; nr <= 20; nr++) {
+                const t = postPrune(fullTree, nr);
+                points.push({ x: nr, train: accuracy(t, trainData), val: accuracy(t, valData) });
+            }
+        } else {
+            for (let md = 1; md <= 8; md++) {
+                const t = buildTree(trainData, { maxDepth: md, minSamples: 1, criterion: 'gini' });
+                points.push({ x: md, train: accuracy(t, trainData), val: accuracy(t, valData) });
+            }
+        }
+
+        const xS = d3.scaleLinear().domain(d3.extent(points, d => d.x)).range([0, w]);
+        const yS = d3.scaleLinear().domain([0.4, 1.05]).range([h, 0]);
+
+        // axes
+        g.append('g').attr('transform', `translate(0,${h})`).call(d3.axisBottom(xS).ticks(points.length > 12 ? 10 : points.length))
+            .selectAll('text').style('fill', COLORS.muted).style('font-size', '0.7rem');
+        g.append('g').call(d3.axisLeft(yS).ticks(5).tickFormat(d => (d * 100).toFixed(0) + '%'))
+            .selectAll('text').style('fill', COLORS.muted).style('font-size', '0.7rem');
+        g.selectAll('.domain, .tick line').style('stroke', COLORS.border);
+
+        // x-axis label
+        g.append('text').attr('x', w / 2).attr('y', h + 30).attr('text-anchor', 'middle')
+            .attr('fill', COLORS.muted).attr('font-size', '0.75rem')
+            .text(mode === 'post' ? '剪除叶节点数' : '最大深度');
+
+        const lineGen = (key) => d3.line().x(d => xS(d.x)).y(d => yS(d[key])).curve(d3.curveMonotoneX);
+
+        g.append('path').datum(points).attr('d', lineGen('train'))
+            .attr('fill', 'none').attr('stroke', COLORS.orange).attr('stroke-width', 2);
+        g.append('path').datum(points).attr('d', lineGen('val'))
+            .attr('fill', 'none').attr('stroke', COLORS.green).attr('stroke-width', 2);
+
+        // Current position marker
+        const curX = mode === 'post' ? +slPrune.value : (mode === 'pre' ? +slPrune.value : 8);
+        const curPt = points.find(p => p.x === curX);
+        if (curPt) {
+            g.append('line').attr('x1', xS(curX)).attr('x2', xS(curX)).attr('y1', 0).attr('y2', h)
+                .attr('stroke', COLORS.text).attr('stroke-width', 1).attr('stroke-dasharray', '3,3').attr('opacity', 0.4);
+        }
+
+        // Legend
+        const lg = g.append('g').attr('transform', `translate(${w - 120}, 0)`);
+        lg.append('line').attr('x1', 0).attr('x2', 20).attr('y1', 0).attr('y2', 0).attr('stroke', COLORS.orange).attr('stroke-width', 2);
+        lg.append('text').attr('x', 25).attr('y', 4).attr('fill', COLORS.text).attr('font-size', '0.7rem').text('训练');
+        lg.append('line').attr('x1', 0).attr('x2', 20).attr('y1', 16).attr('y2', 16).attr('stroke', COLORS.green).attr('stroke-width', 2);
+        lg.append('text').attr('x', 25).attr('y', 20).attr('fill', COLORS.text).attr('font-size', '0.7rem').text('验证');
+    }
+
+    btnNone.addEventListener('click', () => setMode('none'));
+    btnPre.addEventListener('click', () => setMode('pre'));
+    btnPost.addEventListener('click', () => setMode('post'));
+    slPrune.addEventListener('input', update);
+    setMode('none');
+})();
+
+/* ============================================================
+   Section 4 — CART 伪代码高亮 (self-running)
+   ============================================================ */
+(function initSection4() {
+    const lines = document.querySelectorAll('#pseudocode > span, #pseudocode');
+    // Auto-highlight lines on hover — parsed from the pre block
+    const codeEl = document.getElementById('pseudocode');
+    const allText = codeEl.innerHTML.split('\n');
+
+    // Step highlighting for class/reg lists
+    const classSteps = document.querySelectorAll('#cart-class-steps li');
+    const regSteps = document.querySelectorAll('#cart-reg-steps li');
+    let hlIdx = 0;
+    function cycleHighlight() {
+        classSteps.forEach((li, i) => li.classList.toggle('active', i === hlIdx));
+        regSteps.forEach((li, i) => li.classList.toggle('active', i === hlIdx));
+        hlIdx = (hlIdx + 1) % classSteps.length;
+    }
+    cycleHighlight();
+    setInterval(cycleHighlight, 2000);
+})();
+
+/* ============================================================
+   Section 5 — 自己构建一棵树
+   ============================================================ */
+(function initSection5() {
+    const data = DATA_TRAIN;
+    const userSplits = []; // {feature: 0|1, threshold: number, region: {xMin,xMax,yMin,yMax}}
+    let splitMode = 0; // 0 = X (vertical), 1 = Y (horizontal)
+    let autoTree = null;
+    let sc = null;
+
+    const btnSplitX = document.getElementById('split-x');
+    const btnSplitY = document.getElementById('split-y');
+
+    btnSplitX.addEventListener('click', () => { splitMode = 0; btnSplitX.classList.add('active'); btnSplitY.classList.remove('active'); });
+    btnSplitY.addEventListener('click', () => { splitMode = 1; btnSplitY.classList.add('active'); btnSplitX.classList.remove('active'); });
+
+    document.getElementById('undo-split').addEventListener('click', () => { userSplits.pop(); redraw(); });
+    document.getElementById('clear-splits').addEventListener('click', () => { userSplits.length = 0; redraw(); });
+    document.getElementById('auto-build').addEventListener('click', runAutoBuild);
+
+    function initScatter() {
+        sc = setupScatter('scatter5', data);
+        // Click handler
+        sc.svg.on('click', function(event) {
+            const [mx, my] = d3.pointer(event, sc.g.node());
+            const dataX = sc.xS.invert(mx), dataY = sc.yS.invert(my);
+            if (mx < 0 || mx > sc.w || my < 0 || my > sc.h) return;
+            userSplits.push({ feature: splitMode, threshold: splitMode === 0 ? dataX : dataY });
+            redraw();
+        });
+    }
+
+    // Build a tree from user splits
+    function buildUserTree() {
+        if (userSplits.length === 0) return null;
+
+        function _build(subset, splitIdx, nodeId) {
+            const node = { id: nodeId, samples: subset.length };
+            node.prediction = RFUtils.majorityClass(subset);
+            node.classCounts = RFUtils.countClasses(subset);
+            if (splitIdx >= userSplits.length || subset.length <= 1) {
+                node.isLeaf = true;
+                return node;
+            }
+            const s = userSplits[splitIdx];
+            node.isLeaf = false;
+            node.splitFeature = s.feature;
+            node.splitThreshold = s.threshold;
+            node.gain = 0;
+            const getVal = d => s.feature === 0 ? d.x : d.y;
+            const left = subset.filter(d => getVal(d) <= s.threshold);
+            const right = subset.filter(d => getVal(d) > s.threshold);
+            if (left.length === 0 || right.length === 0) {
+                node.isLeaf = true;
+                return node;
+            }
+            node.left = _build(left, splitIdx + 1, nodeId * 2 + 1);
+            node.right = _build(right, splitIdx + 1, nodeId * 2 + 2);
+            return node;
+        }
+        return _build(data, 0, 0);
+    }
+
+    // Build recursive user tree — splits applied hierarchically
+    function buildUserTreeRecursive() {
+        if (userSplits.length === 0) return null;
+
+        // Each split subdivides data; we apply splits depth-first: first split at root,
+        // second split on left child, etc. This creates a left-skewed tree matching user order.
+        // Alternative: apply splits in sequence, each time splitting the largest impure region.
+
+        // Simple approach: chain splits as a left-deep tree
+        function _chain(subset, idx, nodeId) {
+            const node = { id: nodeId, samples: subset.length };
+            node.prediction = RFUtils.majorityClass(subset);
+            node.classCounts = RFUtils.countClasses(subset);
+            if (idx >= userSplits.length || subset.length <= 1) {
+                node.isLeaf = true;
+                return node;
+            }
+            const s = userSplits[idx];
+            const getVal = d => s.feature === 0 ? d.x : d.y;
+            const left = subset.filter(d => getVal(d) <= s.threshold);
+            const right = subset.filter(d => getVal(d) > s.threshold);
+            if (left.length === 0 || right.length === 0) {
+                node.isLeaf = true;
+                return node;
+            }
+            node.isLeaf = false;
+            node.splitFeature = s.feature;
+            node.splitThreshold = s.threshold;
+            node.gain = 0;
+            // Continue splitting on both branches
+            node.left = _chain(left, idx + 1, nodeId * 2 + 1);
+            node.right = _chain(right, idx + 1, nodeId * 2 + 2);
+            return node;
+        }
+        return _chain(data, 0, 0);
+    }
+
+    function redraw() {
+        sc = setupScatter('scatter5', data);
+        sc.svg.on('click', function(event) {
+            const [mx, my] = d3.pointer(event, sc.g.node());
+            const dataX = sc.xS.invert(mx), dataY = sc.yS.invert(my);
+            if (mx < 0 || mx > sc.w || my < 0 || my > sc.h) return;
+            userSplits.push({ feature: splitMode, threshold: splitMode === 0 ? dataX : dataY });
+            redraw();
+        });
+
+        // Draw user split lines
+        const xD = sc.xS.domain(), yD = sc.yS.domain();
+        userSplits.forEach((s, i) => {
+            if (s.feature === 0) {
+                sc.g.append('line').attr('class', 'split-line')
+                    .attr('x1', sc.xS(s.threshold)).attr('y1', sc.yS(yD[0])).attr('x2', sc.xS(s.threshold)).attr('y2', sc.yS(yD[1]))
+                    .attr('stroke', COLORS.orange).attr('stroke-width', 2).attr('stroke-dasharray', '5,3');
+            } else {
+                sc.g.append('line').attr('class', 'split-line')
+                    .attr('x1', sc.xS(xD[0])).attr('y1', sc.yS(s.threshold)).attr('x2', sc.xS(xD[1])).attr('y2', sc.yS(s.threshold))
+                    .attr('stroke', COLORS.green).attr('stroke-width', 2).attr('stroke-dasharray', '5,3');
+            }
+            // Label
+            if (s.feature === 0) {
+                sc.g.append('text').attr('x', sc.xS(s.threshold) + 4).attr('y', 12)
+                    .attr('fill', COLORS.orange).attr('font-size', '0.65rem').text(`#${i + 1}`);
+            } else {
+                sc.g.append('text').attr('x', 4).attr('y', sc.yS(s.threshold) - 4)
+                    .attr('fill', COLORS.green).attr('font-size', '0.65rem').text(`#${i + 1}`);
+            }
+        });
+
+        const userTree = buildUserTreeRecursive();
+        if (userTree) {
+            drawBoundary(sc.g, userTree, sc.xS, sc.yS, sc.w, sc.h);
+            sc.g.selectAll('.pt').raise();
+            sc.g.selectAll('.split-line').raise();
+        }
+        drawTreeViz('tree5', userTree);
+
+        // Accuracy
+        if (userTree) {
+            const uAcc = accuracy(userTree, data);
+            document.getElementById('user-acc').textContent = (uAcc * 100).toFixed(1) + '%';
+        } else {
+            document.getElementById('user-acc').textContent = '—';
+        }
+
+        // Auto tree accuracy
+        if (autoTree) {
+            const aAcc = accuracy(autoTree, data);
+            document.getElementById('auto-acc').textContent = (aAcc * 100).toFixed(1) + '%';
+        }
+    }
+
+    async function runAutoBuild() {
+        // Clear user splits and animate auto-build
+        userSplits.length = 0;
+        autoTree = buildTree(data, { maxDepth: 4, minSamples: 3, criterion: 'gini' });
+        const aAcc = accuracy(autoTree, data);
+        document.getElementById('auto-acc').textContent = (aAcc * 100).toFixed(1) + '%';
+
+        // Animate: add splits from auto tree one by one
+        const autoSplits = [];
+        function collectSplits(node) {
+            if (!node || node.isLeaf) return;
+            autoSplits.push({ feature: node.splitFeature, threshold: node.splitThreshold });
+            collectSplits(node.left);
+            collectSplits(node.right);
+        }
+        collectSplits(autoTree);
+
+        userSplits.length = 0;
+        for (let i = 0; i < autoSplits.length; i++) {
+            userSplits.push(autoSplits[i]);
+            redraw();
+            await new Promise(r => setTimeout(r, 500));
+        }
+
+        // Finally show the real auto tree
+        sc = setupScatter('scatter5', data);
+        sc.svg.on('click', function(event) {
+            const [mx, my] = d3.pointer(event, sc.g.node());
+            if (mx < 0 || mx > sc.w || my < 0 || my > sc.h) return;
+            userSplits.push({ feature: splitMode, threshold: splitMode === 0 ? sc.xS.invert(mx) : sc.yS.invert(my) });
+            redraw();
+        });
+        drawBoundary(sc.g, autoTree, sc.xS, sc.yS, sc.w, sc.h);
+        drawSplitLines(sc.g, autoTree, sc.xS, sc.yS, sc.w, sc.h);
+        drawTreeViz('tree5', autoTree);
+        document.getElementById('user-acc').textContent = (aAcc * 100).toFixed(1) + '%';
+    }
+
+    initScatter();
+    redraw();
+})();
+
+/* ============================================================
+   Re-render KaTeX after dynamic content
+   ============================================================ */
+document.addEventListener('DOMContentLoaded', () => {
+    setTimeout(() => {
+        if (typeof renderMath === 'function') renderMath(document.body);
+    }, 300);
+});
+
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,1355 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>实战调参 — XGBoost 交互式可视化</title>
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+SC:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
+    <style>
+        /* === Breadcrumb === */
+        .breadcrumb {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            margin-bottom: 0.5rem;
+        }
+        .breadcrumb a { color: var(--accent-blue); }
+        .breadcrumb a:hover { color: var(--accent-green); }
+
+        /* === Parameter Cards === */
+        .param-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+        .param-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1rem 1.2rem;
+            cursor: pointer;
+            transition: all 0.3s;
+            position: relative;
+            overflow: hidden;
+        }
+        .param-card::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0;
+            height: 3px;
+            background: var(--accent-yellow);
+            transform: scaleX(0);
+            transition: transform 0.3s;
+        }
+        .param-card:hover, .param-card.active {
+            border-color: var(--accent-yellow);
+            box-shadow: 0 0 20px rgba(255, 215, 64, 0.15);
+        }
+        .param-card:hover::before, .param-card.active::before {
+            transform: scaleX(1);
+        }
+        .param-card .param-name {
+            font-family: var(--font-mono);
+            font-size: 0.95rem;
+            color: var(--accent-yellow);
+            font-weight: 600;
+            margin-bottom: 0.4rem;
+        }
+        .param-card .param-meta {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            margin-bottom: 0.3rem;
+        }
+        .param-card .param-desc {
+            font-size: 0.82rem;
+            color: var(--text-secondary);
+            line-height: 1.5;
+        }
+        .param-detail {
+            background: var(--bg-secondary);
+            border: 1px solid var(--accent-yellow);
+            border-radius: var(--radius-md);
+            padding: 1.2rem 1.5rem;
+            margin-top: 1rem;
+            display: none;
+        }
+        .param-detail.visible { display: block; }
+        .param-detail h4 {
+            color: var(--accent-yellow);
+            font-family: var(--font-mono);
+            margin-bottom: 0.5rem;
+        }
+        .param-detail p { font-size: 0.9rem; }
+
+        /* === Heatmap === */
+        .heatmap-container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5rem;
+            align-items: start;
+        }
+        .heatmap-wrap {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1rem;
+            overflow: hidden;
+        }
+        .heatmap-wrap svg { display: block; }
+        .heatmap-cell { cursor: pointer; stroke: var(--bg-primary); stroke-width: 0.5; }
+        .heatmap-cell:hover { stroke: var(--accent-yellow); stroke-width: 2; }
+        .heatmap-cell.selected { stroke: #fff; stroke-width: 2; }
+        .chart-wrap {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1rem;
+        }
+        .chart-wrap canvas { max-height: 340px; }
+        .heatmap-info {
+            margin-top: 0.75rem;
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            font-family: var(--font-mono);
+        }
+
+        /* === Decision Boundary === */
+        .boundary-layout {
+            display: grid;
+            grid-template-columns: 280px 1fr;
+            gap: 1.5rem;
+            align-items: start;
+        }
+        .controls-panel {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1.2rem;
+        }
+        .controls-panel .slider-group { margin-bottom: 1rem; }
+        .controls-panel .slider-group:last-child { margin-bottom: 0; }
+        .metric-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 0.4rem 0;
+            border-bottom: 1px solid rgba(42,42,74,0.4);
+            font-size: 0.85rem;
+        }
+        .metric-row .label { color: var(--text-secondary); }
+        .metric-row .value { font-family: var(--font-mono); color: var(--accent-green); font-weight: 600; }
+        .boundary-canvas {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+        }
+        .boundary-canvas svg { display: block; }
+
+        /* === Flowchart === */
+        .flowchart-container {
+            display: grid;
+            grid-template-columns: 1fr 1.2fr;
+            gap: 1.5rem;
+            align-items: start;
+        }
+        .flow-steps {
+            display: flex;
+            flex-direction: column;
+            gap: 0;
+        }
+        .flow-step {
+            display: flex;
+            align-items: flex-start;
+            gap: 1rem;
+            padding: 1rem;
+            cursor: pointer;
+            border-radius: var(--radius-md);
+            transition: all 0.3s;
+            position: relative;
+        }
+        .flow-step:hover { background: rgba(255, 215, 64, 0.05); }
+        .flow-step.active { background: rgba(255, 215, 64, 0.1); }
+        .flow-step .step-num {
+            min-width: 32px; height: 32px;
+            border-radius: 50%;
+            background: var(--border-color);
+            display: flex; align-items: center; justify-content: center;
+            font-weight: 700; font-size: 0.85rem;
+            color: var(--text-muted);
+            transition: all 0.3s;
+        }
+        .flow-step.active .step-num {
+            background: var(--accent-yellow);
+            color: var(--bg-primary);
+        }
+        .flow-step.done .step-num {
+            background: rgba(22,199,154,0.3);
+            color: var(--accent-green);
+        }
+        .flow-step .step-title {
+            font-weight: 600; font-size: 0.95rem;
+            margin-bottom: 0.25rem;
+        }
+        .flow-step .step-desc {
+            font-size: 0.82rem; color: var(--text-secondary); line-height: 1.5;
+        }
+        .flow-connector {
+            width: 2px; height: 20px;
+            background: var(--border-color);
+            margin-left: 1rem + 15px;
+            margin-left: calc(1rem + 15px);
+        }
+        .flow-connector.done { background: var(--accent-green); }
+        .flow-detail-panel {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1.5rem;
+        }
+        .flow-detail-panel h4 {
+            color: var(--accent-yellow);
+            margin-bottom: 1rem;
+        }
+        .metrics-compare {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+        .metric-box {
+            text-align: center;
+            padding: 1rem;
+            border-radius: var(--radius-sm);
+            background: rgba(0,0,0,0.2);
+        }
+        .metric-box .metric-label { font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.3rem; }
+        .metric-box .metric-val {
+            font-family: var(--font-mono);
+            font-size: 1.4rem;
+            font-weight: 700;
+        }
+        .metric-box .metric-val.good { color: var(--accent-green); }
+        .metric-box .metric-val.warn { color: var(--accent-orange); }
+
+        /* === Early Stopping === */
+        .early-stop-layout {
+            display: grid;
+            grid-template-columns: 280px 1fr;
+            gap: 1.5rem;
+            align-items: start;
+        }
+        .early-stop-chart {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1rem;
+        }
+        .early-stop-chart canvas { max-height: 380px; }
+        .stop-marker {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.3rem;
+            padding: 0.3rem 0.7rem;
+            background: rgba(255, 82, 82, 0.15);
+            border-radius: var(--radius-sm);
+            font-size: 0.8rem;
+            color: var(--accent-red);
+            font-weight: 600;
+            margin-top: 0.5rem;
+        }
+
+        /* === Responsive overrides === */
+        @media (max-width: 1024px) {
+            .heatmap-container,
+            .boundary-layout,
+            .flowchart-container,
+            .early-stop-layout {
+                grid-template-columns: 1fr;
+            }
+        }
+        @media (max-width: 768px) {
+            .param-grid { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="page-container">
+    <!-- Breadcrumb & Title -->
+    <div class="breadcrumb">
+        <a href="../index.html">XGBoost</a> / 模块 07
+    </div>
+    <h1 style="margin-bottom: 0.3rem;">实战调参</h1>
+    <p style="color: var(--text-secondary); margin-bottom: 2.5rem;">
+        掌握 XGBoost 超参数的调优策略，理解每个参数的作用，从手动调参到自动早停。
+    </p>
+
+    <!-- ============================================================ -->
+    <!-- Section 1: 超参数全览 -->
+    <!-- ============================================================ -->
+    <div class="section" id="sec-params">
+        <div class="section-title">
+            <div class="icon">&#9881;</div>
+            <h2>超参数全览</h2>
+        </div>
+        <p>点击任意参数卡片查看详细说明。这八个参数是 XGBoost 调参中最关键的旋钮。</p>
+        <div class="param-grid" id="paramGrid"></div>
+        <div class="param-detail" id="paramDetail">
+            <h4 id="detailTitle"></h4>
+            <p id="detailText"></p>
+            <div id="detailFormula" style="margin-top: 0.75rem;"></div>
+        </div>
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- Section 2: 学习率 × 轮数 -->
+    <!-- ============================================================ -->
+    <div class="section" id="sec-lr-rounds">
+        <div class="section-title">
+            <div class="icon">&#128293;</div>
+            <h2>学习率 × 轮数</h2>
+        </div>
+        <p>核心权衡：低学习率需要更多轮数，但往往能获得更好的泛化能力。热力图颜色越亮表示测试准确率越高。</p>
+        <div class="heatmap-container">
+            <div>
+                <div class="heatmap-wrap">
+                    <svg id="heatmapSvg"></svg>
+                </div>
+                <div class="heatmap-info" id="heatmapInfo">点击热力图中的格子查看对应的损失曲线</div>
+            </div>
+            <div class="chart-wrap">
+                <canvas id="lrRoundChart"></canvas>
+                <div class="info-box mt-1" id="lrRoundHint" style="font-size:0.82rem;">
+                    <p>选择热力图中某一格，此处将展示该学习率和轮数组合下的训练/测试损失曲线。</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- Section 3: 树深度与正则化 -->
+    <!-- ============================================================ -->
+    <div class="section" id="sec-depth-reg">
+        <div class="section-title">
+            <div class="icon">&#127795;</div>
+            <h2>树深度与正则化</h2>
+        </div>
+        <p>调整滑块观察决策边界如何变化。增大深度使模型更复杂，增大正则化使边界更平滑。</p>
+        <div class="boundary-layout">
+            <div class="controls-panel">
+                <div class="slider-group">
+                    <label>max_depth</label>
+                    <input type="range" id="sliderDepth" min="1" max="10" value="4" step="1">
+                    <span class="slider-value" id="valDepth">4</span>
+                </div>
+                <div class="slider-group">
+                    <label>lambda (L2)</label>
+                    <input type="range" id="sliderLambda" min="0" max="10" value="1" step="0.5">
+                    <span class="slider-value" id="valLambda">1</span>
+                </div>
+                <div class="slider-group">
+                    <label>gamma</label>
+                    <input type="range" id="sliderGamma" min="0" max="5" value="0" step="0.25">
+                    <span class="slider-value" id="valGamma">0</span>
+                </div>
+                <hr style="border-color: var(--border-color); margin: 1rem 0;">
+                <div class="metric-row">
+                    <span class="label">训练准确率</span>
+                    <span class="value" id="trainAcc">--</span>
+                </div>
+                <div class="metric-row">
+                    <span class="label">测试准确率</span>
+                    <span class="value" id="testAcc">--</span>
+                </div>
+                <div class="metric-row">
+                    <span class="label">树数量</span>
+                    <span class="value" id="treeCount">--</span>
+                </div>
+                <button class="btn btn-primary mt-2" onclick="regenerateBoundaryData()" style="width:100%;">重新生成数据</button>
+            </div>
+            <div class="boundary-canvas">
+                <svg id="boundarySvg" width="560" height="440"></svg>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- Section 4: 调参策略流程 -->
+    <!-- ============================================================ -->
+    <div class="section" id="sec-strategy">
+        <div class="section-title">
+            <div class="icon">&#128203;</div>
+            <h2>调参策略流程</h2>
+        </div>
+        <p>实战中推荐的分步调参方法。点击每一步查看调参前后的效果对比。</p>
+        <div class="flowchart-container">
+            <div>
+                <div class="flow-steps" id="flowSteps"></div>
+            </div>
+            <div class="flow-detail-panel" id="flowDetail">
+                <h4 id="flowDetailTitle">选择左侧步骤查看详情</h4>
+                <p id="flowDetailDesc" style="font-size:0.9rem; color:var(--text-secondary);"></p>
+                <div class="metrics-compare" id="flowMetrics"></div>
+                <canvas id="flowChart" style="margin-top:1rem; max-height:250px;"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- Section 5: 早停法 -->
+    <!-- ============================================================ -->
+    <div class="section" id="sec-early-stop">
+        <div class="section-title">
+            <div class="icon">&#9200;</div>
+            <h2>早停法</h2>
+        </div>
+        <p>训练轮数过多会导致过拟合。早停法监控验证集损失，当连续若干轮无改善时自动停止训练。</p>
+        <div class="early-stop-layout">
+            <div class="controls-panel">
+                <div class="slider-group">
+                    <label>patience</label>
+                    <input type="range" id="sliderPatience" min="1" max="30" value="5" step="1">
+                    <span class="slider-value" id="valPatience">5</span>
+                </div>
+                <div class="slider-group">
+                    <label>learning_rate</label>
+                    <input type="range" id="sliderEsLr" min="0.01" max="0.5" value="0.1" step="0.01">
+                    <span class="slider-value" id="valEsLr">0.1</span>
+                </div>
+                <div class="slider-group">
+                    <label>max_depth</label>
+                    <input type="range" id="sliderEsDepth" min="2" max="8" value="4" step="1">
+                    <span class="slider-value" id="valEsDepth">4</span>
+                </div>
+                <hr style="border-color: var(--border-color); margin: 1rem 0;">
+                <div class="metric-row">
+                    <span class="label">最优轮次</span>
+                    <span class="value" id="bestRound">--</span>
+                </div>
+                <div class="metric-row">
+                    <span class="label">最优验证损失</span>
+                    <span class="value" id="bestValLoss">--</span>
+                </div>
+                <div class="metric-row">
+                    <span class="label">早停轮次</span>
+                    <span class="value" id="stopRound">--</span>
+                </div>
+                <div class="stop-marker" id="stopMarker" style="display:none;">
+                    &#9632; 已触发早停
+                </div>
+            </div>
+            <div class="early-stop-chart">
+                <canvas id="earlyStopChart"></canvas>
+            </div>
+        </div>
+    </div>
+
+</div><!-- end page-container -->
+
+<!-- Shared scripts -->
+<script src="../shared/scripts/xgb-utils.js"></script>
+<script src="../shared/scripts/animation-controller.js"></script>
+<script src="../shared/scripts/matrix-renderer.js"></script>
+<script src="../shared/scripts/nav.js"></script>
+<script src="../shared/scripts/katex-init.js"></script>
+
+<script>
+/* ================================================================
+   Section 1: 超参数全览
+   ================================================================ */
+(function() {
+    const params = [
+        {
+            name: 'n_estimators',
+            range: '1 ~ 10000',
+            default_: '100',
+            effect: '树的总数量（提升轮数）',
+            detail: '控制模型中弱学习器的数量。过少会欠拟合，过多会过拟合（尤其学习率较大时）。通常配合早停法自动确定最佳值。',
+            formula: '\\hat{y}_i = \\sum_{k=1}^{K} f_k(x_i)',
+            category: '基础'
+        },
+        {
+            name: 'learning_rate',
+            range: '0.001 ~ 1.0',
+            default_: '0.3',
+            effect: '每棵树的贡献缩减系数',
+            detail: '也叫 eta。每棵新树的预测值会乘以这个系数再加到总预测中。低学习率意味着每棵树贡献更小，通常需要更多的树来补偿，但泛化能力更强。',
+            formula: '\\hat{y}_i^{(t)} = \\hat{y}_i^{(t-1)} + \\eta \\cdot f_t(x_i)',
+            category: '基础'
+        },
+        {
+            name: 'max_depth',
+            range: '1 ~ 无穷',
+            default_: '6',
+            effect: '单棵树的最大深度',
+            detail: '控制每棵树的复杂度。深度越大，树能捕获更复杂的交互特征，但也更容易过拟合。一般建议 3~8 之间。比赛中常用 5~7。',
+            formula: '\\text{叶子数} \\leq 2^{\\text{max\\_depth}}',
+            category: '树结构'
+        },
+        {
+            name: 'lambda',
+            range: '0 ~ +∞',
+            default_: '1',
+            effect: 'L2 正则化系数',
+            detail: '叶子权重的 L2 正则化。增大 lambda 会使叶子权重更小、更保守，有效防止过拟合。类似岭回归的惩罚项。',
+            formula: '\\Omega(f) = \\gamma T + \\frac{1}{2}\\lambda \\sum_{j=1}^T w_j^2',
+            category: '正则化'
+        },
+        {
+            name: 'gamma',
+            range: '0 ~ +∞',
+            default_: '0',
+            effect: '最小分裂增益阈值',
+            detail: '只有当分裂带来的增益大于 gamma 时才会进行分裂。增大 gamma 使模型更保守，减少分裂次数。等价于树的剪枝强度。',
+            formula: 'Gain = \\frac{1}{2}\\left[\\frac{G_L^2}{H_L+\\lambda}+\\frac{G_R^2}{H_R+\\lambda}-\\frac{(G_L+G_R)^2}{H_L+H_R+\\lambda}\\right] - \\gamma',
+            category: '正则化'
+        },
+        {
+            name: 'min_child_weight',
+            range: '0 ~ +∞',
+            default_: '1',
+            effect: '子节点最小 Hessian 权重和',
+            detail: '如果某个分裂后子节点的二阶导数之和小于此值，则不进行分裂。对于二分类问题，Hessian ≈ p(1-p)，所以此参数约束了叶子节点的最少有效样本数。',
+            formula: '\\text{分裂条件}: H_{child} \\geq \\text{min\\_child\\_weight}',
+            category: '树结构'
+        },
+        {
+            name: 'subsample',
+            range: '(0, 1]',
+            default_: '1.0',
+            effect: '每轮训练使用的样本比例',
+            detail: '类似随机森林的行抽样。每轮训练前随机抽取部分样本来构建树。减少到 0.5~0.8 可有效防止过拟合，也加快训练速度。',
+            formula: '|D_t| = \\lfloor \\text{subsample} \\times N \\rfloor',
+            category: '采样'
+        },
+        {
+            name: 'colsample_bytree',
+            range: '(0, 1]',
+            default_: '1.0',
+            effect: '每棵树使用的特征比例',
+            detail: '类似随机森林的列抽样。每棵树训练前随机选择部分特征。有助于降低特征间的相关性，增加模型多样性，防止过拟合。',
+            formula: '|F_t| = \\lfloor \\text{colsample} \\times M \\rfloor',
+            category: '采样'
+        }
+    ];
+
+    const categoryColors = {
+        '基础': 'var(--accent-yellow)',
+        '树结构': 'var(--accent-blue)',
+        '正则化': 'var(--accent-red)',
+        '采样': 'var(--accent-purple)'
+    };
+
+    const grid = document.getElementById('paramGrid');
+    const detailBox = document.getElementById('paramDetail');
+    const detailTitle = document.getElementById('detailTitle');
+    const detailText = document.getElementById('detailText');
+    const detailFormula = document.getElementById('detailFormula');
+
+    params.forEach((p, i) => {
+        const card = document.createElement('div');
+        card.className = 'param-card';
+        card.innerHTML = `
+            <div class="param-name">${p.name}</div>
+            <div class="param-meta">范围: ${p.range} &nbsp;|&nbsp; 默认: ${p.default_}</div>
+            <div class="param-desc">${p.effect}</div>
+            <div style="margin-top:0.5rem;">
+                <span class="badge" style="background:${categoryColors[p.category]}22; color:${categoryColors[p.category]};">${p.category}</span>
+            </div>
+        `;
+        card.addEventListener('click', () => {
+            grid.querySelectorAll('.param-card').forEach(c => c.classList.remove('active'));
+            card.classList.add('active');
+            detailTitle.textContent = p.name;
+            detailText.textContent = p.detail;
+            detailFormula.innerHTML = '';
+            if (p.formula && typeof katex !== 'undefined') {
+                katex.render(p.formula, detailFormula, { displayMode: true, throwOnError: false });
+            } else if (p.formula) {
+                detailFormula.textContent = p.formula;
+            }
+            detailBox.classList.add('visible');
+            gsap.fromTo(detailBox, { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.3 });
+        });
+        grid.appendChild(card);
+    });
+
+    // Auto-select first card after a short delay
+    setTimeout(() => {
+        grid.querySelector('.param-card')?.click();
+    }, 500);
+})();
+
+/* ================================================================
+   Section 2: 学习率 × 轮数 热力图
+   ================================================================ */
+(function() {
+    const lrValues = [0.01, 0.03, 0.05, 0.1, 0.2, 0.3, 0.5, 0.8, 1.0];
+    const roundValues = [10, 20, 30, 50, 80, 100, 130, 160, 200];
+
+    // Generate data
+    const trainData = XGBUtils.generateClassificationData(120, 42, 0.3);
+    const testData = XGBUtils.generateClassificationData(60, 99, 0.3);
+
+    // Precompute accuracy grid & loss curves
+    const accGrid = [];
+    const lossCache = {};
+
+    lrValues.forEach((lr, li) => {
+        accGrid[li] = [];
+        roundValues.forEach((nr, ri) => {
+            const model = XGBUtils.trainXGBoost(trainData, {
+                nRounds: nr, learningRate: lr, maxDepth: 4,
+                lambda: 1, gamma: 0, isRegression: false, seed: 42
+            });
+            const evalResult = XGBUtils.evaluateXGBoost(model, testData);
+            accGrid[li][ri] = evalResult.accuracy;
+            lossCache[`${li}_${ri}`] = { trainLoss: model.lossHistory };
+        });
+    });
+
+    // Also compute test loss per round for selected combos
+    function getFullLossCurves(lr, maxRounds) {
+        const trainLosses = [];
+        const testLosses = [];
+        for (let nr = 1; nr <= maxRounds; nr++) {
+            const model = XGBUtils.trainXGBoost(trainData, {
+                nRounds: nr, learningRate: lr, maxDepth: 4,
+                lambda: 1, gamma: 0, isRegression: false, seed: 42
+            });
+            trainLosses.push(model.lossHistory[model.lossHistory.length - 1]);
+            // Compute test loss
+            const y = testData.map(d => d.label);
+            const rawPreds = testData.map(d => {
+                const res = XGBUtils.predictXGBoost(model, d);
+                return res.raw;
+            });
+            testLosses.push(XGBUtils.logLoss(y, rawPreds));
+        }
+        return { trainLosses, testLosses };
+    }
+
+    // Draw heatmap with D3
+    const margin = { top: 40, right: 20, bottom: 50, left: 60 };
+    const w = 420, h = 360;
+    const innerW = w - margin.left - margin.right;
+    const innerH = h - margin.top - margin.bottom;
+
+    const svg = d3.select('#heatmapSvg')
+        .attr('width', w).attr('height', h);
+
+    const g = svg.append('g')
+        .attr('transform', `translate(${margin.left},${margin.top})`);
+
+    const cellW = innerW / lrValues.length;
+    const cellH = innerH / roundValues.length;
+
+    const allAcc = accGrid.flat();
+    const minAcc = d3.min(allAcc), maxAcc = d3.max(allAcc);
+
+    const colorScale = d3.scaleSequential(d3.interpolateYlGn)
+        .domain([minAcc - 0.02, maxAcc + 0.01]);
+
+    let selectedCell = null;
+
+    lrValues.forEach((lr, li) => {
+        roundValues.forEach((nr, ri) => {
+            const acc = accGrid[li][ri];
+            g.append('rect')
+                .attr('class', 'heatmap-cell')
+                .attr('x', li * cellW)
+                .attr('y', ri * cellH)
+                .attr('width', cellW - 1)
+                .attr('height', cellH - 1)
+                .attr('rx', 2)
+                .attr('fill', colorScale(acc))
+                .attr('data-li', li)
+                .attr('data-ri', ri)
+                .on('click', function() {
+                    svg.selectAll('.heatmap-cell').classed('selected', false);
+                    d3.select(this).classed('selected', true);
+                    showLossCurve(lr, nr, li, ri);
+                });
+
+            // Show accuracy as text for brighter cells
+            if (acc > (minAcc + maxAcc) / 2) {
+                g.append('text')
+                    .attr('x', li * cellW + cellW / 2)
+                    .attr('y', ri * cellH + cellH / 2)
+                    .attr('text-anchor', 'middle')
+                    .attr('dominant-baseline', 'central')
+                    .attr('fill', '#1a1a2e')
+                    .attr('font-size', '10px')
+                    .attr('font-family', 'var(--font-mono)')
+                    .attr('pointer-events', 'none')
+                    .text((acc * 100).toFixed(0));
+            }
+        });
+    });
+
+    // X axis labels
+    lrValues.forEach((lr, i) => {
+        g.append('text')
+            .attr('x', i * cellW + cellW / 2)
+            .attr('y', innerH + 16)
+            .attr('text-anchor', 'middle')
+            .attr('fill', 'var(--text-muted)')
+            .attr('font-size', '10px')
+            .text(lr);
+    });
+    g.append('text')
+        .attr('x', innerW / 2).attr('y', innerH + 36)
+        .attr('text-anchor', 'middle')
+        .attr('fill', 'var(--text-secondary)')
+        .attr('font-size', '12px')
+        .text('学习率 (learning_rate)');
+
+    // Y axis labels
+    roundValues.forEach((nr, i) => {
+        g.append('text')
+            .attr('x', -8)
+            .attr('y', i * cellH + cellH / 2)
+            .attr('text-anchor', 'end')
+            .attr('dominant-baseline', 'central')
+            .attr('fill', 'var(--text-muted)')
+            .attr('font-size', '10px')
+            .text(nr);
+    });
+    g.append('text')
+        .attr('transform', `rotate(-90) translate(${-innerH / 2}, -45)`)
+        .attr('text-anchor', 'middle')
+        .attr('fill', 'var(--text-secondary)')
+        .attr('font-size', '12px')
+        .text('轮数 (n_estimators)');
+
+    // Title
+    svg.append('text')
+        .attr('x', w / 2).attr('y', 18)
+        .attr('text-anchor', 'middle')
+        .attr('fill', 'var(--text-primary)')
+        .attr('font-size', '13px')
+        .attr('font-weight', '600')
+        .text('测试准确率热力图 (%)');
+
+    // Chart.js loss curve
+    const ctx = document.getElementById('lrRoundChart').getContext('2d');
+    let lossChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: [],
+            datasets: [
+                {
+                    label: '训练损失',
+                    data: [],
+                    borderColor: '#4fc3f7',
+                    backgroundColor: 'rgba(79,195,247,0.1)',
+                    borderWidth: 2,
+                    fill: true,
+                    tension: 0.3,
+                    pointRadius: 1
+                },
+                {
+                    label: '测试损失',
+                    data: [],
+                    borderColor: '#ff5252',
+                    backgroundColor: 'rgba(255,82,82,0.1)',
+                    borderWidth: 2,
+                    fill: true,
+                    tension: 0.3,
+                    pointRadius: 1
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            plugins: {
+                legend: { labels: { color: '#a8a8b8', font: { size: 12 } } },
+                title: { display: true, text: '损失曲线', color: '#e8e8e8', font: { size: 14 } }
+            },
+            scales: {
+                x: {
+                    title: { display: true, text: '轮次', color: '#a8a8b8' },
+                    ticks: { color: '#6c6c7c' },
+                    grid: { color: 'rgba(42,42,74,0.4)' }
+                },
+                y: {
+                    title: { display: true, text: 'Log Loss', color: '#a8a8b8' },
+                    ticks: { color: '#6c6c7c' },
+                    grid: { color: 'rgba(42,42,74,0.4)' }
+                }
+            }
+        }
+    });
+
+    function showLossCurve(lr, nRounds, li, ri) {
+        const acc = accGrid[li][ri];
+        document.getElementById('heatmapInfo').textContent =
+            `lr=${lr}, rounds=${nRounds} → 测试准确率: ${(acc * 100).toFixed(1)}%`;
+
+        const curves = getFullLossCurves(lr, nRounds);
+        const labels = Array.from({ length: nRounds }, (_, i) => i + 1);
+
+        lossChart.data.labels = labels;
+        lossChart.data.datasets[0].data = curves.trainLosses;
+        lossChart.data.datasets[1].data = curves.testLosses;
+        lossChart.options.plugins.title.text = `损失曲线 (lr=${lr}, rounds=${nRounds})`;
+        lossChart.update();
+
+        document.getElementById('lrRoundHint').innerHTML =
+            `<p>学习率 <code>${lr}</code>，训练 <code>${nRounds}</code> 轮。` +
+            `测试准确率 <strong style="color:var(--accent-green)">${(acc * 100).toFixed(1)}%</strong>。` +
+            `${lr < 0.1 ? '低学习率收敛较慢，需要更多轮数。' : lr > 0.5 ? '高学习率可能导致不稳定和过拟合。' : '中等学习率在合适轮数下表现良好。'}</p>`;
+    }
+
+    // Auto-click a good cell
+    setTimeout(() => {
+        const cell = svg.select('.heatmap-cell[data-li="3"][data-ri="4"]');
+        if (!cell.empty()) cell.dispatch('click');
+    }, 600);
+})();
+
+/* ================================================================
+   Section 3: 树深度与正则化 — 决策边界
+   ================================================================ */
+(function() {
+    let boundaryTrainData, boundaryTestData;
+    let boundarySeed = 42;
+
+    function generateData() {
+        boundaryTrainData = XGBUtils.generateClassificationData(100, boundarySeed, 0.35);
+        boundaryTestData = XGBUtils.generateClassificationData(50, boundarySeed + 57, 0.35);
+    }
+    generateData();
+
+    window.regenerateBoundaryData = function() {
+        boundarySeed = Math.floor(Math.random() * 10000);
+        generateData();
+        updateBoundary();
+    };
+
+    const svgEl = document.getElementById('boundarySvg');
+    const svgW = 560, svgH = 440;
+    const bMargin = { top: 10, right: 10, bottom: 30, left: 35 };
+    const bW = svgW - bMargin.left - bMargin.right;
+    const bH = svgH - bMargin.top - bMargin.bottom;
+
+    const bSvg = d3.select('#boundarySvg');
+    const bG = bSvg.append('g')
+        .attr('transform', `translate(${bMargin.left},${bMargin.top})`);
+
+    const xScale = d3.scaleLinear().domain([-5.5, 5.5]).range([0, bW]);
+    const yScale = d3.scaleLinear().domain([-5.5, 5.5]).range([bH, 0]);
+
+    // Axes
+    bG.append('g').attr('transform', `translate(0,${bH})`)
+        .call(d3.axisBottom(xScale).ticks(6))
+        .selectAll('text').attr('fill', '#6c6c7c');
+    bG.append('g')
+        .call(d3.axisLeft(yScale).ticks(6))
+        .selectAll('text').attr('fill', '#6c6c7c');
+    bG.selectAll('.domain, .tick line').attr('stroke', '#2a2a4a');
+
+    // Background image for boundary
+    const resolution = 50;
+    const boundaryImage = bG.append('image')
+        .attr('x', 0).attr('y', 0)
+        .attr('width', bW).attr('height', bH)
+        .attr('preserveAspectRatio', 'none')
+        .style('opacity', 0.7);
+
+    // Data points group
+    const pointsG = bG.append('g');
+
+    function updateBoundary() {
+        const depth = +document.getElementById('sliderDepth').value;
+        const lambda = +document.getElementById('sliderLambda').value;
+        const gamma = +document.getElementById('sliderGamma').value;
+
+        document.getElementById('valDepth').textContent = depth;
+        document.getElementById('valLambda').textContent = lambda;
+        document.getElementById('valGamma').textContent = gamma;
+
+        // Train model
+        const model = XGBUtils.trainXGBoost(boundaryTrainData, {
+            nRounds: 20,
+            learningRate: 0.2,
+            maxDepth: depth,
+            lambda: lambda,
+            gamma: gamma,
+            minChildWeight: 1,
+            isRegression: false,
+            seed: 42
+        });
+
+        // Evaluate
+        const trainEval = XGBUtils.evaluateXGBoost(model, boundaryTrainData);
+        const testEval = XGBUtils.evaluateXGBoost(model, boundaryTestData);
+        document.getElementById('trainAcc').textContent = (trainEval.accuracy * 100).toFixed(1) + '%';
+        document.getElementById('testAcc').textContent = (testEval.accuracy * 100).toFixed(1) + '%';
+        document.getElementById('treeCount').textContent = model.trees.length;
+
+        // Draw boundary via offscreen canvas
+        const canvas = document.createElement('canvas');
+        canvas.width = resolution;
+        canvas.height = resolution;
+        const ctxB = canvas.getContext('2d');
+        const imgData = ctxB.createImageData(resolution, resolution);
+
+        for (let yi = 0; yi < resolution; yi++) {
+            for (let xi = 0; xi < resolution; xi++) {
+                const px = -5.5 + (xi / (resolution - 1)) * 11;
+                const py = 5.5 - (yi / (resolution - 1)) * 11;
+                const result = XGBUtils.predictXGBoost(model, { x: px, y: py });
+                const prob = result.probability || 0.5;
+                const idx = (yi * resolution + xi) * 4;
+
+                if (prob > 0.5) {
+                    // Blue-ish (class 1)
+                    imgData.data[idx] = 30;
+                    imgData.data[idx + 1] = Math.round(80 + 115 * (prob - 0.5) * 2);
+                    imgData.data[idx + 2] = Math.round(150 + 97 * (prob - 0.5) * 2);
+                } else {
+                    // Red-ish (class 0)
+                    imgData.data[idx] = Math.round(150 + 105 * (0.5 - prob) * 2);
+                    imgData.data[idx + 1] = Math.round(40 + 42 * prob * 2);
+                    imgData.data[idx + 2] = Math.round(40 + 42 * prob * 2);
+                }
+                imgData.data[idx + 3] = 180;
+            }
+        }
+        ctxB.putImageData(imgData, 0, 0);
+        boundaryImage.attr('href', canvas.toDataURL());
+
+        // Draw data points
+        pointsG.selectAll('*').remove();
+        const allData = [
+            ...boundaryTrainData.map(d => ({ ...d, isTrain: true })),
+            ...boundaryTestData.map(d => ({ ...d, isTrain: false }))
+        ];
+        pointsG.selectAll('circle')
+            .data(allData)
+            .join('circle')
+            .attr('cx', d => xScale(d.x))
+            .attr('cy', d => yScale(d.y))
+            .attr('r', d => d.isTrain ? 4 : 3)
+            .attr('fill', d => d.label === 1 ? '#4fc3f7' : '#ff5252')
+            .attr('stroke', d => d.isTrain ? '#fff' : 'none')
+            .attr('stroke-width', d => d.isTrain ? 1 : 0)
+            .attr('opacity', d => d.isTrain ? 0.9 : 0.5);
+    }
+
+    ['sliderDepth', 'sliderLambda', 'sliderGamma'].forEach(id => {
+        document.getElementById(id).addEventListener('input', updateBoundary);
+    });
+
+    updateBoundary();
+})();
+
+/* ================================================================
+   Section 4: 调参策略流程
+   ================================================================ */
+(function() {
+    const steps = [
+        {
+            title: '步骤 1: 固定学习率，确定最佳轮数',
+            desc: '先设 learning_rate=0.1，用早停法找到最优 n_estimators。这给我们一个性能基线。',
+            paramsBefore: { lr: 0.1, maxDepth: 6, gamma: 0, subsample: 1, colsample: 1 },
+            paramsAfter:  { lr: 0.1, maxDepth: 6, gamma: 0, subsample: 1, colsample: 1, nRounds: 50 },
+            metricBefore: null,
+            metricAfter: null
+        },
+        {
+            title: '步骤 2: 调整 max_depth 和 min_child_weight',
+            desc: '这两个参数控制树的复杂度。较小的 max_depth 和较大的 min_child_weight 会产生更简单的模型。',
+            paramsBefore: { lr: 0.1, maxDepth: 6, minChildWeight: 1, nRounds: 50 },
+            paramsAfter:  { lr: 0.1, maxDepth: 4, minChildWeight: 3, nRounds: 50 },
+            metricBefore: null,
+            metricAfter: null
+        },
+        {
+            title: '步骤 3: 调整 gamma',
+            desc: '增大 gamma 要求更高的分裂增益阈值，等效于后剪枝。逐步增大直到测试性能不再提升。',
+            paramsBefore: { lr: 0.1, maxDepth: 4, gamma: 0, minChildWeight: 3, nRounds: 50 },
+            paramsAfter:  { lr: 0.1, maxDepth: 4, gamma: 1.0, minChildWeight: 3, nRounds: 50 },
+            metricBefore: null,
+            metricAfter: null
+        },
+        {
+            title: '步骤 4: 调整 subsample 和 colsample_bytree',
+            desc: '行列抽样增加随机性，防止过拟合。通常在 0.6~0.9 之间搜索。',
+            paramsBefore: { lr: 0.1, maxDepth: 4, gamma: 1, subsample: 1, colsample: 1, minChildWeight: 3, nRounds: 50 },
+            paramsAfter:  { lr: 0.1, maxDepth: 4, gamma: 1, subsample: 0.8, colsample: 0.8, minChildWeight: 3, nRounds: 50 },
+            metricBefore: null,
+            metricAfter: null
+        },
+        {
+            title: '步骤 5: 降低学习率，增加轮数',
+            desc: '最后一步：降低 learning_rate 到 0.01~0.05，同时成比例增加轮数，通常能再提升 1~2% 的精度。',
+            paramsBefore: { lr: 0.1, maxDepth: 4, gamma: 1, subsample: 0.8, colsample: 0.8, minChildWeight: 3, nRounds: 50 },
+            paramsAfter:  { lr: 0.03, maxDepth: 4, gamma: 1, subsample: 0.8, colsample: 0.8, minChildWeight: 3, nRounds: 150 },
+            metricBefore: null,
+            metricAfter: null
+        }
+    ];
+
+    // Generate data for the strategy demo
+    const sTrainData = XGBUtils.generateClassificationData(150, 77, 0.3);
+    const sTestData = XGBUtils.generateClassificationData(60, 123, 0.3);
+
+    function trainAndEval(p) {
+        const model = XGBUtils.trainXGBoost(sTrainData, {
+            nRounds: p.nRounds || 50,
+            learningRate: p.lr || 0.1,
+            maxDepth: p.maxDepth || 6,
+            lambda: 1,
+            gamma: p.gamma || 0,
+            minChildWeight: p.minChildWeight || 1,
+            subsample: p.subsample || 1,
+            colsampleBytree: p.colsample || 1,
+            isRegression: false,
+            seed: 42
+        });
+        const trainEval = XGBUtils.evaluateXGBoost(model, sTrainData);
+        const testEval = XGBUtils.evaluateXGBoost(model, sTestData);
+        return {
+            trainAcc: trainEval.accuracy,
+            testAcc: testEval.accuracy,
+            lossHistory: model.lossHistory
+        };
+    }
+
+    // Pre-compute metrics
+    steps.forEach(step => {
+        step.metricBefore = trainAndEval(step.paramsBefore);
+        step.metricAfter = trainAndEval(step.paramsAfter);
+    });
+
+    // Build flow steps UI
+    const container = document.getElementById('flowSteps');
+    steps.forEach((step, i) => {
+        if (i > 0) {
+            const conn = document.createElement('div');
+            conn.className = 'flow-connector';
+            container.appendChild(conn);
+        }
+        const el = document.createElement('div');
+        el.className = 'flow-step';
+        el.dataset.idx = i;
+        el.innerHTML = `
+            <div class="step-num">${i + 1}</div>
+            <div>
+                <div class="step-title">${step.title}</div>
+                <div class="step-desc">${step.desc}</div>
+            </div>
+        `;
+        el.addEventListener('click', () => selectFlowStep(i));
+        container.appendChild(el);
+    });
+
+    // Flow chart
+    const flowCtx = document.getElementById('flowChart').getContext('2d');
+    let flowChart = new Chart(flowCtx, {
+        type: 'bar',
+        data: {
+            labels: ['调整前 (训练)', '调整前 (测试)', '调整后 (训练)', '调整后 (测试)'],
+            datasets: [{
+                data: [0, 0, 0, 0],
+                backgroundColor: [
+                    'rgba(79,195,247,0.6)', 'rgba(79,195,247,0.3)',
+                    'rgba(22,199,154,0.6)', 'rgba(22,199,154,0.3)'
+                ],
+                borderColor: ['#4fc3f7', '#4fc3f7', '#16c79a', '#16c79a'],
+                borderWidth: 1
+            }]
+        },
+        options: {
+            responsive: true,
+            plugins: {
+                legend: { display: false },
+                title: { display: true, text: '准确率对比', color: '#e8e8e8', font: { size: 13 } }
+            },
+            scales: {
+                x: { ticks: { color: '#6c6c7c' }, grid: { color: 'rgba(42,42,74,0.4)' } },
+                y: {
+                    min: 0.5, max: 1,
+                    ticks: {
+                        color: '#6c6c7c',
+                        callback: v => (v * 100).toFixed(0) + '%'
+                    },
+                    grid: { color: 'rgba(42,42,74,0.4)' }
+                }
+            }
+        }
+    });
+
+    function selectFlowStep(idx) {
+        // Highlight steps
+        document.querySelectorAll('.flow-step').forEach((el, i) => {
+            el.classList.remove('active', 'done');
+            if (i < idx) el.classList.add('done');
+            if (i === idx) el.classList.add('active');
+        });
+        document.querySelectorAll('.flow-connector').forEach((el, i) => {
+            el.classList.toggle('done', i < idx);
+        });
+
+        const step = steps[idx];
+        document.getElementById('flowDetailTitle').textContent = step.title;
+        document.getElementById('flowDetailDesc').textContent = step.desc;
+
+        // Metrics boxes
+        const metricsEl = document.getElementById('flowMetrics');
+        const mb = step.metricBefore, ma = step.metricAfter;
+        metricsEl.innerHTML = `
+            <div class="metric-box">
+                <div class="metric-label">调整前 (测试)</div>
+                <div class="metric-val warn">${(mb.testAcc * 100).toFixed(1)}%</div>
+            </div>
+            <div class="metric-box">
+                <div class="metric-label">调整后 (测试)</div>
+                <div class="metric-val good">${(ma.testAcc * 100).toFixed(1)}%</div>
+            </div>
+            <div class="metric-box">
+                <div class="metric-label">调整前 (训练)</div>
+                <div class="metric-val" style="color:var(--accent-blue)">${(mb.trainAcc * 100).toFixed(1)}%</div>
+            </div>
+            <div class="metric-box">
+                <div class="metric-label">调整后 (训练)</div>
+                <div class="metric-val" style="color:var(--accent-blue)">${(ma.trainAcc * 100).toFixed(1)}%</div>
+            </div>
+        `;
+
+        // Update bar chart
+        flowChart.data.datasets[0].data = [mb.trainAcc, mb.testAcc, ma.trainAcc, ma.testAcc];
+        flowChart.update();
+
+        gsap.fromTo('#flowDetail', { opacity: 0, x: 20 }, { opacity: 1, x: 0, duration: 0.4 });
+    }
+
+    // Auto-select first step
+    setTimeout(() => selectFlowStep(0), 700);
+})();
+
+/* ================================================================
+   Section 5: 早停法
+   ================================================================ */
+(function() {
+    const totalRounds = 100;
+    const esTrainData = XGBUtils.generateClassificationData(120, 55, 0.25);
+    const esTestData = XGBUtils.generateClassificationData(50, 200, 0.25);
+
+    const ctx = document.getElementById('earlyStopChart').getContext('2d');
+    let esChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: [],
+            datasets: [
+                {
+                    label: '训练损失',
+                    data: [],
+                    borderColor: '#4fc3f7',
+                    backgroundColor: 'rgba(79,195,247,0.05)',
+                    borderWidth: 2,
+                    fill: true,
+                    tension: 0.3,
+                    pointRadius: 0,
+                    pointHoverRadius: 4
+                },
+                {
+                    label: '验证损失',
+                    data: [],
+                    borderColor: '#ff5252',
+                    backgroundColor: 'rgba(255,82,82,0.05)',
+                    borderWidth: 2,
+                    fill: true,
+                    tension: 0.3,
+                    pointRadius: 0,
+                    pointHoverRadius: 4
+                },
+                {
+                    label: '早停点',
+                    data: [],
+                    borderColor: '#ffd740',
+                    backgroundColor: '#ffd740',
+                    borderWidth: 0,
+                    pointRadius: [],
+                    pointStyle: 'rectRot',
+                    pointHoverRadius: 8,
+                    showLine: false
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+                legend: { labels: { color: '#a8a8b8', font: { size: 12 } } },
+                title: { display: true, text: '早停法演示', color: '#e8e8e8', font: { size: 14, weight: 'bold' } },
+                annotation: {}
+            },
+            scales: {
+                x: {
+                    title: { display: true, text: '训练轮次', color: '#a8a8b8' },
+                    ticks: { color: '#6c6c7c', maxTicksLimit: 20 },
+                    grid: { color: 'rgba(42,42,74,0.4)' }
+                },
+                y: {
+                    title: { display: true, text: 'Log Loss', color: '#a8a8b8' },
+                    ticks: { color: '#6c6c7c' },
+                    grid: { color: 'rgba(42,42,74,0.4)' }
+                }
+            }
+        }
+    });
+
+    function updateEarlyStop() {
+        const patience = +document.getElementById('sliderPatience').value;
+        const lr = +document.getElementById('sliderEsLr').value;
+        const depth = +document.getElementById('sliderEsDepth').value;
+
+        document.getElementById('valPatience').textContent = patience;
+        document.getElementById('valEsLr').textContent = lr;
+        document.getElementById('valEsDepth').textContent = depth;
+
+        // Train incrementally and record losses
+        const trainLosses = [];
+        const valLosses = [];
+
+        for (let nr = 1; nr <= totalRounds; nr++) {
+            const model = XGBUtils.trainXGBoost(esTrainData, {
+                nRounds: nr,
+                learningRate: lr,
+                maxDepth: depth,
+                lambda: 1,
+                gamma: 0,
+                isRegression: false,
+                seed: 42
+            });
+
+            trainLosses.push(model.lossHistory[model.lossHistory.length - 1]);
+
+            // Compute val loss
+            const yVal = esTestData.map(d => d.label);
+            const rawPreds = esTestData.map(d => XGBUtils.predictXGBoost(model, d).raw);
+            valLosses.push(XGBUtils.logLoss(yVal, rawPreds));
+        }
+
+        // Find early stopping point
+        let bestValLoss = Infinity;
+        let bestRound = 0;
+        let stopRound = totalRounds;
+        let noImproveCount = 0;
+
+        for (let i = 0; i < totalRounds; i++) {
+            if (valLosses[i] < bestValLoss) {
+                bestValLoss = valLosses[i];
+                bestRound = i;
+                noImproveCount = 0;
+            } else {
+                noImproveCount++;
+            }
+            if (noImproveCount >= patience) {
+                stopRound = i;
+                break;
+            }
+        }
+
+        // Update display
+        document.getElementById('bestRound').textContent = bestRound + 1;
+        document.getElementById('bestValLoss').textContent = bestValLoss.toFixed(4);
+        document.getElementById('stopRound').textContent = stopRound < totalRounds ? (stopRound + 1) : '未触发';
+
+        const stopMarker = document.getElementById('stopMarker');
+        if (stopRound < totalRounds) {
+            stopMarker.style.display = 'inline-flex';
+            stopMarker.textContent = `已在第 ${stopRound + 1} 轮触发早停`;
+        } else {
+            stopMarker.style.display = 'inline-flex';
+            stopMarker.textContent = '未触发早停（patience 不够或轮数不足）';
+            stopMarker.style.background = 'rgba(255,171,64,0.15)';
+            stopMarker.style.color = 'var(--accent-orange)';
+        }
+
+        // Build chart data
+        const labels = Array.from({ length: totalRounds }, (_, i) => i + 1);
+
+        // Mark early stop point and best point
+        const pointRadii = labels.map((_, i) => {
+            if (i === bestRound) return 8;
+            if (i === stopRound && stopRound < totalRounds) return 8;
+            return 0;
+        });
+
+        const earlyStopData = labels.map((_, i) => {
+            if (i === bestRound) return valLosses[bestRound];
+            if (i === stopRound && stopRound < totalRounds) return valLosses[stopRound];
+            return null;
+        });
+
+        esChart.data.labels = labels;
+        esChart.data.datasets[0].data = trainLosses;
+        esChart.data.datasets[1].data = valLosses;
+        esChart.data.datasets[2].data = earlyStopData;
+        esChart.data.datasets[2].pointRadius = pointRadii;
+
+        // Dim the curves after the stop round
+        if (stopRound < totalRounds) {
+            const segmentColors0 = trainLosses.map((_, i) => i <= stopRound ? '#4fc3f7' : 'rgba(79,195,247,0.2)');
+            const segmentColors1 = valLosses.map((_, i) => i <= stopRound ? '#ff5252' : 'rgba(255,82,82,0.2)');
+            esChart.data.datasets[0].segment = {
+                borderColor: ctx2 => {
+                    const idx = ctx2.p0DataIndex;
+                    return idx < stopRound ? '#4fc3f7' : 'rgba(79,195,247,0.25)';
+                }
+            };
+            esChart.data.datasets[1].segment = {
+                borderColor: ctx2 => {
+                    const idx = ctx2.p0DataIndex;
+                    return idx < stopRound ? '#ff5252' : 'rgba(255,82,82,0.25)';
+                }
+            };
+        } else {
+            esChart.data.datasets[0].segment = {};
+            esChart.data.datasets[1].segment = {};
+        }
+
+        esChart.options.plugins.title.text =
+            `早停法 (patience=${patience}, lr=${lr}, depth=${depth})`;
+        esChart.update();
+    }
+
+    ['sliderPatience', 'sliderEsLr', 'sliderEsDepth'].forEach(id => {
+        document.getElementById(id).addEventListener('input', updateEarlyStop);
+    });
+
+    updateEarlyStop();
+})();
+
+/* ================================================================
+   KaTeX auto-render fallback
+   ================================================================ */
+document.addEventListener('DOMContentLoaded', () => {
+    if (typeof renderMathInElement === 'function') {
+        renderMathInElement(document.body, {
+            delimiters: [
+                { left: '$$', right: '$$', display: true },
+                { left: '$', right: '$', display: false },
+                { left: '\\(', right: '\\)', display: false },
+                { left: '\\[', right: '\\]', display: true }
+            ],
+            throwOnError: false
+        });
+    }
+});
+</script>
+</body>
+</html>

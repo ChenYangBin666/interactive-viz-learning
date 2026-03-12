@@ -1,0 +1,671 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>XGBoost 交互式可视化学习</title>
+    <link rel="stylesheet" href="shared/styles/common.css">
+    <link rel="stylesheet" href="shared/styles/components.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+SC:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <style>
+        body { overflow-x: hidden; }
+
+        /* ===== Hero ===== */
+        .hero {
+            text-align: center;
+            padding: calc(var(--header-height) + 2rem) 2rem 3rem;
+            position: relative;
+        }
+        .hero h1 {
+            font-size: 2.8rem;
+            margin-bottom: 0.5rem;
+            background: linear-gradient(135deg, #ffd740, #ffab00, #ffd740);
+            background-size: 200% 200%;
+            animation: heroGradient 6s ease infinite;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        @keyframes heroGradient {
+            0%, 100% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+        }
+        .hero .subtitle {
+            font-size: 1.1rem;
+            color: var(--text-secondary);
+            max-width: 640px;
+            margin: 0 auto 2rem;
+        }
+        .hero .tags {
+            display: flex;
+            justify-content: center;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+
+        /* ===== Floating Boost/Rocket/Chart Background ===== */
+        .bg-floats {
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            pointer-events: none;
+            z-index: -1;
+            overflow: hidden;
+        }
+        .bg-float-item {
+            position: absolute;
+            font-size: 24px;
+            opacity: 0;
+            animation: floatUp linear infinite;
+        }
+        @keyframes floatUp {
+            0% {
+                opacity: 0;
+                transform: translateY(100vh) rotate(0deg);
+            }
+            10% {
+                opacity: 0.15;
+            }
+            90% {
+                opacity: 0.15;
+            }
+            100% {
+                opacity: 0;
+                transform: translateY(-10vh) rotate(360deg);
+            }
+        }
+
+        /* ===== Boost Pipeline Diagram (decorative) ===== */
+        .boost-diagram {
+            max-width: 900px;
+            margin: 0 auto 2rem;
+            padding: 0 2rem;
+            display: flex;
+            justify-content: center;
+            gap: 0.3rem;
+            flex-wrap: wrap;
+        }
+        .boost-block {
+            padding: 0.35rem 0.7rem;
+            border-radius: var(--radius-sm);
+            font-size: 0.7rem;
+            font-weight: 600;
+            border: 1px solid;
+            opacity: 0.6;
+            transition: opacity 0.3s, transform 0.3s;
+        }
+        .boost-block:hover {
+            opacity: 1;
+            transform: translateY(-2px);
+        }
+        .boost-block.foundation { color: #ffd740; border-color: rgba(255,215,64,0.3); background: rgba(255,215,64,0.06); }
+        .boost-block.core { color: #ffab00; border-color: rgba(255,171,0,0.3); background: rgba(255,171,0,0.06); }
+        .boost-block.practice { color: #ff8f00; border-color: rgba(255,143,0,0.3); background: rgba(255,143,0,0.06); }
+        .boost-arrow {
+            display: flex;
+            align-items: center;
+            color: var(--text-muted);
+            font-size: 0.8rem;
+            opacity: 0.4;
+        }
+
+        /* ===== Metro Roadmap ===== */
+        .roadmap {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 2rem;
+            position: relative;
+        }
+        .roadmap-title {
+            text-align: center;
+            margin-bottom: 2.5rem;
+        }
+
+        .metro-line {
+            position: relative;
+            padding-left: 60px;
+        }
+
+        /* Vertical rail with XGBoost themed gradient */
+        .metro-line::before {
+            content: '';
+            position: absolute;
+            left: 27px;
+            top: 0;
+            bottom: 0;
+            width: 4px;
+            background: linear-gradient(
+                to bottom,
+                #ffd740 0%,
+                #ffd740 33%,
+                #ffab00 33%,
+                #ffab00 66%,
+                #ff8f00 66%,
+                #ff8f00 100%
+            );
+            border-radius: 2px;
+        }
+
+        /* Branch decoration along the rail */
+        .metro-line::after {
+            content: '';
+            position: absolute;
+            left: 22px;
+            top: 0;
+            bottom: 0;
+            width: 14px;
+            background: repeating-linear-gradient(
+                to bottom,
+                transparent 0px,
+                transparent 56px,
+                rgba(255, 215, 64, 0.08) 56px,
+                rgba(255, 215, 64, 0.08) 60px
+            );
+            pointer-events: none;
+        }
+
+        .station {
+            position: relative;
+            margin-bottom: 1rem;
+            cursor: pointer;
+            transition: transform 0.25s var(--anim-ease);
+        }
+        .station:hover {
+            transform: translateX(6px);
+        }
+
+        /* Station dot */
+        .station-dot {
+            position: absolute;
+            left: -41px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            border: 3px solid #ffd740;
+            background: var(--bg-primary);
+            z-index: 2;
+            transition: all 0.3s;
+        }
+        .station:hover .station-dot {
+            background: #ffd740;
+            box-shadow: 0 0 14px rgba(255, 215, 64, 0.5);
+        }
+        /* Phase colors for station dots */
+        .station[data-phase="boost-foundation"] .station-dot { border-color: #ffd740; }
+        .station[data-phase="boost-foundation"]:hover .station-dot {
+            background: #ffd740;
+            box-shadow: 0 0 14px rgba(255, 215, 64, 0.5);
+        }
+
+        .station[data-phase="xgb-core"] .station-dot { border-color: #ffab00; }
+        .station[data-phase="xgb-core"]:hover .station-dot {
+            background: #ffab00;
+            box-shadow: 0 0 14px rgba(255, 171, 0, 0.5);
+        }
+
+        .station[data-phase="practice"] .station-dot { border-color: #ff8f00; }
+        .station[data-phase="practice"]:hover .station-dot {
+            background: #ff8f00;
+            box-shadow: 0 0 14px rgba(255, 143, 0, 0.5);
+        }
+
+        .station-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1.2rem 1.5rem;
+            transition: all 0.3s;
+            position: relative;
+            overflow: hidden;
+        }
+        /* Subtle accent decoration on card hover */
+        .station-card::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 2px;
+            background: linear-gradient(90deg, transparent, #ffd740, transparent);
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+        .station:hover .station-card::before {
+            opacity: 1;
+        }
+        .station[data-phase="boost-foundation"]:hover .station-card {
+            border-color: #ffd740;
+            box-shadow: 0 0 20px rgba(255, 215, 64, 0.15);
+        }
+        .station[data-phase="xgb-core"]:hover .station-card {
+            border-color: #ffab00;
+            box-shadow: 0 0 20px rgba(255, 171, 0, 0.15);
+        }
+        .station[data-phase="practice"]:hover .station-card {
+            border-color: #ff8f00;
+            box-shadow: 0 0 20px rgba(255, 143, 0, 0.15);
+        }
+        .station-header {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            margin-bottom: 0.4rem;
+        }
+        .station-num {
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            min-width: 2.5rem;
+        }
+        .station-name {
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+        .station-badge {
+            margin-left: auto;
+        }
+        .station-desc {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            margin: 0;
+            padding-left: 3.25rem;
+        }
+        .station-keywords {
+            display: flex;
+            gap: 0.4rem;
+            flex-wrap: wrap;
+            padding-left: 3.25rem;
+            margin-top: 0.5rem;
+        }
+        .station-keywords span {
+            font-size: 0.7rem;
+            padding: 0.1rem 0.4rem;
+            background: rgba(255, 215, 64, 0.08);
+            border-radius: 4px;
+            color: var(--text-muted);
+        }
+        .station[data-phase="xgb-core"] .station-keywords span {
+            background: rgba(255, 171, 0, 0.08);
+        }
+        .station[data-phase="practice"] .station-keywords span {
+            background: rgba(255, 143, 0, 0.08);
+        }
+
+        /* Phase separators */
+        .phase-label {
+            position: relative;
+            padding: 0.5rem 0 0.5rem 0;
+            margin-bottom: 0.5rem;
+            margin-top: 1rem;
+        }
+        .phase-label span {
+            font-size: 0.75rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            padding: 0.2rem 0.8rem;
+            border-radius: 4px;
+        }
+        .phase-label.boost-foundation span { color: #ffd740; background: rgba(255,215,64,0.1); }
+        .phase-label.xgb-core span { color: #ffab00; background: rgba(255,171,0,0.1); }
+        .phase-label.practice span { color: #ff8f00; background: rgba(255,143,0,0.1); }
+
+        /* ===== Protocol Warning ===== */
+        .protocol-warning {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.9);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+        }
+        .protocol-warning .inner {
+            background: var(--bg-secondary);
+            border: 1px solid #ffd740;
+            border-radius: var(--radius-lg);
+            padding: 2rem 3rem;
+            max-width: 500px;
+            text-align: center;
+        }
+        .protocol-warning h2 { color: #ffd740; }
+        .protocol-warning code {
+            display: block;
+            margin: 1rem 0;
+            padding: 0.75rem;
+            background: var(--bg-primary);
+            border-radius: var(--radius-sm);
+            font-size: 0.9rem;
+        }
+
+        /* ===== Footer ===== */
+        .footer {
+            text-align: center;
+            padding: 3rem 2rem;
+            color: var(--text-muted);
+            font-size: 0.8rem;
+        }
+        .footer a {
+            color: #ffd740;
+        }
+
+        /* ===== Badge override for amber theme ===== */
+        .badge-amber {
+            background: rgba(255, 215, 64, 0.15);
+            color: #ffd740;
+            border: 1px solid rgba(255, 215, 64, 0.3);
+            padding: 0.15rem 0.5rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+
+        /* ===== Responsive ===== */
+        @media (max-width: 768px) {
+            .hero h1 { font-size: 2rem; }
+            .hero .subtitle { font-size: 0.95rem; }
+            .roadmap { padding: 1rem; }
+            .metro-line { padding-left: 50px; }
+            .station-dot { left: -35px; width: 18px; height: 18px; }
+            .station-desc { padding-left: 2.5rem; }
+            .station-keywords { padding-left: 2.5rem; }
+            .boost-diagram { display: none; }
+        }
+    </style>
+</head>
+<body>
+
+<!-- Top Navigation -->
+<nav class="top-nav">
+    <div class="nav-left">
+        <a href="../index.html" class="nav-home" title="算法总览">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+                <path d="M3 12l9-8 9 8"/>
+                <path d="M5 10v9a1 1 0 001 1h4v-5h4v5h4a1 1 0 001-1v-9"/>
+            </svg>
+        </a>
+        <span class="nav-sep">›</span>
+        <a href="index.html" class="logo">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M3 20l4-8 4 4 4-10 4 6"/><path d="M3 20h18"/>
+                <circle cx="7" cy="12" r="1.5" fill="currentColor"/><circle cx="11" cy="8" r="1.5" fill="currentColor"/>
+                <circle cx="15" cy="6" r="1.5" fill="currentColor"/><circle cx="19" cy="10" r="1.5" fill="currentColor"/>
+            </svg>
+            XGBoost
+        </a>
+    </div>
+</nav>
+
+<!-- Protocol Warning -->
+<div id="protocolWarning" class="protocol-warning hidden">
+    <div class="inner">
+        <h2>请使用本地服务器</h2>
+        <p>直接打开 HTML 文件（file:// 协议）会导致跨域问题。请使用以下方式启动：</p>
+        <code>python -m http.server 8080</code>
+        <p class="text-sm text-muted">或使用 VS Code 的 Live Server 插件</p>
+        <button class="btn btn-primary mt-2" onclick="document.getElementById('protocolWarning').classList.add('hidden')">
+            我知道了，继续浏览
+        </button>
+    </div>
+</div>
+
+<!-- Floating Boost/Rocket/Chart Background -->
+<div id="bgFloats" class="bg-floats"></div>
+
+<!-- Hero Section -->
+<div class="hero">
+    <h1>XGBoost 交互式可视化学习</h1>
+    <p class="subtitle">
+        通过交互式可视化，彻底理解 XGBoost 的每一个概念 ——
+        从梯度提升基础到正则化策略，从工程优化到实战调参
+    </p>
+    <div class="tags">
+        <span class="badge badge-amber">交互式</span>
+        <span class="badge badge-amber">可视化</span>
+        <span class="badge badge-amber">逐步动画</span>
+        <span class="badge badge-amber">全中文</span>
+    </div>
+</div>
+
+<!-- Boost Pipeline Overview (decorative mini-diagram) -->
+<div class="boost-diagram">
+    <div class="boost-block foundation">决策树</div>
+    <div class="boost-arrow">&rarr;</div>
+    <div class="boost-block foundation">梯度提升</div>
+    <div class="boost-arrow">&rarr;</div>
+    <div class="boost-block foundation">目标函数</div>
+    <div class="boost-arrow">&rarr;</div>
+    <div class="boost-block core">分裂增益</div>
+    <div class="boost-arrow">&rarr;</div>
+    <div class="boost-block core">正则化</div>
+    <div class="boost-arrow">&rarr;</div>
+    <div class="boost-block core">工程优化</div>
+    <div class="boost-arrow">&rarr;</div>
+    <div class="boost-block practice">调参 & 实战</div>
+</div>
+
+<!-- Roadmap -->
+<div class="roadmap">
+    <div class="roadmap-title">
+        <h2>学习路线图</h2>
+        <p class="text-sm text-muted">按顺序学习效果最佳，也可跳转到感兴趣的模块</p>
+    </div>
+
+    <div class="metro-line">
+        <!-- Phase 1: 提升基础 -->
+        <div class="phase-label boost-foundation"><span>提升基础</span></div>
+
+        <div class="station" data-id="01" data-phase="boost-foundation" onclick="goTo('01-boosting-intuition/')">
+            <div class="station-dot"></div>
+            <div class="station-card">
+                <div class="station-header">
+                    <span class="station-num">01</span>
+                    <span class="station-name">从决策树到提升</span>
+                    <span class="station-badge badge badge-amber"></span>
+                </div>
+                <p class="station-desc">理解 Boosting 的核心思想：串行纠错</p>
+                <div class="station-keywords">
+                    <span>弱学习器</span><span>串行纠错</span><span>Boosting</span><span>残差</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="station" data-id="02" data-phase="boost-foundation" onclick="goTo('02-gradient-boosting/')">
+            <div class="station-dot"></div>
+            <div class="station-card">
+                <div class="station-header">
+                    <span class="station-num">02</span>
+                    <span class="station-name">梯度提升原理</span>
+                    <span class="station-badge badge badge-amber"></span>
+                </div>
+                <p class="station-desc">用梯度下降的视角理解残差拟合</p>
+                <div class="station-keywords">
+                    <span>梯度下降</span><span>残差拟合</span><span>损失函数</span><span>函数空间</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="station" data-id="03" data-phase="boost-foundation" onclick="goTo('03-objective-function/')">
+            <div class="station-dot"></div>
+            <div class="station-card">
+                <div class="station-header">
+                    <span class="station-num">03</span>
+                    <span class="station-name">目标函数</span>
+                    <span class="station-badge badge badge-amber"></span>
+                </div>
+                <p class="station-desc">二阶泰勒展开与正则化目标</p>
+                <div class="station-keywords">
+                    <span>泰勒展开</span><span>一阶梯度</span><span>二阶海森</span><span>正则化项</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Phase 2: XGBoost 核心 -->
+        <div class="phase-label xgb-core"><span>XGBoost 核心</span></div>
+
+        <div class="station" data-id="04" data-phase="xgb-core" onclick="goTo('04-tree-splitting/')">
+            <div class="station-dot"></div>
+            <div class="station-card">
+                <div class="station-header">
+                    <span class="station-num">04</span>
+                    <span class="station-name">树的分裂</span>
+                    <span class="station-badge badge badge-amber"></span>
+                </div>
+                <p class="station-desc">XGBoost 特有的增益公式与分裂策略</p>
+                <div class="station-keywords">
+                    <span>分裂增益</span><span>贪心算法</span><span>最优分裂点</span><span>叶子权重</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="station" data-id="05" data-phase="xgb-core" onclick="goTo('05-regularization/')">
+            <div class="station-dot"></div>
+            <div class="station-card">
+                <div class="station-header">
+                    <span class="station-num">05</span>
+                    <span class="station-name">正则化</span>
+                    <span class="station-badge badge badge-amber"></span>
+                </div>
+                <p class="station-desc">L1/L2 正则、收缩率、列采样控制过拟合</p>
+                <div class="station-keywords">
+                    <span>L1 正则</span><span>L2 正则</span><span>收缩率</span><span>列采样</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="station" data-id="06" data-phase="xgb-core" onclick="goTo('06-engineering/')">
+            <div class="station-dot"></div>
+            <div class="station-card">
+                <div class="station-header">
+                    <span class="station-num">06</span>
+                    <span class="station-name">工程优化</span>
+                    <span class="station-badge badge badge-amber"></span>
+                </div>
+                <p class="station-desc">近似算法、稀疏感知、缓存优化</p>
+                <div class="station-keywords">
+                    <span>近似算法</span><span>稀疏感知</span><span>缓存优化</span><span>并行化</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Phase 3: 实战应用 -->
+        <div class="phase-label practice"><span>实战应用</span></div>
+
+        <div class="station" data-id="07" data-phase="practice" onclick="goTo('07-tuning/')">
+            <div class="station-dot"></div>
+            <div class="station-card">
+                <div class="station-header">
+                    <span class="station-num">07</span>
+                    <span class="station-name">实战调参</span>
+                    <span class="station-badge badge badge-amber"></span>
+                </div>
+                <p class="station-desc">学习率、树深度、正则项的调参策略</p>
+                <div class="station-keywords">
+                    <span>学习率</span><span>树深度</span><span>正则系数</span><span>交叉验证</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="station" data-id="08" data-phase="practice" onclick="goTo('08-comparison/')">
+            <div class="station-dot"></div>
+            <div class="station-card">
+                <div class="station-header">
+                    <span class="station-num">08</span>
+                    <span class="station-name">对比分析</span>
+                    <span class="station-badge badge badge-amber"></span>
+                </div>
+                <p class="station-desc">XGBoost vs 随机森林 vs GBDT vs LightGBM</p>
+                <div class="station-keywords">
+                    <span>随机森林</span><span>GBDT</span><span>LightGBM</span><span>性能对比</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="station" data-id="09" data-phase="practice" onclick="goTo('09-playground/')">
+            <div class="station-dot"></div>
+            <div class="station-card">
+                <div class="station-header">
+                    <span class="station-num">09</span>
+                    <span class="station-name">游乐场</span>
+                    <span class="station-badge badge badge-amber"></span>
+                </div>
+                <p class="station-desc">自由实验，实时调参观察效果</p>
+                <div class="station-keywords">
+                    <span>实时调参</span><span>数据集</span><span>可视化</span><span>自由实验</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    </div>
+
+<!-- Footer -->
+<div class="footer">
+    <p>XGBoost 交互式可视化学习 | 纯前端 · 全中文</p>
+</div>
+
+<script>
+// ========== Protocol Check ==========
+if (window.location.protocol === 'file:') {
+    document.getElementById('protocolWarning').classList.remove('hidden');
+}
+
+// ========== Navigation ==========
+function goTo(path) {
+    window.location.href = path + 'index.html';
+}
+
+// ========== Background Animation: Floating Boost/Rocket/Chart Emoji ==========
+(function() {
+    var container = document.getElementById('bgFloats');
+    var emojis = [
+        '\uD83D\uDE80',  // Rocket
+        '\uD83D\uDCC8',  // Chart increasing
+        '\uD83D\uDCC9',  // Chart decreasing
+        '\u26A1',        // Lightning bolt
+        '\uD83C\uDFAF',  // Bullseye
+        '\uD83D\uDD25',  // Fire
+        '\uD83D\uDCCA',  // Bar chart
+        '\u2B50',        // Star
+    ];
+
+    var ITEM_COUNT = 30;
+
+    function createFloat() {
+        var el = document.createElement('span');
+        el.className = 'bg-float-item';
+        el.textContent = emojis[Math.floor(Math.random() * emojis.length)];
+
+        // Random horizontal position
+        el.style.left = Math.random() * 100 + '%';
+
+        // Random size
+        var size = 16 + Math.random() * 24;
+        el.style.fontSize = size + 'px';
+
+        // Random duration and delay
+        var duration = 15 + Math.random() * 25;
+        var delay = Math.random() * 20;
+        el.style.animationDuration = duration + 's';
+        el.style.animationDelay = delay + 's';
+
+        // Linear timing
+        el.style.animationTimingFunction = 'linear';
+
+        container.appendChild(el);
+
+        // Reposition on animation iteration
+        el.addEventListener('animationiteration', function() {
+            el.style.left = Math.random() * 100 + '%';
+        });
+    }
+
+    for (var i = 0; i < ITEM_COUNT; i++) {
+        createFloat();
+    }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,1106 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>随机森林 — 模块 06</title>
+
+    <!-- KaTeX -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+
+    <!-- D3.js -->
+    <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+
+    <!-- GSAP -->
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.2/dist/gsap.min.js"></script>
+
+    <!-- Project styles -->
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+
+    <style>
+        /* === Section-specific styles === */
+        .pipeline-stage {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            padding: 0.35rem 0.7rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            transition: all 0.4s;
+        }
+        .pipeline-stage.active {
+            border-color: var(--accent-green);
+            color: var(--accent-green);
+            background: rgba(22, 199, 154, 0.1);
+            box-shadow: 0 0 12px rgba(22, 199, 154, 0.15);
+        }
+        .pipeline-stage.done {
+            border-color: rgba(22, 199, 154, 0.4);
+            color: var(--accent-green);
+            opacity: 0.7;
+        }
+        .pipeline-arrow {
+            color: var(--text-muted);
+            font-size: 1.1rem;
+            opacity: 0.4;
+        }
+        .pipeline-flow {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 0.3rem;
+            margin: 1rem 0;
+        }
+
+        /* Forest grid */
+        .forest-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+            gap: 0.75rem;
+        }
+        .tree-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            padding: 0.5rem;
+            cursor: pointer;
+            transition: all 0.3s;
+            position: relative;
+        }
+        .tree-card:hover, .tree-card.selected {
+            border-color: var(--accent-green);
+            box-shadow: var(--shadow-glow);
+        }
+        .tree-card .tree-label {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            text-align: center;
+            margin-top: 0.25rem;
+        }
+        .tree-card.selected .tree-label {
+            color: var(--accent-green);
+        }
+
+        /* Stacking controls */
+        .stacking-bar {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            padding: 0.75rem 1rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            margin-bottom: 1rem;
+        }
+        .tree-count-display {
+            font-family: var(--font-mono);
+            font-size: 1.4rem;
+            font-weight: 700;
+            color: var(--accent-green);
+            min-width: 3rem;
+            text-align: center;
+        }
+
+        /* Compare panels */
+        .compare-panel {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1rem;
+        }
+        .compare-panel h4 {
+            text-align: center;
+            margin-bottom: 0.75rem;
+        }
+        .metric-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 0.4rem 0;
+            border-bottom: 1px solid rgba(42, 42, 74, 0.3);
+            font-size: 0.85rem;
+        }
+        .metric-row .label { color: var(--text-secondary); }
+        .metric-row .value {
+            font-family: var(--font-mono);
+            font-weight: 600;
+        }
+        .metric-row .value.good { color: var(--accent-green); }
+        .metric-row .value.bad { color: var(--accent-orange); }
+
+        /* Pseudocode */
+        .pseudocode {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1.25rem 1.5rem;
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            line-height: 2;
+            overflow-x: auto;
+        }
+        .pseudocode .line {
+            padding: 0.15rem 0.5rem;
+            border-radius: 3px;
+            transition: background 0.3s, color 0.3s;
+            white-space: pre;
+        }
+        .pseudocode .line.active {
+            background: rgba(22, 199, 154, 0.15);
+            color: var(--accent-green);
+        }
+        .pseudocode .keyword { color: var(--accent-purple); }
+        .pseudocode .func { color: var(--accent-blue); }
+        .pseudocode .comment { color: var(--text-muted); font-style: italic; }
+        .pseudocode .str { color: var(--accent-orange); }
+
+        /* Summary card */
+        .summary-card {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+        }
+        .param-item {
+            background: var(--bg-card);
+            border-radius: var(--radius-sm);
+            padding: 0.75rem 1rem;
+        }
+        .param-item .param-name {
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            color: var(--accent-green);
+            margin-bottom: 0.25rem;
+        }
+        .param-item .param-desc {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+        }
+
+        /* Accuracy chart area */
+        .accuracy-chart {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 0.5rem;
+        }
+
+        /* Boundary canvas overlay */
+        .boundary-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            pointer-events: none;
+        }
+
+        /* Ensemble tag */
+        .ensemble-tag {
+            display: inline-block;
+            padding: 0.2rem 0.5rem;
+            background: rgba(22, 199, 154, 0.15);
+            border: 1px solid var(--accent-green);
+            border-radius: 9999px;
+            font-size: 0.7rem;
+            color: var(--accent-green);
+            font-weight: 600;
+        }
+
+        .insight-box {
+            padding: 1rem 1.25rem;
+            background: rgba(255, 171, 64, 0.06);
+            border-left: 3px solid var(--accent-orange);
+            border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+            margin: 1rem 0;
+        }
+        .insight-box strong {
+            color: var(--accent-orange);
+        }
+        .insight-box p {
+            font-size: 0.9rem;
+            margin-bottom: 0;
+        }
+    </style>
+</head>
+<body>
+
+<div class="page-container">
+    <!-- Header -->
+    <div class="page-header" style="margin-bottom: 2rem;">
+        <div class="breadcrumb" style="font-size:0.85rem; color:var(--text-muted); margin-bottom:0.5rem;">
+            <a href="../index.html">随机森林</a> / 模块 06
+        </div>
+        <h1>随机森林</h1>
+        <p>将 Bagging、随机子空间和决策树组装为强大的集成模型</p>
+    </div>
+
+    <!-- ==================== Section 1: Pipeline ==================== -->
+    <div class="section" id="sec-pipeline">
+        <div class="section-title">
+            <div class="icon">1</div>
+            <h2>算法全景</h2>
+        </div>
+        <p>随机森林通过<strong>自助采样 + 随机特征选择 + 多棵决策树 + 投票</strong>四步完成预测。下面逐步演示完整流程。</p>
+
+        <div class="pipeline-flow" id="pipeline-stages"></div>
+
+        <div class="viz-area" style="min-height:420px; position:relative;">
+            <svg id="svg-pipeline" width="100%" height="420"></svg>
+            <span class="watermark">随机森林流水线</span>
+        </div>
+        <div id="pipeline-controls" style="margin-top:0.75rem;"></div>
+        <div id="pipeline-desc" class="info-box mt-1" style="min-height:2.5rem;">
+            <p>点击「播放」或「下一步」开始演示</p>
+        </div>
+    </div>
+
+    <!-- ==================== Section 2: Forest Viz ==================== -->
+    <div class="section" id="sec-forest">
+        <div class="section-title">
+            <div class="icon">2</div>
+            <h2>森林可视化</h2>
+        </div>
+        <p>在二维分类数据上构建包含多棵决策树的森林。悬停某棵树可查看其独立决策边界，同时显示集成边界。</p>
+
+        <div class="slider-group mb-2">
+            <label>树的数量</label>
+            <input type="range" id="forest-n-trees" min="3" max="10" value="7" step="1">
+            <span class="slider-value" id="forest-n-trees-val">7</span>
+            <button class="btn btn-primary btn-sm" id="btn-build-forest">构建森林</button>
+        </div>
+
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem;">
+            <div>
+                <h4 style="margin-bottom:0.5rem;">决策边界 <span class="ensemble-tag" id="boundary-label">集成</span></h4>
+                <div class="viz-area" style="min-height:360px; position:relative;">
+                    <canvas id="canvas-boundary" style="position:absolute;top:0;left:0;"></canvas>
+                    <svg id="svg-boundary" width="100%" height="360" style="position:relative;z-index:1;"></svg>
+                </div>
+            </div>
+            <div>
+                <h4 style="margin-bottom:0.5rem;">各棵决策树</h4>
+                <div class="forest-grid" id="forest-grid"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== Section 3: Stacking ==================== -->
+    <div class="section" id="sec-stacking">
+        <div class="section-title">
+            <div class="icon">3</div>
+            <h2>逐棵树叠加</h2>
+        </div>
+        <p>从零棵树开始，逐步添加新树到集成中，观察决策边界如何变得越来越平滑、精度如何提升。</p>
+
+        <div class="stacking-bar">
+            <button class="btn btn-sm" id="btn-stack-reset">重置</button>
+            <button class="btn btn-primary btn-sm" id="btn-stack-play">自动播放</button>
+            <button class="btn btn-sm" id="btn-stack-add">+ 添加一棵树</button>
+            <span style="color:var(--text-secondary);font-size:0.85rem;">当前树数:</span>
+            <span class="tree-count-display" id="stack-count">0</span>
+            <span style="color:var(--text-muted);font-size:0.8rem;">/ <span id="stack-total">10</span></span>
+        </div>
+
+        <div style="display:grid; grid-template-columns:1.2fr 0.8fr; gap:1rem;">
+            <div class="viz-area" style="min-height:360px; position:relative;">
+                <canvas id="canvas-stacking" style="position:absolute;top:0;left:0;"></canvas>
+                <svg id="svg-stacking" width="100%" height="360" style="position:relative;z-index:1;"></svg>
+                <span class="watermark">叠加决策边界</span>
+            </div>
+            <div class="accuracy-chart">
+                <h4 style="text-align:center;margin-bottom:0.5rem;">准确率随树数变化</h4>
+                <svg id="svg-accuracy" width="100%" height="320"></svg>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== Section 4: Compare ==================== -->
+    <div class="section" id="sec-compare">
+        <div class="section-title">
+            <div class="icon">4</div>
+            <h2>对比单棵树 vs 随机森林</h2>
+        </div>
+        <p>单棵深度决策树容易过拟合（高方差），随机森林通过集成大幅降低方差，同时几乎不增加偏差。</p>
+
+        <div class="compare-grid cols-2">
+            <!-- Left: single tree -->
+            <div class="compare-panel">
+                <h4 style="color:var(--accent-orange);">单棵决策树 (深度=8)</h4>
+                <div class="viz-area" style="min-height:280px; position:relative;">
+                    <canvas id="canvas-single" style="position:absolute;top:0;left:0;"></canvas>
+                    <svg id="svg-single" width="100%" height="280" style="position:relative;z-index:1;"></svg>
+                </div>
+                <div id="metrics-single" style="margin-top:0.5rem;"></div>
+            </div>
+            <!-- Right: forest -->
+            <div class="compare-panel">
+                <h4 style="color:var(--accent-green);">随机森林 (10棵树)</h4>
+                <div class="viz-area" style="min-height:280px; position:relative;">
+                    <canvas id="canvas-forest" style="position:absolute;top:0;left:0;"></canvas>
+                    <svg id="svg-forest" width="100%" height="280" style="position:relative;z-index:1;"></svg>
+                </div>
+                <div id="metrics-forest" style="margin-top:0.5rem;"></div>
+            </div>
+        </div>
+
+        <div class="insight-box mt-2">
+            <strong>核心洞察:</strong>
+            <p>随机森林通过对多棵「高方差、低偏差」的树取平均（投票），显著降低了预测方差。训练精度略低于单棵深度树，但测试精度通常更高。</p>
+        </div>
+    </div>
+
+    <!-- ==================== Section 5: Pseudocode ==================== -->
+    <div class="section" id="sec-pseudocode">
+        <div class="section-title">
+            <div class="icon">5</div>
+            <h2>算法伪代码</h2>
+        </div>
+
+        <div style="display:grid; grid-template-columns:1.3fr 0.7fr; gap:1.5rem; align-items:start;">
+            <div>
+                <div class="pseudocode" id="pseudocode-block"></div>
+                <div id="pseudo-controls" style="margin-top:0.75rem;"></div>
+            </div>
+            <div>
+                <h4 style="margin-bottom:0.75rem;">预测公式</h4>
+                <div class="card" style="margin-bottom:1rem;">
+                    <div id="formula-vote" style="text-align:center;"></div>
+                    <p class="text-sm text-muted mt-1" style="text-align:center;">对 B 棵树的预测取众数（分类）或均值（回归）</p>
+                </div>
+
+                <h4 style="margin-bottom:0.75rem;">关键超参数</h4>
+                <div class="summary-card">
+                    <div class="param-item">
+                        <div class="param-name">n_estimators</div>
+                        <div class="param-desc">森林中决策树的数量，通常 100~500</div>
+                    </div>
+                    <div class="param-item">
+                        <div class="param-name">max_depth</div>
+                        <div class="param-desc">每棵树的最大深度，控制模型复杂度</div>
+                    </div>
+                    <div class="param-item">
+                        <div class="param-name">max_features</div>
+                        <div class="param-desc">每次分裂考虑的特征数，一般取 sqrt(p)</div>
+                    </div>
+                    <div class="param-item">
+                        <div class="param-name">min_samples_split</div>
+                        <div class="param-desc">节点分裂所需最小样本数</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Project scripts -->
+<script src="../shared/scripts/rf-utils.js"></script>
+<script src="../shared/scripts/animation-controller.js"></script>
+<script src="../shared/scripts/matrix-renderer.js"></script>
+<script src="../shared/scripts/nav.js"></script>
+<script src="../shared/scripts/katex-init.js"></script>
+
+<script>
+(function() {
+    'use strict';
+
+    /* ===================================================================
+     *  SHARED DATA & HELPERS
+     * =================================================================== */
+    const DATA_N = 150;
+    const SEED = 42;
+    const allData = RFUtils.generateClassificationData(DATA_N, SEED, 0.35);
+
+    // Train / test split (70/30)
+    const rng = RFUtils.seededRandom(99);
+    const shuffled = [...allData].sort(() => rng() - 0.5);
+    const splitIdx = Math.floor(DATA_N * 0.7);
+    const trainData = shuffled.slice(0, splitIdx);
+    const testData = shuffled.slice(splitIdx);
+
+    const xExtent = [-5.5, 5.5];
+    const yExtent = [-5.5, 5.5];
+
+    function accuracy(data, predictor) {
+        let correct = 0;
+        for (const d of data) {
+            if (predictor(d) === d.label) correct++;
+        }
+        return correct / data.length;
+    }
+
+    /* Draw data points on SVG */
+    function drawPoints(svg, data, xScale, yScale, opts = {}) {
+        const r = opts.r || 3;
+        const opacity = opts.opacity || 0.8;
+        const sel = d3.select(svg).selectAll('.data-pt').data(data, (d, i) => i);
+        sel.enter().append('circle')
+            .attr('class', 'data-pt')
+            .attr('r', r)
+            .attr('fill', d => RFUtils.classColor(d.label))
+            .attr('opacity', opacity)
+            .attr('stroke', '#000')
+            .attr('stroke-width', 0.5)
+            .merge(sel)
+            .attr('cx', d => xScale(d.x))
+            .attr('cy', d => yScale(d.y));
+        sel.exit().remove();
+    }
+
+    /* Render decision boundary on a canvas */
+    function drawBoundary(canvas, predictor, xScale, yScale, alpha = 0.55) {
+        const w = canvas.width;
+        const h = canvas.height;
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, w, h);
+        const res = 3;
+        for (let px = 0; px < w; px += res) {
+            for (let py = 0; py < h; py += res) {
+                const x = xScale.invert(px);
+                const y = yScale.invert(py);
+                const pred = predictor({ x, y });
+                const c = RFUtils.classColor(pred);
+                ctx.fillStyle = c;
+                ctx.globalAlpha = alpha;
+                ctx.fillRect(px, py, res, res);
+            }
+        }
+        ctx.globalAlpha = 1;
+    }
+
+    /* Fit canvas to its parent viz-area */
+    function fitCanvas(canvas) {
+        const parent = canvas.parentElement;
+        const rect = parent.getBoundingClientRect();
+        canvas.width = rect.width;
+        canvas.height = rect.height;
+        canvas.style.width = rect.width + 'px';
+        canvas.style.height = rect.height + 'px';
+    }
+
+    /* Standard D3 scales for a viz area */
+    function makeScales(container) {
+        const rect = container.getBoundingClientRect();
+        const margin = { top: 10, right: 10, bottom: 10, left: 10 };
+        const w = rect.width - margin.left - margin.right;
+        const h = rect.height - margin.top - margin.bottom;
+        const xScale = d3.scaleLinear().domain(xExtent).range([margin.left, margin.left + w]);
+        const yScale = d3.scaleLinear().domain(yExtent).range([margin.top, margin.top + h]);
+        return { xScale, yScale, width: rect.width, height: rect.height };
+    }
+
+    /* Draw a small tree diagram inside an SVG */
+    function drawMiniTree(svg, tree, w, h) {
+        const nodes = RFUtils.flattenTree(tree);
+        if (nodes.length === 0) return;
+        const maxD = Math.max(...nodes.map(n => n.depth), 1);
+        const xRange = nodes.length > 1 ? [Math.min(...nodes.map(n => n.vx)), Math.max(...nodes.map(n => n.vx))] : [-1, 1];
+        const sx = d3.scaleLinear().domain([xRange[0] - 0.5, xRange[1] + 0.5]).range([8, w - 8]);
+        const sy = d3.scaleLinear().domain([-0.3, maxD + 0.3]).range([8, h - 8]);
+
+        const g = d3.select(svg);
+        g.selectAll('*').remove();
+
+        // edges
+        for (const n of nodes) {
+            if (!n.isLeaf) {
+                const left = nodes.find(c => c.id === n.id * 2 + 1);
+                const right = nodes.find(c => c.id === n.id * 2 + 2);
+                if (left) g.append('line').attr('x1', sx(n.vx)).attr('y1', sy(n.depth)).attr('x2', sx(left.vx)).attr('y2', sy(left.depth)).attr('stroke', 'rgba(255,255,255,0.15)').attr('stroke-width', 1);
+                if (right) g.append('line').attr('x1', sx(n.vx)).attr('y1', sy(n.depth)).attr('x2', sx(right.vx)).attr('y2', sy(right.depth)).attr('stroke', 'rgba(255,255,255,0.15)').attr('stroke-width', 1);
+            }
+        }
+        // nodes
+        for (const n of nodes) {
+            g.append('circle')
+                .attr('cx', sx(n.vx))
+                .attr('cy', sy(n.depth))
+                .attr('r', n.isLeaf ? 3.5 : 3)
+                .attr('fill', n.isLeaf ? RFUtils.classColor(n.prediction) : 'var(--accent-blue)')
+                .attr('opacity', 0.9);
+        }
+    }
+
+    /* ===================================================================
+     *  SECTION 1: PIPELINE ANIMATION
+     * =================================================================== */
+    (function initPipeline() {
+        const nTreesDemo = 3;
+        const stageNames = [];
+        for (let t = 0; t < nTreesDemo; t++) {
+            stageNames.push(`采样${t + 1}`, `选特征${t + 1}`, `建树${t + 1}`);
+        }
+        stageNames.push('投票集成');
+
+        // Render stage badges
+        const flow = document.getElementById('pipeline-stages');
+        stageNames.forEach((name, i) => {
+            if (i > 0) {
+                const arrow = document.createElement('span');
+                arrow.className = 'pipeline-arrow';
+                arrow.textContent = '\u2192';
+                flow.appendChild(arrow);
+            }
+            const badge = document.createElement('span');
+            badge.className = 'pipeline-stage';
+            badge.textContent = name;
+            badge.dataset.idx = i;
+            flow.appendChild(badge);
+        });
+
+        const svgEl = document.getElementById('svg-pipeline');
+        const descEl = document.getElementById('pipeline-desc').querySelector('p');
+
+        // Build actual forest data for animation
+        const bootstraps = [];
+        const trees = [];
+        for (let t = 0; t < nTreesDemo; t++) {
+            const { sample } = RFUtils.bootstrapSample(trainData, SEED + t * 137);
+            bootstraps.push(sample);
+            const tree = RFUtils.buildTree(sample, { maxDepth: 4, maxFeatures: 1, seed: SEED + t * 251 });
+            trees.push(tree);
+        }
+
+        const descriptions = [];
+        for (let t = 0; t < nTreesDemo; t++) {
+            descriptions.push(
+                `从训练集中有放回地抽取 ${trainData.length} 个样本（自助采样），构成第 ${t + 1} 棵树的训练子集。`,
+                `从全部特征中随机选择 sqrt(p) 个候选特征，增加树之间的多样性。`,
+                `在采样数据和随机特征上构建第 ${t + 1} 棵决策树。`
+            );
+        }
+        descriptions.push('所有树构建完毕，对新样本的预测通过多数投票（分类）或平均（回归）完成。');
+
+        function renderPipelineSVG(stepIdx) {
+            const svg = d3.select(svgEl);
+            const rect = svgEl.getBoundingClientRect();
+            const W = rect.width, H = rect.height;
+            svg.attr('viewBox', `0 0 ${W} ${H}`);
+            svg.selectAll('*').remove();
+
+            const treeW = 130, treeH = 130;
+            const startX = 40;
+            const gapX = (W - startX * 2 - nTreesDemo * treeW) / Math.max(nTreesDemo - 1, 1);
+            const treeY = 160;
+
+            // Draw original data cluster
+            const dataG = svg.append('g').attr('transform', `translate(${W / 2}, 40)`);
+            dataG.append('rect').attr('x', -60).attr('y', -15).attr('width', 120).attr('height', 30)
+                .attr('rx', 6).attr('fill', 'var(--bg-card)').attr('stroke', 'var(--border-color)');
+            dataG.append('text').attr('text-anchor', 'middle').attr('dy', 5)
+                .attr('fill', 'var(--text-primary)').attr('font-size', '0.8rem').text('原始训练数据');
+
+            const treeIdx = Math.floor(stepIdx / 3);
+            const phaseInTree = stepIdx % 3;
+
+            for (let t = 0; t < nTreesDemo; t++) {
+                const cx = startX + t * (treeW + gapX) + treeW / 2;
+                const isActive = (stepIdx < nTreesDemo * 3) ? (t === treeIdx) : true;
+                const isDone = (t < treeIdx) || (stepIdx >= nTreesDemo * 3);
+                const baseAlpha = isDone ? 0.9 : (isActive ? 1 : 0.3);
+
+                // Arrow from data to tree
+                svg.append('line')
+                    .attr('x1', W / 2).attr('y1', 65)
+                    .attr('x2', cx).attr('y2', treeY - 15)
+                    .attr('stroke', isDone || isActive ? 'var(--accent-green)' : 'var(--border-color)')
+                    .attr('stroke-width', 1.5)
+                    .attr('stroke-dasharray', isDone || isActive ? 'none' : '4,4')
+                    .attr('opacity', baseAlpha);
+
+                // Tree container
+                const tg = svg.append('g').attr('transform', `translate(${cx - treeW / 2}, ${treeY})`).attr('opacity', baseAlpha);
+
+                tg.append('rect').attr('width', treeW).attr('height', treeH)
+                    .attr('rx', 8)
+                    .attr('fill', 'var(--bg-card)')
+                    .attr('stroke', isActive && stepIdx < nTreesDemo * 3 ? 'var(--accent-green)' : isDone ? 'rgba(22,199,154,0.4)' : 'var(--border-color)')
+                    .attr('stroke-width', isActive && stepIdx < nTreesDemo * 3 ? 2 : 1);
+
+                tg.append('text').attr('x', treeW / 2).attr('y', 16).attr('text-anchor', 'middle')
+                    .attr('fill', 'var(--text-muted)').attr('font-size', '0.7rem').text(`树 ${t + 1}`);
+
+                // Phases within tree
+                if (isDone || (isActive && phaseInTree >= 2 && stepIdx < nTreesDemo * 3) || stepIdx >= nTreesDemo * 3) {
+                    // draw mini tree
+                    const miniSvg = tg.append('svg').attr('x', 10).attr('y', 22).attr('width', treeW - 20).attr('height', treeH - 30);
+                    drawMiniTree(miniSvg.node(), trees[t], treeW - 20, treeH - 30);
+                } else if (isActive && phaseInTree === 0) {
+                    // show bootstrap sample dots
+                    for (let i = 0; i < Math.min(30, bootstraps[t].length); i++) {
+                        tg.append('circle')
+                            .attr('cx', 15 + (i % 10) * 10)
+                            .attr('cy', 35 + Math.floor(i / 10) * 12)
+                            .attr('r', 3)
+                            .attr('fill', RFUtils.classColor(bootstraps[t][i].label))
+                            .attr('opacity', 0.7);
+                    }
+                    tg.append('text').attr('x', treeW / 2).attr('y', treeH - 8).attr('text-anchor', 'middle')
+                        .attr('fill', 'var(--accent-orange)').attr('font-size', '0.65rem').text('自助采样');
+                } else if (isActive && phaseInTree === 1) {
+                    // show feature selection
+                    const feats = ['x\u2081', 'x\u2082'];
+                    const chosen = Math.floor(rng() * 2);
+                    feats.forEach((f, fi) => {
+                        tg.append('rect')
+                            .attr('x', 20 + fi * 50).attr('y', 50).attr('width', 40).attr('height', 24)
+                            .attr('rx', 4)
+                            .attr('fill', fi === chosen ? 'rgba(22,199,154,0.2)' : 'var(--bg-secondary)')
+                            .attr('stroke', fi === chosen ? 'var(--accent-green)' : 'var(--border-color)');
+                        tg.append('text')
+                            .attr('x', 40 + fi * 50).attr('y', 66).attr('text-anchor', 'middle')
+                            .attr('fill', fi === chosen ? 'var(--accent-green)' : 'var(--text-muted)')
+                            .attr('font-size', '0.75rem').text(f);
+                    });
+                    tg.append('text').attr('x', treeW / 2).attr('y', treeH - 8).attr('text-anchor', 'middle')
+                        .attr('fill', 'var(--accent-blue)').attr('font-size', '0.65rem').text('随机选特征');
+                }
+            }
+
+            // Ensemble box at bottom
+            if (stepIdx >= nTreesDemo * 3) {
+                const ensY = treeY + treeH + 30;
+                const ensG = svg.append('g').attr('transform', `translate(${W / 2}, ${ensY})`);
+                // Arrows from trees to ensemble
+                for (let t = 0; t < nTreesDemo; t++) {
+                    const cx = startX + t * (treeW + gapX) + treeW / 2;
+                    svg.append('line').attr('x1', cx).attr('y1', treeY + treeH + 5)
+                        .attr('x2', W / 2).attr('y2', ensY - 18)
+                        .attr('stroke', 'var(--accent-green)').attr('stroke-width', 1.5);
+                }
+                ensG.append('rect').attr('x', -70).attr('y', -18).attr('width', 140).attr('height', 36)
+                    .attr('rx', 8)
+                    .attr('fill', 'rgba(22,199,154,0.15)')
+                    .attr('stroke', 'var(--accent-green)').attr('stroke-width', 2);
+                ensG.append('text').attr('text-anchor', 'middle').attr('dy', 5)
+                    .attr('fill', 'var(--accent-green)').attr('font-size', '0.9rem').attr('font-weight', '700')
+                    .text('多数投票');
+            }
+        }
+
+        // Build AnimationController steps
+        const steps = [];
+        for (let i = 0; i < stageNames.length; i++) {
+            steps.push({
+                name: stageNames[i],
+                duration: 1200,
+                action: () => {
+                    renderPipelineSVG(i);
+                    descEl.textContent = descriptions[i];
+                    // Highlight stage badges
+                    document.querySelectorAll('.pipeline-stage').forEach((el, idx) => {
+                        el.classList.remove('active', 'done');
+                        if (idx === i) el.classList.add('active');
+                        else if (idx < i) el.classList.add('done');
+                    });
+                }
+            });
+        }
+
+        const ctrl = new AnimationController({
+            container: document.getElementById('pipeline-controls'),
+            steps,
+            defaultDuration: 1200
+        });
+
+        // Initial render
+        renderPipelineSVG(-1);
+    })();
+
+    /* ===================================================================
+     *  SECTION 2: FOREST VISUALIZATION
+     * =================================================================== */
+    (function initForestViz() {
+        const slider = document.getElementById('forest-n-trees');
+        const sliderVal = document.getElementById('forest-n-trees-val');
+        const btnBuild = document.getElementById('btn-build-forest');
+        const gridEl = document.getElementById('forest-grid');
+        const labelEl = document.getElementById('boundary-label');
+
+        slider.addEventListener('input', () => { sliderVal.textContent = slider.value; });
+
+        let currentForest = null;
+        let hoveredTree = -1;
+
+        function build() {
+            const nTrees = parseInt(slider.value);
+            currentForest = RFUtils.buildForest(trainData, { nTrees, maxDepth: 4, seed: SEED });
+            hoveredTree = -1;
+            renderGrid();
+            renderBoundary();
+        }
+
+        function renderGrid() {
+            gridEl.innerHTML = '';
+            if (!currentForest) return;
+            currentForest.trees.forEach(({ tree }, i) => {
+                const card = document.createElement('div');
+                card.className = 'tree-card';
+                const svgNS = 'http://www.w3.org/2000/svg';
+                const svg = document.createElementNS(svgNS, 'svg');
+                svg.setAttribute('width', '100%');
+                svg.setAttribute('height', '90');
+                card.appendChild(svg);
+
+                const lbl = document.createElement('div');
+                lbl.className = 'tree-label';
+                lbl.textContent = `树 ${i + 1} (深度=${RFUtils.treeDepth(tree)}, 节点=${RFUtils.treeNodeCount(tree)})`;
+                card.appendChild(lbl);
+
+                card.addEventListener('mouseenter', () => {
+                    hoveredTree = i;
+                    document.querySelectorAll('.tree-card').forEach((c, j) => c.classList.toggle('selected', j === i));
+                    labelEl.textContent = `树 ${i + 1}`;
+                    labelEl.style.background = 'rgba(255,171,64,0.15)';
+                    labelEl.style.borderColor = 'var(--accent-orange)';
+                    labelEl.style.color = 'var(--accent-orange)';
+                    renderBoundary();
+                });
+                card.addEventListener('mouseleave', () => {
+                    hoveredTree = -1;
+                    document.querySelectorAll('.tree-card').forEach(c => c.classList.remove('selected'));
+                    labelEl.textContent = '集成';
+                    labelEl.style.background = '';
+                    labelEl.style.borderColor = '';
+                    labelEl.style.color = '';
+                    renderBoundary();
+                });
+
+                gridEl.appendChild(card);
+                drawMiniTree(svg, tree, svg.getBoundingClientRect().width || 160, 90);
+            });
+        }
+
+        function renderBoundary() {
+            if (!currentForest) return;
+            const container = document.getElementById('svg-boundary').parentElement;
+            const canvas = document.getElementById('canvas-boundary');
+            const svgEl = document.getElementById('svg-boundary');
+            fitCanvas(canvas);
+            const { xScale, yScale } = makeScales(container);
+
+            if (hoveredTree >= 0) {
+                const tree = currentForest.trees[hoveredTree].tree;
+                drawBoundary(canvas, pt => RFUtils.predictTree(tree, pt).prediction, xScale, yScale, 0.45);
+            } else {
+                drawBoundary(canvas, pt => RFUtils.predictForest(currentForest, pt).prediction, xScale, yScale, 0.4);
+            }
+
+            d3.select(svgEl).selectAll('*').remove();
+            drawPoints(svgEl, trainData, xScale, yScale);
+        }
+
+        btnBuild.addEventListener('click', build);
+
+        // Initial build
+        setTimeout(build, 100);
+    })();
+
+    /* ===================================================================
+     *  SECTION 3: STACKING (add trees one by one)
+     * =================================================================== */
+    (function initStacking() {
+        const maxTrees = 10;
+        document.getElementById('stack-total').textContent = maxTrees;
+
+        // Pre-build all trees
+        const allTrees = [];
+        for (let t = 0; t < maxTrees; t++) {
+            const { sample, oobIndices } = RFUtils.bootstrapSample(trainData, SEED + t * 137);
+            const tree = RFUtils.buildTree(sample, { maxDepth: 4, maxFeatures: 1, seed: SEED + t * 251 });
+            allTrees.push({ tree, oobIndices, bootstrapSize: sample.length });
+        }
+
+        let activeCount = 0;
+        let playing = false;
+        let playInterval = null;
+        const accuracyHistory = [];
+
+        const countEl = document.getElementById('stack-count');
+        const btnAdd = document.getElementById('btn-stack-add');
+        const btnPlay = document.getElementById('btn-stack-play');
+        const btnReset = document.getElementById('btn-stack-reset');
+
+        function addTree() {
+            if (activeCount >= maxTrees) return;
+            activeCount++;
+            countEl.textContent = activeCount;
+
+            // Compute ensemble accuracy
+            const forest = { trees: allTrees.slice(0, activeCount), nTrees: activeCount };
+            const trainAcc = accuracy(trainData, pt => RFUtils.predictForest(forest, pt).prediction);
+            const testAcc = accuracy(testData, pt => RFUtils.predictForest(forest, pt).prediction);
+            accuracyHistory.push({ n: activeCount, trainAcc, testAcc });
+
+            renderStackBoundary();
+            renderAccChart();
+
+            if (activeCount >= maxTrees) stopPlay();
+        }
+
+        function reset() {
+            stopPlay();
+            activeCount = 0;
+            accuracyHistory.length = 0;
+            countEl.textContent = '0';
+            renderStackBoundary();
+            renderAccChart();
+        }
+
+        function startPlay() {
+            playing = true;
+            btnPlay.textContent = '暂停';
+            if (activeCount >= maxTrees) reset();
+            playInterval = setInterval(() => {
+                addTree();
+                if (activeCount >= maxTrees) stopPlay();
+            }, 900);
+        }
+
+        function stopPlay() {
+            playing = false;
+            btnPlay.textContent = '自动播放';
+            if (playInterval) { clearInterval(playInterval); playInterval = null; }
+        }
+
+        btnAdd.addEventListener('click', addTree);
+        btnReset.addEventListener('click', reset);
+        btnPlay.addEventListener('click', () => playing ? stopPlay() : startPlay());
+
+        function renderStackBoundary() {
+            const container = document.getElementById('svg-stacking').parentElement;
+            const canvas = document.getElementById('canvas-stacking');
+            const svgEl = document.getElementById('svg-stacking');
+            fitCanvas(canvas);
+            const { xScale, yScale } = makeScales(container);
+
+            if (activeCount > 0) {
+                const forest = { trees: allTrees.slice(0, activeCount), nTrees: activeCount };
+                drawBoundary(canvas, pt => RFUtils.predictForest(forest, pt).prediction, xScale, yScale, 0.4);
+            } else {
+                const ctx = canvas.getContext('2d');
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+            }
+
+            d3.select(svgEl).selectAll('*').remove();
+            drawPoints(svgEl, trainData, xScale, yScale);
+        }
+
+        function renderAccChart() {
+            const svgEl = document.getElementById('svg-accuracy');
+            const rect = svgEl.getBoundingClientRect();
+            const margin = { top: 20, right: 20, bottom: 35, left: 45 };
+            const W = rect.width - margin.left - margin.right;
+            const H = rect.height - margin.top - margin.bottom;
+
+            const svg = d3.select(svgEl);
+            svg.selectAll('*').remove();
+
+            const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+
+            const x = d3.scaleLinear().domain([1, maxTrees]).range([0, W]);
+            const y = d3.scaleLinear().domain([0.5, 1.0]).range([H, 0]);
+
+            // Axes
+            g.append('g').attr('transform', `translate(0,${H})`).call(d3.axisBottom(x).ticks(maxTrees).tickFormat(d3.format('d')))
+                .selectAll('text').attr('fill', 'var(--text-muted)').attr('font-size', '0.7rem');
+            g.append('g').call(d3.axisLeft(y).ticks(5).tickFormat(d => (d * 100).toFixed(0) + '%'))
+                .selectAll('text').attr('fill', 'var(--text-muted)').attr('font-size', '0.7rem');
+            g.selectAll('.domain, .tick line').attr('stroke', 'var(--border-color)');
+
+            // Labels
+            g.append('text').attr('x', W / 2).attr('y', H + 30).attr('text-anchor', 'middle')
+                .attr('fill', 'var(--text-muted)').attr('font-size', '0.75rem').text('树的数量');
+            g.append('text').attr('x', -H / 2).attr('y', -35).attr('text-anchor', 'middle')
+                .attr('transform', 'rotate(-90)').attr('fill', 'var(--text-muted)').attr('font-size', '0.75rem').text('准确率');
+
+            if (accuracyHistory.length === 0) return;
+
+            // Train line
+            const lineTrain = d3.line().x(d => x(d.n)).y(d => y(d.trainAcc)).curve(d3.curveMonotoneX);
+            g.append('path').datum(accuracyHistory).attr('d', lineTrain)
+                .attr('fill', 'none').attr('stroke', 'var(--accent-orange)').attr('stroke-width', 2);
+
+            // Test line
+            const lineTest = d3.line().x(d => x(d.n)).y(d => y(d.testAcc)).curve(d3.curveMonotoneX);
+            g.append('path').datum(accuracyHistory).attr('d', lineTest)
+                .attr('fill', 'none').attr('stroke', 'var(--accent-green)').attr('stroke-width', 2);
+
+            // Dots
+            g.selectAll('.dot-train').data(accuracyHistory).enter().append('circle')
+                .attr('cx', d => x(d.n)).attr('cy', d => y(d.trainAcc))
+                .attr('r', 3).attr('fill', 'var(--accent-orange)');
+            g.selectAll('.dot-test').data(accuracyHistory).enter().append('circle')
+                .attr('cx', d => x(d.n)).attr('cy', d => y(d.testAcc))
+                .attr('r', 3).attr('fill', 'var(--accent-green)');
+
+            // Legend
+            const lg = g.append('g').attr('transform', `translate(${W - 110}, 0)`);
+            lg.append('line').attr('x1', 0).attr('y1', 0).attr('x2', 20).attr('y2', 0).attr('stroke', 'var(--accent-orange)').attr('stroke-width', 2);
+            lg.append('text').attr('x', 25).attr('y', 4).attr('fill', 'var(--text-secondary)').attr('font-size', '0.7rem').text('训练准确率');
+            lg.append('line').attr('x1', 0).attr('y1', 18).attr('x2', 20).attr('y2', 18).attr('stroke', 'var(--accent-green)').attr('stroke-width', 2);
+            lg.append('text').attr('x', 25).attr('y', 22).attr('fill', 'var(--text-secondary)').attr('font-size', '0.7rem').text('测试准确率');
+        }
+
+        // Initial render
+        setTimeout(() => {
+            renderStackBoundary();
+            renderAccChart();
+        }, 150);
+    })();
+
+    /* ===================================================================
+     *  SECTION 4: COMPARE SINGLE TREE vs FOREST
+     * =================================================================== */
+    (function initCompare() {
+        // Single deep tree
+        const singleTree = RFUtils.buildTree(trainData, { maxDepth: 8, minSamples: 1, seed: SEED });
+        const singleTrainAcc = accuracy(trainData, pt => RFUtils.predictTree(singleTree, pt).prediction);
+        const singleTestAcc = accuracy(testData, pt => RFUtils.predictTree(singleTree, pt).prediction);
+
+        // Random forest
+        const forest = RFUtils.buildForest(trainData, { nTrees: 10, maxDepth: 4, seed: SEED });
+        const forestTrainAcc = accuracy(trainData, pt => RFUtils.predictForest(forest, pt).prediction);
+        const forestTestAcc = accuracy(testData, pt => RFUtils.predictForest(forest, pt).prediction);
+
+        function renderCompare() {
+            // Single tree
+            const contSingle = document.getElementById('svg-single').parentElement;
+            const canvasSingle = document.getElementById('canvas-single');
+            const svgSingle = document.getElementById('svg-single');
+            fitCanvas(canvasSingle);
+            const sSingle = makeScales(contSingle);
+            drawBoundary(canvasSingle, pt => RFUtils.predictTree(singleTree, pt).prediction, sSingle.xScale, sSingle.yScale, 0.4);
+            d3.select(svgSingle).selectAll('*').remove();
+            drawPoints(svgSingle, trainData, sSingle.xScale, sSingle.yScale, { r: 2.5 });
+
+            // Forest
+            const contForest = document.getElementById('svg-forest').parentElement;
+            const canvasForest = document.getElementById('canvas-forest');
+            const svgForest = document.getElementById('svg-forest');
+            fitCanvas(canvasForest);
+            const sForest = makeScales(contForest);
+            drawBoundary(canvasForest, pt => RFUtils.predictForest(forest, pt).prediction, sForest.xScale, sForest.yScale, 0.4);
+            d3.select(svgForest).selectAll('*').remove();
+            drawPoints(svgForest, trainData, sForest.xScale, sForest.yScale, { r: 2.5 });
+
+            // Metrics
+            function renderMetrics(el, trainAcc, testAcc, extra) {
+                el.innerHTML = `
+                    <div class="metric-row">
+                        <span class="label">训练准确率</span>
+                        <span class="value ${trainAcc > 0.95 ? 'bad' : 'good'}">${(trainAcc * 100).toFixed(1)}%</span>
+                    </div>
+                    <div class="metric-row">
+                        <span class="label">测试准确率</span>
+                        <span class="value good">${(testAcc * 100).toFixed(1)}%</span>
+                    </div>
+                    ${extra || ''}
+                `;
+            }
+            renderMetrics(document.getElementById('metrics-single'), singleTrainAcc, singleTestAcc,
+                `<div class="metric-row"><span class="label">树深度</span><span class="value" style="color:var(--accent-orange);">${RFUtils.treeDepth(singleTree)}</span></div>
+                 <div class="metric-row"><span class="label">节点数</span><span class="value" style="color:var(--text-secondary);">${RFUtils.treeNodeCount(singleTree)}</span></div>`
+            );
+            renderMetrics(document.getElementById('metrics-forest'), forestTrainAcc, forestTestAcc,
+                `<div class="metric-row"><span class="label">树数量</span><span class="value" style="color:var(--accent-green);">10</span></div>
+                 <div class="metric-row"><span class="label">OOB 得分</span><span class="value good">${(RFUtils.oobScore(trainData, forest) * 100).toFixed(1)}%</span></div>`
+            );
+        }
+
+        setTimeout(renderCompare, 200);
+    })();
+
+    /* ===================================================================
+     *  SECTION 5: PSEUDOCODE + FORMULAS
+     * =================================================================== */
+    (function initPseudocode() {
+        const lines = [
+            { text: '<span class="keyword">function</span> <span class="func">RandomForest</span>(D, B, max_features):', desc: '定义随机森林函数，输入数据集 D、树数量 B、最大特征数' },
+            { text: '    forest = []', desc: '初始化空森林' },
+            { text: '    <span class="keyword">for</span> b = 1 <span class="keyword">to</span> B:', desc: '循环构建 B 棵决策树' },
+            { text: '        D_b = <span class="func">BootstrapSample</span>(D)  <span class="comment">// 有放回抽样 n 个</span>', desc: '从原始数据中有放回地抽取 n 个样本，约 63.2% 的唯一样本' },
+            { text: '        T_b = <span class="func">BuildTree</span>(D_b, max_features)', desc: '在自助采样集上构建决策树，每次分裂只考虑随机 max_features 个特征' },
+            { text: '            <span class="comment">// 每次分裂: 随机选 max_features 个特征</span>', desc: '随机特征选择是随机森林区别于 Bagging 的关键' },
+            { text: '            <span class="comment">// 在候选特征中选最佳分裂点</span>', desc: '在随机选中的特征中，选择信息增益最大的分裂' },
+            { text: '        forest.<span class="func">append</span>(T_b)', desc: '将构建好的树加入森林' },
+            { text: '    <span class="keyword">return</span> forest', desc: '返回包含 B 棵树的森林' },
+            { text: '', desc: '' },
+            { text: '<span class="keyword">function</span> <span class="func">Predict</span>(forest, x):', desc: '定义预测函数' },
+            { text: '    predictions = [T(x) <span class="keyword">for</span> T <span class="keyword">in</span> forest]', desc: '每棵树独立对 x 做预测' },
+            { text: '    <span class="keyword">return</span> <span class="func">mode</span>(predictions)  <span class="comment">// 分类: 多数投票</span>', desc: '对分类问题取众数（多数投票），对回归问题取均值' },
+        ];
+
+        const block = document.getElementById('pseudocode-block');
+        lines.forEach((l, i) => {
+            const div = document.createElement('div');
+            div.className = 'line';
+            div.dataset.idx = i;
+            div.innerHTML = l.text || '&nbsp;';
+            block.appendChild(div);
+        });
+
+        // AnimationController for pseudocode
+        const stepsP = lines.filter(l => l.text).map((l, i) => ({
+            name: `行 ${i + 1}`,
+            duration: 1500,
+            action: () => {
+                block.querySelectorAll('.line').forEach(el => el.classList.remove('active'));
+                // Find the actual line element index
+                const realIdx = lines.indexOf(l);
+                const lineEl = block.querySelector(`.line[data-idx="${realIdx}"]`);
+                if (lineEl) {
+                    lineEl.classList.add('active');
+                    lineEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                }
+            }
+        }));
+
+        new AnimationController({
+            container: document.getElementById('pseudo-controls'),
+            steps: stepsP,
+            defaultDuration: 1500
+        });
+
+        // Render KaTeX formula
+        const formulaEl = document.getElementById('formula-vote');
+        if (formulaEl) {
+            try {
+                katex.render(
+                    '\\hat{y} = \\text{mode}\\big(h_1(\\mathbf{x}),\\; h_2(\\mathbf{x}),\\; \\ldots,\\; h_B(\\mathbf{x})\\big)',
+                    formulaEl,
+                    { displayMode: true, throwOnError: false }
+                );
+            } catch (e) {
+                // KaTeX might not be loaded yet, retry
+                setTimeout(() => {
+                    try {
+                        katex.render(
+                            '\\hat{y} = \\text{mode}\\big(h_1(\\mathbf{x}),\\; h_2(\\mathbf{x}),\\; \\ldots,\\; h_B(\\mathbf{x})\\big)',
+                            formulaEl,
+                            { displayMode: true, throwOnError: false }
+                        );
+                    } catch (_) {}
+                }, 1000);
+            }
+        }
+    })();
+
+    /* ===================================================================
+     *  WINDOW RESIZE HANDLER
+     * =================================================================== */
+    let resizeTimer;
+    window.addEventListener('resize', () => {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(() => {
+            // Re-trigger forest viz
+            document.getElementById('btn-build-forest')?.click();
+        }, 300);
+    });
+
+})();
+</script>
+</body>
+</html>

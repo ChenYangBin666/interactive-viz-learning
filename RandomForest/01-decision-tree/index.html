@@ -1,0 +1,1281 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>决策树基础 — 随机森林可视化</title>
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+SC:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+
+    <!-- KaTeX -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+
+    <!-- D3.js -->
+    <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+
+    <!-- GSAP -->
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.2/dist/gsap.min.js"></script>
+
+    <!-- Shared styles -->
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+
+    <style>
+        .page-header {
+            margin-bottom: 2.5rem;
+        }
+        .breadcrumb {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            margin-bottom: 0.5rem;
+        }
+        .breadcrumb a {
+            color: var(--accent-blue);
+        }
+        .section-desc {
+            font-size: 1rem;
+            color: var(--text-secondary);
+            max-width: 700px;
+        }
+
+        /* Tree diagram styles */
+        .tree-node {
+            cursor: pointer;
+            transition: filter 0.2s;
+        }
+        .tree-node:hover {
+            filter: brightness(1.2);
+        }
+        .tree-link {
+            fill: none;
+            stroke: var(--border-color);
+            stroke-width: 2;
+        }
+        .tree-link.active-path {
+            stroke: var(--accent-green);
+            stroke-width: 3;
+        }
+        .tree-node-circle {
+            stroke-width: 2;
+        }
+        .tree-label {
+            fill: var(--text-primary);
+            font-size: 11px;
+            text-anchor: middle;
+            pointer-events: none;
+        }
+
+        /* Scatter plot */
+        .scatter-point {
+            stroke: rgba(0,0,0,0.3);
+            stroke-width: 1;
+            transition: r 0.2s;
+        }
+        .scatter-point:hover {
+            stroke: var(--text-primary);
+            stroke-width: 2;
+        }
+
+        /* Split line */
+        .split-line {
+            stroke-width: 2;
+            stroke-dasharray: 6 3;
+            cursor: pointer;
+        }
+        .split-line:hover {
+            stroke-width: 3;
+        }
+
+        /* Decision boundary */
+        .boundary-rect {
+            opacity: 0.25;
+            transition: opacity 0.2s;
+        }
+        .boundary-rect.highlight {
+            opacity: 0.5;
+            stroke: var(--text-primary);
+            stroke-width: 1;
+        }
+
+        /* Analogy tree interactive */
+        .analogy-node {
+            cursor: pointer;
+        }
+        .analogy-node rect {
+            transition: fill 0.3s, stroke 0.3s;
+        }
+        .analogy-node:hover rect {
+            filter: brightness(1.15);
+        }
+        .analogy-outcome {
+            opacity: 0;
+            transition: opacity 0.5s;
+        }
+        .analogy-outcome.visible {
+            opacity: 1;
+        }
+
+        /* Controls bar */
+        .controls-bar {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 1rem;
+            padding: 1rem 1.25rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            margin-bottom: 1rem;
+        }
+
+        /* Stats display */
+        .stats-row {
+            display: flex;
+            gap: 1.5rem;
+            flex-wrap: wrap;
+            margin-top: 0.75rem;
+        }
+        .stat-item {
+            display: flex;
+            align-items: baseline;
+            gap: 0.4rem;
+            font-size: 0.85rem;
+        }
+        .stat-label {
+            color: var(--text-muted);
+        }
+        .stat-value {
+            font-family: var(--font-mono);
+            color: var(--accent-green);
+            font-weight: 600;
+        }
+
+        /* Side-by-side compare */
+        .side-label {
+            text-align: center;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            color: var(--text-secondary);
+        }
+
+        /* Regression chart */
+        .regression-line {
+            fill: none;
+            stroke: var(--accent-orange);
+            stroke-width: 2.5;
+        }
+        .regression-area {
+            fill: var(--accent-orange);
+            opacity: 0.08;
+        }
+
+        /* Tree side panel */
+        .tree-side-panel {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 0.75rem;
+            max-height: 420px;
+            overflow-y: auto;
+        }
+
+        /* Interactive hint */
+        .hint {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.3rem;
+            font-size: 0.8rem;
+            color: var(--accent-orange);
+            margin-top: 0.5rem;
+        }
+        .hint::before {
+            content: '💡';
+        }
+
+        /* Mode toggle for section 2 */
+        .mode-toggle {
+            display: inline-flex;
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            overflow: hidden;
+        }
+        .mode-toggle button {
+            padding: 0.35rem 0.75rem;
+            border: none;
+            background: transparent;
+            color: var(--text-muted);
+            font-family: inherit;
+            font-size: 0.8rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .mode-toggle button.active {
+            background: rgba(22, 199, 154, 0.2);
+            color: var(--accent-green);
+        }
+    </style>
+</head>
+<body>
+
+<div class="page-container">
+    <!-- Header -->
+    <div class="page-header">
+        <div class="breadcrumb"><a href="../index.html">随机森林</a> / 模块 01</div>
+        <h1>决策树基础</h1>
+        <p class="section-desc">
+            决策树是最直观的机器学习模型之一——它模仿人类的"如果...那么..."式推理，
+            通过逐步提问来做出最终预测。本模块将带你从零理解决策树的核心概念。
+        </p>
+    </div>
+
+    <!-- ============ Section 1: 什么是决策树 ============ -->
+    <div class="section" id="sec-what">
+        <div class="section-title">
+            <div class="icon">🌳</div>
+            <h2>什么是决策树</h2>
+        </div>
+        <div class="split-layout">
+            <div class="text-panel">
+                <p>
+                    想象你每天早上需要决定"今天要不要出门跑步"。你会根据天气、温度、
+                    是否有风等条件逐步判断。这个判断过程就像一棵倒置的树——从根节点开始，
+                    根据不同条件走向不同的分支，最终到达叶子节点（做出决策）。
+                </p>
+                <div class="info-box">
+                    <p><strong>决策树的核心思想：</strong>通过一系列有序的"是/否"问题，将数据空间层层划分，直到每个区域足够"纯净"。</p>
+                </div>
+                <p>
+                    下方是一棵简单的决策树。<strong>点击每个节点</strong>来选择路径，
+                    观察不同条件组合下的最终决策结果。
+                </p>
+                <div class="hint">点击节点选择"是"或"否"路径</div>
+                <div id="analogy-outcome-text" style="margin-top:1rem; min-height: 2.5rem;"></div>
+            </div>
+            <div class="viz-panel">
+                <div class="viz-area" id="analogy-tree-container">
+                    <svg id="analogy-tree-svg" width="100%" height="100%"></svg>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============ Section 2: 分类决策树 ============ -->
+    <div class="section" id="sec-classify">
+        <div class="section-title">
+            <div class="icon">📊</div>
+            <h2>分类决策树</h2>
+        </div>
+        <p style="max-width:700px; margin-bottom:1rem;">
+            在机器学习中，决策树通过在特征空间中放置"切割线"来分隔不同类别。
+            下面我们用二维数据来直观体验：<strong>点击图表区域</strong>放置水平或垂直切割线，
+            观察如何将不同颜色的数据点分开。
+        </p>
+        <div class="controls-bar">
+            <span class="stat-label">切割方向：</span>
+            <div class="mode-toggle" id="split-mode-toggle">
+                <button class="active" data-mode="vertical">垂直 (x)</button>
+                <button data-mode="horizontal">水平 (y)</button>
+            </div>
+            <button class="btn btn-sm" id="btn-clear-splits">清除切割线</button>
+            <button class="btn btn-sm" id="btn-regen-data">重新生成数据</button>
+        </div>
+        <div class="viz-area" id="classify-container" style="min-height:460px; cursor:crosshair;">
+            <svg id="classify-svg" width="100%" height="100%"></svg>
+        </div>
+        <div class="stats-row" id="classify-stats">
+            <div class="stat-item">
+                <span class="stat-label">切割数：</span>
+                <span class="stat-value" id="stat-splits">0</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-label">区域数：</span>
+                <span class="stat-value" id="stat-regions">1</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-label">分类准确率：</span>
+                <span class="stat-value" id="stat-accuracy">—</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============ Section 3: 决策边界可视化 ============ -->
+    <div class="section" id="sec-boundary">
+        <div class="section-title">
+            <div class="icon">🗺️</div>
+            <h2>决策边界可视化</h2>
+        </div>
+        <p style="max-width:700px; margin-bottom:1rem;">
+            让算法自动找到最优的切割方式！调节树的最大深度，观察决策边界如何变化。
+            <strong>悬停右侧树节点</strong>可高亮对应的决策区域。
+        </p>
+        <div class="controls-bar">
+            <div class="slider-group" style="min-width:260px;">
+                <label>最大深度：</label>
+                <input type="range" id="depth-slider" min="1" max="6" value="3" step="1">
+                <span class="slider-value" id="depth-value">3</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-label">节点数：</span>
+                <span class="stat-value" id="stat-nodes">—</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-label">准确率：</span>
+                <span class="stat-value" id="stat-boundary-acc">—</span>
+            </div>
+        </div>
+        <div style="display:grid; grid-template-columns: 1.4fr 1fr; gap:1rem; align-items:start;">
+            <div class="viz-area" id="boundary-container" style="min-height:460px;">
+                <svg id="boundary-svg" width="100%" height="100%"></svg>
+            </div>
+            <div class="tree-side-panel" id="boundary-tree-panel">
+                <h4 style="margin-bottom:0.5rem; color:var(--text-secondary);">树结构</h4>
+                <svg id="boundary-tree-svg" width="100%" height="350"></svg>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============ Section 4: 回归树 ============ -->
+    <div class="section" id="sec-regression">
+        <div class="section-title">
+            <div class="icon">📈</div>
+            <h2>回归树</h2>
+        </div>
+        <p style="max-width:700px; margin-bottom:1rem;">
+            决策树不仅能做分类，还能做回归预测。回归树在每个叶子节点返回该区域内数据的<strong>均值</strong>，
+            因此预测结果是一条阶梯函数。调节深度观察拟合效果的变化。
+        </p>
+        <div class="controls-bar">
+            <div class="slider-group" style="min-width:260px;">
+                <label>回归树深度：</label>
+                <input type="range" id="reg-depth-slider" min="1" max="8" value="3" step="1">
+                <span class="slider-value" id="reg-depth-value">3</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-label">MSE：</span>
+                <span class="stat-value" id="stat-mse">—</span>
+            </div>
+        </div>
+        <div class="viz-area" id="regression-container" style="min-height:420px;">
+            <svg id="regression-svg" width="100%" height="100%"></svg>
+        </div>
+    </div>
+
+    <!-- ============ Section 5: 过拟合与欠拟合 ============ -->
+    <div class="section" id="sec-overfit">
+        <div class="section-title">
+            <div class="icon">⚖️</div>
+            <h2>过拟合与欠拟合</h2>
+        </div>
+        <p style="max-width:700px; margin-bottom:1rem;">
+            深度太浅的树（欠拟合）无法捕捉数据规律；深度太深的树（过拟合）会记住噪声。
+            拖动滑块从深度 1 扫到 8，观察决策边界和准确率的变化。
+        </p>
+        <div class="controls-bar">
+            <div class="slider-group" style="min-width:300px;">
+                <label>树深度：</label>
+                <input type="range" id="overfit-depth-slider" min="1" max="8" value="1" step="1">
+                <span class="slider-value" id="overfit-depth-value">1</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-label">训练准确率：</span>
+                <span class="stat-value" id="stat-train-acc">—</span>
+            </div>
+            <button class="btn btn-sm btn-primary" id="btn-animate-overfit">自动播放</button>
+        </div>
+        <div class="compare-grid cols-2">
+            <div>
+                <div class="side-label">欠拟合 (深度=1)</div>
+                <div class="viz-area" id="underfit-container" style="min-height:380px;">
+                    <svg id="underfit-svg" width="100%" height="100%"></svg>
+                </div>
+            </div>
+            <div>
+                <div class="side-label" id="overfit-label">当前 (深度=<span id="overfit-current-depth">1</span>)</div>
+                <div class="viz-area" id="overfit-container" style="min-height:380px;">
+                    <svg id="overfit-svg" width="100%" height="100%"></svg>
+                </div>
+            </div>
+        </div>
+        <div class="info-box warning" style="margin-top:1rem;">
+            <p><strong>关键观察：</strong>当深度增大时，训练准确率不断提高甚至达到 100%，但模型会记住数据中的噪声，无法泛化到新数据。这就是过拟合。选择合适的深度是决策树调参的核心问题。</p>
+        </div>
+    </div>
+</div>
+
+<!-- Shared scripts -->
+<script src="../shared/scripts/rf-utils.js"></script>
+<script src="../shared/scripts/animation-controller.js"></script>
+<script src="../shared/scripts/matrix-renderer.js"></script>
+<script src="../shared/scripts/nav.js"></script>
+<script src="../shared/scripts/katex-init.js"></script>
+
+<script>
+// ================================================================
+// Global data
+// ================================================================
+let classData = RFUtils.generateClassificationData(80, 42);
+let regData = RFUtils.generateRegressionData(60, 42, 0.5);
+
+// Shared margin/scale helpers
+const MARGIN = { top: 20, right: 20, bottom: 30, left: 40 };
+
+function getSize(containerId) {
+    const el = document.getElementById(containerId);
+    const w = el.clientWidth || 600;
+    const h = el.clientHeight || 400;
+    return {
+        width: w, height: h,
+        innerW: w - MARGIN.left - MARGIN.right,
+        innerH: h - MARGIN.top - MARGIN.bottom
+    };
+}
+
+function makeScales(data, size, xKey = 'x', yKey = 'y') {
+    const xExt = d3.extent(data, d => d[xKey]);
+    const yExt = d3.extent(data, d => d[yKey]);
+    const xPad = (xExt[1] - xExt[0]) * 0.08;
+    const yPad = (yExt[1] - yExt[0]) * 0.08;
+    return {
+        x: d3.scaleLinear().domain([xExt[0] - xPad, xExt[1] + xPad]).range([0, size.innerW]),
+        y: d3.scaleLinear().domain([yExt[0] - yPad, yExt[1] + yPad]).range([size.innerH, 0])
+    };
+}
+
+// ================================================================
+// Section 1: Analogy Tree (static interactive)
+// ================================================================
+(function initAnalogyTree() {
+    const container = document.getElementById('analogy-tree-container');
+    const svg = d3.select('#analogy-tree-svg');
+
+    const treeData = {
+        question: '天气晴朗？',
+        yes: {
+            question: '温度 > 30°C？',
+            yes: { outcome: '不跑步（太热了）', icon: '🏠', color: '#ff5252' },
+            no: {
+                question: '有风？',
+                yes: { outcome: '跑步（凉爽有风）', icon: '🏃', color: '#16c79a' },
+                no: { outcome: '跑步（晴天适宜）', icon: '🏃', color: '#16c79a' }
+            }
+        },
+        no: {
+            question: '下雨？',
+            yes: { outcome: '不跑步（下雨了）', icon: '🏠', color: '#ff5252' },
+            no: { outcome: '跑步（阴天也行）', icon: '🏃', color: '#4fc3f7' }
+        }
+    };
+
+    function layoutTree(node, x, y, dx, depth = 0) {
+        const items = [];
+        const links = [];
+        const id = items.length;
+        const item = { ...node, x, y, depth, id: `n${x.toFixed(0)}_${y.toFixed(0)}` };
+        items.push(item);
+
+        if (!node.outcome) {
+            const childDx = dx * 0.48;
+            const childDy = 90;
+            // Yes branch
+            const yesItems = layoutTree(node.yes, x - dx, y + childDy, childDx, depth + 1);
+            links.push({ x1: x, y1: y + 22, x2: x - dx, y2: y + childDy - 22, label: '是' });
+            items.push(...yesItems.items);
+            links.push(...yesItems.links);
+            // No branch
+            const noItems = layoutTree(node.no, x + dx, y + childDy, childDx, depth + 1);
+            links.push({ x1: x, y1: y + 22, x2: x + dx, y2: y + childDy - 22, label: '否' });
+            items.push(...noItems.items);
+            links.push(...noItems.links);
+        }
+        return { items, links };
+    }
+
+    function render() {
+        const w = container.clientWidth || 600;
+        const h = container.clientHeight || 420;
+        svg.attr('viewBox', `0 0 ${w} ${h}`);
+
+        const layout = layoutTree(treeData, w / 2, 50, w * 0.22);
+        svg.selectAll('*').remove();
+
+        const g = svg.append('g');
+
+        // Links
+        layout.links.forEach(link => {
+            g.append('line')
+                .attr('class', 'tree-link')
+                .attr('x1', link.x1).attr('y1', link.y1)
+                .attr('x2', link.x2).attr('y2', link.y2)
+                .attr('data-from', `${link.x1.toFixed(0)}_${link.y1.toFixed(0)}`)
+                .attr('data-label', link.label);
+
+            // Edge label
+            const mx = (link.x1 + link.x2) / 2;
+            const my = (link.y1 + link.y2) / 2;
+            g.append('text')
+                .attr('x', mx + (link.label === '是' ? -12 : 12))
+                .attr('y', my - 4)
+                .attr('fill', link.label === '是' ? '#16c79a' : '#ff5252')
+                .attr('font-size', '11px')
+                .attr('text-anchor', 'middle')
+                .text(link.label);
+        });
+
+        // Nodes
+        layout.items.forEach(item => {
+            const ng = g.append('g')
+                .attr('class', item.outcome ? '' : 'analogy-node')
+                .attr('transform', `translate(${item.x}, ${item.y})`);
+
+            if (item.outcome) {
+                // Leaf
+                ng.append('rect')
+                    .attr('x', -50).attr('y', -18)
+                    .attr('width', 100).attr('height', 36)
+                    .attr('rx', 18).attr('fill', item.color)
+                    .attr('opacity', 0.2)
+                    .attr('stroke', item.color)
+                    .attr('stroke-width', 1.5);
+                ng.append('text')
+                    .attr('text-anchor', 'middle')
+                    .attr('dy', '0.35em')
+                    .attr('fill', item.color)
+                    .attr('font-size', '11px')
+                    .attr('font-weight', '600')
+                    .text(item.icon + ' ' + item.outcome.replace(/（.*）/, ''));
+            } else {
+                // Decision node
+                ng.append('rect')
+                    .attr('x', -68).attr('y', -22)
+                    .attr('width', 136).attr('height', 44)
+                    .attr('rx', 8)
+                    .attr('fill', 'var(--bg-card)')
+                    .attr('stroke', 'var(--border-color)')
+                    .attr('stroke-width', 1.5);
+                ng.append('text')
+                    .attr('text-anchor', 'middle')
+                    .attr('dy', '0.35em')
+                    .attr('fill', 'var(--text-primary)')
+                    .attr('font-size', '12px')
+                    .text(item.question);
+            }
+        });
+
+        // Interactive: click a path
+        let activePath = [];
+        function highlightPath(path) {
+            // Reset
+            g.selectAll('.tree-link').attr('stroke', 'var(--border-color)').attr('stroke-width', 2);
+            g.selectAll('.analogy-node rect')
+                .attr('stroke', 'var(--border-color)');
+
+            path.forEach(seg => {
+                g.selectAll('.tree-link')
+                    .filter(function() {
+                        return this.getAttribute('data-from') === `${seg.fromX.toFixed(0)}_${seg.fromY.toFixed(0)}`
+                            && this.getAttribute('data-label') === seg.label;
+                    })
+                    .attr('stroke', '#16c79a')
+                    .attr('stroke-width', 3);
+            });
+        }
+
+        // Click handler for decision nodes
+        let clickState = {};
+        g.selectAll('.analogy-node').on('click', function(event) {
+            const t = d3.select(this).attr('transform');
+            const match = t.match(/translate\(([\d.]+),\s*([\d.]+)\)/);
+            if (!match) return;
+            const nx = parseFloat(match[1]);
+            const ny = parseFloat(match[2]);
+            const key = `${nx.toFixed(0)}_${ny.toFixed(0)}`;
+
+            // Find this node in layout
+            const node = layout.items.find(i => i.id === `n${key}`);
+            if (!node || node.outcome) return;
+
+            // Toggle yes/no
+            clickState[key] = clickState[key] === 'yes' ? 'no' : 'yes';
+
+            // Build path from root
+            function tracePath(n, cx, cy) {
+                const k = `${cx.toFixed(0)}_${cy.toFixed(0)}`;
+                const choice = clickState[k] || 'yes';
+                const childDy = 90;
+                const parentItem = layout.items.find(i => i.id === `n${k}`);
+                if (!parentItem || parentItem.outcome) return { path: [], finalNode: parentItem };
+
+                const seg = { fromX: cx, fromY: cy + 22, label: choice === 'yes' ? '是' : '否' };
+                const nextNode = choice === 'yes' ? n.yes : n.no;
+
+                // Find child coordinates
+                const childItem = layout.items.find(i => {
+                    const childY = cy + childDy;
+                    return Math.abs(i.y - childY) < 5 &&
+                        ((choice === 'yes' && i.x < cx) || (choice === 'no' && i.x > cx));
+                });
+
+                if (!childItem) return { path: [seg], finalNode: null };
+
+                const sub = tracePath(nextNode, childItem.x, childItem.y);
+                return { path: [seg, ...sub.path], finalNode: sub.finalNode || childItem };
+            }
+
+            const rootItem = layout.items[0];
+            const result = tracePath(treeData, rootItem.x, rootItem.y);
+            highlightPath(result.path);
+
+            // Show outcome
+            const outcomeEl = document.getElementById('analogy-outcome-text');
+            if (result.finalNode && result.finalNode.outcome) {
+                outcomeEl.innerHTML = `<span style="color:${result.finalNode.color}; font-weight:600;">
+                    ${result.finalNode.icon} ${result.finalNode.outcome}</span>`;
+                gsap.fromTo(outcomeEl, { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.4 });
+            } else {
+                outcomeEl.innerHTML = '<span class="text-muted" style="font-size:0.85rem;">继续点击下方节点完成路径...</span>';
+            }
+        });
+
+        // Entrance animation
+        gsap.from(g.selectAll('.analogy-node, rect, line').nodes(), {
+            opacity: 0, y: -20, duration: 0.5, stagger: 0.05, ease: 'power2.out'
+        });
+    }
+
+    render();
+    window.addEventListener('resize', render);
+})();
+
+
+// ================================================================
+// Section 2: Manual Classification Splits
+// ================================================================
+(function initClassifySection() {
+    const container = document.getElementById('classify-container');
+    const svg = d3.select('#classify-svg');
+    let splits = []; // { axis: 'x'|'y', value: number }
+    let splitMode = 'vertical';
+
+    // Mode toggle
+    document.querySelectorAll('#split-mode-toggle button').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('#split-mode-toggle button').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            splitMode = btn.dataset.mode;
+        });
+    });
+
+    document.getElementById('btn-clear-splits').addEventListener('click', () => {
+        splits = [];
+        renderClassify();
+    });
+
+    document.getElementById('btn-regen-data').addEventListener('click', () => {
+        const seed = Math.floor(Math.random() * 10000);
+        classData = RFUtils.generateClassificationData(80, seed);
+        splits = [];
+        renderClassify();
+        // Also update boundary section
+        renderBoundary();
+        renderOverfit();
+    });
+
+    function computeRegions(splits, xDomain, yDomain) {
+        // Build axis-aligned rectangles from splits
+        let xCuts = [xDomain[0], ...splits.filter(s => s.axis === 'x').map(s => s.value).sort((a, b) => a - b), xDomain[1]];
+        let yCuts = [yDomain[0], ...splits.filter(s => s.axis === 'y').map(s => s.value).sort((a, b) => a - b), yDomain[1]];
+
+        const regions = [];
+        for (let i = 0; i < xCuts.length - 1; i++) {
+            for (let j = 0; j < yCuts.length - 1; j++) {
+                regions.push({
+                    x0: xCuts[i], x1: xCuts[i + 1],
+                    y0: yCuts[j], y1: yCuts[j + 1]
+                });
+            }
+        }
+        return regions;
+    }
+
+    function assignRegionClass(region, data) {
+        const pts = data.filter(d => d.x >= region.x0 && d.x < region.x1 && d.y >= region.y0 && d.y < region.y1);
+        if (pts.length === 0) return { label: 0, count: 0, total: 0 };
+        const counts = {};
+        pts.forEach(p => { counts[p.label] = (counts[p.label] || 0) + 1; });
+        let best = 0, bestC = 0;
+        for (const [k, v] of Object.entries(counts)) {
+            if (v > bestC) { best = Number(k); bestC = v; }
+        }
+        return { label: best, count: bestC, total: pts.length };
+    }
+
+    function computeAccuracy(regions, data) {
+        let correct = 0;
+        data.forEach(d => {
+            const r = regions.find(r => d.x >= r.x0 && d.x < r.x1 && d.y >= r.y0 && d.y < r.y1);
+            if (r && r.majorLabel === d.label) correct++;
+        });
+        return correct / data.length;
+    }
+
+    function renderClassify() {
+        const size = getSize('classify-container');
+        svg.attr('viewBox', `0 0 ${size.width} ${size.height}`);
+        svg.selectAll('*').remove();
+
+        const g = svg.append('g').attr('transform', `translate(${MARGIN.left},${MARGIN.top})`);
+        const scales = makeScales(classData, size);
+
+        // Axes
+        g.append('g').attr('transform', `translate(0,${size.innerH})`)
+            .call(d3.axisBottom(scales.x).ticks(6))
+            .selectAll('text').attr('fill', 'var(--text-muted)');
+        g.append('g')
+            .call(d3.axisLeft(scales.y).ticks(6))
+            .selectAll('text').attr('fill', 'var(--text-muted)');
+        g.selectAll('.domain, .tick line').attr('stroke', 'var(--border-color)');
+
+        // Regions
+        const xDomain = scales.x.domain();
+        const yDomain = scales.y.domain();
+        const regions = computeRegions(splits, xDomain, yDomain);
+
+        regions.forEach(r => {
+            const info = assignRegionClass(r, classData);
+            r.majorLabel = info.label;
+            const color = RFUtils.classColor(info.label);
+            g.append('rect')
+                .attr('x', scales.x(r.x0))
+                .attr('y', scales.y(r.y1))
+                .attr('width', scales.x(r.x1) - scales.x(r.x0))
+                .attr('height', scales.y(r.y0) - scales.y(r.y1))
+                .attr('fill', color)
+                .attr('opacity', 0.12);
+        });
+
+        // Split lines
+        splits.forEach((s, i) => {
+            if (s.axis === 'x') {
+                g.append('line')
+                    .attr('class', 'split-line')
+                    .attr('x1', scales.x(s.value)).attr('y1', 0)
+                    .attr('x2', scales.x(s.value)).attr('y2', size.innerH)
+                    .attr('stroke', 'var(--accent-orange)');
+            } else {
+                g.append('line')
+                    .attr('class', 'split-line')
+                    .attr('x1', 0).attr('y1', scales.y(s.value))
+                    .attr('x2', size.innerW).attr('y2', scales.y(s.value))
+                    .attr('stroke', 'var(--accent-blue)');
+            }
+        });
+
+        // Data points
+        g.selectAll('.scatter-point')
+            .data(classData)
+            .enter().append('circle')
+            .attr('class', 'scatter-point')
+            .attr('cx', d => scales.x(d.x))
+            .attr('cy', d => scales.y(d.y))
+            .attr('r', 4.5)
+            .attr('fill', d => RFUtils.classColor(d.label));
+
+        // Accuracy
+        const acc = computeAccuracy(regions, classData);
+        document.getElementById('stat-splits').textContent = splits.length;
+        document.getElementById('stat-regions').textContent = regions.length;
+        document.getElementById('stat-accuracy').textContent = splits.length > 0 ? (acc * 100).toFixed(1) + '%' : '—';
+
+        // Click to add split
+        g.append('rect')
+            .attr('width', size.innerW).attr('height', size.innerH)
+            .attr('fill', 'transparent')
+            .attr('cursor', 'crosshair')
+            .on('click', function(event) {
+                const [mx, my] = d3.pointer(event);
+                const dataX = scales.x.invert(mx);
+                const dataY = scales.y.invert(my);
+                if (splitMode === 'vertical') {
+                    splits.push({ axis: 'x', value: dataX });
+                } else {
+                    splits.push({ axis: 'y', value: dataY });
+                }
+                renderClassify();
+            });
+    }
+
+    renderClassify();
+    window.addEventListener('resize', renderClassify);
+    window._renderClassify = renderClassify;
+})();
+
+
+// ================================================================
+// Section 3: Decision Boundary Visualization
+// ================================================================
+let currentBoundaryTree = null;
+
+function renderBoundary() {
+    const depth = +document.getElementById('depth-slider').value;
+    document.getElementById('depth-value').textContent = depth;
+
+    const tree = RFUtils.buildTree(classData, { maxDepth: depth, criterion: 'gini' });
+    currentBoundaryTree = tree;
+
+    const container = document.getElementById('boundary-container');
+    const svg = d3.select('#boundary-svg');
+    const size = getSize('boundary-container');
+    svg.attr('viewBox', `0 0 ${size.width} ${size.height}`);
+    svg.selectAll('*').remove();
+
+    const g = svg.append('g').attr('transform', `translate(${MARGIN.left},${MARGIN.top})`);
+    const scales = makeScales(classData, size);
+
+    // Decision boundary: grid of colored rectangles
+    const res = 40;
+    const xDom = scales.x.domain();
+    const yDom = scales.y.domain();
+    const stepX = (xDom[1] - xDom[0]) / res;
+    const stepY = (yDom[1] - yDom[0]) / res;
+
+    const boundaryGroup = g.append('g').attr('class', 'boundary-group');
+
+    for (let i = 0; i < res; i++) {
+        for (let j = 0; j < res; j++) {
+            const px = xDom[0] + (i + 0.5) * stepX;
+            const py = yDom[0] + (j + 0.5) * stepY;
+            const { prediction } = RFUtils.predictTree(tree, { x: px, y: py });
+            boundaryGroup.append('rect')
+                .attr('class', 'boundary-rect')
+                .attr('x', scales.x(xDom[0] + i * stepX))
+                .attr('y', scales.y(yDom[0] + (j + 1) * stepY))
+                .attr('width', scales.x(xDom[0] + (i + 1) * stepX) - scales.x(xDom[0] + i * stepX) + 0.5)
+                .attr('height', scales.y(yDom[0] + j * stepY) - scales.y(yDom[0] + (j + 1) * stepY) + 0.5)
+                .attr('fill', RFUtils.classColor(prediction))
+                .attr('data-px', px.toFixed(2))
+                .attr('data-py', py.toFixed(2));
+        }
+    }
+
+    // Axes
+    g.append('g').attr('transform', `translate(0,${size.innerH})`)
+        .call(d3.axisBottom(scales.x).ticks(6))
+        .selectAll('text').attr('fill', 'var(--text-muted)');
+    g.append('g')
+        .call(d3.axisLeft(scales.y).ticks(6))
+        .selectAll('text').attr('fill', 'var(--text-muted)');
+    g.selectAll('.domain, .tick line').attr('stroke', 'var(--border-color)');
+
+    // Data points
+    g.selectAll('.scatter-point')
+        .data(classData)
+        .enter().append('circle')
+        .attr('class', 'scatter-point')
+        .attr('cx', d => scales.x(d.x))
+        .attr('cy', d => scales.y(d.y))
+        .attr('r', 4)
+        .attr('fill', d => RFUtils.classColor(d.label));
+
+    // Accuracy
+    let correct = 0;
+    classData.forEach(d => {
+        const { prediction } = RFUtils.predictTree(tree, d);
+        if (prediction === d.label) correct++;
+    });
+    const acc = correct / classData.length;
+    document.getElementById('stat-boundary-acc').textContent = (acc * 100).toFixed(1) + '%';
+    document.getElementById('stat-nodes').textContent = RFUtils.treeNodeCount(tree);
+
+    // Render tree structure in side panel
+    renderTreeStructure(tree, scales, xDom, yDom, boundaryGroup);
+
+    // Entrance animation
+    gsap.from(boundaryGroup.selectAll('.boundary-rect').nodes(), {
+        opacity: 0, duration: 0.6, stagger: 0.001, ease: 'power2.out'
+    });
+}
+
+function renderTreeStructure(tree, mainScales, xDom, yDom, boundaryGroup) {
+    const svgTree = d3.select('#boundary-tree-svg');
+    const panelW = document.getElementById('boundary-tree-panel').clientWidth - 20;
+    const panelH = 350;
+    svgTree.attr('viewBox', `0 0 ${panelW} ${panelH}`);
+    svgTree.selectAll('*').remove();
+
+    const nodes = RFUtils.flattenTree(tree);
+    if (nodes.length === 0) return;
+
+    const maxDepth = d3.max(nodes, d => d.depth) || 1;
+    const xExtent = d3.extent(nodes, d => d.vx);
+    const xRange = xExtent[1] - xExtent[0] || 1;
+
+    const xScale = d3.scaleLinear()
+        .domain([xExtent[0] - 0.3, xExtent[1] + 0.3])
+        .range([30, panelW - 30]);
+    const yScale = d3.scaleLinear()
+        .domain([0, maxDepth + 0.5])
+        .range([25, panelH - 25]);
+
+    const g = svgTree.append('g');
+
+    // Links
+    nodes.forEach(node => {
+        if (!node.isLeaf) {
+            const childL = nodes.find(n => n.id === node.id * 2 + 1);
+            const childR = nodes.find(n => n.id === node.id * 2 + 2);
+            [childL, childR].forEach(child => {
+                if (child) {
+                    g.append('line')
+                        .attr('x1', xScale(node.vx)).attr('y1', yScale(node.depth))
+                        .attr('x2', xScale(child.vx)).attr('y2', yScale(child.depth))
+                        .attr('stroke', 'var(--border-color)')
+                        .attr('stroke-width', 1.5);
+                }
+            });
+        }
+    });
+
+    // Nodes
+    nodes.forEach(node => {
+        const ng = g.append('g')
+            .attr('transform', `translate(${xScale(node.vx)},${yScale(node.depth)})`)
+            .attr('class', 'tree-node')
+            .style('cursor', 'pointer');
+
+        const r = node.isLeaf ? 10 : 13;
+        const color = node.isLeaf
+            ? RFUtils.classColor(node.prediction)
+            : 'var(--bg-card)';
+        const strokeColor = node.isLeaf
+            ? RFUtils.classColor(node.prediction)
+            : 'var(--accent-green)';
+
+        ng.append('circle')
+            .attr('r', r)
+            .attr('fill', color)
+            .attr('stroke', strokeColor)
+            .attr('stroke-width', 2)
+            .attr('opacity', node.isLeaf ? 0.7 : 1);
+
+        if (!node.isLeaf) {
+            const featureLabel = node.splitFeature === 0 ? 'x' : 'y';
+            ng.append('text')
+                .attr('text-anchor', 'middle')
+                .attr('dy', '0.35em')
+                .attr('fill', 'var(--text-primary)')
+                .attr('font-size', '8px')
+                .text(`${featureLabel}≤${node.splitThreshold.toFixed(1)}`);
+        }
+
+        // Hover: highlight corresponding region on scatter
+        ng.on('mouseenter', () => {
+            // Find the region this node covers by tracing from root
+            function getNodeBounds(n, bounds) {
+                if (n.id === node.id) return bounds;
+                if (n.isLeaf) return null;
+                const feat = n.splitFeature;
+                const thresh = n.splitThreshold;
+                // Try left
+                const leftBounds = { ...bounds };
+                if (feat === 0) leftBounds.xMax = Math.min(leftBounds.xMax, thresh);
+                else leftBounds.yMax = Math.min(leftBounds.yMax, thresh);
+                const leftResult = getNodeBounds(n.left, leftBounds);
+                if (leftResult) return leftResult;
+                // Try right
+                const rightBounds = { ...bounds };
+                if (feat === 0) rightBounds.xMin = Math.max(rightBounds.xMin, thresh);
+                else rightBounds.yMin = Math.max(rightBounds.yMin, thresh);
+                return getNodeBounds(n.right, rightBounds);
+            }
+
+            const bounds = getNodeBounds(tree, {
+                xMin: xDom[0], xMax: xDom[1],
+                yMin: yDom[0], yMax: yDom[1]
+            });
+
+            if (bounds) {
+                boundaryGroup.selectAll('.boundary-rect').each(function() {
+                    const px = +this.getAttribute('data-px');
+                    const py = +this.getAttribute('data-py');
+                    if (px >= bounds.xMin && px <= bounds.xMax && py >= bounds.yMin && py <= bounds.yMax) {
+                        d3.select(this).classed('highlight', true).attr('opacity', 0.55);
+                    }
+                });
+            }
+            ng.select('circle').attr('stroke-width', 3).attr('stroke', 'var(--accent-orange)');
+        })
+        .on('mouseleave', () => {
+            boundaryGroup.selectAll('.boundary-rect').classed('highlight', false).attr('opacity', 0.25);
+            ng.select('circle').attr('stroke-width', 2).attr('stroke', strokeColor);
+        });
+    });
+}
+
+document.getElementById('depth-slider').addEventListener('input', renderBoundary);
+
+
+// ================================================================
+// Section 4: Regression Tree
+// ================================================================
+function renderRegression() {
+    const depth = +document.getElementById('reg-depth-slider').value;
+    document.getElementById('reg-depth-value').textContent = depth;
+
+    const tree = RFUtils.buildTree(regData, {
+        maxDepth: depth,
+        criterion: 'gini',
+        isRegression: true,
+        labelKey: 'target'
+    });
+
+    const container = document.getElementById('regression-container');
+    const svg = d3.select('#regression-svg');
+    const size = getSize('regression-container');
+    svg.attr('viewBox', `0 0 ${size.width} ${size.height}`);
+    svg.selectAll('*').remove();
+
+    const g = svg.append('g').attr('transform', `translate(${MARGIN.left},${MARGIN.top})`);
+
+    const xExt = d3.extent(regData, d => d.x);
+    const yExt = d3.extent(regData, d => d.target);
+    const xPad = (xExt[1] - xExt[0]) * 0.05;
+    const yPad = (yExt[1] - yExt[0]) * 0.15;
+
+    const xScale = d3.scaleLinear().domain([xExt[0] - xPad, xExt[1] + xPad]).range([0, size.innerW]);
+    const yScale = d3.scaleLinear().domain([yExt[0] - yPad, yExt[1] + yPad]).range([size.innerH, 0]);
+
+    // Axes
+    g.append('g').attr('transform', `translate(0,${size.innerH})`)
+        .call(d3.axisBottom(xScale).ticks(8))
+        .selectAll('text').attr('fill', 'var(--text-muted)');
+    g.append('g')
+        .call(d3.axisLeft(yScale).ticks(6))
+        .selectAll('text').attr('fill', 'var(--text-muted)');
+    g.selectAll('.domain, .tick line').attr('stroke', 'var(--border-color)');
+
+    // Prediction step function
+    const nSteps = 200;
+    const xDom = xScale.domain();
+    const stepW = (xDom[1] - xDom[0]) / nSteps;
+    const predictions = [];
+    for (let i = 0; i <= nSteps; i++) {
+        const px = xDom[0] + i * stepW;
+        const { prediction } = RFUtils.predictTree(tree, { x: px, y: 0, features: [px] });
+        predictions.push({ x: px, y: prediction });
+    }
+
+    // Area under prediction
+    const areaGen = d3.area()
+        .x(d => xScale(d.x))
+        .y0(size.innerH)
+        .y1(d => yScale(d.y));
+    g.append('path')
+        .datum(predictions)
+        .attr('class', 'regression-area')
+        .attr('d', areaGen);
+
+    // Step line
+    const lineGen = d3.line()
+        .x(d => xScale(d.x))
+        .y(d => yScale(d.y))
+        .curve(d3.curveStepAfter);
+    const pathEl = g.append('path')
+        .datum(predictions)
+        .attr('class', 'regression-line')
+        .attr('d', lineGen);
+
+    // Animate line drawing
+    const totalLen = pathEl.node().getTotalLength();
+    pathEl.attr('stroke-dasharray', totalLen)
+        .attr('stroke-dashoffset', totalLen);
+    gsap.to(pathEl.node(), { attr: { 'stroke-dashoffset': 0 }, duration: 0.8, ease: 'power2.out' });
+
+    // True function line (faint)
+    const truePts = [];
+    for (let i = 0; i <= nSteps; i++) {
+        const px = xDom[0] + i * stepW;
+        truePts.push({ x: px, y: Math.sin(px) * 2 + px * 0.3 });
+    }
+    g.append('path')
+        .datum(truePts)
+        .attr('fill', 'none')
+        .attr('stroke', 'var(--accent-green)')
+        .attr('stroke-width', 1.5)
+        .attr('stroke-dasharray', '4 3')
+        .attr('opacity', 0.4)
+        .attr('d', d3.line().x(d => xScale(d.x)).y(d => yScale(d.y)).curve(d3.curveBasis));
+
+    // Data points
+    g.selectAll('.reg-point')
+        .data(regData)
+        .enter().append('circle')
+        .attr('class', 'scatter-point')
+        .attr('cx', d => xScale(d.x))
+        .attr('cy', d => yScale(d.target))
+        .attr('r', 4)
+        .attr('fill', 'var(--accent-blue)')
+        .attr('opacity', 0.7);
+
+    // Legend
+    const legend = g.append('g').attr('transform', `translate(${size.innerW - 180}, 10)`);
+    legend.append('line').attr('x1', 0).attr('y1', 0).attr('x2', 20).attr('y2', 0)
+        .attr('stroke', 'var(--accent-orange)').attr('stroke-width', 2.5);
+    legend.append('text').attr('x', 26).attr('y', 4).attr('fill', 'var(--text-secondary)')
+        .attr('font-size', '11px').text('回归树预测');
+    legend.append('line').attr('x1', 0).attr('y1', 18).attr('x2', 20).attr('y2', 18)
+        .attr('stroke', 'var(--accent-green)').attr('stroke-width', 1.5).attr('stroke-dasharray', '4 3').attr('opacity', 0.5);
+    legend.append('text').attr('x', 26).attr('y', 22).attr('fill', 'var(--text-secondary)')
+        .attr('font-size', '11px').text('真实函数');
+
+    // MSE
+    let mse = 0;
+    regData.forEach(d => {
+        const { prediction } = RFUtils.predictTree(tree, { x: d.x, y: 0, features: [d.x] });
+        mse += (prediction - d.target) ** 2;
+    });
+    mse /= regData.length;
+    document.getElementById('stat-mse').textContent = mse.toFixed(3);
+}
+
+document.getElementById('reg-depth-slider').addEventListener('input', renderRegression);
+
+
+// ================================================================
+// Section 5: Overfitting vs Underfitting
+// ================================================================
+function renderOverfitComparison(currentDepth) {
+    document.getElementById('overfit-depth-value').textContent = currentDepth;
+    document.getElementById('overfit-current-depth').textContent = currentDepth;
+
+    // Build trees
+    const underfitTree = RFUtils.buildTree(classData, { maxDepth: 1, criterion: 'gini' });
+    const currentTree = RFUtils.buildTree(classData, { maxDepth: currentDepth, criterion: 'gini' });
+
+    function renderBoundaryOnSvg(svgId, containerId, tree) {
+        const svg = d3.select('#' + svgId);
+        const size = getSize(containerId);
+        svg.attr('viewBox', `0 0 ${size.width} ${size.height}`);
+        svg.selectAll('*').remove();
+
+        const g = svg.append('g').attr('transform', `translate(${MARGIN.left},${MARGIN.top})`);
+        const scales = makeScales(classData, size);
+
+        // Decision boundary
+        const res = 30;
+        const xDom = scales.x.domain();
+        const yDom = scales.y.domain();
+        const stepX = (xDom[1] - xDom[0]) / res;
+        const stepY = (yDom[1] - yDom[0]) / res;
+
+        for (let i = 0; i < res; i++) {
+            for (let j = 0; j < res; j++) {
+                const px = xDom[0] + (i + 0.5) * stepX;
+                const py = yDom[0] + (j + 0.5) * stepY;
+                const { prediction } = RFUtils.predictTree(tree, { x: px, y: py });
+                g.append('rect')
+                    .attr('x', scales.x(xDom[0] + i * stepX))
+                    .attr('y', scales.y(yDom[0] + (j + 1) * stepY))
+                    .attr('width', scales.x(xDom[0] + (i + 1) * stepX) - scales.x(xDom[0] + i * stepX) + 0.5)
+                    .attr('height', scales.y(yDom[0] + j * stepY) - scales.y(yDom[0] + (j + 1) * stepY) + 0.5)
+                    .attr('fill', RFUtils.classColor(prediction))
+                    .attr('opacity', 0.2);
+            }
+        }
+
+        // Axes
+        g.append('g').attr('transform', `translate(0,${size.innerH})`)
+            .call(d3.axisBottom(scales.x).ticks(5))
+            .selectAll('text').attr('fill', 'var(--text-muted)');
+        g.append('g')
+            .call(d3.axisLeft(scales.y).ticks(5))
+            .selectAll('text').attr('fill', 'var(--text-muted)');
+        g.selectAll('.domain, .tick line').attr('stroke', 'var(--border-color)');
+
+        // Points
+        g.selectAll('.scatter-point')
+            .data(classData)
+            .enter().append('circle')
+            .attr('class', 'scatter-point')
+            .attr('cx', d => scales.x(d.x))
+            .attr('cy', d => scales.y(d.y))
+            .attr('r', 3.5)
+            .attr('fill', d => RFUtils.classColor(d.label));
+
+        // Compute accuracy
+        let correct = 0;
+        classData.forEach(d => {
+            const { prediction } = RFUtils.predictTree(tree, d);
+            if (prediction === d.label) correct++;
+        });
+        return correct / classData.length;
+    }
+
+    renderBoundaryOnSvg('underfit-svg', 'underfit-container', underfitTree);
+    const currentAcc = renderBoundaryOnSvg('overfit-svg', 'overfit-container', currentTree);
+    document.getElementById('stat-train-acc').textContent = (currentAcc * 100).toFixed(1) + '%';
+}
+
+function renderOverfit() {
+    const depth = +document.getElementById('overfit-depth-slider').value;
+    renderOverfitComparison(depth);
+}
+
+document.getElementById('overfit-depth-slider').addEventListener('input', renderOverfit);
+
+// Auto-play animation
+document.getElementById('btn-animate-overfit').addEventListener('click', function() {
+    const slider = document.getElementById('overfit-depth-slider');
+    const btn = this;
+    btn.disabled = true;
+    btn.textContent = '播放中...';
+    let depth = 1;
+    slider.value = depth;
+    renderOverfitComparison(depth);
+
+    const interval = setInterval(() => {
+        depth++;
+        if (depth > 8) {
+            clearInterval(interval);
+            btn.disabled = false;
+            btn.textContent = '自动播放';
+            return;
+        }
+        slider.value = depth;
+        renderOverfitComparison(depth);
+    }, 800);
+});
+
+
+// ================================================================
+// Initial render
+// ================================================================
+window.addEventListener('DOMContentLoaded', () => {
+    // KaTeX auto-render
+    if (typeof renderMathInElement === 'function') {
+        renderMathInElement(document.body, {
+            delimiters: [
+                { left: '$$', right: '$$', display: true },
+                { left: '$', right: '$', display: false }
+            ]
+        });
+    }
+    renderBoundary();
+    renderRegression();
+    renderOverfitComparison(1);
+});
+
+// Resize handler for sections 3-5
+window.addEventListener('resize', () => {
+    renderBoundary();
+    renderRegression();
+    renderOverfit();
+});
+</script>
+
+</body>
+</html>

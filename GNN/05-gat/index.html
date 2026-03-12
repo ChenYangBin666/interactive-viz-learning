@@ -1,0 +1,1214 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>05 - GAT 图注意力网络 | GNN 学习</title>
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+SC:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+
+    <!-- Shared CSS -->
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+
+    <!-- KaTeX -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+
+    <!-- Cytoscape -->
+    <script src="https://cdn.jsdelivr.net/npm/cytoscape@3.28.1/dist/cytoscape.min.js"></script>
+
+    <!-- D3.js -->
+    <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+
+    <!-- GSAP -->
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+
+    <style>
+        /* ===== Page-specific styles ===== */
+        .hero-section {
+            text-align: center;
+            padding: 2rem 0 1.5rem;
+        }
+        .hero-section h1 {
+            font-size: 2.2rem;
+            background: linear-gradient(135deg, #16c79a, #4fc3f7);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .hero-section .subtitle {
+            color: var(--text-secondary);
+            font-size: 1rem;
+            margin-top: 0.5rem;
+        }
+
+        /* Step indicators for attention calc */
+        .step-indicators {
+            display: flex;
+            gap: 0;
+            align-items: center;
+            margin-bottom: 1rem;
+            flex-wrap: wrap;
+        }
+        .step-indicator {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            padding: 0.4rem 0.8rem;
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            cursor: pointer;
+            border-radius: var(--radius-sm);
+            transition: all 0.3s;
+            user-select: none;
+        }
+        .step-indicator .step-num {
+            width: 24px; height: 24px;
+            border-radius: 50%;
+            background: var(--border-color);
+            display: flex; align-items: center; justify-content: center;
+            font-weight: 700; font-size: 0.75rem;
+            transition: all 0.3s;
+        }
+        .step-indicator.active { color: var(--text-primary); }
+        .step-indicator.active .step-num {
+            background: var(--accent-green);
+            color: var(--bg-primary);
+        }
+        .step-indicator.done .step-num {
+            background: rgba(22,199,154,0.3);
+            color: var(--accent-green);
+        }
+        .step-arrow {
+            color: var(--text-muted);
+            margin: 0 0.2rem;
+            font-size: 0.7rem;
+        }
+
+        /* Attention viz area */
+        .attn-viz {
+            position: relative;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            min-height: 360px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+        .attn-viz svg { display: block; }
+
+        /* Step description box */
+        .step-desc-box {
+            padding: 1rem 1.2rem;
+            background: rgba(22,199,154,0.05);
+            border-left: 3px solid var(--accent-green);
+            border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+            margin-top: 1rem;
+            min-height: 60px;
+            transition: opacity 0.3s;
+        }
+        .step-desc-box .step-title {
+            font-weight: 700;
+            color: var(--accent-green);
+            margin-bottom: 0.3rem;
+            font-size: 0.95rem;
+        }
+        .step-desc-box .step-detail {
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+        }
+
+        /* Donut chart tooltip */
+        .donut-tooltip {
+            position: absolute;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            padding: 0.4rem 0.8rem;
+            font-size: 0.8rem;
+            color: var(--text-primary);
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.2s;
+            z-index: 20;
+        }
+
+        /* Explorer layout */
+        .explorer-layout {
+            display: grid;
+            grid-template-columns: 1.2fr 1fr;
+            gap: 1.5rem;
+            align-items: start;
+        }
+        .explorer-graph {
+            min-height: 380px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+        }
+        .explorer-panel {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+        .donut-container {
+            width: 100%;
+            min-height: 220px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+        }
+
+        /* Slider feature editor */
+        .feature-editor {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1rem;
+        }
+        .feature-editor h4 {
+            color: var(--accent-green);
+            margin-bottom: 0.75rem;
+            font-size: 0.9rem;
+        }
+        .feature-slider-row {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-bottom: 0.5rem;
+        }
+        .feature-slider-row label {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            min-width: 28px;
+            font-family: var(--font-mono);
+        }
+        .feature-slider-row input[type="range"] { flex: 1; }
+        .feature-slider-row .val {
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            color: var(--accent-green);
+            min-width: 36px;
+            text-align: right;
+        }
+
+        /* Multi-head section */
+        .multihead-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 1rem;
+        }
+        .head-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+        }
+        .head-card .head-title {
+            padding: 0.6rem 1rem;
+            font-size: 0.85rem;
+            font-weight: 700;
+            text-align: center;
+        }
+        .head-card .head-graph {
+            min-height: 280px;
+        }
+        .head-green .head-title { background: rgba(22,199,154,0.15); color: #16c79a; }
+        .head-blue .head-title { background: rgba(79,195,247,0.15); color: #4fc3f7; }
+        .head-purple .head-title { background: rgba(179,136,255,0.15); color: #b388ff; }
+
+        .concat-viz {
+            margin-top: 1rem;
+            padding: 1rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            text-align: center;
+        }
+        .concat-viz .concat-bar {
+            display: flex;
+            margin: 0.75rem auto;
+            max-width: 500px;
+            height: 32px;
+            border-radius: var(--radius-sm);
+            overflow: hidden;
+        }
+        .concat-bar .seg { display: flex; align-items: center; justify-content: center;
+            font-size: 0.75rem; font-weight: 600; color: var(--bg-primary); }
+
+        /* Comparison section */
+        .compare-container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5rem;
+        }
+        .compare-box {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+        }
+        .compare-box .compare-title {
+            padding: 0.7rem 1rem;
+            font-weight: 700;
+            font-size: 0.95rem;
+            text-align: center;
+        }
+        .compare-box .compare-graph {
+            min-height: 320px;
+        }
+        .compare-gcn .compare-title { background: rgba(255,171,64,0.15); color: #ffab40; }
+        .compare-gat .compare-title { background: rgba(22,199,154,0.15); color: #16c79a; }
+
+        .compare-highlight {
+            text-align: center;
+            margin-top: 1rem;
+            padding: 1rem;
+            background: rgba(22,199,154,0.06);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+        }
+        .compare-highlight strong { color: var(--accent-green); }
+
+        /* Formula block */
+        .formula-block {
+            padding: 1.2rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            margin: 1rem 0;
+            text-align: center;
+            overflow-x: auto;
+        }
+
+        @media (max-width: 1024px) {
+            .explorer-layout { grid-template-columns: 1fr; }
+            .multihead-grid { grid-template-columns: 1fr; }
+            .compare-container { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <div class="page-container">
+
+        <!-- Hero -->
+        <div class="hero-section">
+            <h1>05 - GAT 图注意力网络</h1>
+            <p class="subtitle">Graph Attention Network -- 让节点自己学会"看向"最重要的邻居</p>
+        </div>
+
+        <!-- ===== Section 1: Attention Score Calculation ===== -->
+        <div class="section" id="sec-attention">
+            <div class="section-title">
+                <div class="icon">&#9678;</div>
+                <h2>注意力分数计算</h2>
+            </div>
+
+            <p>GAT 的核心在于：对每个邻居动态计算注意力权重，而非像 GCN 一样使用固定的归一化系数。完整公式如下：</p>
+
+            <div class="formula-block">
+                $$\alpha_{ij} = \frac{\exp\!\Big(\text{LeakyReLU}\big(\vec{a}^T [Wh_i \| Wh_j]\big)\Big)}{\displaystyle\sum_{k \in \mathcal{N}(i)} \exp\!\Big(\text{LeakyReLU}\big(\vec{a}^T [Wh_i \| Wh_k]\big)\Big)}$$
+            </div>
+
+            <p>下面用 5 步动画分解这个过程。选择中心节点 $v_0$，计算它对所有邻居的注意力权重。</p>
+
+            <!-- Step indicators -->
+            <div class="step-indicators" id="stepIndicators">
+                <div class="step-indicator" data-step="0">
+                    <span class="step-num">1</span><span>$W$ 变换</span>
+                </div>
+                <span class="step-arrow">&#9654;</span>
+                <div class="step-indicator" data-step="1">
+                    <span class="step-num">2</span><span>拼接</span>
+                </div>
+                <span class="step-arrow">&#9654;</span>
+                <div class="step-indicator" data-step="2">
+                    <span class="step-num">3</span><span>$\vec{a}$ 映射</span>
+                </div>
+                <span class="step-arrow">&#9654;</span>
+                <div class="step-indicator" data-step="3">
+                    <span class="step-num">4</span><span>LeakyReLU</span>
+                </div>
+                <span class="step-arrow">&#9654;</span>
+                <div class="step-indicator" data-step="4">
+                    <span class="step-num">5</span><span>Softmax</span>
+                </div>
+            </div>
+
+            <!-- Viz -->
+            <div class="attn-viz" id="attnViz">
+                <svg id="attnSvg" width="760" height="360"></svg>
+            </div>
+
+            <!-- Controls -->
+            <div id="attnControls" style="margin-top:0.75rem;"></div>
+
+            <!-- Description -->
+            <div class="step-desc-box" id="stepDescBox">
+                <div class="step-title">点击"播放"或"下一步"开始</div>
+                <div class="step-detail">将逐步展示从原始特征到最终注意力权重 $\alpha_{ij}$ 的完整计算过程。</div>
+            </div>
+        </div>
+
+        <!-- ===== Section 2: Attention Weight Explorer ===== -->
+        <div class="section" id="sec-explorer">
+            <div class="section-title">
+                <div class="icon">&#9673;</div>
+                <h2>注意力权重探索</h2>
+            </div>
+            <p>点击任意节点查看其注意力分布。拖动下方滑块修改选中节点的特征向量，观察注意力权重如何随之变化。</p>
+
+            <div class="explorer-layout">
+                <div class="explorer-graph" id="explorerGraph"></div>
+                <div class="explorer-panel">
+                    <div class="card">
+                        <div class="card-header"><h3 id="donutTitle">点击一个节点</h3></div>
+                        <div class="donut-container" id="donutContainer">
+                            <svg id="donutSvg" width="220" height="220"></svg>
+                            <div class="donut-tooltip" id="donutTooltip"></div>
+                        </div>
+                    </div>
+                    <div class="feature-editor" id="featureEditor">
+                        <h4>编辑节点特征</h4>
+                        <p class="text-sm text-muted">选中一个节点后可在此调整其特征</p>
+                        <div id="featureSliders"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== Section 3: Multi-Head Attention ===== -->
+        <div class="section" id="sec-multihead">
+            <div class="section-title">
+                <div class="icon">&#9683;</div>
+                <h2>多头注意力</h2>
+            </div>
+            <p>GAT 使用多个独立的注意力头，每个头学习不同的注意力模式。最终输出通过拼接或平均合并：</p>
+            <div class="formula-block">
+                $$h'_i = \Big\|_{k=1}^{K} \sigma\!\left(\sum_{j \in \mathcal{N}(i)} \alpha_{ij}^{(k)} W^{(k)} h_j\right)$$
+            </div>
+            <p>下面展示 3 个注意力头对同一图的不同注意力模式。注意边的粗细代表注意力权重的大小。</p>
+
+            <div class="multihead-grid" id="multiheadGrid">
+                <div class="head-card head-green">
+                    <div class="head-title">Head 1 (绿)</div>
+                    <div class="head-graph" id="headGraph0"></div>
+                </div>
+                <div class="head-card head-blue">
+                    <div class="head-title">Head 2 (蓝)</div>
+                    <div class="head-graph" id="headGraph1"></div>
+                </div>
+                <div class="head-card head-purple">
+                    <div class="head-title">Head 3 (紫)</div>
+                    <div class="head-graph" id="headGraph2"></div>
+                </div>
+            </div>
+
+            <div class="concat-viz">
+                <p style="margin-bottom:0.5rem;font-weight:600;">多头输出拼接示意 (对节点 $v_0$)</p>
+                <div class="concat-bar" id="concatBar">
+                    <div class="seg" style="flex:1;background:#16c79a;">Head 1</div>
+                    <div class="seg" style="flex:1;background:#4fc3f7;">Head 2</div>
+                    <div class="seg" style="flex:1;background:#b388ff;">Head 3</div>
+                </div>
+                <p class="text-sm text-muted">最终特征维度 = $K \times d' $，其中 $K=3$（头数），$d'$（每头输出维度）</p>
+            </div>
+        </div>
+
+        <!-- ===== Section 4: GCN vs GAT ===== -->
+        <div class="section" id="sec-compare">
+            <div class="section-title">
+                <div class="icon">&#9618;</div>
+                <h2>GCN vs GAT 对比</h2>
+            </div>
+            <p>左侧是 GCN：所有邻居获得相同的归一化权重（仅由度数决定）。右侧是 GAT：不同邻居获得不同的注意力权重（由特征决定）。</p>
+
+            <div class="compare-container">
+                <div class="compare-box compare-gcn">
+                    <div class="compare-title">GCN -- 固定归一化权重</div>
+                    <div class="compare-graph" id="gcnGraph"></div>
+                </div>
+                <div class="compare-box compare-gat">
+                    <div class="compare-title">GAT -- 可学习注意力权重</div>
+                    <div class="compare-graph" id="gatGraph"></div>
+                </div>
+            </div>
+
+            <div class="compare-highlight">
+                <p><strong>GCN 用固定的归一化权重，GAT 用可学习的注意力权重</strong></p>
+                <p class="text-sm text-muted">GCN: $\hat{A}_{ij} = \frac{1}{\sqrt{\hat{d}_i \hat{d}_j}}$（仅取决于度数） &nbsp;&nbsp;|&nbsp;&nbsp; GAT: $\alpha_{ij}$（取决于节点特征，由网络学习）</p>
+            </div>
+        </div>
+
+    </div><!-- /page-container -->
+
+    <!-- Shared scripts -->
+    <script src="../shared/scripts/graph-utils.js"></script>
+    <script src="../shared/scripts/graph-renderer.js"></script>
+    <script src="../shared/scripts/matrix-renderer.js"></script>
+    <script src="../shared/scripts/animation-controller.js"></script>
+    <script src="../shared/scripts/katex-init.js"></script>
+    <script src="../shared/scripts/nav.js"></script>
+
+    <script>
+    /* ======================================================================
+       GAT 交互式学习模块  --  全部内联 JS
+    ====================================================================== */
+    (() => {
+    'use strict';
+
+    /* ------------------------------------------------------------------
+       共享图数据：6 节点小图，中心节点 0
+    ------------------------------------------------------------------ */
+    const NODES = [
+        { id: 0, label: 'v0', features: [0.8, 0.3, -0.2] },
+        { id: 1, label: 'v1', features: [0.1, 0.9,  0.4] },
+        { id: 2, label: 'v2', features: [-0.5, 0.2, 0.7] },
+        { id: 3, label: 'v3', features: [0.6, -0.4, 0.1] },
+        { id: 4, label: 'v4', features: [0.3, 0.7, -0.6] },
+        { id: 5, label: 'v5', features: [-0.1, 0.5, 0.9] },
+    ];
+    const EDGES = [[0,1],[0,2],[0,3],[0,4],[1,2],[2,5],[3,4]];
+    const CENTER = 0;
+    const NEIGHBORS = [1, 2, 3, 4]; // 0 的直接邻居
+
+    // 固定种子产生确定性权重
+    const rng = GraphUtils.seededRandom(77);
+    const W = Array.from({length:3}, () => Array.from({length:2}, () => +((rng()*2-1)*0.6).toFixed(3)));
+    const attnVec = Array.from({length:4}, () => +((rng()*2-1)*0.5).toFixed(3)); // a 向量 (2*outDim=4)
+
+    /* ------------------------------------------------------------------
+       GAT 计算函数
+    ------------------------------------------------------------------ */
+    function transform(h) {
+        // Wh: 3->2
+        return [
+            +(W[0][0]*h[0] + W[1][0]*h[1] + W[2][0]*h[2]).toFixed(4),
+            +(W[0][1]*h[0] + W[1][1]*h[1] + W[2][1]*h[2]).toFixed(4),
+        ];
+    }
+
+    function concat(a, b) { return [...a, ...b]; }
+
+    function dotAttn(cat) {
+        let s = 0;
+        for (let i = 0; i < cat.length; i++) s += attnVec[i] * cat[i];
+        return +s.toFixed(4);
+    }
+
+    function leakyRelu(x, alpha = 0.2) {
+        return x >= 0 ? x : alpha * x;
+    }
+
+    function computeAttention(features) {
+        const wh = features.map(f => transform(f));
+        const whI = wh[CENTER];
+        const raw = NEIGHBORS.map(j => {
+            const c = concat(whI, wh[j]);
+            const e = dotAttn(c);
+            return leakyRelu(e);
+        });
+        // softmax
+        const maxVal = Math.max(...raw);
+        const exps = raw.map(v => Math.exp(v - maxVal));
+        const sumExp = exps.reduce((a,b) => a+b, 0);
+        const alpha = exps.map(e => +(e / sumExp).toFixed(4));
+        return { wh, raw, alpha };
+    }
+
+    /* ------------------------------------------------------------------
+       颜色常量
+    ------------------------------------------------------------------ */
+    const COLORS = {
+        node: '#16c79a', center: '#ff5252', neighbor: '#4fc3f7',
+        bar: ['#16c79a','#4fc3f7','#b388ff'], dim: '#2a2a4a',
+        text: '#e8e8e8', muted: '#6c6c7c',
+        green: '#16c79a', blue: '#4fc3f7', purple: '#b388ff', orange: '#ffab40',
+    };
+    const NODE_POSITIONS = [
+        {x:380, y:180}, {x:200, y:80}, {x:180, y:280},
+        {x:560, y:80},  {x:580, y:280}, {x:80, y:200},
+    ];
+
+    /* ==================================================================
+       Section 1: 注意力分数计算 (5-step animation)
+    ================================================================== */
+    const svg1 = d3.select('#attnSvg');
+    const featuresArr = NODES.map(n => [...n.features]);
+    let attnResult = computeAttention(featuresArr);
+
+    // 画静态的节点与边
+    function drawBaseGraph(svg, positions, highlight) {
+        // edges
+        const edgeG = svg.append('g').attr('class','edges');
+        EDGES.forEach(([u,v]) => {
+            edgeG.append('line')
+                .attr('x1', positions[u].x).attr('y1', positions[u].y)
+                .attr('x2', positions[v].x).attr('y2', positions[v].y)
+                .attr('stroke', COLORS.dim).attr('stroke-width', 2)
+                .attr('class', `edge-${u}-${v}`);
+        });
+        // nodes
+        const nodeG = svg.append('g').attr('class','nodes');
+        NODES.forEach((n, i) => {
+            const isCtr = (i === CENTER);
+            const isNb = NEIGHBORS.includes(i);
+            const col = isCtr ? COLORS.center : (isNb && highlight ? COLORS.neighbor : COLORS.node);
+            nodeG.append('circle')
+                .attr('cx', positions[i].x).attr('cy', positions[i].y)
+                .attr('r', isCtr ? 22 : 18)
+                .attr('fill', col).attr('opacity', 0.85)
+                .attr('class', `node-${i}`);
+            nodeG.append('text')
+                .attr('x', positions[i].x).attr('y', positions[i].y + 4)
+                .attr('text-anchor','middle').attr('fill','#fff')
+                .attr('font-size','12').attr('font-weight','700')
+                .attr('font-family','JetBrains Mono, monospace')
+                .text(n.label);
+        });
+    }
+
+    drawBaseGraph(svg1, NODE_POSITIONS, true);
+
+    // 右侧区域：用于展示计算过程的面板
+    const vizPanel = svg1.append('g').attr('class','viz-panel');
+
+    // 清空面板
+    function clearPanel() { vizPanel.selectAll('*').remove(); }
+
+    // 格式化向量为字符串
+    function vecStr(v, prec=2) { return '[' + v.map(x => x.toFixed(prec)).join(', ') + ']'; }
+
+    // -- Step action helpers --
+    function updateStepIndicators(stepIdx) {
+        document.querySelectorAll('.step-indicator').forEach((el, i) => {
+            el.classList.remove('active','done');
+            if (i < stepIdx) el.classList.add('done');
+            else if (i === stepIdx) el.classList.add('active');
+        });
+    }
+
+    const STEP_DESC = [
+        { title: '步骤 1: W 线性变换',
+          detail: '将每个节点的原始特征 $h_i$ 通过共享权重矩阵 $W$ 映射到新空间：$Wh_i$。' },
+        { title: '步骤 2: 特征拼接',
+          detail: '对中心节点 $i$ 的每个邻居 $j$，拼接两者的变换特征：$[Wh_i \\| Wh_j]$。' },
+        { title: '步骤 3: 注意力向量点积',
+          detail: '用可学习的注意力向量 $\\vec{a}$ 与拼接结果做点积，得到标量 $e_{ij} = \\vec{a}^T [Wh_i \\| Wh_j]$。' },
+        { title: '步骤 4: LeakyReLU 激活',
+          detail: '对 $e_{ij}$ 应用 LeakyReLU 激活函数，引入非线性。负斜率 = 0.2。' },
+        { title: '步骤 5: Softmax 归一化',
+          detail: '对节点 $i$ 的所有邻居，用 Softmax 将分数归一化为概率分布 $\\alpha_{ij}$，使 $\\sum_j \\alpha_{ij} = 1$。' },
+    ];
+
+    function setDesc(idx) {
+        const box = document.getElementById('stepDescBox');
+        if (idx < 0) {
+            box.querySelector('.step-title').textContent = '点击"播放"或"下一步"开始';
+            box.querySelector('.step-detail').innerHTML = '将逐步展示从原始特征到最终注意力权重 α_ij 的完整计算过程。';
+            renderMath(box);
+            return;
+        }
+        box.querySelector('.step-title').textContent = STEP_DESC[idx].title;
+        box.querySelector('.step-detail').innerHTML = STEP_DESC[idx].detail;
+        renderMath(box);
+    }
+
+    // Feature bar helpers
+    function drawFeatureBar(g, x, y, values, color, label, barW, barH) {
+        barW = barW || 14;
+        barH = barH || 50;
+        const gap = 3;
+        if (label) {
+            g.append('text').attr('x', x + (values.length*(barW+gap))/2).attr('y', y - 8)
+             .attr('text-anchor','middle').attr('fill', color).attr('font-size','10')
+             .attr('font-family','JetBrains Mono, monospace').text(label);
+        }
+        values.forEach((v, i) => {
+            const h = Math.abs(v) * barH;
+            const barY = v >= 0 ? y + barH - h : y + barH;
+            g.append('rect')
+                .attr('x', x + i*(barW+gap)).attr('y', barY)
+                .attr('width', barW).attr('height', Math.max(2, h))
+                .attr('fill', color).attr('rx', 2).attr('opacity', 0.85);
+        });
+    }
+
+    // Animate step functions
+    async function stepWTransform(step, instant) {
+        clearPanel();
+        updateStepIndicators(0);
+        setDesc(0);
+
+        const dur = instant ? 0 : 600;
+        const wh = attnResult.wh;
+
+        // Show Wh_i at center
+        const group = vizPanel.append('g').attr('opacity', 0);
+        const startX = 120, startY = 30;
+
+        // Show center node transform
+        drawFeatureBar(group, NODE_POSITIONS[CENTER].x - 25, NODE_POSITIONS[CENTER].y - 70,
+            wh[CENTER], COLORS.center, 'Wh0', 16, 40);
+
+        // Show neighbor transforms
+        NEIGHBORS.forEach((j, idx) => {
+            drawFeatureBar(group, NODE_POSITIONS[j].x - 15, NODE_POSITIONS[j].y - 60,
+                wh[j], COLORS.neighbor, `Wh${j}`, 14, 35);
+        });
+
+        // Animate edges from center to neighbors glow
+        NEIGHBORS.forEach(j => {
+            const edgeSel = svg1.select(`.edge-${Math.min(CENTER,j)}-${Math.max(CENTER,j)}`);
+            if (!edgeSel.empty()) {
+                gsap.to(edgeSel.node(), {
+                    attr: {stroke: COLORS.orange, 'stroke-width': 3},
+                    duration: dur/1000, yoyo: true, repeat: 1
+                });
+            }
+        });
+
+        gsap.to(group.node(), {opacity: 1, duration: dur/1000});
+        if (!instant) await new Promise(r => setTimeout(r, dur));
+    }
+
+    async function stepConcat(step, instant) {
+        clearPanel();
+        updateStepIndicators(1);
+        setDesc(1);
+        const dur = instant ? 0 : 600;
+        const wh = attnResult.wh;
+
+        const group = vizPanel.append('g').attr('opacity', 0);
+        const baseX = 620, baseY = 40;
+
+        NEIGHBORS.forEach((j, idx) => {
+            const yOff = baseY + idx * 80;
+            // Wh_i part
+            const catVals = concat(wh[CENTER], wh[j]);
+            group.append('text').attr('x', baseX).attr('y', yOff)
+                .attr('fill', COLORS.muted).attr('font-size','9')
+                .attr('font-family','JetBrains Mono, monospace')
+                .text(`[Wh0 || Wh${j}]`);
+            // draw bars: first 2 in red (center), next 2 in blue (neighbor)
+            catVals.forEach((v, k) => {
+                const col = k < 2 ? COLORS.center : COLORS.neighbor;
+                const h = Math.abs(v) * 35;
+                const barY = v >= 0 ? yOff + 40 - h : yOff + 40;
+                group.append('rect')
+                    .attr('x', baseX + k * 17).attr('y', barY)
+                    .attr('width', 14).attr('height', Math.max(2, h))
+                    .attr('fill', col).attr('rx', 2).attr('opacity', 0.85);
+            });
+            // separator
+            group.append('line')
+                .attr('x1', baseX + 2*17 - 4).attr('y1', yOff + 8)
+                .attr('x2', baseX + 2*17 - 4).attr('y2', yOff + 48)
+                .attr('stroke', COLORS.muted).attr('stroke-width', 1)
+                .attr('stroke-dasharray', '3,3');
+        });
+
+        gsap.to(group.node(), {opacity: 1, duration: dur/1000});
+        if (!instant) await new Promise(r => setTimeout(r, dur));
+    }
+
+    async function stepAttnVec(step, instant) {
+        clearPanel();
+        updateStepIndicators(2);
+        setDesc(2);
+        const dur = instant ? 0 : 600;
+        const wh = attnResult.wh;
+
+        const group = vizPanel.append('g').attr('opacity', 0);
+        const baseX = 600, baseY = 50;
+
+        NEIGHBORS.forEach((j, idx) => {
+            const yOff = baseY + idx * 72;
+            const cat = concat(wh[CENTER], wh[j]);
+            const e = dotAttn(cat);
+            group.append('text').attr('x', baseX).attr('y', yOff)
+                .attr('fill', COLORS.muted).attr('font-size','9.5')
+                .attr('font-family','JetBrains Mono, monospace')
+                .text(`a^T[Wh0||Wh${j}]`);
+            // score display
+            group.append('rect')
+                .attr('x', baseX).attr('y', yOff + 6)
+                .attr('width', 80).attr('height', 24)
+                .attr('fill', 'rgba(255,171,64,0.15)').attr('rx', 4);
+            group.append('text').attr('x', baseX + 40).attr('y', yOff + 22)
+                .attr('text-anchor','middle').attr('fill', COLORS.orange)
+                .attr('font-size','12').attr('font-weight','600')
+                .attr('font-family','JetBrains Mono, monospace')
+                .text(`e = ${e.toFixed(3)}`);
+        });
+
+        gsap.to(group.node(), {opacity: 1, duration: dur/1000});
+        if (!instant) await new Promise(r => setTimeout(r, dur));
+    }
+
+    async function stepLeakyRelu(step, instant) {
+        clearPanel();
+        updateStepIndicators(3);
+        setDesc(3);
+        const dur = instant ? 0 : 600;
+        const wh = attnResult.wh;
+
+        const group = vizPanel.append('g').attr('opacity', 0);
+        const baseX = 580, baseY = 50;
+
+        NEIGHBORS.forEach((j, idx) => {
+            const yOff = baseY + idx * 72;
+            const cat = concat(wh[CENTER], wh[j]);
+            const e = dotAttn(cat);
+            const lr = leakyRelu(e);
+            const isNeg = e < 0;
+
+            group.append('text').attr('x', baseX).attr('y', yOff)
+                .attr('fill', COLORS.muted).attr('font-size','9.5')
+                .attr('font-family','JetBrains Mono, monospace')
+                .text(`LeakyReLU(e_0${j})`);
+            // before
+            group.append('rect')
+                .attr('x', baseX).attr('y', yOff + 6)
+                .attr('width', 72).attr('height', 24)
+                .attr('fill', isNeg ? 'rgba(255,82,82,0.12)' : 'rgba(22,199,154,0.12)').attr('rx', 4);
+            group.append('text').attr('x', baseX + 36).attr('y', yOff + 22)
+                .attr('text-anchor','middle')
+                .attr('fill', isNeg ? '#ff5252' : COLORS.green)
+                .attr('font-size','11').attr('font-weight','600')
+                .attr('font-family','JetBrains Mono, monospace')
+                .text(e.toFixed(3));
+
+            // arrow
+            group.append('text').attr('x', baseX + 82).attr('y', yOff + 22)
+                .attr('fill', COLORS.muted).attr('font-size','14').text('\u2192');
+
+            // after
+            group.append('rect')
+                .attr('x', baseX + 98).attr('y', yOff + 6)
+                .attr('width', 72).attr('height', 24)
+                .attr('fill', 'rgba(255,171,64,0.15)').attr('rx', 4);
+            group.append('text').attr('x', baseX + 134).attr('y', yOff + 22)
+                .attr('text-anchor','middle').attr('fill', COLORS.orange)
+                .attr('font-size','11').attr('font-weight','600')
+                .attr('font-family','JetBrains Mono, monospace')
+                .text(lr.toFixed(3));
+        });
+
+        gsap.to(group.node(), {opacity: 1, duration: dur/1000});
+        if (!instant) await new Promise(r => setTimeout(r, dur));
+    }
+
+    async function stepSoftmax(step, instant) {
+        clearPanel();
+        updateStepIndicators(4);
+        setDesc(4);
+        const dur = instant ? 0 : 700;
+        const alpha = attnResult.alpha;
+
+        const group = vizPanel.append('g').attr('opacity', 0);
+        const baseX = 590, baseY = 50;
+
+        // Show softmax bars
+        const maxAlpha = Math.max(...alpha);
+        NEIGHBORS.forEach((j, idx) => {
+            const yOff = baseY + idx * 72;
+            const a = alpha[idx];
+            const barW = a / maxAlpha * 100;
+
+            group.append('text').attr('x', baseX).attr('y', yOff)
+                .attr('fill', COLORS.muted).attr('font-size','9.5')
+                .attr('font-family','JetBrains Mono, monospace')
+                .text(`\u03B1_0${j}`);
+
+            const bar = group.append('rect')
+                .attr('x', baseX).attr('y', yOff + 6)
+                .attr('width', 0).attr('height', 22)
+                .attr('fill', COLORS.green).attr('rx', 4).attr('opacity', 0.7);
+
+            group.append('text').attr('x', baseX + barW + 10).attr('y', yOff + 22)
+                .attr('fill', COLORS.green).attr('font-size','12')
+                .attr('font-weight','700').attr('font-family','JetBrains Mono, monospace')
+                .attr('class', `alpha-val-${idx}`)
+                .text(a.toFixed(4));
+
+            if (!instant) {
+                gsap.to(bar.node(), {attr:{width: barW}, duration: 0.5, delay: idx * 0.12});
+            } else {
+                bar.attr('width', barW);
+            }
+        });
+
+        // Update edge widths on main graph
+        NEIGHBORS.forEach((j, idx) => {
+            const a = alpha[idx];
+            const sel = svg1.select(`.edge-${Math.min(CENTER,j)}-${Math.max(CENTER,j)}`);
+            if (!sel.empty()) {
+                gsap.to(sel.node(), {
+                    attr: {'stroke-width': 2 + a * 10, stroke: COLORS.green},
+                    duration: instant ? 0 : 0.5
+                });
+            }
+        });
+
+        gsap.to(group.node(), {opacity: 1, duration: dur/1000});
+        if (!instant) await new Promise(r => setTimeout(r, dur));
+    }
+
+    // Build AnimationController
+    const attnCtrl = new AnimationController({
+        container: document.getElementById('attnControls'),
+        steps: [
+            { name: 'W变换', duration: 1200, action: stepWTransform },
+            { name: '拼接',  duration: 1000, action: stepConcat },
+            { name: 'a映射', duration: 1000, action: stepAttnVec },
+            { name: 'LeakyReLU', duration: 1000, action: stepLeakyRelu },
+            { name: 'Softmax', duration: 1200, action: stepSoftmax },
+        ],
+        onStepChange(idx) {
+            if (idx < 0) { setDesc(-1); updateStepIndicators(-1); }
+        },
+    });
+
+    // Click step indicators to jump
+    document.querySelectorAll('.step-indicator').forEach(el => {
+        el.addEventListener('click', () => {
+            const s = parseInt(el.dataset.step);
+            attnCtrl.goTo(s);
+        });
+    });
+
+    /* ==================================================================
+       Section 2: 注意力权重探索
+    ================================================================== */
+    const expFeatures = NODES.map(n => [...n.features]);
+    let selectedNode = null;
+
+    const expElements = GraphUtils.toCytoscapeElements(NODES, EDGES);
+    const expRenderer = new GraphRenderer({
+        container: document.getElementById('explorerGraph'),
+        elements: expElements,
+        layout: 'cose',
+        directed: false,
+        onNodeClick(id) { selectExplorerNode(parseInt(id)); },
+    });
+
+    function computeNodeAttention(nodeIdx, features) {
+        const wh = features.map(f => transform(f));
+        const whI = wh[nodeIdx];
+        // 找邻居
+        const adj = GraphUtils.adjacencyMatrix(NODES.length, EDGES);
+        const neighbors = [];
+        for (let j = 0; j < NODES.length; j++) {
+            if (adj[nodeIdx][j] && j !== nodeIdx) neighbors.push(j);
+        }
+        if (neighbors.length === 0) return { neighbors: [], alpha: [] };
+
+        const raw = neighbors.map(j => {
+            const c = concat(whI, wh[j]);
+            return leakyRelu(dotAttn(c));
+        });
+        const maxVal = Math.max(...raw);
+        const exps = raw.map(v => Math.exp(v - maxVal));
+        const sumExp = exps.reduce((a,b) => a+b, 0);
+        const alpha = exps.map(e => +(e / sumExp).toFixed(4));
+        return { neighbors, alpha };
+    }
+
+    function updateExplorerEdges() {
+        if (selectedNode === null) return;
+        const {neighbors, alpha} = computeNodeAttention(selectedNode, expFeatures);
+        // Reset all edges
+        expRenderer.cy.edges().style({'line-color': 'rgba(22,199,154,0.3)', 'width': 2});
+        // Set selected node edges
+        neighbors.forEach((j, idx) => {
+            const a = alpha[idx];
+            const edge = expRenderer.cy.edges(`[source="${selectedNode}"][target="${j}"], [source="${j}"][target="${selectedNode}"]`);
+            edge.style({'line-color': COLORS.green, 'width': 2 + a * 12});
+        });
+        drawDonut(selectedNode, neighbors, alpha);
+    }
+
+    function selectExplorerNode(idx) {
+        selectedNode = idx;
+        document.getElementById('donutTitle').textContent = `节点 v${idx} 的注意力分布`;
+        updateExplorerEdges();
+        buildFeatureSliders(idx);
+        // Highlight
+        expRenderer.clearHighlights();
+        expRenderer.cy.getElementById(String(idx)).addClass('highlighted');
+    }
+
+    // Donut chart
+    const donutSvg = d3.select('#donutSvg');
+    const donutW = 220, donutH = 220, donutR = 80, innerR = 45;
+
+    function drawDonut(nodeIdx, neighbors, alpha) {
+        donutSvg.selectAll('*').remove();
+        if (neighbors.length === 0) return;
+
+        const g = donutSvg.append('g')
+            .attr('transform', `translate(${donutW/2},${donutH/2})`);
+
+        const pieGen = d3.pie().value(d => d.val).sort(null);
+        const arcGen = d3.arc().innerRadius(innerR).outerRadius(donutR);
+        const colorScale = d3.scaleOrdinal()
+            .domain(neighbors.map(String))
+            .range(['#16c79a','#4fc3f7','#b388ff','#ffab40','#ff80ab','#ffd740']);
+
+        const data = neighbors.map((j, i) => ({id: j, val: alpha[i]}));
+        const slices = pieGen(data);
+
+        const tooltip = document.getElementById('donutTooltip');
+
+        g.selectAll('path')
+            .data(slices).enter().append('path')
+            .attr('d', arcGen)
+            .attr('fill', d => colorScale(String(d.data.id)))
+            .attr('stroke', '#1a1a2e').attr('stroke-width', 2)
+            .style('cursor', 'pointer')
+            .on('mouseenter', function(event, d) {
+                gsap.to(this, {attr:{d: d3.arc().innerRadius(innerR).outerRadius(donutR + 8)(d)}, duration: 0.2});
+                tooltip.style.opacity = 1;
+                tooltip.innerHTML = `v${d.data.id}: <strong>${(d.data.val * 100).toFixed(1)}%</strong>`;
+                const rect = document.getElementById('donutContainer').getBoundingClientRect();
+                tooltip.style.left = (event.clientX - rect.left + 10) + 'px';
+                tooltip.style.top = (event.clientY - rect.top - 30) + 'px';
+            })
+            .on('mouseleave', function(event, d) {
+                gsap.to(this, {attr:{d: arcGen(d)}, duration: 0.2});
+                tooltip.style.opacity = 0;
+            });
+
+        // Center label
+        g.append('text').attr('text-anchor','middle').attr('dy','-0.2em')
+            .attr('fill', COLORS.text).attr('font-size','14').attr('font-weight','700')
+            .text(`v${nodeIdx}`);
+        g.append('text').attr('text-anchor','middle').attr('dy','1.2em')
+            .attr('fill', COLORS.muted).attr('font-size','10')
+            .text('注意力');
+
+        // Labels outside
+        const labelArc = d3.arc().innerRadius(donutR + 16).outerRadius(donutR + 16);
+        g.selectAll('.slice-label')
+            .data(slices).enter().append('text')
+            .attr('transform', d => `translate(${labelArc.centroid(d)})`)
+            .attr('text-anchor','middle').attr('fill', COLORS.text)
+            .attr('font-size','10').attr('font-family','JetBrains Mono, monospace')
+            .text(d => `v${d.data.id}`);
+    }
+
+    // Feature sliders
+    function buildFeatureSliders(nodeIdx) {
+        const container = document.getElementById('featureSliders');
+        container.innerHTML = '';
+        const feat = expFeatures[nodeIdx];
+        const dimNames = ['d0','d1','d2'];
+        feat.forEach((v, i) => {
+            const row = document.createElement('div');
+            row.className = 'feature-slider-row';
+            row.innerHTML = `
+                <label>${dimNames[i]}</label>
+                <input type="range" min="-1" max="1" step="0.05" value="${v}">
+                <span class="val">${v.toFixed(2)}</span>
+            `;
+            const slider = row.querySelector('input');
+            const valSpan = row.querySelector('.val');
+            slider.addEventListener('input', () => {
+                const newVal = parseFloat(slider.value);
+                expFeatures[nodeIdx][i] = newVal;
+                valSpan.textContent = newVal.toFixed(2);
+                updateExplorerEdges();
+            });
+            container.appendChild(row);
+        });
+    }
+
+    // Auto-select node 0
+    setTimeout(() => selectExplorerNode(0), 500);
+
+    /* ==================================================================
+       Section 3: 多头注意力
+    ================================================================== */
+    // 3 heads with different random weights
+    const heads = [
+        { color: '#16c79a', edgeColor: '#16c79a', seed: 42 },
+        { color: '#4fc3f7', edgeColor: '#4fc3f7', seed: 99 },
+        { color: '#b388ff', edgeColor: '#b388ff', seed: 173 },
+    ];
+
+    function computeHeadAttention(seed) {
+        const rng2 = GraphUtils.seededRandom(seed);
+        const Wk = Array.from({length:3}, () => Array.from({length:2}, () => +((rng2()*2-1)*0.6).toFixed(3)));
+        const ak = Array.from({length:4}, () => +((rng2()*2-1)*0.5).toFixed(3));
+
+        function xform(h) {
+            return [
+                +(Wk[0][0]*h[0]+Wk[1][0]*h[1]+Wk[2][0]*h[2]).toFixed(4),
+                +(Wk[0][1]*h[0]+Wk[1][1]*h[1]+Wk[2][1]*h[2]).toFixed(4),
+            ];
+        }
+        const wh = NODES.map(n => xform(n.features));
+
+        // For each node, compute attention to neighbors
+        const adj = GraphUtils.adjacencyMatrix(NODES.length, EDGES);
+        const allAlpha = {};
+        for (let i = 0; i < NODES.length; i++) {
+            const neighbors = [];
+            for (let j = 0; j < NODES.length; j++) {
+                if (adj[i][j] && j !== i) neighbors.push(j);
+            }
+            if (neighbors.length === 0) { allAlpha[i] = {}; continue; }
+            const whI = wh[i];
+            const raw = neighbors.map(j => {
+                const c = [...whI, ...wh[j]];
+                let s = 0; for (let k = 0; k < c.length; k++) s += ak[k]*c[k];
+                return leakyRelu(s);
+            });
+            const mx = Math.max(...raw);
+            const exps = raw.map(v => Math.exp(v-mx));
+            const sm = exps.reduce((a,b)=>a+b,0);
+            const alpha = exps.map(e => e/sm);
+            const map = {};
+            neighbors.forEach((j,idx) => { map[j] = alpha[idx]; });
+            allAlpha[i] = map;
+        }
+        return allAlpha;
+    }
+
+    heads.forEach((head, hIdx) => {
+        const allAlpha = computeHeadAttention(head.seed);
+        const elements = GraphUtils.toCytoscapeElements(NODES, EDGES);
+
+        const renderer = new GraphRenderer({
+            container: document.getElementById(`headGraph${hIdx}`),
+            elements,
+            layout: 'circle',
+            directed: false,
+            style: {
+                node: { 'background-color': head.color, 'border-color': head.color },
+                edge: { 'line-color': head.edgeColor },
+            },
+        });
+
+        // Set edge widths from attention
+        setTimeout(() => {
+            EDGES.forEach(([u,v]) => {
+                const a1 = allAlpha[u]?.[v] || 0;
+                const a2 = allAlpha[v]?.[u] || 0;
+                const avgA = (a1 + a2) / 2;
+                const edge = renderer.cy.edges(`[source="${u}"][target="${v}"], [source="${v}"][target="${u}"]`);
+                edge.style({
+                    'width': 1.5 + avgA * 12,
+                    'line-color': head.edgeColor,
+                    'opacity': 0.3 + avgA * 1.5,
+                });
+            });
+            renderer.fit(30);
+
+            // Add edge weight labels
+            EDGES.forEach(([u,v]) => {
+                const a1 = allAlpha[u]?.[v] || 0;
+                const a2 = allAlpha[v]?.[u] || 0;
+                const avgA = (a1+a2)/2;
+                renderer.setEdgeLabel(u, v, avgA.toFixed(2));
+            });
+        }, 300);
+
+        head.allAlpha = allAlpha;
+    });
+
+    // Animate concat bar
+    setTimeout(() => {
+        const concatBar = document.getElementById('concatBar');
+        gsap.from(concatBar.children, {
+            scaleX: 0, duration: 0.6, stagger: 0.15, ease: 'power2.out',
+            transformOrigin: 'left center'
+        });
+    }, 800);
+
+    /* ==================================================================
+       Section 4: GCN vs GAT 对比
+    ================================================================== */
+    const compElements = GraphUtils.toCytoscapeElements(NODES, EDGES);
+
+    // -- GCN side --
+    const gcnRenderer = new GraphRenderer({
+        container: document.getElementById('gcnGraph'),
+        elements: JSON.parse(JSON.stringify(compElements)),
+        layout: 'circle',
+        directed: false,
+        style: {
+            node: { 'background-color': '#ffab40', 'border-color': 'rgba(255,171,64,0.4)' },
+            edge: { 'line-color': 'rgba(255,171,64,0.3)' },
+        },
+    });
+
+    // Compute GCN weights (symmetric normalization with self-loops)
+    const adj = GraphUtils.adjacencyMatrix(NODES.length, EDGES);
+    const adjHat = GraphUtils.addSelfLoops(adj);
+    const gcnNorm = GraphUtils.gcnNormalize(adj);
+
+    setTimeout(() => {
+        // Set GCN edge widths based on normalized weights
+        EDGES.forEach(([u,v]) => {
+            const w = gcnNorm[u][v];
+            const edge = gcnRenderer.cy.edges(`[source="${u}"][target="${v}"], [source="${v}"][target="${u}"]`);
+            edge.style({
+                'width': 2 + w * 16,
+                'line-color': '#ffab40',
+                'opacity': 0.4 + w * 1.5,
+            });
+            gcnRenderer.setEdgeLabel(u, v, w.toFixed(3));
+        });
+        gcnRenderer.fit(30);
+    }, 400);
+
+    // -- GAT side --
+    const gatRenderer = new GraphRenderer({
+        container: document.getElementById('gatGraph'),
+        elements: JSON.parse(JSON.stringify(compElements)),
+        layout: 'circle',
+        directed: false,
+        style: {
+            node: { 'background-color': '#16c79a', 'border-color': 'rgba(22,199,154,0.4)' },
+            edge: { 'line-color': 'rgba(22,199,154,0.3)' },
+        },
+    });
+
+    const gatAllAlpha = computeHeadAttention(77);
+
+    setTimeout(() => {
+        EDGES.forEach(([u,v]) => {
+            const a1 = gatAllAlpha[u]?.[v] || 0;
+            const a2 = gatAllAlpha[v]?.[u] || 0;
+            const avgA = (a1+a2)/2;
+            const edge = gatRenderer.cy.edges(`[source="${u}"][target="${v}"], [source="${v}"][target="${u}"]`);
+            edge.style({
+                'width': 2 + avgA * 16,
+                'line-color': '#16c79a',
+                'opacity': 0.4 + avgA * 1.5,
+            });
+            gatRenderer.setEdgeLabel(u, v, avgA.toFixed(3));
+        });
+        gatRenderer.fit(30);
+    }, 400);
+
+    /* ------------------------------------------------------------------
+       Re-render math after DOM is ready
+    ------------------------------------------------------------------ */
+    setTimeout(() => {
+        if (typeof renderMath === 'function') renderMath(document.body);
+    }, 200);
+
+    })();
+    </script>
+</body>
+</html>

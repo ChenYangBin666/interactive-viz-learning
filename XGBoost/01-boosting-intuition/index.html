@@ -1,0 +1,1054 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>从决策树到提升 — XGBoost 模块 01</title>
+
+    <!-- KaTeX -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+
+    <!-- D3.js -->
+    <script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+
+    <!-- GSAP -->
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.2/dist/gsap.min.js"></script>
+
+    <!-- Shared styles -->
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+
+    <style>
+        /* === Page-specific styles === */
+        .page-header {
+            margin-bottom: 2rem;
+        }
+        .breadcrumb {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            margin-bottom: 0.5rem;
+        }
+        .breadcrumb a { color: var(--accent-blue); }
+        .breadcrumb .sep { margin: 0 0.4rem; opacity: 0.5; }
+
+        .compare-panels {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5rem;
+        }
+        @media (max-width: 768px) {
+            .compare-panels { grid-template-columns: 1fr; }
+        }
+
+        .panel-label {
+            text-align: center;
+            font-weight: 700;
+            font-size: 1.1rem;
+            margin-bottom: 0.75rem;
+        }
+        .panel-label.bagging { color: var(--accent-blue); }
+        .panel-label.boosting { color: var(--accent-yellow); }
+
+        .insight-cards {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+        @media (max-width: 768px) {
+            .insight-cards { grid-template-columns: 1fr; }
+        }
+        .insight-card {
+            padding: 1rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            font-size: 0.9rem;
+        }
+        .insight-card h4 {
+            font-size: 0.85rem;
+            margin-bottom: 0.4rem;
+        }
+        .insight-card p { margin: 0; font-size: 0.82rem; }
+        .insight-card.blue { border-left: 3px solid var(--accent-blue); }
+        .insight-card.amber { border-left: 3px solid var(--accent-yellow); }
+
+        .viz-svg {
+            width: 100%;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+        }
+
+        .round-info {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            flex-wrap: wrap;
+            margin-top: 0.75rem;
+        }
+        .round-info .metric {
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            padding: 0.3rem 0.7rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+        }
+        .round-info .metric span { color: var(--accent-green); }
+
+        .timeline-container {
+            position: relative;
+            padding: 2rem 0;
+        }
+        .timeline-line {
+            position: absolute;
+            top: 50%;
+            left: 5%;
+            right: 5%;
+            height: 3px;
+            background: var(--border-color);
+            transform: translateY(-50%);
+        }
+        .timeline-items {
+            display: flex;
+            justify-content: space-around;
+            position: relative;
+            z-index: 1;
+        }
+        .timeline-item {
+            text-align: center;
+            max-width: 280px;
+            padding: 0 1rem;
+        }
+        .timeline-dot {
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            margin: 0 auto 0.75rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.2rem;
+            font-weight: 700;
+            border: 3px solid;
+        }
+        .timeline-dot.ada { background: rgba(79,195,247,0.15); border-color: var(--accent-blue); color: var(--accent-blue); }
+        .timeline-dot.gb { background: rgba(179,136,255,0.15); border-color: var(--accent-purple); color: var(--accent-purple); }
+        .timeline-dot.xgb { background: rgba(22,199,154,0.15); border-color: var(--accent-green); color: var(--accent-green); }
+        .timeline-year {
+            font-family: var(--font-mono);
+            font-size: 0.9rem;
+            color: var(--accent-yellow);
+            margin-bottom: 0.3rem;
+        }
+        .timeline-name {
+            font-weight: 700;
+            font-size: 1rem;
+            margin-bottom: 0.4rem;
+        }
+        .timeline-desc {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            line-height: 1.5;
+        }
+
+        .bias-var-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5rem;
+        }
+        @media (max-width: 768px) {
+            .bias-var-grid { grid-template-columns: 1fr; }
+            .timeline-items { flex-direction: column; gap: 2rem; align-items: center; }
+            .timeline-line { display: none; }
+        }
+
+        .formula-highlight {
+            padding: 1rem 1.5rem;
+            background: rgba(255,215,64,0.06);
+            border: 1px solid rgba(255,215,64,0.2);
+            border-radius: var(--radius-md);
+            text-align: center;
+            margin: 1.5rem 0;
+        }
+
+        .section-desc {
+            color: var(--text-secondary);
+            font-size: 0.92rem;
+            margin-bottom: 1rem;
+            max-width: 800px;
+        }
+
+        .nav-next {
+            display: flex;
+            justify-content: flex-end;
+            margin-top: 2rem;
+            padding-top: 1.5rem;
+            border-top: 1px solid var(--border-color);
+        }
+        .nav-next a {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.6rem 1.2rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            color: var(--text-primary);
+            font-size: 0.9rem;
+            transition: all 0.2s;
+        }
+        .nav-next a:hover {
+            border-color: var(--accent-green);
+            background: rgba(22,199,154,0.08);
+        }
+    </style>
+</head>
+<body>
+
+<div class="page-container">
+    <!-- Header -->
+    <div class="page-header">
+        <div class="breadcrumb">
+            <a href="../index.html">XGBoost</a>
+            <span class="sep">/</span>
+            模块 01
+        </div>
+        <h1>从决策树到提升</h1>
+        <p class="section-desc">理解集成学习的两大范式 — Bagging 与 Boosting，以及为什么串行纠错能把弱学习器变成强学习器。</p>
+    </div>
+
+    <!-- ===== Section 1: Bagging vs Boosting ===== -->
+    <div class="section" id="sec-compare">
+        <div class="section-title">
+            <div class="icon">1</div>
+            <h2>Bagging vs Boosting 对比</h2>
+        </div>
+        <p class="section-desc">两种集成策略的核心区别：并行独立 vs 串行纠错。点击"播放"观看动画。</p>
+
+        <div class="compare-panels">
+            <div>
+                <div class="panel-label bagging">Bagging（并行独立）</div>
+                <div class="viz-area" style="min-height:320px;">
+                    <svg id="svg-bagging" class="viz-svg" viewBox="0 0 500 320"></svg>
+                </div>
+            </div>
+            <div>
+                <div class="panel-label boosting">Boosting（串行纠错）</div>
+                <div class="viz-area" style="min-height:320px;">
+                    <svg id="svg-boosting" class="viz-svg" viewBox="0 0 500 320"></svg>
+                </div>
+            </div>
+        </div>
+
+        <div style="margin-top:1rem;">
+            <div id="compare-controls"></div>
+        </div>
+
+        <div class="insight-cards">
+            <div class="insight-card blue">
+                <h4>Bagging 关键词</h4>
+                <p>Bootstrap 采样、并行训练、多数投票/平均、降低方差。代表：随机森林。</p>
+            </div>
+            <div class="insight-card amber">
+                <h4>Boosting 关键词</h4>
+                <p>串行学习、残差/梯度拟合、加权组合、降低偏差。代表：AdaBoost、GBDT、XGBoost。</p>
+            </div>
+            <div class="insight-card blue">
+                <h4>Bagging 的弱点</h4>
+                <p>每棵树独立 — 如果所有树都犯同一种系统性错误（高偏差），平均也无法消除。</p>
+            </div>
+            <div class="insight-card amber">
+                <h4>Boosting 的优势</h4>
+                <p>后一棵树专注于前一棵的错误，能逐步"修补"预测中的系统性偏差。</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== Section 2: Residual Intuition ===== -->
+    <div class="section" id="sec-residual">
+        <div class="section-title">
+            <div class="icon">2</div>
+            <h2>残差的直觉</h2>
+        </div>
+        <p class="section-desc">回归示例：用多棵简单的树逐步拟合正弦曲线。每一轮新树拟合的是上一轮的残差（实际值 - 预测值）。</p>
+
+        <div class="slider-group" style="max-width:400px; margin-bottom:1rem;">
+            <label>提升轮数：</label>
+            <input type="range" id="residual-rounds" min="1" max="6" value="1">
+            <span class="slider-value" id="residual-rounds-val">1</span>
+        </div>
+
+        <div class="viz-area" style="min-height:420px;">
+            <svg id="svg-residual" class="viz-svg" viewBox="0 0 900 420"></svg>
+        </div>
+
+        <div class="round-info" id="residual-info"></div>
+    </div>
+
+    <!-- ===== Section 3: Serial Error Correction (Classification) ===== -->
+    <div class="section" id="sec-serial">
+        <div class="section-title">
+            <div class="icon">3</div>
+            <h2>串行纠错</h2>
+        </div>
+        <p class="section-desc">二分类示例：每一轮新树关注上一轮的误分类点（放大/高亮）。观察决策边界如何逐轮改善。</p>
+
+        <div id="serial-controls" style="margin-bottom:1rem;"></div>
+
+        <div class="viz-area" style="min-height:400px;">
+            <svg id="svg-serial" class="viz-svg" viewBox="0 0 800 400"></svg>
+        </div>
+
+        <div class="round-info" id="serial-info"></div>
+    </div>
+
+    <!-- ===== Section 4: Why Boosting Works ===== -->
+    <div class="section" id="sec-why">
+        <div class="section-title">
+            <div class="icon">4</div>
+            <h2>为什么 Boosting 有效</h2>
+        </div>
+        <p class="section-desc">偏差-方差权衡视角：Bagging 通过平均降低方差；Boosting 通过逐步纠错降低偏差。</p>
+
+        <div class="bias-var-grid">
+            <div>
+                <h3 style="color:var(--accent-blue); margin-bottom:0.5rem;">Bagging：降低方差</h3>
+                <div class="viz-area" style="min-height:300px;">
+                    <svg id="svg-bv-bagging" class="viz-svg" viewBox="0 0 400 300"></svg>
+                </div>
+                <p style="font-size:0.82rem; margin-top:0.5rem;">多棵独立树的平均 → 平滑边界，减少过拟合。</p>
+            </div>
+            <div>
+                <h3 style="color:var(--accent-yellow); margin-bottom:0.5rem;">Boosting：降低偏差</h3>
+                <div class="viz-area" style="min-height:300px;">
+                    <svg id="svg-bv-boosting" class="viz-svg" viewBox="0 0 400 300"></svg>
+                </div>
+                <p style="font-size:0.82rem; margin-top:0.5rem;">弱学习器逐步叠加 → 复杂边界，捕捉数据模式。</p>
+            </div>
+        </div>
+
+        <div class="formula-highlight">
+            <p style="margin-bottom:0.5rem; color:var(--text-secondary); font-size:0.85rem;">Boosting 的核心迭代公式：</p>
+            <span class="katex-formula">$$F_m(x) = F_{m-1}(x) + \eta \cdot h_m(x)$$</span>
+            <p style="margin-top:0.5rem; font-size:0.8rem; color:var(--text-muted);">
+                $F_m$ = 第 $m$ 轮预测，$\eta$ = 学习率，$h_m$ = 第 $m$ 棵新树
+            </p>
+        </div>
+    </div>
+
+    <!-- ===== Section 5: From AdaBoost to Gradient Boosting ===== -->
+    <div class="section" id="sec-history">
+        <div class="section-title">
+            <div class="icon">5</div>
+            <h2>从 AdaBoost 到梯度提升</h2>
+        </div>
+        <p class="section-desc">Boosting 家族的演进路线：从样本加权到梯度拟合，再到二阶优化与正则化。</p>
+
+        <div class="timeline-container">
+            <div class="timeline-line"></div>
+            <div class="timeline-items">
+                <div class="timeline-item" id="tl-ada">
+                    <div class="timeline-dot ada">A</div>
+                    <div class="timeline-year">1995</div>
+                    <div class="timeline-name">AdaBoost</div>
+                    <div class="timeline-desc">对误分类样本加权 — 下一棵树更关注"难样本"。简洁优雅，但仅适用于分类，对噪声敏感。</div>
+                </div>
+                <div class="timeline-item" id="tl-gb">
+                    <div class="timeline-dot gb">G</div>
+                    <div class="timeline-year">2001</div>
+                    <div class="timeline-name">Gradient Boosting</div>
+                    <div class="timeline-desc">将 Boosting 理解为在函数空间做梯度下降 — 每棵新树拟合负梯度（残差）。适用于任意可微损失函数。</div>
+                </div>
+                <div class="timeline-item" id="tl-xgb">
+                    <div class="timeline-dot xgb">X</div>
+                    <div class="timeline-year">2016</div>
+                    <div class="timeline-name">XGBoost</div>
+                    <div class="timeline-desc">二阶泰勒展开更精确；正则化（叶子权重 + 复杂度惩罚）防过拟合；工程优化（并行、缓存、分块）。</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="info-box success" style="margin-top:1rem;">
+            <p><strong>下一步：</strong>在模块 02 中，我们将深入梯度提升的数学原理 — 为什么"拟合负梯度"等价于在函数空间做梯度下降。</p>
+        </div>
+    </div>
+
+    <!-- Navigation -->
+    <div class="nav-next">
+        <a href="../02-gradient-boosting/index.html">
+            下一模块：梯度提升原理
+            <span style="font-size:1.1rem;">→</span>
+        </a>
+    </div>
+</div>
+
+<!-- Shared scripts -->
+<script src="../shared/scripts/xgb-utils.js"></script>
+<script src="../shared/scripts/animation-controller.js"></script>
+<script src="../shared/scripts/matrix-renderer.js"></script>
+<script src="../shared/scripts/nav.js"></script>
+<script src="../shared/scripts/katex-init.js"></script>
+
+<script>
+// ============================================================
+// Section 1: Bagging vs Boosting Animation
+// ============================================================
+(function() {
+    const svgBag = d3.select('#svg-bagging');
+    const svgBoost = d3.select('#svg-boosting');
+    const W = 500, H = 320;
+
+    // Tree icon helper
+    function drawTree(parent, x, y, w, h, color, label, opacity) {
+        const g = parent.append('g')
+            .attr('transform', `translate(${x},${y})`)
+            .attr('opacity', opacity || 0);
+        // trunk
+        g.append('rect')
+            .attr('x', w * 0.4).attr('y', h * 0.6)
+            .attr('width', w * 0.2).attr('height', h * 0.4)
+            .attr('fill', '#8d6e63');
+        // canopy
+        g.append('polygon')
+            .attr('points', `${w/2},0 ${w},${h*0.65} 0,${h*0.65}`)
+            .attr('fill', color).attr('opacity', 0.85);
+        // label
+        g.append('text')
+            .attr('x', w / 2).attr('y', h + 18)
+            .attr('text-anchor', 'middle')
+            .attr('fill', '#a8a8b8').attr('font-size', 11)
+            .text(label);
+        return g;
+    }
+
+    // ---- Bagging setup ----
+    const bagTreeData = [
+        { x: 30, y: 70, label: 'T1' },
+        { x: 145, y: 70, label: 'T2' },
+        { x: 260, y: 70, label: 'T3' },
+        { x: 375, y: 70, label: 'T4' },
+    ];
+
+    // Data source
+    svgBag.append('rect')
+        .attr('x', 170).attr('y', 10).attr('width', 160).attr('height', 30)
+        .attr('rx', 6).attr('fill', '#0f3460').attr('stroke', '#4fc3f7');
+    svgBag.append('text')
+        .attr('x', 250).attr('y', 30).attr('text-anchor', 'middle')
+        .attr('fill', '#4fc3f7').attr('font-size', 12).attr('font-weight', 600)
+        .text('Bootstrap 子集');
+
+    // Bootstrap arrows
+    bagTreeData.forEach(d => {
+        svgBag.append('line')
+            .attr('x1', 250).attr('y1', 42)
+            .attr('x2', d.x + 40).attr('y2', d.y)
+            .attr('stroke', '#4fc3f7').attr('stroke-width', 1).attr('opacity', 0.3)
+            .attr('stroke-dasharray', '4,3');
+    });
+
+    const bagTrees = bagTreeData.map(d =>
+        drawTree(svgBag, d.x, d.y, 80, 80, '#4fc3f7', d.label, 0)
+    );
+
+    // Vote box
+    svgBag.append('rect')
+        .attr('x', 170).attr('y', 230).attr('width', 160).attr('height', 34)
+        .attr('rx', 6).attr('fill', '#0f3460').attr('stroke', '#4fc3f7').attr('opacity', 0);
+    svgBag.append('text')
+        .attr('x', 250).attr('y', 252).attr('text-anchor', 'middle')
+        .attr('fill', '#4fc3f7').attr('font-size', 12).attr('font-weight', 600)
+        .text('多数投票 / 平均').attr('opacity', 0);
+
+    const bagVoteElements = svgBag.selectAll('rect, text').filter(function() {
+        const y = +d3.select(this).attr('y');
+        return y >= 230;
+    });
+
+    // Vote arrows
+    const bagVoteArrows = bagTreeData.map(d => {
+        return svgBag.append('line')
+            .attr('x1', d.x + 40).attr('y1', 168)
+            .attr('x2', 250).attr('y2', 228)
+            .attr('stroke', '#4fc3f7').attr('stroke-width', 1).attr('opacity', 0)
+            .attr('marker-end', 'none');
+    });
+
+    // Result
+    const bagResult = svgBag.append('text')
+        .attr('x', 250).attr('y', 295).attr('text-anchor', 'middle')
+        .attr('fill', '#e8e8e8').attr('font-size', 13).attr('font-weight', 600)
+        .text('最终预测').attr('opacity', 0);
+
+    // ---- Boosting setup ----
+    const boostTreeData = [
+        { x: 20, y: 110, label: 'T1' },
+        { x: 140, y: 110, label: 'T2' },
+        { x: 260, y: 110, label: 'T3' },
+        { x: 380, y: 110, label: 'T4' },
+    ];
+
+    svgBoost.append('text')
+        .attr('x', 250).attr('y', 25).attr('text-anchor', 'middle')
+        .attr('fill', '#ffd740').attr('font-size', 12).attr('font-weight', 600)
+        .text('全部训练数据');
+    svgBoost.append('rect')
+        .attr('x', 170).attr('y', 8).attr('width', 160).attr('height', 30)
+        .attr('rx', 6).attr('fill', 'none').attr('stroke', '#ffd740').attr('stroke-width', 1);
+
+    const boostTrees = boostTreeData.map(d =>
+        drawTree(svgBoost, d.x, d.y, 80, 80, '#ffd740', d.label, 0)
+    );
+
+    // Sequential arrows between trees
+    const boostArrows = [];
+    for (let i = 0; i < boostTreeData.length - 1; i++) {
+        const a = boostTreeData[i], b = boostTreeData[i + 1];
+        const arrow = svgBoost.append('g').attr('opacity', 0);
+        arrow.append('line')
+            .attr('x1', a.x + 85).attr('y1', a.y + 40)
+            .attr('x2', b.x - 5).attr('y2', b.y + 40)
+            .attr('stroke', '#ffd740').attr('stroke-width', 2)
+            .attr('marker-end', 'url(#arrowhead-boost)');
+        arrow.append('text')
+            .attr('x', (a.x + 85 + b.x - 5) / 2).attr('y', a.y + 30)
+            .attr('text-anchor', 'middle')
+            .attr('fill', '#ff5252').attr('font-size', 10)
+            .text('残差');
+        boostArrows.push(arrow);
+    }
+
+    // Arrowhead marker
+    svgBoost.append('defs').append('marker')
+        .attr('id', 'arrowhead-boost')
+        .attr('viewBox', '0 0 10 10')
+        .attr('refX', 9).attr('refY', 5)
+        .attr('markerWidth', 6).attr('markerHeight', 6)
+        .attr('orient', 'auto')
+        .append('path').attr('d', 'M 0 0 L 10 5 L 0 10 Z').attr('fill', '#ffd740');
+
+    // Summation
+    const boostSum = svgBoost.append('g').attr('opacity', 0);
+    boostSum.append('rect')
+        .attr('x', 150).attr('y', 250).attr('width', 200).attr('height', 34)
+        .attr('rx', 6).attr('fill', '#0f3460').attr('stroke', '#ffd740');
+    boostSum.append('text')
+        .attr('x', 250).attr('y', 272).attr('text-anchor', 'middle')
+        .attr('fill', '#ffd740').attr('font-size', 12).attr('font-weight', 600)
+        .text('加权求和');
+    const boostResult = svgBoost.append('text')
+        .attr('x', 250).attr('y', 308).attr('text-anchor', 'middle')
+        .attr('fill', '#e8e8e8').attr('font-size', 13).attr('font-weight', 600)
+        .text('最终预测').attr('opacity', 0);
+
+    // AnimationController for compare
+    const compareCtrl = new AnimationController({
+        container: document.getElementById('compare-controls'),
+        defaultDuration: 900,
+        steps: [
+            {
+                name: 'Bagging: 全部树同时出现',
+                duration: 800,
+                action: (_, instant) => {
+                    const dur = instant ? 0 : 600;
+                    bagTrees.forEach(t => {
+                        gsap.to(t.node(), { opacity: 1, duration: dur / 1000 });
+                    });
+                }
+            },
+            {
+                name: 'Bagging: 投票',
+                duration: 700,
+                action: (_, instant) => {
+                    const dur = instant ? 0 : 500;
+                    bagVoteArrows.forEach(a => gsap.to(a.node(), { opacity: 0.5, duration: dur / 1000 }));
+                    bagVoteElements.each(function() { gsap.to(this, { opacity: 1, duration: dur / 1000 }); });
+                    gsap.to(bagResult.node(), { opacity: 1, duration: dur / 1000, delay: dur / 2000 });
+                }
+            },
+            {
+                name: 'Boosting: T1 出现',
+                duration: 800,
+                action: (_, instant) => {
+                    const dur = instant ? 0 : 500;
+                    gsap.to(boostTrees[0].node(), { opacity: 1, duration: dur / 1000 });
+                }
+            },
+            {
+                name: 'Boosting: T2 纠错',
+                duration: 800,
+                action: (_, instant) => {
+                    const dur = instant ? 0 : 500;
+                    gsap.to(boostArrows[0].node(), { opacity: 1, duration: dur / 1000 });
+                    gsap.to(boostTrees[1].node(), { opacity: 1, duration: dur / 1000, delay: dur / 3000 });
+                }
+            },
+            {
+                name: 'Boosting: T3 纠错',
+                duration: 800,
+                action: (_, instant) => {
+                    const dur = instant ? 0 : 500;
+                    gsap.to(boostArrows[1].node(), { opacity: 1, duration: dur / 1000 });
+                    gsap.to(boostTrees[2].node(), { opacity: 1, duration: dur / 1000, delay: dur / 3000 });
+                }
+            },
+            {
+                name: 'Boosting: T4 纠错',
+                duration: 800,
+                action: (_, instant) => {
+                    const dur = instant ? 0 : 500;
+                    gsap.to(boostArrows[2].node(), { opacity: 1, duration: dur / 1000 });
+                    gsap.to(boostTrees[3].node(), { opacity: 1, duration: dur / 1000, delay: dur / 3000 });
+                }
+            },
+            {
+                name: 'Boosting: 加权求和',
+                duration: 700,
+                action: (_, instant) => {
+                    const dur = instant ? 0 : 500;
+                    gsap.to(boostSum.node(), { opacity: 1, duration: dur / 1000 });
+                    gsap.to(boostResult.node(), { opacity: 1, duration: dur / 1000, delay: dur / 2000 });
+                }
+            }
+        ],
+        onStepChange: () => {}
+    });
+
+    // Reset handler
+    const origReset = compareCtrl.reset.bind(compareCtrl);
+    compareCtrl.reset = function() {
+        origReset();
+        bagTrees.forEach(t => gsap.set(t.node(), { opacity: 0 }));
+        bagVoteArrows.forEach(a => gsap.set(a.node(), { opacity: 0 }));
+        bagVoteElements.each(function() { gsap.set(this, { opacity: 0 }); });
+        gsap.set(bagResult.node(), { opacity: 0 });
+        boostTrees.forEach(t => gsap.set(t.node(), { opacity: 0 }));
+        boostArrows.forEach(a => gsap.set(a.node(), { opacity: 0 }));
+        gsap.set(boostSum.node(), { opacity: 0 });
+        gsap.set(boostResult.node(), { opacity: 0 });
+    };
+})();
+
+// ============================================================
+// Section 2: Residual Intuition (Regression)
+// ============================================================
+(function() {
+    const svg = d3.select('#svg-residual');
+    const W = 900, H = 420;
+    const margin = { top: 30, right: 30, bottom: 40, left: 50 };
+    const plotW = W - margin.left - margin.right;
+    const plotH = H - margin.top - margin.bottom;
+
+    // Generate sine curve data
+    const rng = XGBUtils.seededRandom(77);
+    const nPts = 50;
+    const dataPoints = [];
+    for (let i = 0; i < nPts; i++) {
+        const x = -3 + (6 * i / (nPts - 1)) + (rng() - 0.5) * 0.1;
+        const y = Math.sin(x * 1.5) * 2 + (rng() - 0.5) * 0.8;
+        dataPoints.push({ x, y });
+    }
+    dataPoints.sort((a, b) => a.x - b.x);
+
+    const xScale = d3.scaleLinear().domain([-3.5, 3.5]).range([0, plotW]);
+    const yScale = d3.scaleLinear().domain([-4, 4]).range([plotH, 0]);
+
+    const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+
+    // Axes
+    g.append('g').attr('transform', `translate(0,${plotH})`)
+        .call(d3.axisBottom(xScale).ticks(7))
+        .selectAll('text').attr('fill', '#a8a8b8');
+    g.selectAll('.domain, .tick line').attr('stroke', '#2a2a4a');
+
+    g.append('g')
+        .call(d3.axisLeft(yScale).ticks(5))
+        .selectAll('text').attr('fill', '#a8a8b8');
+
+    // True function line
+    const trueLine = d3.line()
+        .x(d => xScale(d.x))
+        .y(d => yScale(Math.sin(d.x * 1.5) * 2))
+        .curve(d3.curveBasis);
+    const trueXs = d3.range(-3.5, 3.6, 0.1).map(x => ({ x }));
+    g.append('path')
+        .datum(trueXs)
+        .attr('d', trueLine)
+        .attr('fill', 'none')
+        .attr('stroke', '#6c6c7c')
+        .attr('stroke-width', 1)
+        .attr('stroke-dasharray', '5,4')
+        .attr('opacity', 0.6);
+
+    // Data dots
+    g.selectAll('.data-dot')
+        .data(dataPoints)
+        .join('circle')
+        .attr('class', 'data-dot')
+        .attr('cx', d => xScale(d.x))
+        .attr('cy', d => yScale(d.y))
+        .attr('r', 3.5)
+        .attr('fill', '#4fc3f7')
+        .attr('opacity', 0.7);
+
+    // Simple stump predictor for boosting demo
+    function fitStump(points, targets) {
+        // Find best single split
+        let bestSplit = 0, bestLeft = 0, bestRight = 0, bestMSE = Infinity;
+        const xs = points.map(p => p.x);
+        const sorted = [...xs].sort((a, b) => a - b);
+
+        for (let i = 1; i < sorted.length; i++) {
+            const thresh = (sorted[i - 1] + sorted[i]) / 2;
+            const leftVals = [], rightVals = [];
+            for (let j = 0; j < points.length; j++) {
+                if (points[j].x <= thresh) leftVals.push(targets[j]);
+                else rightVals.push(targets[j]);
+            }
+            if (leftVals.length === 0 || rightVals.length === 0) continue;
+            const lm = leftVals.reduce((a, b) => a + b, 0) / leftVals.length;
+            const rm = rightVals.reduce((a, b) => a + b, 0) / rightVals.length;
+            let mse = 0;
+            leftVals.forEach(v => mse += (v - lm) ** 2);
+            rightVals.forEach(v => mse += (v - rm) ** 2);
+            if (mse < bestMSE) {
+                bestMSE = mse;
+                bestSplit = thresh;
+                bestLeft = lm;
+                bestRight = rm;
+            }
+        }
+        return { split: bestSplit, left: bestLeft, right: bestRight };
+    }
+
+    function predictStump(stump, x) {
+        return x <= stump.split ? stump.left : stump.right;
+    }
+
+    // Build 6 rounds of stumps on residuals
+    const stumps = [];
+    const roundPredictions = []; // predictions at each round (cumulative)
+    let currentTargets = dataPoints.map(d => d.y);
+    const lr = 0.8;
+
+    for (let round = 0; round < 6; round++) {
+        const stump = fitStump(dataPoints, currentTargets);
+        stumps.push(stump);
+
+        // Cumulative prediction
+        if (round === 0) {
+            roundPredictions.push(dataPoints.map(d => lr * predictStump(stump, d.x)));
+        } else {
+            const prev = roundPredictions[round - 1];
+            roundPredictions.push(dataPoints.map((d, i) => prev[i] + lr * predictStump(stump, d.x)));
+        }
+
+        // Update residuals
+        currentTargets = dataPoints.map((d, i) => d.y - roundPredictions[round][i]);
+    }
+
+    // Prediction line group
+    const predLine = g.append('path')
+        .attr('fill', 'none')
+        .attr('stroke', '#ffd740')
+        .attr('stroke-width', 2.5);
+
+    // Residual lines group
+    const residualGroup = g.append('g');
+
+    function updateResidualViz(nRounds) {
+        const roundIdx = nRounds - 1;
+        const preds = roundPredictions[roundIdx];
+
+        // Generate smooth prediction curve
+        const curvePoints = d3.range(-3.5, 3.6, 0.05).map(x => {
+            let pred = 0;
+            for (let r = 0; r <= roundIdx; r++) {
+                pred += lr * predictStump(stumps[r], x);
+            }
+            return { x, pred };
+        });
+
+        const line = d3.line()
+            .x(d => xScale(d.x))
+            .y(d => yScale(d.pred))
+            .curve(d3.curveStepAfter);
+
+        predLine.datum(curvePoints).attr('d', line);
+
+        // Residual vertical lines
+        const residuals = dataPoints.map((d, i) => ({
+            x: xScale(d.x),
+            y1: yScale(d.y),
+            y2: yScale(preds[i])
+        }));
+
+        residualGroup.selectAll('line').remove();
+        residualGroup.selectAll('line')
+            .data(residuals)
+            .join('line')
+            .attr('x1', d => d.x).attr('y1', d => d.y1)
+            .attr('x2', d => d.x).attr('y2', d => d.y2)
+            .attr('stroke', '#ff5252')
+            .attr('stroke-width', 1)
+            .attr('opacity', 0.5);
+
+        // MSE
+        const mse = dataPoints.reduce((s, d, i) => s + (d.y - preds[i]) ** 2, 0) / dataPoints.length;
+        document.getElementById('residual-info').innerHTML = `
+            <div class="metric">轮数: <span>${nRounds}</span></div>
+            <div class="metric">MSE: <span>${mse.toFixed(4)}</span></div>
+            <div class="metric">树数量: <span>${nRounds}</span></div>
+        `;
+    }
+
+    const slider = document.getElementById('residual-rounds');
+    const valSpan = document.getElementById('residual-rounds-val');
+    slider.addEventListener('input', () => {
+        valSpan.textContent = slider.value;
+        updateResidualViz(+slider.value);
+    });
+    updateResidualViz(1);
+})();
+
+// ============================================================
+// Section 3: Serial Error Correction (Classification)
+// ============================================================
+(function() {
+    const svg = d3.select('#svg-serial');
+    const W = 800, H = 400;
+    const margin = { top: 20, right: 20, bottom: 30, left: 30 };
+    const plotW = W - margin.left - margin.right;
+    const plotH = H - margin.top - margin.bottom;
+
+    const data = XGBUtils.generateClassificationData(80, 55, 0.4);
+
+    const xScale = d3.scaleLinear()
+        .domain(d3.extent(data, d => d.x).map((v, i) => v + (i === 0 ? -1 : 1)))
+        .range([0, plotW]);
+    const yScale = d3.scaleLinear()
+        .domain(d3.extent(data, d => d.y).map((v, i) => v + (i === 0 ? -1 : 1)))
+        .range([plotH, 0]);
+
+    const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+
+    // Background heatmap group (placed first so dots are on top)
+    const heatGroup = g.append('g');
+
+    // Dot group
+    const dotGroup = g.append('g');
+    const dots = dotGroup.selectAll('circle')
+        .data(data)
+        .join('circle')
+        .attr('cx', d => xScale(d.x))
+        .attr('cy', d => yScale(d.y))
+        .attr('r', 4)
+        .attr('fill', d => d.label === 1 ? '#4fc3f7' : '#ff5252')
+        .attr('stroke', '#1a1a2e')
+        .attr('stroke-width', 1)
+        .attr('opacity', 0.8);
+
+    // Train boosting models for 1-5 rounds
+    const maxRounds = 5;
+    const models = [];
+    for (let r = 1; r <= maxRounds; r++) {
+        const model = XGBUtils.trainXGBoost(data, {
+            nRounds: r,
+            learningRate: 0.5,
+            maxDepth: 2,
+            lambda: 1,
+            gamma: 0,
+            isRegression: false,
+            seed: 42
+        });
+        models.push(model);
+    }
+
+    function renderRound(roundIdx) {
+        const model = models[roundIdx];
+        const nRound = roundIdx + 1;
+
+        // Compute predictions and misclassified
+        const predictions = data.map(d => XGBUtils.predictXGBoost(model, d));
+        const misclassified = data.map((d, i) => predictions[i].prediction !== d.label);
+        const accuracy = data.filter((d, i) => !misclassified[i]).length / data.length;
+
+        // Update dots — misclassified are enlarged
+        dots.transition().duration(400)
+            .attr('r', (d, i) => misclassified[i] ? 7 : 4)
+            .attr('stroke', (d, i) => misclassified[i] ? '#ffd740' : '#1a1a2e')
+            .attr('stroke-width', (d, i) => misclassified[i] ? 2.5 : 1)
+            .attr('opacity', (d, i) => misclassified[i] ? 1 : 0.7);
+
+        // Decision boundary heatmap
+        const res = 40;
+        const xDom = xScale.domain(), yDom = yScale.domain();
+        const cellW = plotW / res, cellH = plotH / res;
+        const heatData = [];
+
+        for (let i = 0; i < res; i++) {
+            for (let j = 0; j < res; j++) {
+                const px = xDom[0] + (i + 0.5) * (xDom[1] - xDom[0]) / res;
+                const py = yDom[0] + (j + 0.5) * (yDom[1] - yDom[0]) / res;
+                const result = XGBUtils.predictXGBoost(model, { x: px, y: py });
+                heatData.push({
+                    x: i * cellW, y: j * cellH,
+                    w: cellW + 1, h: cellH + 1,
+                    prob: result.probability
+                });
+            }
+        }
+
+        heatGroup.selectAll('rect').remove();
+        heatGroup.selectAll('rect')
+            .data(heatData)
+            .join('rect')
+            .attr('x', d => d.x).attr('y', d => d.y)
+            .attr('width', d => d.w).attr('height', d => d.h)
+            .attr('fill', d => d.prob > 0.5
+                ? `rgba(79, 195, 247, ${(d.prob - 0.5) * 0.4})`
+                : `rgba(255, 82, 82, ${(0.5 - d.prob) * 0.4})`)
+            .attr('stroke', 'none');
+
+        // Info
+        const nMis = misclassified.filter(Boolean).length;
+        document.getElementById('serial-info').innerHTML = `
+            <div class="metric">轮数: <span>${nRound}</span></div>
+            <div class="metric">准确率: <span>${(accuracy * 100).toFixed(1)}%</span></div>
+            <div class="metric">误分类: <span style="color:var(--accent-red)">${nMis}</span> / ${data.length}</div>
+        `;
+    }
+
+    // AnimationController
+    const serialSteps = [];
+    for (let r = 0; r < maxRounds; r++) {
+        serialSteps.push({
+            name: `第 ${r + 1} 轮`,
+            duration: 1200,
+            action: (_, instant) => {
+                renderRound(r);
+            }
+        });
+    }
+
+    const serialCtrl = new AnimationController({
+        container: document.getElementById('serial-controls'),
+        defaultDuration: 1200,
+        steps: serialSteps
+    });
+
+    // Reset override
+    const origReset = serialCtrl.reset.bind(serialCtrl);
+    serialCtrl.reset = function() {
+        origReset();
+        heatGroup.selectAll('rect').remove();
+        dots.attr('r', 4).attr('stroke', '#1a1a2e').attr('stroke-width', 1).attr('opacity', 0.8);
+        document.getElementById('serial-info').innerHTML = '';
+    };
+})();
+
+// ============================================================
+// Section 4: Bias-Variance Visualizations
+// ============================================================
+(function() {
+    const data = XGBUtils.generateClassificationData(60, 99, 0.3);
+    const xDom = d3.extent(data, d => d.x).map((v, i) => v + (i === 0 ? -1 : 1));
+    const yDom = d3.extent(data, d => d.y).map((v, i) => v + (i === 0 ? -1 : 1));
+
+    function drawBVPlot(svgId, modelFn, dotColor) {
+        const svg = d3.select(svgId);
+        const W = 400, H = 300;
+        const margin = { top: 15, right: 15, bottom: 25, left: 25 };
+        const pW = W - margin.left - margin.right;
+        const pH = H - margin.top - margin.bottom;
+        const xScale = d3.scaleLinear().domain(xDom).range([0, pW]);
+        const yScale = d3.scaleLinear().domain(yDom).range([pH, 0]);
+        const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+
+        // Heatmap
+        const res = 35;
+        const cellW = pW / res, cellH = pH / res;
+        for (let i = 0; i < res; i++) {
+            for (let j = 0; j < res; j++) {
+                const px = xDom[0] + (i + 0.5) * (xDom[1] - xDom[0]) / res;
+                const py = yDom[0] + (j + 0.5) * (yDom[1] - yDom[0]) / res;
+                const prob = modelFn(px, py);
+                g.append('rect')
+                    .attr('x', i * cellW).attr('y', j * cellH)
+                    .attr('width', cellW + 1).attr('height', cellH + 1)
+                    .attr('fill', prob > 0.5
+                        ? `rgba(79, 195, 247, ${(prob - 0.5) * 0.5})`
+                        : `rgba(255, 82, 82, ${(0.5 - prob) * 0.5})`)
+                    .attr('stroke', 'none');
+            }
+        }
+
+        // Dots
+        g.selectAll('circle')
+            .data(data)
+            .join('circle')
+            .attr('cx', d => xScale(d.x))
+            .attr('cy', d => yScale(d.y))
+            .attr('r', 3)
+            .attr('fill', d => d.label === 1 ? '#4fc3f7' : '#ff5252')
+            .attr('stroke', '#1a1a2e')
+            .attr('stroke-width', 0.8)
+            .attr('opacity', 0.8);
+    }
+
+    // Bagging model: smooth boundary (average of random trees = logistic-like)
+    const baggingModel = XGBUtils.trainXGBoost(data, {
+        nRounds: 1, learningRate: 0.8, maxDepth: 1,
+        isRegression: false, seed: 42
+    });
+    drawBVPlot('#svg-bv-bagging', (px, py) => {
+        // Simulate bagging smoothness: single weak prediction → very smooth
+        const result = XGBUtils.predictXGBoost(baggingModel, { x: px, y: py });
+        return result.probability;
+    });
+
+    // Boosting model: complex boundary (many rounds)
+    const boostingModel = XGBUtils.trainXGBoost(data, {
+        nRounds: 8, learningRate: 0.5, maxDepth: 3,
+        isRegression: false, seed: 42
+    });
+    drawBVPlot('#svg-bv-boosting', (px, py) => {
+        const result = XGBUtils.predictXGBoost(boostingModel, { x: px, y: py });
+        return result.probability;
+    });
+})();
+
+// ============================================================
+// Section 5: Timeline Animation
+// ============================================================
+(function() {
+    const items = document.querySelectorAll('.timeline-item');
+    items.forEach(el => { el.style.opacity = '0'; el.style.transform = 'translateY(20px)'; });
+
+    const observer = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+            if (entry.isIntersecting) {
+                const items = document.querySelectorAll('.timeline-item');
+                items.forEach((el, i) => {
+                    gsap.to(el, {
+                        opacity: 1, y: 0,
+                        duration: 0.6,
+                        delay: i * 0.3,
+                        ease: 'power2.out'
+                    });
+                });
+                observer.disconnect();
+            }
+        });
+    }, { threshold: 0.3 });
+
+    observer.observe(document.querySelector('.timeline-container'));
+})();
+</script>
+
+</body>
+</html>

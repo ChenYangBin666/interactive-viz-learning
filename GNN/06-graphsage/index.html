@@ -1,0 +1,1047 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>06 - GraphSAGE | GNN 学习</title>
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+SC:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+    <script src="https://unpkg.com/cytoscape@3.28.1/dist/cytoscape.min.js"></script>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="https://unpkg.com/gsap@3.12.5/dist/gsap.min.js"></script>
+    <style>
+        /* ===== Hero ===== */
+        .hero-banner {
+            text-align: center;
+            padding: 2rem 1rem 1rem;
+        }
+        .hero-banner h1 {
+            font-size: 2.4rem;
+            background: linear-gradient(135deg, #16c79a, #4fc3f7);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .hero-banner .subtitle {
+            color: var(--text-secondary);
+            font-size: 1rem;
+            max-width: 520px;
+            margin: 0.25rem auto 0;
+        }
+        .hero-banner .module-badge {
+            display: inline-block;
+            margin-top: 0.75rem;
+            padding: 0.2rem 0.7rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            background: rgba(22,199,154,0.15);
+            color: var(--accent-green);
+            font-family: var(--font-mono);
+        }
+
+        /* ===== Sampling section ===== */
+        .sampling-layout {
+            display: grid;
+            grid-template-columns: 320px 1fr;
+            gap: 1.5rem;
+            align-items: start;
+        }
+        .sampling-controls {
+            position: sticky;
+            top: calc(var(--header-height) + 1rem);
+        }
+        .sample-graph-area { height: 440px; }
+        .tree-area { height: 320px; }
+        .stat-row {
+            display: flex;
+            gap: 0.4rem;
+            flex-wrap: wrap;
+            margin-top: 0.75rem;
+        }
+        .stat-chip {
+            padding: 0.25rem 0.6rem;
+            border-radius: 9999px;
+            font-size: 0.76rem;
+            background: rgba(22,199,154,0.12);
+            color: var(--accent-green);
+            font-family: var(--font-mono);
+            transition: opacity 0.5s, transform 0.4s;
+        }
+        .stat-chip.dimmed {
+            opacity: 0.25;
+            transform: scale(0.9);
+        }
+        .stat-chip.selected {
+            background: rgba(22,199,154,0.35);
+            font-weight: 600;
+        }
+        .computation-note {
+            margin-top: 0.75rem;
+            padding: 0.5rem 0.75rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            font-family: var(--font-mono);
+            font-size: 0.78rem;
+            color: var(--text-muted);
+            transition: color 0.4s, border-color 0.4s;
+        }
+        .computation-note.active {
+            color: var(--accent-green);
+            border-color: var(--accent-green);
+        }
+
+        /* ===== Aggregator comparison ===== */
+        .agg-col {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.6rem;
+        }
+        .agg-col h4 {
+            color: var(--accent-green);
+            font-size: 0.92rem;
+            margin: 0;
+        }
+        .agg-graph {
+            height: 190px;
+            width: 100%;
+        }
+        .agg-bar-wrap {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .agg-bar {
+            flex: 1;
+            height: 20px;
+            border-radius: 4px;
+            position: relative;
+            overflow: hidden;
+            background: var(--border-color);
+            display: flex;
+        }
+        .agg-bar .fill-seg {
+            height: 100%;
+            display: inline-block;
+            transition: width 0.7s var(--anim-ease);
+        }
+        .agg-bar-label {
+            font-size: 0.73rem;
+            color: var(--text-muted);
+            font-family: var(--font-mono);
+            min-width: 2.2rem;
+            text-align: right;
+        }
+        .agg-formula {
+            font-size: 0.82rem;
+            min-height: 2.8rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+        }
+        .agg-detail {
+            font-size: 0.78rem;
+            color: var(--text-muted);
+            text-align: center;
+            min-height: 1.2rem;
+            font-family: var(--font-mono);
+            transition: color 0.3s;
+        }
+        .agg-detail.active {
+            color: var(--accent-blue);
+        }
+
+        /* ===== Inductive section ===== */
+        .inductive-layout {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5rem;
+        }
+        .inductive-graph { height: 340px; }
+        .phase-label {
+            display: inline-block;
+            padding: 0.3rem 0.8rem;
+            border-radius: var(--radius-sm);
+            font-size: 0.82rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+        }
+        .phase-label.sage {
+            background: rgba(22,199,154,0.15);
+            color: var(--accent-green);
+        }
+        .phase-label.gcn-label {
+            background: rgba(255,82,82,0.15);
+            color: var(--accent-red);
+        }
+        .embed-output {
+            margin-top: 0.5rem;
+            padding: 0.55rem 0.75rem;
+            background: rgba(22,199,154,0.04);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            font-family: var(--font-mono);
+            font-size: 0.78rem;
+            color: var(--text-muted);
+            min-height: 2.4rem;
+            transition: all 0.4s;
+            line-height: 1.5;
+        }
+        .embed-output.active {
+            border-color: var(--accent-green);
+            color: var(--accent-green);
+        }
+        .embed-output.error {
+            border-color: var(--accent-red);
+            color: var(--accent-red);
+        }
+        .key-insight {
+            margin-top: 1.5rem;
+            padding: 1.2rem 1.5rem;
+            background: linear-gradient(135deg, rgba(22,199,154,0.08), rgba(79,195,247,0.05));
+            border: 1px solid rgba(22,199,154,0.25);
+            border-radius: var(--radius-md);
+            font-size: 1rem;
+            text-align: center;
+            color: var(--text-primary);
+            line-height: 1.6;
+        }
+        .time-badge {
+            display: inline-block;
+            padding: 0.15rem 0.5rem;
+            border-radius: 9999px;
+            font-size: 0.72rem;
+            font-weight: 600;
+            font-family: var(--font-mono);
+            margin-left: 0.4rem;
+        }
+        .time-badge.fast {
+            background: rgba(22,199,154,0.15);
+            color: var(--accent-green);
+        }
+        .time-badge.slow {
+            background: rgba(255,82,82,0.15);
+            color: var(--accent-red);
+        }
+
+        /* ===== Responsive ===== */
+        @media (max-width: 1024px) {
+            .sampling-layout { grid-template-columns: 1fr; }
+            .inductive-layout { grid-template-columns: 1fr; }
+        }
+        @media (max-width: 768px) {
+            .compare-grid.cols-4 { grid-template-columns: 1fr 1fr !important; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="page-container">
+
+    <!-- ===== Hero ===== -->
+    <div class="hero-banner">
+        <span class="module-badge">Module 06 / 09</span>
+        <h1>GraphSAGE</h1>
+        <p class="subtitle">SAmple and aggreGatE -- 通过邻居采样与聚合函数实现大规模图的高效归纳式节点表示学习</p>
+    </div>
+
+    <!-- ====================================================================
+         Section 1: Neighbor Sampling
+    ===================================================================== -->
+    <div class="section" id="sec-sampling">
+        <div class="section-title">
+            <div class="icon">&#x2699;</div>
+            <h2>邻居采样 (Neighbor Sampling)</h2>
+        </div>
+        <p>在大规模图中，一个节点可能有成百上千个邻居。GCN 需要在每一层聚合<strong>全部</strong>邻居，导致计算复杂度随层数指数增长。GraphSAGE 的核心改进之一是<strong>随机采样固定数量 $k$ 的邻居</strong>，将每层计算量从 $O(|\mathcal{N}(v)|)$ 控制到 $O(k)$，使其可以处理百万级节点的图。</p>
+
+        <div class="sampling-layout">
+            <!-- Left: controls + tree -->
+            <div class="sampling-controls">
+                <div class="card">
+                    <h4>采样参数</h4>
+                    <div class="slider-group mt-1">
+                        <label>采样数 $k$</label>
+                        <input type="range" id="sampleSlider" min="1" max="8" value="4">
+                        <span class="slider-value" id="sampleVal">4</span>
+                    </div>
+                    <div class="flex gap-sm mt-2">
+                        <button class="btn btn-primary" id="btnSample">随机采样</button>
+                        <button class="btn" id="btnResetSample">重置</button>
+                    </div>
+                    <div class="stat-row" id="neighborStats"></div>
+                    <div class="computation-note" id="compNote">
+                        总邻居: 14 | 采样: -- | 节省: --
+                    </div>
+                    <div class="info-box success mt-2">
+                        <p>每次点击"随机采样"都会选择不同的邻居子集。多次采样的期望等价于使用全部邻居，但单次前向传播开销大幅降低。</p>
+                    </div>
+                </div>
+
+                <div class="card mt-2">
+                    <h4>多跳采样树</h4>
+                    <p class="text-sm text-muted">中心节点向外扩展: 1-hop 采样 $k$ 个, 2-hop 每个再采样 $\min(k,3)$ 个</p>
+                    <div class="viz-area tree-area" id="treeContainer"></div>
+                </div>
+            </div>
+
+            <!-- Right: main graph -->
+            <div>
+                <div class="viz-area sample-graph-area" id="sampleGraphContainer">
+                    <span class="watermark">hub node + 14 neighbors</span>
+                </div>
+                <div class="legend mt-1">
+                    <div class="legend-item"><span class="swatch" style="background:#16c79a"></span>中心节点 v</div>
+                    <div class="legend-item"><span class="swatch" style="background:#4fc3f7"></span>被采样邻居</div>
+                    <div class="legend-item"><span class="swatch" style="background:#2a2a4a"></span>未被采样</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ====================================================================
+         Section 2: Aggregator Comparison
+    ===================================================================== -->
+    <div class="section" id="sec-aggregator">
+        <div class="section-title">
+            <div class="icon">&#x229B;</div>
+            <h2>聚合器对比 (Aggregator Comparison)</h2>
+        </div>
+        <p>GraphSAGE 将邻居信息的聚合抽象为一个可替换的聚合函数 $\text{AGG}$。不同的聚合器在表达能力、计算效率和对排列不变性的满足程度上各有差异。最终更新步骤都包含一个关键的 <strong>CONCAT</strong> 操作：</p>
+        <div class="agg-formula mb-2">
+            $$h_v^{(l)} = \sigma\!\Big(W^{(l)} \cdot \text{CONCAT}\big(h_v^{(l-1)},\; h_{\mathcal{N}(v)}^{(l)}\big)\Big)$$
+        </div>
+
+        <div class="flex justify-center gap-sm mb-2">
+            <button class="btn btn-primary" id="btnRunAgg">运行聚合</button>
+            <button class="btn" id="btnResetAgg">重置</button>
+        </div>
+
+        <div class="compare-grid cols-4">
+            <!-- Mean Aggregator -->
+            <div class="card agg-col" id="aggMean">
+                <h4>Mean 聚合</h4>
+                <div class="agg-formula text-sm">
+                    $h_{\mathcal{N}(v)}^{(l)} = \text{MEAN}\!\big(\{h_u^{(l-1)}, \forall u \in \mathcal{N}(v)\}\big)$
+                </div>
+                <div class="viz-area agg-graph" id="aggGraphMean"></div>
+                <div class="agg-bar-wrap">
+                    <span class="agg-bar-label">输出</span>
+                    <div class="agg-bar" id="barMean"></div>
+                </div>
+                <div class="agg-detail" id="detailMean">--</div>
+            </div>
+            <!-- Max-Pool Aggregator -->
+            <div class="card agg-col" id="aggPool">
+                <h4>Max-Pool 聚合</h4>
+                <div class="agg-formula text-sm">
+                    $h_{\mathcal{N}(v)}^{(l)} = \max\!\big(\{\sigma(W_{pool}h_u + b)\}\big)$
+                </div>
+                <div class="viz-area agg-graph" id="aggGraphPool"></div>
+                <div class="agg-bar-wrap">
+                    <span class="agg-bar-label">输出</span>
+                    <div class="agg-bar" id="barPool"></div>
+                </div>
+                <div class="agg-detail" id="detailPool">--</div>
+            </div>
+            <!-- LSTM Aggregator -->
+            <div class="card agg-col" id="aggLSTM">
+                <h4>LSTM 聚合</h4>
+                <div class="agg-formula text-sm">
+                    顺序处理随机排列的邻居序列
+                </div>
+                <div class="viz-area agg-graph" id="aggGraphLSTM"></div>
+                <div class="agg-bar-wrap">
+                    <span class="agg-bar-label">输出</span>
+                    <div class="agg-bar" id="barLSTM"></div>
+                </div>
+                <div class="agg-detail" id="detailLSTM">--</div>
+            </div>
+            <!-- GCN-style Aggregator -->
+            <div class="card agg-col" id="aggGCN">
+                <h4>GCN 风格</h4>
+                <div class="agg-formula text-sm">
+                    类似 GCN 归一化，但使用采样邻居
+                </div>
+                <div class="viz-area agg-graph" id="aggGraphGCN"></div>
+                <div class="agg-bar-wrap">
+                    <span class="agg-bar-label">输出</span>
+                    <div class="agg-bar" id="barGCN"></div>
+                </div>
+                <div class="agg-detail" id="detailGCN">--</div>
+            </div>
+        </div>
+
+        <div class="info-box mt-2">
+            <p><strong>对比要点：</strong>Mean 聚合简单且排列不变，输出平滑稳定；Max-Pool 通过元素级最大值保留最显著的特征维度；LSTM 可捕捉序列依赖但需随机排列邻居以近似排列不变性；GCN 风格将自身特征也纳入归一化求和，是最简洁的变体。原论文实验表明 LSTM 和 Max-Pool 在部分归纳学习任务上效果更佳。</p>
+        </div>
+    </div>
+
+    <!-- ====================================================================
+         Section 3: Inductive Learning
+    ===================================================================== -->
+    <div class="section" id="sec-inductive">
+        <div class="section-title">
+            <div class="icon">&#x26A1;</div>
+            <h2>归纳学习 (Inductive Learning)</h2>
+        </div>
+        <p>传统 GCN 是<strong>转导式 (transductive)</strong> 方法: 训练时需要整个图的邻接矩阵，新节点加入后必须对整张图重新进行前向传播。GraphSAGE 采用<strong>归纳式 (inductive)</strong> 方法: 学习的是聚合函数的参数 $W$，而非每个节点的固定嵌入，因此可以直接为从未见过的新节点生成表示。</p>
+
+        <div class="flex justify-center gap-sm mb-2">
+            <button class="btn" id="btnPhase1">阶段一: 训练图</button>
+            <button class="btn" id="btnPhase2">阶段二: 加入新节点</button>
+            <button class="btn btn-primary" id="btnInfer">推理对比</button>
+            <button class="btn" id="btnResetInductive">重置</button>
+        </div>
+
+        <div class="inductive-layout">
+            <!-- GraphSAGE panel -->
+            <div class="card">
+                <span class="phase-label sage">GraphSAGE -- 归纳式</span>
+                <span class="time-badge fast" id="sageTime" style="visibility:hidden">~O(k)</span>
+                <div class="viz-area inductive-graph" id="inductiveGraphSAGE"></div>
+                <div class="embed-output" id="sageOutput">等待操作...</div>
+            </div>
+            <!-- GCN panel -->
+            <div class="card">
+                <span class="phase-label gcn-label">GCN -- 转导式 (对比)</span>
+                <span class="time-badge slow" id="gcnTime" style="visibility:hidden">~O(N)</span>
+                <div class="viz-area inductive-graph" id="inductiveGraphGCN"></div>
+                <div class="embed-output" id="gcnOutput">等待操作...</div>
+            </div>
+        </div>
+
+        <div class="key-insight">
+            "GraphSAGE 学习的是<strong>聚合函数</strong>，而非特定节点的嵌入"<br>
+            <span style="font-size:0.85rem; color:var(--text-secondary)">新节点加入后，只需采样其邻居并调用已学习的 $\text{AGG}$ 函数即可获得嵌入，无需重新训练</span>
+        </div>
+    </div>
+
+</div><!-- /page-container -->
+
+<!-- ===== Shared scripts ===== -->
+<script src="../shared/scripts/graph-utils.js"></script>
+<script src="../shared/scripts/graph-renderer.js"></script>
+<script src="../shared/scripts/matrix-renderer.js"></script>
+<script src="../shared/scripts/animation-controller.js"></script>
+<script src="../shared/scripts/katex-init.js"></script>
+<script src="../shared/scripts/nav.js"></script>
+
+<script>
+// ====================================================================
+//  Section 1 -- Neighbor Sampling
+// ====================================================================
+(function initSampling() {
+    const NEIGHBOR_COUNT = 14;
+    const centerId = 'c';
+    const elements = [];
+
+    // Hub node
+    elements.push({ data: { id: centerId, label: 'v', group: 0 } });
+
+    // Neighbor ring
+    for (let i = 0; i < NEIGHBOR_COUNT; i++) {
+        const nid = 'n' + i;
+        elements.push({ data: { id: nid, label: 'u' + i, group: 1 } });
+        elements.push({ data: { id: 'ec' + i, source: centerId, target: nid } });
+    }
+
+    // Inter-neighbor edges for visual realism
+    const interEdges = [
+        [0,1],[1,2],[3,4],[5,6],[7,8],[9,10],[11,12],[12,13],[13,0],
+        [2,5],[4,7],[6,9],[8,11],[10,13]
+    ];
+    interEdges.forEach(([a, b]) => {
+        elements.push({ data: { id: 'en' + a + '-' + b, source: 'n' + a, target: 'n' + b } });
+    });
+
+    const gr = new GraphRenderer({
+        container: document.getElementById('sampleGraphContainer'),
+        elements: elements,
+        layout: 'concentric',
+        style: { node: { 'width': 30, 'height': 30, 'font-size': '11px' } },
+    });
+
+    // Emphasize hub
+    gr.cy.getElementById(centerId).style({
+        width: 50, height: 50, 'font-size': '15px',
+        'background-color': '#16c79a', 'border-color': '#16c79a',
+    });
+
+    const slider    = document.getElementById('sampleSlider');
+    const valSpan   = document.getElementById('sampleVal');
+    const statsEl   = document.getElementById('neighborStats');
+    const compNote  = document.getElementById('compNote');
+
+    slider.addEventListener('input', () => { valSpan.textContent = slider.value; });
+
+    function resetSampling() {
+        gr.clearHighlights();
+        gr.cy.nodes().style({ 'opacity': 1 });
+        gr.cy.edges().style({ 'opacity': 1 });
+        gr.cy.getElementById(centerId).style({
+            'background-color': '#16c79a', 'border-color': '#16c79a',
+        });
+        for (let i = 0; i < NEIGHBOR_COUNT; i++) {
+            gr.cy.getElementById('n' + i).style({
+                'background-color': '#4fc3f7', 'border-color': 'rgba(79,195,247,0.3)',
+            });
+        }
+        statsEl.innerHTML = '';
+        compNote.textContent = '总邻居: ' + NEIGHBOR_COUNT + ' | 采样: -- | 节省: --';
+        compNote.classList.remove('active');
+    }
+
+    function doSample() {
+        resetSampling();
+        const k = parseInt(slider.value);
+
+        // Fisher-Yates shuffle
+        const indices = Array.from({ length: NEIGHBOR_COUNT }, (_, i) => i);
+        for (let i = indices.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [indices[i], indices[j]] = [indices[j], indices[i]];
+        }
+        const sampled = new Set(indices.slice(0, k));
+
+        // Highlight center
+        gr.cy.getElementById(centerId).addClass('highlighted');
+
+        // Animate neighbor-by-neighbor reveal
+        const allIds = Array.from({ length: NEIGHBOR_COUNT }, (_, i) => i);
+        allIds.forEach((idx, step) => {
+            setTimeout(() => {
+                const nid = 'n' + idx;
+                const node = gr.cy.getElementById(nid);
+                const edgeToHub = gr.cy.edges('[source="' + centerId + '"][target="' + nid + '"], [source="' + nid + '"][target="' + centerId + '"]');
+
+                if (sampled.has(idx)) {
+                    node.addClass('highlighted');
+                    edgeToHub.addClass('highlighted');
+                } else {
+                    node.addClass('dimmed');
+                    edgeToHub.addClass('dimmed');
+                }
+            }, step * 70);
+        });
+
+        // Dim inter-neighbor edges involving un-sampled nodes
+        setTimeout(() => {
+            interEdges.forEach(([a, b]) => {
+                if (!sampled.has(a) || !sampled.has(b)) {
+                    gr.cy.getElementById('en' + a + '-' + b).addClass('dimmed');
+                }
+            });
+        }, NEIGHBOR_COUNT * 70 + 50);
+
+        // Build stat chips
+        statsEl.innerHTML = '';
+        for (let i = 0; i < NEIGHBOR_COUNT; i++) {
+            const chip = document.createElement('span');
+            const isSampled = sampled.has(i);
+            chip.className = 'stat-chip' + (isSampled ? ' selected' : ' dimmed');
+            chip.textContent = 'u' + i;
+            statsEl.appendChild(chip);
+        }
+
+        // Computation note
+        const saving = ((1 - k / NEIGHBOR_COUNT) * 100).toFixed(0);
+        compNote.textContent = '总邻居: ' + NEIGHBOR_COUNT + ' | 采样: ' + k + ' | 节省: ' + saving + '%';
+        compNote.classList.add('active');
+
+        // Build tree visualization
+        buildSamplingTree(k);
+    }
+
+    document.getElementById('btnSample').addEventListener('click', doSample);
+    document.getElementById('btnResetSample').addEventListener('click', () => {
+        resetSampling();
+        document.getElementById('treeContainer').innerHTML = '';
+    });
+
+    // -- Multi-hop sampling tree --
+    function buildSamplingTree(k) {
+        const container = document.getElementById('treeContainer');
+        container.innerHTML = '';
+
+        const treeEls = [];
+        const rootId = 'tv';
+        treeEls.push({ data: { id: rootId, label: 'v' }, classes: 'tree-root' });
+
+        // 1-hop sampled
+        const hop1 = [];
+        for (let i = 0; i < k; i++) {
+            const nid = 'h1-' + i;
+            hop1.push(nid);
+            treeEls.push({ data: { id: nid, label: 's' + i } });
+            treeEls.push({ data: { source: rootId, target: nid } });
+        }
+
+        // 2-hop (min(k, 3) per 1-hop node)
+        const k2 = Math.min(k, 3);
+        const hop2 = [];
+        hop1.forEach((pid, pi) => {
+            for (let j = 0; j < k2; j++) {
+                const nid = 'h2-' + pi + '-' + j;
+                hop2.push(nid);
+                treeEls.push({ data: { id: nid, label: '' } });
+                treeEls.push({ data: { source: pid, target: nid } });
+            }
+        });
+
+        const treeCy = cytoscape({
+            container: container,
+            elements: treeEls,
+            style: [
+                {
+                    selector: 'node',
+                    style: {
+                        'background-color': '#4fc3f7', 'label': 'data(label)',
+                        'color': '#e8e8e8', 'text-valign': 'center', 'text-halign': 'center',
+                        'font-size': '9px', 'width': 22, 'height': 22,
+                        'font-family': 'JetBrains Mono, monospace',
+                        'text-outline-width': 2, 'text-outline-color': '#1a1a2e',
+                        'border-width': 1.5, 'border-color': 'rgba(79,195,247,0.3)',
+                        'opacity': 0,
+                    }
+                },
+                {
+                    selector: 'node.tree-root',
+                    style: {
+                        'background-color': '#16c79a', 'width': 32, 'height': 32,
+                        'border-color': '#16c79a', 'font-size': '12px',
+                    }
+                },
+                {
+                    selector: 'edge',
+                    style: {
+                        'width': 1.5, 'line-color': 'rgba(79,195,247,0.25)',
+                        'target-arrow-shape': 'triangle',
+                        'target-arrow-color': 'rgba(79,195,247,0.25)',
+                        'curve-style': 'bezier', 'opacity': 0,
+                    }
+                },
+            ],
+            layout: { name: 'breadthfirst', directed: true, spacingFactor: 0.95, padding: 10 },
+            userZoomingEnabled: false,
+            userPanningEnabled: false,
+        });
+        requestAnimationFrame(() => { requestAnimationFrame(() => { treeCy.resize(); treeCy.fit(undefined, 30); }); });
+
+        // Staggered reveal animation
+        const root = treeCy.getElementById(rootId);
+        gsap.to({}, { duration: 0.05, onComplete() { root.style('opacity', 1); } });
+
+        hop1.forEach((nid, i) => {
+            setTimeout(() => {
+                treeCy.getElementById(nid).style('opacity', 1);
+                treeCy.edges('[target="' + nid + '"]').style('opacity', 1);
+            }, 150 + i * 80);
+        });
+
+        const hop2Start = 150 + k * 80 + 180;
+        hop2.forEach((nid, i) => {
+            setTimeout(() => {
+                treeCy.getElementById(nid).style('opacity', 1);
+                treeCy.edges('[target="' + nid + '"]').style('opacity', 1);
+            }, hop2Start + i * 40);
+        });
+    }
+})();
+
+// ====================================================================
+//  Section 2 -- Aggregator Comparison
+// ====================================================================
+(function initAggregator() {
+    const AGG_COLORS = ['#16c79a', '#4fc3f7', '#b388ff', '#ffab40', '#ff80ab'];
+
+    // Feature vectors for the mini-graph
+    const centerFeat = [0.5, 0.3, 0.8];
+    const neighborFeats = [
+        [0.9, 0.1, 0.4],
+        [0.2, 0.8, 0.6],
+        [0.7, 0.5, 0.2],
+        [0.3, 0.9, 0.7],
+    ];
+    const dimLabels = ['d0', 'd1', 'd2'];
+
+    // Build a small graph in each column
+    function buildMiniGraph(containerId) {
+        const els = [];
+        els.push({ data: { id: 'ac', label: 'v', group: 0 } });
+        for (let i = 0; i < 4; i++) {
+            els.push({ data: { id: 'an' + i, label: 'u' + i, group: i + 1 } });
+            els.push({ data: { id: 'ae' + i, source: 'ac', target: 'an' + i } });
+        }
+        const g = new GraphRenderer({
+            container: document.getElementById(containerId),
+            elements: els,
+            layout: 'circle',
+            style: { node: { 'width': 26, 'height': 26, 'font-size': '9px' } },
+        });
+        g.cy.userZoomingEnabled(false);
+        g.cy.userPanningEnabled(false);
+        return g;
+    }
+
+    const graphs = {
+        mean: buildMiniGraph('aggGraphMean'),
+        pool: buildMiniGraph('aggGraphPool'),
+        lstm: buildMiniGraph('aggGraphLSTM'),
+        gcn:  buildMiniGraph('aggGraphGCN'),
+    };
+
+    // Render a multi-segment bar showing the aggregated feature vector
+    function renderBar(barId, values, barColors) {
+        const bar = document.getElementById(barId);
+        bar.innerHTML = '';
+        const maxVal = Math.max(...values, 0.01);
+        values.forEach((v, i) => {
+            const seg = document.createElement('span');
+            seg.className = 'fill-seg';
+            seg.style.width = '0%';
+            seg.style.backgroundColor = barColors[i % barColors.length];
+            seg.title = dimLabels[i] + ': ' + v.toFixed(3);
+            bar.appendChild(seg);
+            gsap.to(seg, {
+                width: (v / maxVal * (100 / values.length)) + '%',
+                duration: 0.7,
+                delay: 0.15 * i,
+                ease: 'power2.out',
+            });
+        });
+    }
+
+    // Animate edges lighting up one-by-one
+    function animateEdges(gr, order, done) {
+        gr.clearHighlights();
+        gr.cy.getElementById('ac').addClass('highlighted');
+        order.forEach((idx, step) => {
+            setTimeout(() => {
+                gr.cy.getElementById('an' + idx).addClass('highlighted');
+                gr.cy.edges('[source="ac"][target="an' + idx + '"], [source="an' + idx + '"][target="ac"]').addClass('highlighted');
+                if (step === order.length - 1 && done) setTimeout(done, 200);
+            }, step * 220);
+        });
+    }
+
+    // Aggregation functions
+    function aggMean(feats) {
+        const d = feats[0].length;
+        return Array.from({ length: d }, (_, i) =>
+            feats.reduce((s, f) => s + f[i], 0) / feats.length
+        );
+    }
+
+    function aggMaxPool(feats) {
+        const d = feats[0].length;
+        return Array.from({ length: d }, (_, i) =>
+            Math.max(...feats.map(f => Math.max(0, f[i] * 1.2 + 0.1)))
+        );
+    }
+
+    function aggLSTM(feats) {
+        const d = feats[0].length;
+        const shuffled = [...feats].sort(() => Math.random() - 0.5);
+        let h = new Array(d).fill(0);
+        for (const f of shuffled) {
+            h = h.map((v, i) => 0.55 * v + 0.45 * f[i]);
+        }
+        return h;
+    }
+
+    function aggGCNStyle(feats, selfFeat) {
+        const all = [selfFeat, ...feats];
+        const d = all[0].length;
+        return Array.from({ length: d }, (_, i) =>
+            all.reduce((s, f) => s + f[i], 0) / all.length
+        );
+    }
+
+    function fmtVec(v) { return '[' + v.map(x => x.toFixed(3)).join(', ') + ']'; }
+
+    function runAggregation() {
+        const order = [0, 1, 2, 3];
+        const meanRes = aggMean(neighborFeats);
+        const poolRes = aggMaxPool(neighborFeats);
+        const lstmRes = aggLSTM(neighborFeats);
+        const gcnRes  = aggGCNStyle(neighborFeats, centerFeat);
+
+        // LSTM uses random order
+        const lstmOrder = [...order].sort(() => Math.random() - 0.5);
+
+        animateEdges(graphs.mean, order, () => {
+            renderBar('barMean', meanRes, AGG_COLORS);
+            const el = document.getElementById('detailMean');
+            el.textContent = fmtVec(meanRes);
+            el.classList.add('active');
+        });
+
+        animateEdges(graphs.pool, order, () => {
+            renderBar('barPool', poolRes, AGG_COLORS);
+            const el = document.getElementById('detailPool');
+            el.textContent = fmtVec(poolRes);
+            el.classList.add('active');
+        });
+
+        animateEdges(graphs.lstm, lstmOrder, () => {
+            renderBar('barLSTM', lstmRes, AGG_COLORS);
+            const el = document.getElementById('detailLSTM');
+            el.textContent = fmtVec(lstmRes) + ' (order: ' + lstmOrder.join('->') + ')';
+            el.classList.add('active');
+        });
+
+        animateEdges(graphs.gcn, order, () => {
+            renderBar('barGCN', gcnRes, AGG_COLORS);
+            const el = document.getElementById('detailGCN');
+            el.textContent = fmtVec(gcnRes) + ' (含自身)';
+            el.classList.add('active');
+        });
+    }
+
+    function resetAggregation() {
+        Object.values(graphs).forEach(g => g.clearHighlights());
+        ['barMean', 'barPool', 'barLSTM', 'barGCN'].forEach(id => {
+            document.getElementById(id).innerHTML = '';
+        });
+        ['detailMean', 'detailPool', 'detailLSTM', 'detailGCN'].forEach(id => {
+            const el = document.getElementById(id);
+            el.textContent = '--';
+            el.classList.remove('active');
+        });
+    }
+
+    document.getElementById('btnRunAgg').addEventListener('click', runAggregation);
+    document.getElementById('btnResetAgg').addEventListener('click', resetAggregation);
+})();
+
+// ====================================================================
+//  Section 3 -- Inductive Learning
+// ====================================================================
+(function initInductive() {
+    // Training graph
+    const trainNodes = [
+        { id: 0, label: 'A', group: 0 },
+        { id: 1, label: 'B', group: 0 },
+        { id: 2, label: 'C', group: 1 },
+        { id: 3, label: 'D', group: 1 },
+        { id: 4, label: 'E', group: 2 },
+        { id: 5, label: 'F', group: 2 },
+        { id: 6, label: 'G', group: 0 },
+    ];
+    const trainEdges = [
+        [0,1],[1,2],[2,3],[3,4],[4,5],[5,0],[0,3],[1,4],[2,5],[6,0],[6,2]
+    ];
+
+    const NEW_ID = '7';
+    const newEdges = [[7,1],[7,3],[7,5]];
+    const groupColors = ['#16c79a', '#4fc3f7', '#b388ff'];
+
+    function makeElements(nodes, edges) {
+        return GraphUtils.toCytoscapeElements(nodes, edges);
+    }
+
+    // Create both graphs
+    const grSage = new GraphRenderer({
+        container: document.getElementById('inductiveGraphSAGE'),
+        elements: makeElements(trainNodes, trainEdges),
+        layout: 'cose',
+    });
+
+    const grGCN = new GraphRenderer({
+        container: document.getElementById('inductiveGraphGCN'),
+        elements: makeElements(trainNodes, trainEdges),
+        layout: 'cose',
+    });
+
+    const sageOut = document.getElementById('sageOutput');
+    const gcnOut  = document.getElementById('gcnOutput');
+    const sageTimeBadge = document.getElementById('sageTime');
+    const gcnTimeBadge  = document.getElementById('gcnTime');
+
+    let phase = 0;
+
+    function restoreNodeColors(gr) {
+        gr.cy.nodes().forEach(node => {
+            const gid = node.data('group');
+            const c = (gid !== undefined) ? groupColors[gid % 3] : '#16c79a';
+            node.style({
+                'background-color': c,
+                'border-color': 'rgba(22,199,154,0.3)',
+                'border-width': 2,
+                'border-style': 'solid',
+                'width': 36, 'height': 36,
+            });
+        });
+    }
+
+    function removeNewNode(gr) {
+        const n = gr.cy.getElementById(NEW_ID);
+        if (n.length) n.remove();
+        newEdges.forEach(([s, t]) => {
+            const e = gr.cy.getElementById('e' + s + '-' + t);
+            if (e.length) e.remove();
+        });
+    }
+
+    // Phase 1: Show training graph
+    function showPhase1() {
+        phase = 1;
+        [grSage, grGCN].forEach(gr => {
+            gr.clearHighlights();
+            removeNewNode(gr);
+            restoreNodeColors(gr);
+            // Briefly highlight all to show training
+            gr.cy.nodes().forEach((node, i) => {
+                setTimeout(() => node.addClass('highlighted'), i * 80);
+            });
+        });
+        sageOut.textContent = '训练阶段: 学习聚合函数参数 W_agg, W_concat';
+        sageOut.className = 'embed-output';
+        gcnOut.textContent  = '训练阶段: 学习嵌入矩阵 Z = f(A, X; W)';
+        gcnOut.className = 'embed-output';
+        sageTimeBadge.style.visibility = 'hidden';
+        gcnTimeBadge.style.visibility = 'hidden';
+    }
+
+    // Phase 2: Add a new node
+    function showPhase2() {
+        if (phase < 1) showPhase1();
+        phase = 2;
+
+        [grSage, grGCN].forEach(gr => {
+            gr.clearHighlights();
+            removeNewNode(gr);
+            restoreNodeColors(gr);
+
+            // Add new node
+            gr.cy.add({
+                data: { id: NEW_ID, label: 'NEW' },
+                position: { x: gr.cy.width() / 2 + 20, y: gr.cy.height() / 2 },
+            });
+
+            const newNode = gr.cy.getElementById(NEW_ID);
+            newNode.style({
+                'background-color': '#ffd740',
+                'border-color': '#ffd740',
+                'border-width': 3,
+                'border-style': 'dashed',
+                'width': 44, 'height': 44,
+                'font-size': '11px',
+                'color': '#1a1a2e',
+            });
+
+            // Connect to neighbors
+            newEdges.forEach(([s, t]) => {
+                const eid = 'e' + s + '-' + t;
+                if (!gr.cy.getElementById(eid).length) {
+                    gr.cy.add({ data: { id: eid, source: String(s), target: String(t) } });
+                }
+            });
+
+            gr.cy.layout({ name: 'cose', animate: true, animationDuration: 500 }).run();
+        });
+
+        sageOut.textContent = '新节点 NEW 已连入图中，等待推理...';
+        sageOut.className = 'embed-output';
+        gcnOut.textContent  = '新节点 NEW 已连入图中，等待推理...';
+        gcnOut.className = 'embed-output';
+    }
+
+    // Phase 3: Run inference comparison
+    function runInference() {
+        if (phase < 2) showPhase2();
+        setTimeout(doInference, phase === 2 ? 100 : 700);
+    }
+
+    function doInference() {
+        phase = 3;
+
+        // -- GraphSAGE: fast, local inference --
+        grSage.clearHighlights();
+        const sageNew = grSage.cy.getElementById(NEW_ID);
+        const sageNeighborIds = ['1', '3', '5'];
+
+        sageNeighborIds.forEach((nid, i) => {
+            setTimeout(() => {
+                const node = grSage.cy.getElementById(nid);
+                node.addClass('highlighted');
+                grSage.animateMessage(nid, NEW_ID, '#16c79a');
+            }, 250 + i * 350);
+        });
+
+        const sageDoneTime = 250 + sageNeighborIds.length * 350 + 300;
+        setTimeout(() => {
+            sageNew.style({ 'border-style': 'solid', 'background-color': '#16c79a', 'border-color': '#16c79a' });
+            sageNew.addClass('highlighted');
+            sageOut.textContent = 'h_NEW = sigma(W * CONCAT(h_NEW, AGG({h_B, h_D, h_F})))';
+            sageOut.className = 'embed-output active';
+            sageTimeBadge.style.visibility = 'visible';
+        }, sageDoneTime);
+
+        // -- GCN: slow, full-graph recomputation --
+        grGCN.clearHighlights();
+        gcnOut.textContent = '需要对整张图(含新节点)重新前向传播...';
+        gcnOut.className = 'embed-output error';
+
+        // Flash all nodes red to indicate recomputation
+        const gcnNodes = grGCN.cy.nodes();
+        const totalNodes = gcnNodes.length;
+        setTimeout(() => {
+            gcnNodes.forEach((node, i) => {
+                setTimeout(() => {
+                    node.style({ 'background-color': '#ff5252', 'border-color': '#ff5252' });
+                }, i * 100);
+            });
+        }, 400);
+
+        // After full "retraining"
+        const gcnDoneTime = 400 + totalNodes * 100 + 500;
+        setTimeout(() => {
+            gcnNodes.forEach(node => {
+                if (node.id() === NEW_ID) {
+                    node.style({ 'background-color': '#ffd740', 'border-color': '#ffd740', 'border-style': 'solid' });
+                } else {
+                    const gid = node.data('group');
+                    const c = (gid !== undefined) ? groupColors[gid % 3] : '#16c79a';
+                    node.style({ 'background-color': c, 'border-color': c });
+                }
+            });
+            gcnOut.textContent = 'Z = softmax(A_hat * ReLU(A_hat * X * W0) * W1) -- 全图重新计算';
+            gcnOut.className = 'embed-output active';
+            gcnTimeBadge.style.visibility = 'visible';
+        }, gcnDoneTime);
+    }
+
+    function resetInductive() {
+        phase = 0;
+        [grSage, grGCN].forEach(gr => {
+            gr.clearHighlights();
+            removeNewNode(gr);
+            restoreNodeColors(gr);
+        });
+        sageOut.textContent = '等待操作...';
+        sageOut.className = 'embed-output';
+        gcnOut.textContent  = '等待操作...';
+        gcnOut.className = 'embed-output';
+        sageTimeBadge.style.visibility = 'hidden';
+        gcnTimeBadge.style.visibility = 'hidden';
+    }
+
+    document.getElementById('btnPhase1').addEventListener('click', showPhase1);
+    document.getElementById('btnPhase2').addEventListener('click', showPhase2);
+    document.getElementById('btnInfer').addEventListener('click', runInference);
+    document.getElementById('btnResetInductive').addEventListener('click', resetInductive);
+})();
+</script>
+</body>
+</html>

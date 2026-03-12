@@ -1,0 +1,1279 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>08 - 训练与优化 | Transformer 学习</title>
+
+    <!-- Shared Styles -->
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+
+    <!-- KaTeX -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+
+    <!-- CDN Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <style>
+        /* ========== Module-specific Styles ========== */
+        .hero-banner { text-align: center; padding: 2rem 0 1.5rem; }
+        .hero-banner h1 { font-size: 2.2rem; background: linear-gradient(135deg, var(--accent-green), var(--accent-orange)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+        .hero-banner .subtitle { color: var(--text-secondary); font-size: 1.05rem; margin-top: 0.3rem; }
+        .section-anchor { scroll-margin-top: calc(var(--header-height) + 1rem); }
+
+        /* Teacher forcing */
+        .tf-diagram { width: 100%; overflow-x: auto; }
+        .tf-diagram svg { display: block; margin: 0 auto; }
+        .tf-diagram svg text { font-family: var(--font-cn), var(--font-sans); }
+        .tf-token { display: inline-flex; align-items: center; justify-content: center; padding: 0.4rem 0.7rem; border-radius: var(--radius-sm); font-size: 0.85rem; font-weight: 600; min-width: 52px; text-align: center; transition: all 0.3s; }
+        .tf-input { background: rgba(79,195,247,0.2); color: var(--accent-blue); border: 1px solid rgba(79,195,247,0.4); }
+        .tf-target { background: rgba(22,199,154,0.2); color: var(--accent-green); border: 1px solid rgba(22,199,154,0.4); }
+        .tf-pred { background: rgba(255,171,64,0.2); color: var(--accent-orange); border: 1px solid rgba(255,171,64,0.4); }
+        .tf-row { display: flex; gap: 0.5rem; align-items: center; margin: 0.6rem 0; flex-wrap: wrap; }
+        .tf-label { font-size: 0.82rem; color: var(--text-muted); min-width: 80px; }
+
+        /* Mode toggle */
+        .mode-toggle { display: flex; gap: 0; margin: 1rem 0; }
+        .mode-btn { padding: 0.5rem 1.2rem; border: 1px solid var(--border-color); background: var(--bg-secondary); color: var(--text-secondary); font-family: inherit; font-size: 0.85rem; cursor: pointer; transition: all 0.2s; }
+        .mode-btn:first-child { border-radius: var(--radius-sm) 0 0 var(--radius-sm); }
+        .mode-btn:last-child { border-radius: 0 var(--radius-sm) var(--radius-sm) 0; border-left: none; }
+        .mode-btn.active { background: rgba(22,199,154,0.2); border-color: var(--accent-green); color: var(--accent-green); }
+
+        /* Cross-entropy */
+        .prob-bar-row { display: flex; align-items: center; gap: 0.6rem; margin: 0.35rem 0; }
+        .prob-bar-label { font-size: 0.82rem; min-width: 48px; color: var(--text-secondary); font-family: var(--font-mono); }
+        .prob-bar-track { flex: 1; height: 26px; background: var(--bg-primary); border-radius: 4px; overflow: hidden; position: relative; }
+        .prob-bar-fill { height: 100%; border-radius: 4px; transition: width 0.2s; }
+        .prob-bar-value { font-size: 0.78rem; min-width: 44px; text-align: right; font-family: var(--font-mono); color: var(--accent-green); }
+        .loss-display { font-size: 1.3rem; font-family: var(--font-mono); text-align: center; padding: 1rem; background: var(--bg-primary); border-radius: var(--radius-md); border: 1px solid var(--border-color); margin: 1rem 0; }
+        .loss-display .value { color: var(--accent-orange); font-weight: 700; }
+        .loss-display .sub { display: block; font-size: 0.78rem; color: var(--text-muted); margin-top: 0.3rem; }
+        .target-indicator { font-size: 0.75rem; padding: 0.1rem 0.4rem; border-radius: 3px; background: rgba(22,199,154,0.2); color: var(--accent-green); margin-left: 0.3rem; }
+
+        /* Learning rate */
+        .chart-container { position: relative; width: 100%; height: 320px; }
+        .chart-container canvas { width: 100% !important; height: 100% !important; }
+        .slider-panel { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; padding: 1rem; background: var(--bg-primary); border-radius: var(--radius-md); border: 1px solid var(--border-color); margin-top: 1rem; }
+        .lr-formula-box { font-family: var(--font-mono); font-size: 0.82rem; color: var(--text-muted); padding: 0.6rem; background: var(--bg-primary); border-radius: var(--radius-sm); border: 1px solid var(--border-color); margin-top: 0.75rem; text-align: center; }
+        .lr-formula-box .highlight-val { color: var(--accent-green); font-weight: 600; }
+
+        /* Dashboard */
+        .dashboard-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
+        .dash-chart-box { background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 1rem; }
+        .dash-chart-box h4 { margin-bottom: 0.5rem; font-size: 0.9rem; }
+        .dash-stat-row { display: flex; gap: 1rem; margin-top: 0.5rem; justify-content: center; }
+        .dash-stat { text-align: center; padding: 0.4rem 0.8rem; background: var(--bg-secondary); border-radius: var(--radius-sm); border: 1px solid var(--border-color); min-width: 100px; }
+        .dash-stat .stat-label { font-size: 0.72rem; color: var(--text-muted); display: block; }
+        .dash-stat .stat-val { font-family: var(--font-mono); font-size: 1rem; font-weight: 700; }
+        .heatmap-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1rem; margin-top: 1rem; }
+        .heatmap-box { text-align: center; }
+        .heatmap-box canvas { border: 1px solid var(--border-color); border-radius: var(--radius-sm); display: block; margin: 0 auto; }
+        .heatmap-box .label { font-size: 0.78rem; color: var(--text-muted); margin-top: 0.3rem; }
+        .epoch-display { font-family: var(--font-mono); font-size: 1.1rem; text-align: center; padding: 0.5rem; color: var(--accent-green); }
+
+        /* Beam search */
+        .beam-tree-container { width: 100%; overflow-x: auto; }
+        .beam-tree-container svg text { font-family: var(--font-cn), var(--font-sans); }
+        .beam-node { cursor: default; }
+        .beam-node rect { transition: all 0.3s; }
+        .beam-active rect { filter: drop-shadow(0 0 6px rgba(22,199,154,0.4)); }
+        .beam-pruned rect { opacity: 0.35; }
+        .beam-pruned text { opacity: 0.35; }
+        .beam-result { display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 0.8rem; background: var(--bg-primary); border-radius: var(--radius-sm); border: 1px solid var(--border-color); margin: 0.3rem 0; font-size: 0.88rem; transition: all 0.2s; }
+        .beam-result:hover { border-color: var(--accent-green); }
+        .beam-result .rank { color: var(--accent-orange); font-weight: 700; min-width: 24px; }
+        .beam-result .seq { flex: 1; color: var(--text-primary); }
+        .beam-result .score { font-family: var(--font-mono); color: var(--accent-green); font-size: 0.82rem; }
+        .beam-compare-box { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; margin-top: 0.5rem; font-size: 0.8rem; }
+        .beam-metric { padding: 0.4rem 0.6rem; background: var(--bg-primary); border-radius: var(--radius-sm); border: 1px solid var(--border-color); text-align: center; }
+        .beam-metric .metric-label { color: var(--text-muted); display: block; font-size: 0.72rem; }
+        .beam-metric .metric-val { font-family: var(--font-mono); color: var(--accent-blue); font-weight: 600; }
+
+        /* Responsive */
+        @media (max-width: 1024px) { .dashboard-grid { grid-template-columns: 1fr; } .heatmap-row { grid-template-columns: 1fr 1fr; } .slider-panel { grid-template-columns: 1fr; } }
+        @media (max-width: 768px) { .heatmap-row { grid-template-columns: 1fr; } .beam-compare-box { grid-template-columns: 1fr; } }
+    </style>
+</head>
+<body>
+    <div class="page-container">
+        <!-- Hero -->
+        <div class="hero-banner">
+            <h1>训练与优化</h1>
+            <p class="subtitle">教师强制、损失函数、学习率调度、训练监控与解码策略</p>
+        </div>
+
+        <!-- ==================== Section 1: Teacher Forcing ==================== -->
+        <div class="section section-anchor" id="sec-teacher-forcing">
+            <div class="section-title">
+                <span class="icon">&#x27F3;</span>
+                <h2>1. 教师强制 (Teacher Forcing)</h2>
+            </div>
+            <div class="split-layout">
+                <div class="text-panel">
+                    <p>训练序列到序列模型时，解码器需要"上一个词"作为输入来预测下一个词。这里有两种策略：</p>
+                    <div class="info-box">
+                        <p><strong>训练模式 (Teacher Forcing)：</strong>输入为目标序列右移一位（前置 SOS），标签为原始目标序列（后接 EOS）。模型每一步都接收 <em>真实的</em> 上一个词。</p>
+                    </div>
+                    <div class="info-box warning">
+                        <p><strong>推理模式 (Autoregressive)：</strong>逐步生成，每一步的输入是上一步 <em>模型自身的预测</em>。若某步预测错误，错误会向后传播 (exposure bias)。</p>
+                    </div>
+
+                    <div class="mode-toggle">
+                        <button class="mode-btn active" onclick="setTFMode('train')">训练模式</button>
+                        <button class="mode-btn" onclick="setTFMode('infer')">推理模式</button>
+                    </div>
+
+                    <div class="card mt-1" style="padding:0.8rem;">
+                        <p class="text-sm" style="margin-bottom:0.4rem;"><strong>对齐关系：</strong></p>
+                        <div class="tf-row">
+                            <span class="tf-label">输入：</span>
+                            <span class="tf-token tf-input">SOS</span>
+                            <span class="tf-token tf-input">机器</span>
+                            <span class="tf-token tf-input">学习</span>
+                            <span class="tf-token tf-input">很</span>
+                            <span class="tf-token tf-input">有趣</span>
+                        </div>
+                        <div class="tf-row">
+                            <span class="tf-label">目标：</span>
+                            <span class="tf-token tf-target">机器</span>
+                            <span class="tf-token tf-target">学习</span>
+                            <span class="tf-token tf-target">很</span>
+                            <span class="tf-token tf-target">有趣</span>
+                            <span class="tf-token tf-target">EOS</span>
+                        </div>
+                    </div>
+
+                    <div class="legend mt-1">
+                        <div class="legend-item"><span class="swatch" style="background:rgba(79,195,247,0.6)"></span> 解码器输入</div>
+                        <div class="legend-item"><span class="swatch" style="background:rgba(22,199,154,0.6)"></span> 目标/真实输出</div>
+                        <div class="legend-item"><span class="swatch" style="background:rgba(255,171,64,0.6)"></span> 模型预测</div>
+                    </div>
+                </div>
+                <div class="viz-panel">
+                    <div class="card">
+                        <div id="tf-viz-area" style="min-height:330px;"></div>
+                        <div class="anim-controls mt-1">
+                            <button class="btn btn-sm" id="tf-play-btn" onclick="toggleTFAnim()">&#9654; 播放</button>
+                            <button class="btn btn-sm" onclick="resetTFAnim()">&#x21BB; 重置</button>
+                            <div class="progress-bar"><div class="fill" id="tf-progress" style="width:0%"></div></div>
+                            <span class="step-label" id="tf-step-label">0 / 5</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ==================== Section 2: Cross-Entropy Loss ==================== -->
+        <div class="section section-anchor" id="sec-cross-entropy">
+            <div class="section-title">
+                <span class="icon">&#x2212;</span>
+                <h2>2. 交叉熵损失</h2>
+            </div>
+            <div class="split-layout">
+                <div class="text-panel">
+                    <p>在每个时间步，模型输出一个覆盖整个词汇表的概率分布。我们用 <strong>交叉熵损失</strong> 衡量预测分布与真实标签（one-hot）之间的差距：</p>
+                    <div class="info-box">
+                        <p>$$\mathcal{L} = -\sum_{t=1}^{T} \log P(y_t \mid y_{&lt;t}, x)$$</p>
+                    </div>
+                    <p>当模型对正确答案的预测概率趋近 1 时，$-\log P \to 0$，损失最小。若预测概率趋近 0，损失趋向无穷大。</p>
+
+                    <h4 class="mt-2">标签平滑</h4>
+                    <p>标准 one-hot 标签让模型追求极端的概率分布，容易过拟合。<strong>标签平滑</strong>将部分概率质量分配给非正确类：</p>
+                    <div class="info-box success">
+                        <p>$$q(k) = \begin{cases} 1 - \epsilon & \text{if } k = y \\ \frac{\epsilon}{V-1} & \text{otherwise} \end{cases}$$</p>
+                    </div>
+
+                    <div class="mt-1">
+                        <label class="toggle">
+                            <input type="checkbox" id="label-smooth-toggle" onchange="updateCELoss()">
+                            <span class="track"></span>
+                        </label>
+                        <span class="text-sm" style="margin-left:0.5rem;">启用标签平滑 (&#949; = 0.1)</span>
+                    </div>
+                    <div class="info-box warning mt-1" id="smooth-info" style="display:none;">
+                        <p>标签平滑使模型不会对预测过于"自信"，输出更平滑的概率分布，提升泛化能力和 BLEU 分数。</p>
+                    </div>
+                </div>
+                <div class="viz-panel">
+                    <div class="card">
+                        <h4 style="margin-bottom:0.5rem;">目标词: <code>学习</code> <span class="target-indicator">&#10003; 正确标签</span></h4>
+                        <p class="text-sm text-muted" style="margin-bottom:0.6rem;">拖动滑块调整每个词的预测概率，观察损失变化</p>
+                        <div id="ce-prob-bars"></div>
+                        <div class="loss-display">
+                            交叉熵损失: <span class="value" id="ce-loss-value">0.000</span>
+                            <span class="sub" id="ce-loss-sub">概率越接近 1，损失越低</span>
+                        </div>
+                        <div id="ce-breakdown" style="font-size:0.82rem; color:var(--text-muted); text-align:center; padding:0.4rem;"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ==================== Section 3: Learning Rate Schedule ==================== -->
+        <div class="section section-anchor" id="sec-lr-schedule">
+            <div class="section-title">
+                <span class="icon">&#x2197;</span>
+                <h2>3. 学习率调度</h2>
+            </div>
+            <div class="split-layout">
+                <div class="text-panel">
+                    <p>原始 Transformer 论文使用了一种特殊的学习率调度策略：先 <strong>线性预热 (warmup)</strong>，到达峰值后按 <strong>逆平方根衰减</strong>：</p>
+                    <div class="info-box">
+                        <p>$$lr = d_{\text{model}}^{-0.5} \cdot \min\!\big(step^{-0.5},\; step \cdot warmup\_steps^{-1.5}\big)$$</p>
+                    </div>
+                    <p>在 warmup 阶段（$step &lt; warmup\_steps$），学习率从 0 线性增长到峰值。之后按 $step^{-0.5}$ 缓慢下降。</p>
+
+                    <div class="info-box warning mt-1">
+                        <p><strong>为什么需要预热？</strong></p>
+                        <p class="text-sm mt-1">Adam 优化器维护梯度的一阶矩（均值）和二阶矩（方差）的指数移动平均。训练初期这些估计值接近零（偏向初始化），即使经过偏差校正，初始几步的有效学习率仍然不稳定。线性预热让模型在参数更新不稳定的阶段使用较小的步长。</p>
+                    </div>
+
+                    <div class="lr-formula-box mt-1" id="lr-live-formula">
+                        当前配置：warmup = <span class="highlight-val">4000</span>, d_model = <span class="highlight-val">512</span>
+                    </div>
+                </div>
+                <div class="viz-panel">
+                    <div class="card">
+                        <div class="chart-container">
+                            <canvas id="lr-chart"></canvas>
+                        </div>
+                        <div class="slider-panel">
+                            <div class="slider-group">
+                                <label>warmup_steps:</label>
+                                <input type="range" id="warmup-slider" min="500" max="8000" step="500" value="4000" oninput="updateLRChart()">
+                                <span class="slider-value" id="warmup-val">4000</span>
+                            </div>
+                            <div class="slider-group">
+                                <label>d_model:</label>
+                                <input type="range" id="dmodel-slider" min="64" max="1024" step="64" value="512" oninput="updateLRChart()">
+                                <span class="slider-value" id="dmodel-val">512</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ==================== Section 4: Training Dashboard ==================== -->
+        <div class="section section-anchor" id="sec-dashboard">
+            <div class="section-title">
+                <span class="icon">&#x25A3;</span>
+                <h2>4. 训练仪表盘</h2>
+            </div>
+            <p>观察模拟的训练过程：损失曲线逐渐下降，注意力模式从随机噪声演化为有意义的对齐模式。</p>
+            <div class="anim-controls mb-2">
+                <button class="btn btn-sm btn-primary" id="dash-play-btn" onclick="toggleDashAnim()">&#9654; 开始训练</button>
+                <button class="btn btn-sm" onclick="resetDash()">&#x21BB; 重置</button>
+                <div class="progress-bar"><div class="fill" id="dash-progress" style="width:0%"></div></div>
+                <span class="step-label" id="dash-epoch-label">Epoch 0 / 50</span>
+            </div>
+
+            <div class="dash-stat-row mb-2">
+                <div class="dash-stat">
+                    <span class="stat-label">训练损失</span>
+                    <span class="stat-val" id="stat-train-loss" style="color:var(--accent-blue);">--</span>
+                </div>
+                <div class="dash-stat">
+                    <span class="stat-label">验证损失</span>
+                    <span class="stat-val" id="stat-val-loss" style="color:var(--accent-orange);">--</span>
+                </div>
+                <div class="dash-stat">
+                    <span class="stat-label">学习率</span>
+                    <span class="stat-val" id="stat-lr" style="color:var(--accent-green);">--</span>
+                </div>
+                <div class="dash-stat">
+                    <span class="stat-label">过拟合差距</span>
+                    <span class="stat-val" id="stat-gap" style="color:var(--accent-purple);">--</span>
+                </div>
+            </div>
+
+            <div class="dashboard-grid">
+                <div class="dash-chart-box">
+                    <h4 style="color:var(--accent-blue);">训练损失</h4>
+                    <div class="chart-container" style="height:240px;">
+                        <canvas id="train-loss-chart"></canvas>
+                    </div>
+                </div>
+                <div class="dash-chart-box">
+                    <h4 style="color:var(--accent-orange);">验证损失</h4>
+                    <div class="chart-container" style="height:240px;">
+                        <canvas id="val-loss-chart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card mt-2">
+                <h4>注意力模式演化</h4>
+                <p class="text-sm text-muted">随训练进行，注意力从随机分布逐渐学会关注相关的源语言位置</p>
+                <div class="epoch-display" id="attn-epoch-display">当前 Epoch: 0</div>
+                <div class="heatmap-row" id="attn-heatmaps">
+                    <div class="heatmap-box">
+                        <canvas id="heatmap-1" width="180" height="180"></canvas>
+                        <div class="label">Epoch 1 — 随机注意力</div>
+                    </div>
+                    <div class="heatmap-box">
+                        <canvas id="heatmap-2" width="180" height="180"></canvas>
+                        <div class="label">Epoch 10 — 对角线模式</div>
+                    </div>
+                    <div class="heatmap-box">
+                        <canvas id="heatmap-3" width="180" height="180"></canvas>
+                        <div class="label">Epoch 50 — 有意义的对齐</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ==================== Section 5: Greedy vs Beam Search ==================== -->
+        <div class="section section-anchor" id="sec-beam-search">
+            <div class="section-title">
+                <span class="icon">&#x2442;</span>
+                <h2>5. 贪心搜索 vs 束搜索</h2>
+            </div>
+            <div class="split-layout">
+                <div class="text-panel">
+                    <p><strong>贪心搜索 (Greedy)</strong>：每一步选择概率最高的词元，计算最快但可能错过全局最优序列。</p>
+                    <p><strong>束搜索 (Beam Search)</strong>：每一步保留概率最高的 $k$ 个候选序列（$k$ = beam_width），最终选择总分最高的完整序列。</p>
+
+                    <div class="slider-group mt-1">
+                        <label>beam_width:</label>
+                        <input type="range" id="beam-slider" min="1" max="5" step="1" value="3" oninput="updateBeamSearch()">
+                        <span class="slider-value" id="beam-val">3</span>
+                    </div>
+                    <div class="info-box mt-1" id="beam-info">
+                        <p>beam_width = 3：保留 3 个候选序列</p>
+                    </div>
+
+                    <div class="beam-compare-box">
+                        <div class="beam-metric">
+                            <span class="metric-label">候选数量</span>
+                            <span class="metric-val" id="beam-cand-count">3</span>
+                        </div>
+                        <div class="beam-metric">
+                            <span class="metric-label">相对计算量</span>
+                            <span class="metric-val" id="beam-compute">3x</span>
+                        </div>
+                    </div>
+
+                    <h4 class="mt-2">翻译 "机器学习" 的解码结果</h4>
+                    <p class="text-sm text-muted">候选序列按累积对数概率排序</p>
+                    <div id="beam-results"></div>
+                </div>
+                <div class="viz-panel">
+                    <div class="card">
+                        <h4 style="margin-bottom:0.5rem;">搜索树可视化</h4>
+                        <p class="text-sm text-muted">实线 = 保留路径，虚线节点 = 被剪枝</p>
+                        <div class="beam-tree-container" id="beam-tree-container" style="min-height:400px;"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Shared Scripts -->
+    <script src="../shared/scripts/transformer-utils.js"></script>
+    <script src="../shared/scripts/animation-controller.js"></script>
+    <script src="../shared/scripts/matrix-renderer.js"></script>
+    <script src="../shared/scripts/nav.js"></script>
+    <script src="../shared/scripts/katex-init.js"></script>
+
+    <script>
+    /* ================================================================
+       Section 1: Teacher Forcing
+       ================================================================ */
+    const tfTokens = {
+        input:  ['SOS', '机器', '学习', '很', '有趣'],
+        target: ['机器', '学习', '很', '有趣', 'EOS']
+    };
+    const tfInferPred = ['机器', '深度', '很', '有趣', 'EOS'];
+    let tfMode = 'train';
+    let tfAnimStep = 0;
+    let tfAnimRunning = false;
+    let tfAnimTimer = null;
+
+    function setTFMode(mode) {
+        tfMode = mode;
+        document.querySelectorAll('.mode-btn').forEach((b, i) => {
+            b.classList.toggle('active', (i === 0 && mode === 'train') || (i === 1 && mode === 'infer'));
+        });
+        tfAnimStep = 0;
+        stopTFAnim();
+        drawTFDiagram();
+    }
+
+    function resetTFAnim() {
+        stopTFAnim();
+        tfAnimStep = 0;
+        drawTFDiagram();
+    }
+
+    function drawTFDiagram() {
+        const container = document.getElementById('tf-viz-area');
+        container.innerHTML = '';
+        const W = Math.min(container.clientWidth || 640, 700);
+        const H = 330;
+        const svg = d3.select(container).append('svg')
+            .attr('width', W).attr('height', H)
+            .attr('viewBox', `0 0 ${W} ${H}`);
+
+        const colW = (W - 60) / 5;
+        const startX = 50;
+        const yInput = 55, yDecoder = 155, yOutput = 255;
+
+        /* Arrow marker definitions */
+        const defs = svg.append('defs');
+        const markers = [
+            ['arrowBlue', '#4fc3f7'],
+            ['arrowGreen', '#16c79a'],
+            ['arrowOrange', '#ffab40'],
+            ['arrowPurple', '#b388ff'],
+            ['arrowGray', 'rgba(100,100,140,0.4)']
+        ];
+        markers.forEach(([id, color]) => {
+            defs.append('marker').attr('id', id)
+                .attr('viewBox', '0 0 10 10').attr('refX', 9).attr('refY', 5)
+                .attr('markerWidth', 6).attr('markerHeight', 6).attr('orient', 'auto')
+                .append('path').attr('d', 'M0,0 L10,5 L0,10 Z').attr('fill', color);
+        });
+
+        /* Row labels */
+        svg.append('text').attr('x', 8).attr('y', yInput + 4)
+            .text('输入').attr('fill', '#4fc3f7').attr('font-size', 12);
+        svg.append('text').attr('x', 8).attr('y', yDecoder + 4)
+            .text('解码器').attr('fill', '#b388ff').attr('font-size', 12);
+        svg.append('text').attr('x', 8).attr('y', yOutput + 4)
+            .text(tfMode === 'train' ? '目标' : '输出').attr('fill', '#16c79a').attr('font-size', 12);
+
+        for (let i = 0; i < 5; i++) {
+            const cx = startX + i * colW + colW / 2;
+            const active = i < tfAnimStep;
+            const current = i === tfAnimStep - 1;
+
+            /* ---- Input token ---- */
+            const inAlpha = active ? 0.35 : 0.1;
+            svg.append('rect')
+                .attr('x', cx - 36).attr('y', yInput - 16).attr('width', 72).attr('height', 32).attr('rx', 6)
+                .attr('fill', `rgba(79,195,247,${inAlpha})`)
+                .attr('stroke', active ? '#4fc3f7' : 'rgba(79,195,247,0.3)')
+                .attr('stroke-width', current ? 2.5 : 1);
+            svg.append('text').attr('x', cx).attr('y', yInput + 4)
+                .text(tfTokens.input[i])
+                .attr('fill', '#4fc3f7').attr('font-size', 12).attr('text-anchor', 'middle')
+                .attr('font-weight', active ? 700 : 400);
+
+            /* ---- Decoder block ---- */
+            svg.append('rect')
+                .attr('x', cx - 32).attr('y', yDecoder - 18).attr('width', 64).attr('height', 36).attr('rx', 6)
+                .attr('fill', active ? 'rgba(179,136,255,0.2)' : 'rgba(179,136,255,0.06)')
+                .attr('stroke', active ? '#b388ff' : 'rgba(179,136,255,0.25)')
+                .attr('stroke-width', current ? 2 : 1);
+            svg.append('text').attr('x', cx).attr('y', yDecoder + 5)
+                .text('Decoder').attr('fill', '#b388ff').attr('font-size', 10).attr('text-anchor', 'middle');
+
+            /* ---- Arrow: input -> decoder ---- */
+            svg.append('line')
+                .attr('x1', cx).attr('y1', yInput + 16).attr('x2', cx).attr('y2', yDecoder - 18)
+                .attr('stroke', active ? '#4fc3f7' : 'rgba(79,195,247,0.2)')
+                .attr('stroke-width', 1.5)
+                .attr('marker-end', active ? 'url(#arrowBlue)' : 'url(#arrowGray)');
+
+            if (active) {
+                /* ---- Output token ---- */
+                const outTxt = tfMode === 'train' ? tfTokens.target[i] : tfInferPred[i];
+                const isCorrect = outTxt === tfTokens.target[i];
+                const outColor = tfMode === 'train' ? 'rgba(22,199,154,0.3)' : (isCorrect ? 'rgba(22,199,154,0.3)' : 'rgba(255,171,64,0.3)');
+                const outStroke = tfMode === 'train' ? '#16c79a' : (isCorrect ? '#16c79a' : '#ffab40');
+                const outFill = tfMode === 'train' ? '#16c79a' : (isCorrect ? '#16c79a' : '#ffab40');
+                const arrowEnd = tfMode === 'train' ? 'url(#arrowGreen)' : (isCorrect ? 'url(#arrowGreen)' : 'url(#arrowOrange)');
+
+                svg.append('rect')
+                    .attr('x', cx - 36).attr('y', yOutput - 16).attr('width', 72).attr('height', 32).attr('rx', 6)
+                    .attr('fill', outColor).attr('stroke', outStroke)
+                    .attr('stroke-width', current ? 2.5 : 1);
+                svg.append('text').attr('x', cx).attr('y', yOutput + 4)
+                    .text(outTxt).attr('fill', outFill)
+                    .attr('font-size', 12).attr('text-anchor', 'middle').attr('font-weight', 600);
+
+                /* Wrong indicator in inference mode */
+                if (tfMode === 'infer' && !isCorrect) {
+                    svg.append('text').attr('x', cx + 38).attr('y', yOutput - 4)
+                        .text('✗').attr('fill', '#ff5252').attr('font-size', 12);
+                }
+
+                /* Arrow: decoder -> output */
+                svg.append('line')
+                    .attr('x1', cx).attr('y1', yDecoder + 18).attr('x2', cx).attr('y2', yOutput - 16)
+                    .attr('stroke', outStroke).attr('stroke-width', 1.5)
+                    .attr('marker-end', arrowEnd);
+
+                /* Feedback arrow (inference): output feeds into next input */
+                if (tfMode === 'infer' && i < 4 && i < tfAnimStep - 1) {
+                    const nx = startX + (i + 1) * colW + colW / 2;
+                    const midY = yOutput + 30;
+                    svg.append('path')
+                        .attr('d', `M${cx + 36},${yOutput} C${cx + 50},${midY} ${nx - 50},${midY} ${nx - 36},${yInput}`)
+                        .attr('fill', 'none')
+                        .attr('stroke', 'rgba(255,171,64,0.45)')
+                        .attr('stroke-width', 1.2)
+                        .attr('stroke-dasharray', '5,3')
+                        .attr('marker-end', 'url(#arrowOrange)');
+                }
+            } else {
+                /* ---- Placeholder output ---- */
+                svg.append('line')
+                    .attr('x1', cx).attr('y1', yDecoder + 18).attr('x2', cx).attr('y2', yOutput - 16)
+                    .attr('stroke', 'rgba(100,100,140,0.15)').attr('stroke-width', 1)
+                    .attr('stroke-dasharray', '4,4');
+                svg.append('rect')
+                    .attr('x', cx - 36).attr('y', yOutput - 16).attr('width', 72).attr('height', 32).attr('rx', 6)
+                    .attr('fill', 'rgba(100,100,140,0.05)')
+                    .attr('stroke', 'rgba(100,100,140,0.15)').attr('stroke-dasharray', '4,3');
+                svg.append('text').attr('x', cx).attr('y', yOutput + 4)
+                    .text('?').attr('fill', 'rgba(100,100,140,0.35)')
+                    .attr('font-size', 14).attr('text-anchor', 'middle');
+            }
+        }
+
+        /* Bottom label */
+        const label = tfMode === 'train'
+            ? '训练模式: 每步输入真实标签 (Teacher Forcing)'
+            : '推理模式: 每步输入上一步的预测 (可能传播错误)';
+        svg.append('text').attr('x', W / 2).attr('y', H - 8)
+            .text(label).attr('fill', 'var(--text-muted)')
+            .attr('font-size', 11).attr('text-anchor', 'middle');
+
+        /* Update progress controls */
+        document.getElementById('tf-progress').style.width = (tfAnimStep / 5 * 100) + '%';
+        document.getElementById('tf-step-label').textContent = `${tfAnimStep} / 5`;
+    }
+
+    function toggleTFAnim() {
+        if (tfAnimRunning) { stopTFAnim(); return; }
+        tfAnimRunning = true;
+        document.getElementById('tf-play-btn').innerHTML = '&#9646;&#9646; 暂停';
+        if (tfAnimStep >= 5) tfAnimStep = 0;
+        tfAnimTimer = setInterval(() => {
+            tfAnimStep++;
+            drawTFDiagram();
+            if (tfAnimStep >= 5) stopTFAnim();
+        }, 900);
+    }
+
+    function stopTFAnim() {
+        tfAnimRunning = false;
+        clearInterval(tfAnimTimer);
+        document.getElementById('tf-play-btn').innerHTML = '&#9654; 播放';
+    }
+
+    /* ================================================================
+       Section 2: Cross-Entropy Loss
+       ================================================================ */
+    const ceVocab = ['学习', '机器', '深度', '模型', '训练', '其他'];
+    let ceProbs = [0.60, 0.15, 0.10, 0.08, 0.05, 0.02];
+    const ceTargetIdx = 0;
+    const ceColors = ['#16c79a', '#4fc3f7', '#b388ff', '#ffab40', '#ff80ab', '#6c6c7c'];
+
+    function initCEBars() {
+        const container = document.getElementById('ce-prob-bars');
+        container.innerHTML = '';
+        ceVocab.forEach((word, i) => {
+            const row = document.createElement('div');
+            row.className = 'prob-bar-row';
+            const isTarget = i === ceTargetIdx;
+            row.innerHTML = `
+                <span class="prob-bar-label">${word}${isTarget ? '<span class="target-indicator">&#10003;</span>' : ''}</span>
+                <div class="prob-bar-track">
+                    <div class="prob-bar-fill" id="ce-fill-${i}" style="width:${ceProbs[i] * 100}%; background:${ceColors[i]};"></div>
+                </div>
+                <span class="prob-bar-value" id="ce-val-${i}">${ceProbs[i].toFixed(3)}</span>
+                <input type="range" min="1" max="98" value="${Math.round(ceProbs[i] * 100)}"
+                       style="width:80px;" oninput="adjustCEProb(${i}, this.value)" id="ce-slider-${i}">
+            `;
+            container.appendChild(row);
+        });
+        updateCELoss();
+    }
+
+    function adjustCEProb(idx, rawVal) {
+        const v = parseInt(rawVal);
+        const newP = v / 100;
+        const oldOthersSum = ceProbs.reduce((s, p, i) => i !== idx ? s + p : s, 0);
+        ceProbs[idx] = Math.max(0.005, Math.min(0.98, newP));
+        const remaining = 1 - ceProbs[idx];
+        if (oldOthersSum > 0) {
+            for (let i = 0; i < ceProbs.length; i++) {
+                if (i !== idx) ceProbs[i] = Math.max(0.003, ceProbs[i] / oldOthersSum * remaining);
+            }
+        }
+        /* Renormalize */
+        const sum = ceProbs.reduce((s, p) => s + p, 0);
+        ceProbs = ceProbs.map(p => p / sum);
+
+        /* Update UI */
+        ceProbs.forEach((p, i) => {
+            document.getElementById(`ce-fill-${i}`).style.width = (p * 100) + '%';
+            document.getElementById(`ce-val-${i}`).textContent = p.toFixed(3);
+            if (i !== idx) document.getElementById(`ce-slider-${i}`).value = Math.round(p * 100);
+        });
+        updateCELoss();
+    }
+
+    function updateCELoss() {
+        const smooth = document.getElementById('label-smooth-toggle').checked;
+        document.getElementById('smooth-info').style.display = smooth ? 'block' : 'none';
+        const eps = smooth ? 0.1 : 0;
+        const V = ceVocab.length;
+
+        let loss = 0;
+        const parts = [];
+        ceVocab.forEach((w, i) => {
+            const targetP = i === ceTargetIdx ? (1 - eps + eps / V) : (eps / V);
+            if (targetP > 0) {
+                const contrib = -targetP * Math.log(Math.max(ceProbs[i], 1e-10));
+                loss += contrib;
+                if (targetP > 0.01) {
+                    parts.push(`-${targetP.toFixed(2)} * ln(${ceProbs[i].toFixed(3)})`);
+                }
+            }
+        });
+
+        document.getElementById('ce-loss-value').textContent = loss.toFixed(4);
+
+        /* Color-code the loss value */
+        const lossEl = document.getElementById('ce-loss-value');
+        if (loss < 0.5) lossEl.style.color = 'var(--accent-green)';
+        else if (loss < 2) lossEl.style.color = 'var(--accent-orange)';
+        else lossEl.style.color = 'var(--accent-red)';
+
+        const subEl = document.getElementById('ce-loss-sub');
+        if (loss < 0.5) subEl.textContent = '损失很低 — 模型预测准确';
+        else if (loss < 2) subEl.textContent = '损失中等 — 还有改善空间';
+        else subEl.textContent = '损失较高 — 模型不确定';
+
+        document.getElementById('ce-breakdown').innerHTML =
+            `<span style="color:var(--text-muted);">${smooth ? '[标签平滑] ' : ''}` +
+            parts.slice(0, 3).join(' + ') +
+            (parts.length > 3 ? ' + ...' : '') +
+            ` = ${loss.toFixed(4)}</span>`;
+    }
+
+    /* ================================================================
+       Section 3: Learning Rate Schedule
+       ================================================================ */
+    let lrChart = null;
+
+    function computeLR(step, dModel, warmup) {
+        if (step === 0) return 0;
+        return Math.pow(dModel, -0.5) * Math.min(Math.pow(step, -0.5), step * Math.pow(warmup, -1.5));
+    }
+
+    function updateLRChart() {
+        const warmup = parseInt(document.getElementById('warmup-slider').value);
+        const dModel = parseInt(document.getElementById('dmodel-slider').value);
+        document.getElementById('warmup-val').textContent = warmup;
+        document.getElementById('dmodel-val').textContent = dModel;
+
+        /* Update live formula display */
+        document.getElementById('lr-live-formula').innerHTML =
+            `当前配置：warmup = <span class="highlight-val">${warmup}</span>, ` +
+            `d_model = <span class="highlight-val">${dModel}</span>`;
+
+        const totalSteps = Math.max(warmup * 4, 20000);
+        const stepSize = Math.max(1, Math.floor(totalSteps / 300));
+        const labels = [], values = [];
+        for (let s = 1; s <= totalSteps; s += stepSize) {
+            labels.push(s);
+            values.push(computeLR(s, dModel, warmup));
+        }
+
+        const peakVal = Math.max(...values);
+        const peakIdx = values.indexOf(peakVal);
+        const peakStep = labels[peakIdx];
+
+        const chartData = {
+            labels: labels,
+            datasets: [{
+                label: '学习率',
+                data: values,
+                borderColor: '#16c79a',
+                backgroundColor: 'rgba(22, 199, 154, 0.08)',
+                borderWidth: 2,
+                pointRadius: 0,
+                fill: true,
+                tension: 0.1
+            }]
+        };
+
+        const chartOpts = {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false },
+                title: {
+                    display: true,
+                    text: `峰值 lr = ${peakVal.toExponential(3)} @ step ${peakStep}`,
+                    color: '#a8a8b8',
+                    font: { size: 12 }
+                },
+                tooltip: {
+                    callbacks: {
+                        label: function(ctx) { return 'lr = ' + ctx.parsed.y.toExponential(4); }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    title: { display: true, text: '训练步数 (step)', color: '#a8a8b8' },
+                    ticks: { color: '#6c6c7c', maxTicksLimit: 8, callback: function(v) { return v >= 1000 ? (v / 1000) + 'k' : v; } },
+                    grid: { color: 'rgba(42, 42, 74, 0.4)' }
+                },
+                y: {
+                    title: { display: true, text: '学习率 (lr)', color: '#a8a8b8' },
+                    ticks: { color: '#6c6c7c', callback: function(v) { return v.toExponential(1); } },
+                    grid: { color: 'rgba(42, 42, 74, 0.4)' }
+                }
+            },
+            animation: { duration: 300 }
+        };
+
+        if (lrChart) {
+            lrChart.data = chartData;
+            lrChart.options.plugins.title.text = `峰值 lr = ${peakVal.toExponential(3)} @ step ${peakStep}`;
+            lrChart.update('none');
+        } else {
+            lrChart = new Chart(
+                document.getElementById('lr-chart').getContext('2d'),
+                { type: 'line', data: chartData, options: chartOpts }
+            );
+        }
+    }
+
+    /* ================================================================
+       Section 4: Training Dashboard
+       ================================================================ */
+    let trainLossChart = null, valLossChart = null;
+    let dashEpoch = 0, dashRunning = false, dashTimer = null;
+    const maxEpochs = 50;
+
+    /* Pre-compute realistic loss curves with seeded randomness */
+    function seededRandom(seed) {
+        let s = seed;
+        return function() {
+            s = (s * 16807 + 0) % 2147483647;
+            return s / 2147483647;
+        };
+    }
+
+    function genLossCurve(base, noise, decay, seed) {
+        const rng = seededRandom(seed);
+        const arr = [];
+        for (let e = 0; e <= maxEpochs; e++) {
+            const trend = base * Math.exp(-decay * e) + 0.28;
+            const jitter = (rng() - 0.5) * noise * Math.exp(-decay * e * 0.5);
+            arr.push(Math.max(0.25, trend + jitter));
+        }
+        return arr;
+    }
+
+    const trainLossData = genLossCurve(4.5, 0.18, 0.082, 42);
+    const valLossData = genLossCurve(4.8, 0.22, 0.068, 99);
+    /* Ensure val >= train for realism */
+    for (let i = 0; i < valLossData.length; i++) {
+        const rng = seededRandom(i + 200);
+        valLossData[i] = Math.max(valLossData[i], trainLossData[i] + 0.02 + rng() * 0.12);
+    }
+    /* Simulated LR for stats */
+    const dashLRData = [];
+    for (let e = 0; e <= maxEpochs; e++) {
+        const step = e * 1000 + 500;
+        dashLRData.push(computeLR(step, 512, 4000));
+    }
+
+    function createDashChart(canvasId, title, color) {
+        const ctx = document.getElementById(canvasId).getContext('2d');
+        return new Chart(ctx, {
+            type: 'line',
+            data: { labels: [], datasets: [{ label: title, data: [], borderColor: color, backgroundColor: color.replace('rgb', 'rgba').replace(')', ', 0.08)'), borderWidth: 2, pointRadius: 2, pointHoverRadius: 5, fill: true, tension: 0.3 }] },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: { callbacks: { label: function(ctx) { return 'Loss: ' + ctx.parsed.y.toFixed(4); } } }
+                },
+                scales: {
+                    x: { title: { display: true, text: 'Epoch', color: '#a8a8b8' }, ticks: { color: '#6c6c7c' }, grid: { color: 'rgba(42,42,74,0.4)' } },
+                    y: { title: { display: true, text: 'Loss', color: '#a8a8b8' }, ticks: { color: '#6c6c7c' }, grid: { color: 'rgba(42,42,74,0.4)' }, min: 0, max: 5.5 }
+                },
+                animation: { duration: 100 }
+            }
+        });
+    }
+
+    function updateDashToEpoch(epoch) {
+        const labels = Array.from({ length: epoch + 1 }, (_, i) => i);
+
+        trainLossChart.data.labels = labels;
+        trainLossChart.data.datasets[0].data = trainLossData.slice(0, epoch + 1);
+        trainLossChart.update('none');
+
+        valLossChart.data.labels = labels;
+        valLossChart.data.datasets[0].data = valLossData.slice(0, epoch + 1);
+        valLossChart.update('none');
+
+        /* Progress bar and label */
+        document.getElementById('dash-progress').style.width = (epoch / maxEpochs * 100) + '%';
+        document.getElementById('dash-epoch-label').textContent = `Epoch ${epoch} / ${maxEpochs}`;
+
+        /* Stats */
+        if (epoch > 0) {
+            document.getElementById('stat-train-loss').textContent = trainLossData[epoch].toFixed(3);
+            document.getElementById('stat-val-loss').textContent = valLossData[epoch].toFixed(3);
+            document.getElementById('stat-lr').textContent = dashLRData[epoch].toExponential(2);
+            const gap = (valLossData[epoch] - trainLossData[epoch]).toFixed(3);
+            document.getElementById('stat-gap').textContent = gap;
+            document.getElementById('stat-gap').style.color = gap > 0.3 ? 'var(--accent-red)' : 'var(--accent-purple)';
+        } else {
+            ['stat-train-loss', 'stat-val-loss', 'stat-lr', 'stat-gap'].forEach(id => {
+                document.getElementById(id).textContent = '--';
+            });
+        }
+
+        /* Heatmap highlight */
+        let activeIdx = 0;
+        if (epoch >= 30) activeIdx = 2;
+        else if (epoch >= 5) activeIdx = 1;
+        document.getElementById('attn-epoch-display').textContent = `当前 Epoch: ${epoch}`;
+        document.querySelectorAll('.heatmap-box').forEach((box, i) => {
+            const isActive = i === activeIdx;
+            const isPast = i < activeIdx;
+            box.style.opacity = (isActive || isPast) ? '1' : '0.3';
+            box.style.transform = isActive ? 'scale(1.04)' : 'scale(1)';
+            box.style.transition = 'all 0.3s ease';
+            /* Add a border highlight to active heatmap */
+            const canvas = box.querySelector('canvas');
+            if (canvas) {
+                canvas.style.borderColor = isActive ? 'var(--accent-green)' : 'var(--border-color)';
+                canvas.style.borderWidth = isActive ? '2px' : '1px';
+            }
+        });
+    }
+
+    function toggleDashAnim() {
+        if (dashRunning) { stopDashAnim(); return; }
+        dashRunning = true;
+        document.getElementById('dash-play-btn').innerHTML = '&#9646;&#9646; 暂停训练';
+        if (dashEpoch >= maxEpochs) dashEpoch = 0;
+        dashTimer = setInterval(() => {
+            dashEpoch++;
+            updateDashToEpoch(dashEpoch);
+            if (dashEpoch >= maxEpochs) stopDashAnim();
+        }, 180);
+    }
+
+    function stopDashAnim() {
+        dashRunning = false;
+        clearInterval(dashTimer);
+        document.getElementById('dash-play-btn').innerHTML = '&#9654; 开始训练';
+    }
+
+    function resetDash() {
+        stopDashAnim();
+        dashEpoch = 0;
+        updateDashToEpoch(0);
+    }
+
+    /* ---- Attention Heatmaps ---- */
+    function drawHeatmap(canvasId, pattern) {
+        const canvas = document.getElementById(canvasId);
+        const ctx = canvas.getContext('2d');
+        const size = pattern.length;
+        const cellW = canvas.width / size;
+        const cellH = canvas.height / size;
+
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        for (let i = 0; i < size; i++) {
+            for (let j = 0; j < size; j++) {
+                const v = pattern[i][j];
+                /* Color scale: dark bg -> green accent */
+                const r = Math.round(26 + v * (22 - 26));
+                const g = Math.round(26 + v * (199 - 26));
+                const b = Math.round(46 + v * (154 - 46));
+                ctx.fillStyle = `rgba(${Math.max(0, r)}, ${Math.max(0, g)}, ${Math.max(0, b)}, ${0.15 + v * 0.85})`;
+                ctx.fillRect(j * cellW, i * cellH, cellW - 1, cellH - 1);
+
+                /* Value label */
+                ctx.fillStyle = v > 0.4 ? '#1a1a2e' : '#8888a8';
+                ctx.font = '10px monospace';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(v.toFixed(2), j * cellW + cellW / 2, i * cellH + cellH / 2);
+            }
+        }
+    }
+
+    function genRandomPattern(n) {
+        const rng = seededRandom(7);
+        return Array.from({ length: n }, () => {
+            const row = Array.from({ length: n }, () => rng());
+            const sum = row.reduce((a, b) => a + b, 0);
+            return row.map(v => parseFloat((v / sum).toFixed(2)));
+        });
+    }
+
+    function genDiagonalPattern(n) {
+        return Array.from({ length: n }, (_, i) => {
+            const row = Array.from({ length: n }, (_, j) => {
+                const dist = Math.abs(i - j);
+                return dist === 0 ? 0.55 : dist === 1 ? 0.18 : 0.04;
+            });
+            const sum = row.reduce((a, b) => a + b, 0);
+            return row.map(v => parseFloat((v / sum).toFixed(2)));
+        });
+    }
+
+    function genMeaningfulPattern(n) {
+        const base = Array.from({ length: n }, () => Array(n).fill(0.02));
+        /* Meaningful alignment: "机器学习很棒" -> structured attention */
+        const links = [
+            [0, 1, 0.42], [1, 0, 0.38], [2, 3, 0.48], [3, 2, 0.40],
+            [4, 0, 0.28], [4, 2, 0.22], [5, 4, 0.35], [5, 2, 0.22],
+            [0, 0, 0.18], [3, 3, 0.12], [1, 1, 0.15], [5, 5, 0.10]
+        ];
+        links.forEach(([i, j, v]) => { if (i < n && j < n) base[i][j] += v; });
+        return base.map(row => {
+            const sum = row.reduce((a, b) => a + b, 0);
+            return row.map(v => parseFloat(Math.min(1, v / sum).toFixed(2)));
+        });
+    }
+
+    /* ================================================================
+       Section 5: Beam Search
+       ================================================================ */
+    const beamColors = ['#16c79a', '#4fc3f7', '#b388ff', '#ffab40', '#ff80ab'];
+
+    /* Pre-computed search tree data */
+    const beamSteps = {
+        step1: [
+            { token: 'machine', prob: 0.45, logp: -0.80 },
+            { token: 'deep', prob: 0.25, logp: -1.39 },
+            { token: 'auto', prob: 0.15, logp: -1.90 },
+            { token: 'the', prob: 0.08, logp: -2.53 },
+            { token: 'neural', prob: 0.07, logp: -2.66 }
+        ],
+        step2: {
+            'machine': [
+                { token: 'learning', prob: 0.65, logp: -0.43 },
+                { token: 'translation', prob: 0.20, logp: -1.61 },
+                { token: 'study', prob: 0.10, logp: -2.30 }
+            ],
+            'deep': [
+                { token: 'learning', prob: 0.70, logp: -0.36 },
+                { token: 'study', prob: 0.15, logp: -1.90 },
+                { token: 'model', prob: 0.10, logp: -2.30 }
+            ],
+            'auto': [
+                { token: 'learning', prob: 0.40, logp: -0.92 },
+                { token: 'encoder', prob: 0.30, logp: -1.20 },
+                { token: 'model', prob: 0.15, logp: -1.90 }
+            ],
+            'the': [
+                { token: 'machine', prob: 0.50, logp: -0.69 },
+                { token: 'study', prob: 0.25, logp: -1.39 }
+            ],
+            'neural': [
+                { token: 'network', prob: 0.60, logp: -0.51 },
+                { token: 'learning', prob: 0.20, logp: -1.61 }
+            ]
+        },
+        step3: {
+            'machine learning': [{ token: 'EOS', prob: 0.85, logp: -0.16 }],
+            'machine translation': [{ token: 'EOS', prob: 0.75, logp: -0.29 }],
+            'machine study': [{ token: 'EOS', prob: 0.55, logp: -0.60 }],
+            'deep learning': [{ token: 'EOS', prob: 0.80, logp: -0.22 }],
+            'deep study': [{ token: 'EOS', prob: 0.50, logp: -0.69 }],
+            'deep model': [{ token: 'EOS', prob: 0.45, logp: -0.80 }],
+            'auto learning': [{ token: 'EOS', prob: 0.60, logp: -0.51 }],
+            'auto encoder': [{ token: 'EOS', prob: 0.65, logp: -0.43 }],
+            'auto model': [{ token: 'EOS', prob: 0.40, logp: -0.92 }],
+            'the machine': [{ token: 'EOS', prob: 0.30, logp: -1.20 }],
+            'neural network': [{ token: 'EOS', prob: 0.70, logp: -0.36 }]
+        }
+    };
+
+    function updateBeamSearch() {
+        const bw = parseInt(document.getElementById('beam-slider').value);
+        document.getElementById('beam-val').textContent = bw;
+
+        /* Info text */
+        const labels = {
+            1: 'beam_width = 1：等同于贪心搜索 (Greedy)，只保留最优候选',
+            2: 'beam_width = 2：保留 2 个候选，平衡质量与速度',
+            3: 'beam_width = 3：保留 3 个候选，常用默认值',
+            4: 'beam_width = 4：保留 4 个候选，翻译质量提升',
+            5: 'beam_width = 5：保留 5 个候选，接近最优但计算量增大'
+        };
+        document.getElementById('beam-info').innerHTML = `<p>${labels[bw]}</p>`;
+        document.getElementById('beam-cand-count').textContent = bw;
+        document.getElementById('beam-compute').textContent = bw + 'x';
+
+        drawBeamTree(bw);
+        showBeamResults(bw);
+    }
+
+    function drawBeamTree(bw) {
+        const container = document.getElementById('beam-tree-container');
+        container.innerHTML = '';
+        const W = Math.max(container.clientWidth || 620, 580);
+        const H = 400;
+        const svg = d3.select(container).append('svg')
+            .attr('width', W).attr('height', H)
+            .attr('viewBox', `0 0 ${W} ${H}`);
+
+        /* Marker definitions */
+        const defs = svg.append('defs');
+        beamColors.forEach((c, i) => {
+            defs.append('marker').attr('id', `bArr${i}`)
+                .attr('viewBox', '0 0 10 10').attr('refX', 9).attr('refY', 5)
+                .attr('markerWidth', 5).attr('markerHeight', 5).attr('orient', 'auto')
+                .append('path').attr('d', 'M0,0 L10,5 L0,10 Z').attr('fill', c);
+        });
+        defs.append('marker').attr('id', 'bArrGray')
+            .attr('viewBox', '0 0 10 10').attr('refX', 9).attr('refY', 5)
+            .attr('markerWidth', 5).attr('markerHeight', 5).attr('orient', 'auto')
+            .append('path').attr('d', 'M0,0 L10,5 L0,10 Z').attr('fill', '#6c6c7c');
+
+        const nodeW = 95, nodeH = 30;
+        const levels = [[], [], [], []];
+
+        /* Level 0: root node */
+        levels[0].push({
+            id: 'root', label: '机器学习', score: 0,
+            x: W / 2, y: 32, color: '#e8e8e8', active: true, parentIdx: null
+        });
+
+        /* Level 1: first token */
+        const s1 = beamSteps.step1.slice(0, Math.max(bw, 3));
+        const l1Spacing = W / (s1.length + 1);
+        s1.forEach((c, i) => {
+            levels[1].push({
+                id: c.token, label: c.token, score: c.logp, prob: c.prob,
+                x: l1Spacing * (i + 1), y: 112,
+                color: i < bw ? beamColors[i % beamColors.length] : '#6c6c7c',
+                active: i < bw, parentIdx: 0
+            });
+        });
+
+        /* Level 2: second token — expand active beams, select top bw */
+        const l1Active = levels[1].filter(n => n.active);
+        let l2Candidates = [];
+        l1Active.forEach(parent => {
+            const expansions = beamSteps.step2[parent.id] || [];
+            expansions.forEach(c => {
+                l2Candidates.push({
+                    parentId: parent.id,
+                    label: c.token,
+                    fullLabel: parent.id + ' ' + c.token,
+                    score: parent.score + c.logp,
+                    prob: c.prob,
+                    parentColor: parent.color
+                });
+            });
+        });
+        l2Candidates.sort((a, b) => b.score - a.score);
+        const l2Selected = new Set(l2Candidates.slice(0, bw).map(c => c.fullLabel));
+
+        const l2Spacing = W / (Math.max(l2Candidates.length, 1) + 1);
+        l2Candidates.forEach((c, i) => {
+            const isActive = l2Selected.has(c.fullLabel);
+            levels[2].push({
+                id: c.fullLabel, label: c.label, fullLabel: c.fullLabel,
+                score: c.score, prob: c.prob,
+                x: l2Spacing * (i + 1), y: 212,
+                color: isActive ? c.parentColor : '#6c6c7c',
+                active: isActive,
+                parentIdx: levels[1].findIndex(n => n.id === c.parentId)
+            });
+        });
+
+        /* Level 3: EOS — expand active level-2 beams */
+        const l2Active = levels[2].filter(n => n.active);
+        let l3Candidates = [];
+        l2Active.forEach(parent => {
+            const expansions = beamSteps.step3[parent.fullLabel] || [];
+            expansions.forEach(c => {
+                l3Candidates.push({
+                    parentFullLabel: parent.fullLabel,
+                    label: c.token,
+                    fullLabel: parent.fullLabel + (c.token === 'EOS' ? '' : ' ' + c.token),
+                    score: parent.score + c.logp,
+                    prob: c.prob,
+                    parentColor: parent.color
+                });
+            });
+        });
+        l3Candidates.sort((a, b) => b.score - a.score);
+        const l3Spacing = W / (Math.max(l3Candidates.length, 1) + 1);
+        l3Candidates.forEach((c, i) => {
+            levels[3].push({
+                id: c.fullLabel + '_' + i, label: c.label, fullLabel: c.fullLabel,
+                score: c.score, prob: c.prob,
+                x: l3Spacing * (i + 1), y: 312,
+                color: c.parentColor, active: true,
+                parentIdx: levels[2].findIndex(n => n.fullLabel === c.parentFullLabel)
+            });
+        });
+
+        /* Draw edges first (behind nodes) */
+        for (let lvl = 1; lvl < levels.length; lvl++) {
+            levels[lvl].forEach(node => {
+                const parentNode = node.parentIdx !== null ? levels[lvl - 1][node.parentIdx] : levels[lvl - 1][0];
+                if (!parentNode) return;
+                const opacity = node.active ? 0.75 : 0.15;
+                const colorIdx = beamColors.indexOf(node.color);
+                const markerId = node.active && colorIdx >= 0 ? `url(#bArr${colorIdx})` : 'url(#bArrGray)';
+
+                svg.append('line')
+                    .attr('x1', parentNode.x).attr('y1', parentNode.y + nodeH / 2)
+                    .attr('x2', node.x).attr('y2', node.y - nodeH / 2)
+                    .attr('stroke', node.color)
+                    .attr('stroke-width', node.active ? 2 : 0.8)
+                    .attr('opacity', opacity)
+                    .attr('marker-end', markerId);
+
+                /* Probability label on edge */
+                if (node.active && node.prob) {
+                    const mx = (parentNode.x + node.x) / 2 + 10;
+                    const my = (parentNode.y + nodeH / 2 + node.y - nodeH / 2) / 2;
+                    svg.append('text')
+                        .attr('x', mx).attr('y', my)
+                        .text(`p=${node.prob.toFixed(2)}`)
+                        .attr('fill', node.color).attr('font-size', 9)
+                        .attr('opacity', 0.75);
+                }
+            });
+        }
+
+        /* Draw nodes */
+        levels.forEach(level => {
+            level.forEach(node => {
+                const g = svg.append('g')
+                    .attr('class', `beam-node ${node.active ? 'beam-active' : 'beam-pruned'}`);
+
+                g.append('rect')
+                    .attr('x', node.x - nodeW / 2).attr('y', node.y - nodeH / 2)
+                    .attr('width', nodeW).attr('height', nodeH).attr('rx', 5)
+                    .attr('fill', node.active ? 'rgba(22, 33, 62, 0.92)' : 'rgba(22, 33, 62, 0.35)')
+                    .attr('stroke', node.color)
+                    .attr('stroke-width', node.active ? 1.5 : 0.7);
+
+                g.append('text')
+                    .attr('x', node.x).attr('y', node.y + 4)
+                    .text(node.label).attr('fill', node.color)
+                    .attr('font-size', 11).attr('text-anchor', 'middle')
+                    .attr('font-weight', node.active ? 600 : 400);
+
+                /* Cumulative score below node */
+                if (node.id !== 'root' && node.active) {
+                    svg.append('text')
+                        .attr('x', node.x).attr('y', node.y + nodeH / 2 + 13)
+                        .text(`${node.score.toFixed(2)}`)
+                        .attr('fill', 'var(--text-muted)')
+                        .attr('font-size', 9).attr('text-anchor', 'middle')
+                        .attr('font-family', 'var(--font-mono)');
+                }
+            });
+        });
+
+        /* Level labels on right side */
+        const levelLabels = ['源句', '第1步', '第2步', '第3步'];
+        levels.forEach((_, i) => {
+            svg.append('text')
+                .attr('x', W - 8).attr('y', [32, 112, 212, 312][i] + 4)
+                .text(levelLabels[i])
+                .attr('fill', 'var(--text-muted)').attr('font-size', 10)
+                .attr('text-anchor', 'end').attr('opacity', 0.6);
+        });
+
+        /* Bottom legend */
+        svg.append('text')
+            .attr('x', W / 2).attr('y', H - 6)
+            .text(`beam_width = ${bw} | 节点下方数字 = 累积对数概率 | 暗色节点 = 被剪枝`)
+            .attr('fill', 'var(--text-muted)').attr('font-size', 10)
+            .attr('text-anchor', 'middle');
+    }
+
+    function showBeamResults(bw) {
+        const allResults = [
+            { seq: 'machine learning', score: -1.39, zh: '(机器学习)' },
+            { seq: 'deep learning', score: -1.97, zh: '(深度学习)' },
+            { seq: 'machine translation', score: -2.70, zh: '(机器翻译)' },
+            { seq: 'auto learning', score: -3.33, zh: '(自动学习)' },
+            { seq: 'deep study', score: -3.98, zh: '(深度研究)' }
+        ];
+        const shown = allResults.slice(0, bw);
+        const container = document.getElementById('beam-results');
+        container.innerHTML = shown.map((r, i) => `
+            <div class="beam-result">
+                <span class="rank">#${i + 1}</span>
+                <span class="seq" style="color:${beamColors[i % beamColors.length]};">
+                    ${r.seq} <span style="color:var(--text-muted); font-size:0.78rem;">${r.zh}</span>
+                </span>
+                <span class="score">score: ${r.score.toFixed(2)}</span>
+            </div>
+        `).join('');
+    }
+
+    /* ================================================================
+       Initialization
+       ================================================================ */
+    document.addEventListener('DOMContentLoaded', () => {
+        /* Section 1: Teacher Forcing */
+        drawTFDiagram();
+
+        /* Section 2: Cross-Entropy Loss */
+        initCEBars();
+
+        /* Section 3: Learning Rate Schedule */
+        updateLRChart();
+
+        /* Section 4: Training Dashboard */
+        trainLossChart = createDashChart('train-loss-chart', '训练损失', 'rgb(79, 195, 247)');
+        valLossChart = createDashChart('val-loss-chart', '验证损失', 'rgb(255, 171, 64)');
+        updateDashToEpoch(0);
+        drawHeatmap('heatmap-1', genRandomPattern(6));
+        drawHeatmap('heatmap-2', genDiagonalPattern(6));
+        drawHeatmap('heatmap-3', genMeaningfulPattern(6));
+
+        /* Section 5: Beam Search */
+        updateBeamSearch();
+
+        /* KaTeX re-render for any dynamic math */
+        if (typeof renderMathInElement === 'function') {
+            renderMathInElement(document.body, {
+                delimiters: [
+                    { left: '$$', right: '$$', display: true },
+                    { left: '$', right: '$', display: false }
+                ],
+                throwOnError: false
+            });
+        }
+    });
+
+    /* Handle window resize for SVG visualizations */
+    let resizeTimer;
+    window.addEventListener('resize', () => {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(() => {
+            drawTFDiagram();
+            updateBeamSearch();
+        }, 250);
+    });
+    </script>
+</body>
+</html>

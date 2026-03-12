@@ -1,0 +1,1302 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>模块04：梯度消失与爆炸 — RNN & LSTM 交互学习</title>
+
+    <!-- Styles -->
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+
+    <!-- KaTeX -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+
+    <!-- D3.js -->
+    <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+
+    <!-- GSAP -->
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.2/dist/gsap.min.js"></script>
+
+    <style>
+        .module-header { text-align: center; padding: 2rem 0 1.5rem; }
+        .module-header .module-num { font-family: var(--font-mono); font-size: 0.85rem; color: var(--accent-orange); letter-spacing: 0.1em; text-transform: uppercase; }
+        .module-header h1 { background: linear-gradient(135deg, var(--accent-red), var(--accent-orange)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+        .module-header .subtitle { color: var(--text-muted); font-size: 1rem; margin-top: 0.5rem; }
+        .jacobian-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-top: 1rem; }
+        .jacobian-grid .matrix-panel { background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 1rem; }
+        .jacobian-grid .matrix-panel h4 { color: var(--accent-green); margin-bottom: 0.75rem; font-size: 0.9rem; }
+        .controls-row { display: flex; flex-wrap: wrap; align-items: center; gap: 1rem; margin: 1rem 0; }
+        .controls-row .slider-group { flex: 1; min-width: 200px; }
+        .chart-container { position: relative; width: 100%; min-height: 350px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 1rem; margin-top: 1rem; }
+        .chart-container svg { width: 100%; height: 100%; }
+        .metric-row { display: flex; gap: 1rem; margin: 1rem 0; flex-wrap: wrap; }
+        .metric-card { flex: 1; min-width: 140px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 1rem; text-align: center; }
+        .metric-card .value { font-family: var(--font-mono); font-size: 1.5rem; font-weight: 700; margin-bottom: 0.25rem; }
+        .metric-card .label { font-size: 0.8rem; color: var(--text-muted); }
+        .metric-card.danger .value { color: var(--accent-red); }
+        .metric-card.warning .value { color: var(--accent-orange); }
+        .metric-card.success .value { color: var(--accent-green); }
+        .metric-card.info .value { color: var(--accent-blue); }
+        .clip-demo { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-top: 1rem; }
+        .solution-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.5rem; margin-top: 1.5rem; }
+        .solution-card { background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 1.5rem; transition: all 0.3s; position: relative; overflow: hidden; }
+        .solution-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; }
+        .solution-card:nth-child(1)::before { background: var(--accent-orange); }
+        .solution-card:nth-child(2)::before { background: var(--accent-blue); }
+        .solution-card:nth-child(3)::before { background: var(--accent-green); }
+        .solution-card:hover { border-color: var(--accent-green); transform: translateY(-2px); box-shadow: var(--shadow-glow); }
+        .solution-card .card-icon { font-size: 2rem; margin-bottom: 0.75rem; }
+        .solution-card h4 { margin-bottom: 0.5rem; }
+        .solution-card .effectiveness { margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-color); font-size: 0.8rem; }
+        .solution-card .tag { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 9999px; font-size: 0.7rem; font-weight: 600; margin-right: 0.3rem; }
+        .tag-yes { background: rgba(22,199,154,0.15); color: var(--accent-green); }
+        .tag-no { background: rgba(255,82,82,0.15); color: var(--accent-red); }
+        .tag-partial { background: rgba(255,171,64,0.15); color: var(--accent-orange); }
+        .highway-diagram { background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 1.5rem; margin-top: 1.5rem; text-align: center; }
+        .accuracy-chart-container { position: relative; width: 100%; min-height: 350px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 1rem; margin-top: 1rem; }
+        .norm-indicator { display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.3rem 0.8rem; border-radius: var(--radius-sm); font-family: var(--font-mono); font-size: 0.85rem; font-weight: 600; }
+        .norm-indicator.vanish { background: rgba(79,195,247,0.15); color: var(--accent-blue); }
+        .norm-indicator.explode { background: rgba(255,82,82,0.15); color: var(--accent-red); }
+        .norm-indicator.stable { background: rgba(22,199,154,0.15); color: var(--accent-green); }
+        .tanh-derivative-viz { margin-top: 1rem; }
+        @media (max-width: 1024px) {
+            .jacobian-grid, .clip-demo { grid-template-columns: 1fr; }
+            .solution-cards { grid-template-columns: 1fr; }
+        }
+        @media (max-width: 768px) { .solution-cards { grid-template-columns: 1fr; } }
+    </style>
+</head>
+<body>
+    <div class="page-container">
+        <!-- Header -->
+        <div class="module-header">
+            <div class="module-num">模块 04 / 09</div>
+            <h1>梯度消失与爆炸</h1>
+            <p class="subtitle">Vanishing & Exploding Gradients — RNN 训练中的核心挑战</p>
+        </div>
+
+        <!-- Section 1: Jacobian 矩阵与梯度传播 -->
+        <div class="section" id="section-jacobian">
+            <div class="section-title">
+                <div class="icon">J</div>
+                <h2>Jacobian 矩阵与梯度传播</h2>
+            </div>
+
+            <p>在 BPTT（时间反向传播）中，梯度需要在时间步之间传递。关键的 Jacobian 矩阵描述了隐藏状态之间的导数关系：</p>
+
+            <div class="info-box">
+                <p>$$\frac{\partial h_t}{\partial h_{t-1}} = \text{diag}(1 - h_t^2) \cdot W_{hh}$$</p>
+                <p>其中 $\text{diag}(1 - h_t^2)$ 是 tanh 的导数对角矩阵，每个元素都 $\leq 1$。当这个矩阵的<strong>谱范数</strong>（最大奇异值）小于或大于 1 时，决定了梯度的命运。</p>
+            </div>
+
+            <div class="tanh-derivative-viz">
+                <p class="text-sm text-muted">tanh 及其导数：导数 $1 - \tanh^2(x)$ 在 $x = 0$ 时最大为 1，随 $|x|$ 增大而迅速趋近 0。这意味着梯度在每一步都可能被缩小。</p>
+                <div class="chart-container" id="tanh-chart" style="min-height:250px;"></div>
+            </div>
+
+            <h3 class="mt-3">交互：探索 Jacobian 与谱范数</h3>
+            <p class="text-sm text-muted">调整 $W_{hh}$ 的值，观察 Jacobian 矩阵的结构和谱范数变化。</p>
+
+            <div class="controls-row">
+                <div class="slider-group">
+                    <label>$W_{hh}$ 缩放因子：</label>
+                    <input type="range" id="whh-scale" min="0.1" max="2.5" step="0.05" value="0.8">
+                    <span class="slider-value" id="whh-scale-val">0.80</span>
+                </div>
+                <div class="slider-group">
+                    <label>隐藏维度：</label>
+                    <input type="range" id="hidden-dim" min="2" max="5" step="1" value="3">
+                    <span class="slider-value" id="hidden-dim-val">3</span>
+                </div>
+                <button class="btn btn-sm" id="btn-reseed">随机重置</button>
+            </div>
+
+            <div class="metric-row">
+                <div class="metric-card" id="metric-spectral">
+                    <div class="value">—</div>
+                    <div class="label">谱范数 $\|J\|$</div>
+                </div>
+                <div class="metric-card" id="metric-maxderiv">
+                    <div class="value">—</div>
+                    <div class="label">最大 tanh' 值</div>
+                </div>
+                <div class="metric-card" id="metric-status">
+                    <div class="value">—</div>
+                    <div class="label">梯度趋势</div>
+                </div>
+            </div>
+
+            <div class="jacobian-grid">
+                <div class="matrix-panel">
+                    <h4>$W_{hh}$ 权重矩阵</h4>
+                    <div id="whh-matrix-container"></div>
+                </div>
+                <div class="matrix-panel">
+                    <h4>Jacobian $\frac{\partial h_t}{\partial h_{t-1}}$</h4>
+                    <div id="jacobian-matrix-container"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Section 2: 梯度消失 -->
+        <div class="section" id="section-vanishing">
+            <div class="section-title">
+                <div class="icon" style="background:rgba(79,195,247,0.15);color:var(--accent-blue);">V</div>
+                <h2>梯度消失</h2>
+            </div>
+
+            <p>当 Jacobian 的谱范数 $\sigma < 1$ 时，梯度在反向传播中被反复乘以小于 1 的因子，导致<strong>指数级衰减</strong>。经过 $T$ 个时间步后，梯度缩小为 $\sigma^T \to 0$。</p>
+
+            <div class="info-box">
+                <p>$$\frac{\partial \mathcal{L}}{\partial h_0} = \prod_{t=1}^{T} \frac{\partial h_t}{\partial h_{t-1}} \cdot \frac{\partial \mathcal{L}}{\partial h_T}$$</p>
+                <p>当每个因子的范数 $< 1$ 时，乘积以指数速度趋近于零。早期输入的梯度影响几乎为零 — 网络"遗忘"了序列开头的信息。</p>
+            </div>
+
+            <h3 class="mt-3">交互演示：梯度消失过程</h3>
+            <p class="text-sm text-muted">设置较小的 $W_{hh}$ 特征值，在序列上运行 RNN，观察梯度范数的衰减曲线。</p>
+
+            <div class="controls-row">
+                <div class="slider-group">
+                    <label>$W_{hh}$ 特征值：</label>
+                    <input type="range" id="vanish-eigenval" min="0.3" max="0.99" step="0.01" value="0.7">
+                    <span class="slider-value" id="vanish-eigenval-val">0.70</span>
+                </div>
+                <div class="slider-group">
+                    <label>序列长度 $T$：</label>
+                    <input type="range" id="vanish-seqlen" min="10" max="50" step="1" value="30">
+                    <span class="slider-value" id="vanish-seqlen-val">30</span>
+                </div>
+                <button class="btn btn-primary btn-sm" id="btn-run-vanish">运行模拟</button>
+            </div>
+
+            <div class="metric-row">
+                <div class="metric-card info" id="metric-vanish-initial">
+                    <div class="value">—</div>
+                    <div class="label">初始梯度范数</div>
+                </div>
+                <div class="metric-card danger" id="metric-vanish-final">
+                    <div class="value">—</div>
+                    <div class="label">最终梯度范数</div>
+                </div>
+                <div class="metric-card warning" id="metric-vanish-ratio">
+                    <div class="value">—</div>
+                    <div class="label">衰减倍数</div>
+                </div>
+            </div>
+
+            <div class="chart-container" id="vanish-chart" style="min-height:320px;">
+                <div style="display:flex;align-items:center;justify-content:center;height:280px;color:var(--text-muted);">
+                    点击"运行模拟"查看梯度消失过程
+                </div>
+            </div>
+
+            <div class="info-box warning mt-2">
+                <p><strong>"遗忘"问题：</strong>在梯度消失的情况下，序列开头的输入对损失的梯度贡献趋近于零。网络无法学到长距离依赖关系 — 它只能"记住"最近几个时间步的信息。</p>
+            </div>
+        </div>
+
+        <!-- Section 3: 梯度爆炸 -->
+        <div class="section" id="section-exploding">
+            <div class="section-title">
+                <div class="icon" style="background:rgba(255,82,82,0.15);color:var(--accent-red);">E</div>
+                <h2>梯度爆炸</h2>
+            </div>
+
+            <p>当谱范数 $\sigma > 1$ 时，梯度在反向传播中被反复放大，导致<strong>指数级增长</strong>。最终出现 NaN / Inf，训练完全崩溃。</p>
+
+            <div class="info-box warning">
+                <p>$$\|\text{gradient}\| \propto \sigma^T \to \infty \quad (\sigma > 1)$$</p>
+                <p>梯度爆炸比梯度消失更容易被检测到 — 你会看到损失突然变成 NaN，权重更新变得巨大。但好消息是，它有一个简单的修复方案：<strong>梯度裁剪</strong>。</p>
+            </div>
+
+            <h3 class="mt-3">交互演示：梯度爆炸过程</h3>
+
+            <div class="controls-row">
+                <div class="slider-group">
+                    <label>$W_{hh}$ 特征值：</label>
+                    <input type="range" id="explode-eigenval" min="1.01" max="1.8" step="0.01" value="1.2">
+                    <span class="slider-value" id="explode-eigenval-val">1.20</span>
+                </div>
+                <div class="slider-group">
+                    <label>序列长度 $T$：</label>
+                    <input type="range" id="explode-seqlen" min="10" max="50" step="1" value="25">
+                    <span class="slider-value" id="explode-seqlen-val">25</span>
+                </div>
+                <button class="btn btn-primary btn-sm" id="btn-run-explode">运行模拟</button>
+            </div>
+
+            <div class="metric-row">
+                <div class="metric-card info" id="metric-explode-initial">
+                    <div class="value">—</div>
+                    <div class="label">初始梯度范数</div>
+                </div>
+                <div class="metric-card danger" id="metric-explode-final">
+                    <div class="value">—</div>
+                    <div class="label">最终梯度范数</div>
+                </div>
+                <div class="metric-card warning" id="metric-explode-ratio">
+                    <div class="value">—</div>
+                    <div class="label">放大倍数</div>
+                </div>
+            </div>
+
+            <div class="chart-container" id="explode-chart" style="min-height:320px;">
+                <div style="display:flex;align-items:center;justify-content:center;height:280px;color:var(--text-muted);">
+                    点击"运行模拟"查看梯度爆炸过程
+                </div>
+            </div>
+
+            <h3 class="mt-3">梯度裁剪（Gradient Clipping）</h3>
+
+            <div class="info-box success">
+                <p>$$g \leftarrow g \cdot \frac{\theta}{\|g\|} \quad \text{当 } \|g\| > \theta$$</p>
+                <p>当梯度范数超过阈值 $\theta$ 时，将其缩放回阈值范围内。方向不变，只是限制了步长大小。</p>
+            </div>
+
+            <div class="controls-row">
+                <div class="slider-group">
+                    <label>裁剪阈值 $\theta$：</label>
+                    <input type="range" id="clip-threshold" min="0.5" max="20" step="0.5" value="5">
+                    <span class="slider-value" id="clip-threshold-val">5.0</span>
+                </div>
+                <button class="btn btn-primary btn-sm" id="btn-run-clip">应用梯度裁剪</button>
+            </div>
+
+            <div class="clip-demo">
+                <div class="chart-container" id="clip-before-chart" style="min-height:280px;">
+                    <div style="text-align:center;color:var(--text-muted);padding:2rem;">裁剪前</div>
+                </div>
+                <div class="chart-container" id="clip-after-chart" style="min-height:280px;">
+                    <div style="text-align:center;color:var(--text-muted);padding:2rem;">裁剪后</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Section 4: 长距离依赖实验 -->
+        <div class="section" id="section-longrange">
+            <div class="section-title">
+                <div class="icon" style="background:rgba(179,136,255,0.15);color:var(--accent-purple);">L</div>
+                <h2>长距离依赖实验</h2>
+            </div>
+
+            <p>经典实验："记住第一个输入"。序列长度为 $T$，位置 0 的信号决定最终标签（0 或 1），其余位置填充随机噪声。如果网络能记住开头的信号，就能正确分类。</p>
+
+            <div class="info-box">
+                <p>这个任务直接测试网络的长距离记忆能力。随着 $T$ 增大，vanilla RNN 需要将位置 0 的信息保持 $T$ 个时间步 — 而梯度消失让这变得不可能。准确率将退化到随机猜测水平（50%）。</p>
+            </div>
+
+            <h3 class="mt-3">模拟实验</h3>
+
+            <div class="controls-row">
+                <div class="slider-group">
+                    <label>最大序列长度 $T_{max}$：</label>
+                    <input type="range" id="longrange-maxlen" min="20" max="80" step="5" value="50">
+                    <span class="slider-value" id="longrange-maxlen-val">50</span>
+                </div>
+                <button class="btn btn-primary btn-sm" id="btn-run-longrange">运行实验</button>
+            </div>
+
+            <div class="metric-row">
+                <div class="metric-card success" id="metric-lr-short">
+                    <div class="value">—</div>
+                    <div class="label">$T=5$ 准确率</div>
+                </div>
+                <div class="metric-card warning" id="metric-lr-mid">
+                    <div class="value">—</div>
+                    <div class="label">$T=20$ 准确率</div>
+                </div>
+                <div class="metric-card danger" id="metric-lr-long">
+                    <div class="value">—</div>
+                    <div class="label">$T=T_{max}$ 准确率</div>
+                </div>
+                <div class="metric-card" id="metric-lr-random">
+                    <div class="value" style="color:var(--text-muted);">50%</div>
+                    <div class="label">随机基线</div>
+                </div>
+            </div>
+
+            <div class="accuracy-chart-container" id="longrange-chart">
+                <div style="display:flex;align-items:center;justify-content:center;height:280px;color:var(--text-muted);">
+                    点击"运行实验"查看准确率随序列长度的变化
+                </div>
+            </div>
+
+            <div class="info-box warning mt-2">
+                <p><strong>结论：</strong>vanilla RNN 的准确率随 $T$ 增加而迅速下降，最终接近 50% 随机基线。这证明了它根本无法处理长距离依赖问题。我们需要一种新的架构。</p>
+            </div>
+        </div>
+
+        <!-- Section 5: 解决方案预览 -->
+        <div class="section" id="section-solutions">
+            <div class="section-title">
+                <div class="icon" style="background:rgba(22,199,154,0.15);color:var(--accent-green);">S</div>
+                <h2>解决方案预览</h2>
+            </div>
+
+            <p>面对梯度消失与爆炸，研究者们提出了三大类解决方案。它们各有优劣：</p>
+
+            <div class="solution-cards">
+                <!-- Card 1: Gradient Clipping -->
+                <div class="solution-card">
+                    <div class="card-icon">&#9986;</div>
+                    <h4>梯度裁剪</h4>
+                    <p class="text-sm" style="color:var(--text-secondary);">当梯度范数超过阈值时，按比例缩放。简单直接，几乎所有 RNN 训练都使用。但它只能解决梯度爆炸，对梯度消失无能为力。</p>
+                    <div class="effectiveness">
+                        <span class="tag tag-yes">解决爆炸</span>
+                        <span class="tag tag-no">不解决消失</span>
+                    </div>
+                </div>
+
+                <!-- Card 2: Careful Initialization -->
+                <div class="solution-card">
+                    <div class="card-icon">&#9881;</div>
+                    <h4>正交初始化</h4>
+                    <p class="text-sm" style="color:var(--text-secondary);">将 $W_{hh}$ 初始化为正交矩阵，使其特征值的模为 1。这让梯度在训练初期既不消失也不爆炸，但随着训练进行仍可能偏离。</p>
+                    <div class="effectiveness">
+                        <span class="tag tag-partial">缓解爆炸</span>
+                        <span class="tag tag-partial">缓解消失</span>
+                    </div>
+                </div>
+
+                <!-- Card 3: Gated Architectures -->
+                <div class="solution-card">
+                    <div class="card-icon">&#9971;</div>
+                    <h4>门控架构（LSTM / GRU）</h4>
+                    <p class="text-sm" style="color:var(--text-secondary);">通过引入门控机制和"记忆高速公路"，让梯度可以无损地穿越多个时间步。LSTM 的细胞状态就是这条高速公路 — 梯度可以直接流过，不受权重矩阵的反复乘积影响。</p>
+                    <div class="effectiveness">
+                        <span class="tag tag-yes">解决爆炸</span>
+                        <span class="tag tag-yes">解决消失</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="highway-diagram" id="highway-diagram">
+                <h4 style="margin-bottom:1rem;">核心洞察："时间高速公路"</h4>
+                <p class="text-sm text-muted" style="margin-bottom:1rem;">我们需要一条让梯度<strong>不衰减地</strong>穿越时间的通道。LSTM 的细胞状态 $c_t$ 就是这条高速公路。</p>
+                <svg id="highway-svg" width="100%" height="160" viewBox="0 0 700 160"></svg>
+                <p class="text-sm text-muted mt-2">下一模块：深入 LSTM — 学习遗忘门、输入门、输出门如何协同工作。</p>
+            </div>
+
+        </div>
+
+    </div><!-- /page-container -->
+
+    <!-- Shared Scripts -->
+    <script src="../shared/scripts/rnn-utils.js"></script>
+    <script src="../shared/scripts/animation-controller.js"></script>
+    <script src="../shared/scripts/matrix-renderer.js"></script>
+    <script src="../shared/scripts/nav.js"></script>
+    <script src="../shared/scripts/katex-init.js"></script>
+
+    <!-- Main Script -->
+    <script>
+    (function() {
+        'use strict';
+
+        /* === 辅助工具 === */
+        let globalSeed = 42;
+
+        function nextSeed() {
+            globalSeed = (globalSeed * 16807 + 0) % 2147483647;
+            return globalSeed;
+        }
+
+        /** 生成对称正定随机矩阵，然后缩放特征值 */
+        function makeWhhWithScale(dim, scale, seed) {
+            const W = RNNUtils.randomMatrix(dim, dim, 1.0, seed);
+            // 缩放让谱范数约等于 scale
+            const norm = computeFrobeniusNorm(W);
+            const factor = scale / (norm / Math.sqrt(dim));
+            return W.map(row => row.map(v => v * factor));
+        }
+
+        /** 构造特征值约为 eigenval 的对角占优矩阵 */
+        function makeWhhWithEigenval(dim, eigenval, seed) {
+            const rng = RNNUtils.seededRandom(seed);
+            const W = [];
+            for (let i = 0; i < dim; i++) {
+                const row = [];
+                for (let j = 0; j < dim; j++) {
+                    if (i === j) {
+                        row.push(eigenval * (0.8 + rng() * 0.4));
+                    } else {
+                        row.push((rng() - 0.5) * 0.1 * eigenval);
+                    }
+                }
+                W.push(row);
+            }
+            return W;
+        }
+
+        function computeFrobeniusNorm(M) {
+            let sum = 0;
+            for (const row of M)
+                for (const v of row) sum += v * v;
+            return Math.sqrt(sum);
+        }
+
+        /** 近似计算最大奇异值（幂迭代法） */
+        function spectralNorm(M) {
+            const n = M.length;
+            let v = Array.from({ length: n }, () => Math.random());
+            let norm = Math.sqrt(v.reduce((s, x) => s + x * x, 0));
+            v = v.map(x => x / norm);
+
+            for (let iter = 0; iter < 50; iter++) {
+                // u = M * v
+                const u = RNNUtils.matVecMul(M, v);
+                const uNorm = Math.sqrt(u.reduce((s, x) => s + x * x, 0));
+                if (uNorm < 1e-12) return 0;
+                const uUnit = u.map(x => x / uNorm);
+
+                // v = M^T * u
+                const Mt = RNNUtils.transpose(M);
+                const vNew = RNNUtils.matVecMul(Mt, uUnit);
+                norm = Math.sqrt(vNew.reduce((s, x) => s + x * x, 0));
+                if (norm < 1e-12) return 0;
+                v = vNew.map(x => x / norm);
+            }
+            const Mv = RNNUtils.matVecMul(M, v);
+            return Math.sqrt(Mv.reduce((s, x) => s + x * x, 0));
+        }
+
+        /** 计算 Jacobian 矩阵 diag(1-h^2) * Whh */
+        function computeJacobian(Whh, h) {
+            const n = h.length;
+            const J = [];
+            for (let i = 0; i < n; i++) {
+                const row = [];
+                const dtanh = 1 - h[i] * h[i];
+                for (let j = 0; j < n; j++) {
+                    row.push(dtanh * Whh[i][j]);
+                }
+                J.push(row);
+            }
+            return J;
+        }
+
+        /** 模拟 RNN 前向传播并收集梯度范数 */
+        function simulateGradientFlow(Whh, seqLen, seed) {
+            const dim = Whh.length;
+            const Wxh = RNNUtils.randomMatrix(dim, 1, 0.3, seed);
+            const bh = RNNUtils.zerosVector(dim);
+
+            // 生成输入序列
+            const rng = RNNUtils.seededRandom(seed + 100);
+            const xs = Array.from({ length: seqLen }, () => [rng() - 0.5]);
+
+            // 前向传播
+            const h0 = RNNUtils.zerosVector(dim);
+            const result = RNNUtils.rnnForward(xs, h0, Wxh, Whh, bh);
+
+            // 用 gradientFlowAnalysis 计算累积梯度范数
+            const analysis = RNNUtils.gradientFlowAnalysis(Whh, result.steps);
+            return {
+                steps: result.steps,
+                stepNorms: analysis.stepNorms,
+                cumulativeNorms: analysis.cumulativeNorms
+            };
+        }
+
+        /** 格式化数值显示 */
+        function fmtNum(val, digits) {
+            if (digits === undefined) digits = 4;
+            if (!isFinite(val)) return val > 0 ? '+Inf' : '-Inf';
+            if (isNaN(val)) return 'NaN';
+            if (Math.abs(val) < 0.001 && val !== 0) return val.toExponential(2);
+            if (Math.abs(val) > 1e6) return val.toExponential(2);
+            return val.toFixed(digits);
+        }
+
+        /* === Section 1: tanh 导数可视化 === */
+        function drawTanhChart() {
+            const container = document.getElementById('tanh-chart');
+            container.innerHTML = '';
+
+            const margin = { top: 20, right: 30, bottom: 40, left: 50 };
+            const width = container.clientWidth - margin.left - margin.right;
+            const height = 220 - margin.top - margin.bottom;
+
+            const svg = d3.select(container).append('svg')
+                .attr('width', width + margin.left + margin.right)
+                .attr('height', height + margin.top + margin.bottom)
+                .append('g')
+                .attr('transform', `translate(${margin.left},${margin.top})`);
+
+            const xData = d3.range(-4, 4.05, 0.1);
+            const tanhData = xData.map(x => ({ x, y: Math.tanh(x) }));
+            const derivData = xData.map(x => ({ x, y: 1 - Math.tanh(x) ** 2 }));
+
+            const xScale = d3.scaleLinear().domain([-4, 4]).range([0, width]);
+            const yScale = d3.scaleLinear().domain([-1.1, 1.1]).range([height, 0]);
+
+            // 网格
+            svg.append('g').attr('class', 'grid')
+                .selectAll('line')
+                .data([-1, -0.5, 0, 0.5, 1])
+                .enter().append('line')
+                .attr('x1', 0).attr('x2', width)
+                .attr('y1', d => yScale(d)).attr('y2', d => yScale(d))
+                .attr('stroke', '#2a2a4a').attr('stroke-dasharray', '3,3');
+
+            // x 轴
+            svg.append('g')
+                .attr('transform', `translate(0,${height})`)
+                .call(d3.axisBottom(xScale).ticks(8))
+                .selectAll('text').style('fill', '#a8a8b8').style('font-size', '11px');
+            svg.selectAll('.domain, .tick line').attr('stroke', '#3a3a5a');
+
+            // y 轴
+            svg.append('g')
+                .call(d3.axisLeft(yScale).ticks(5))
+                .selectAll('text').style('fill', '#a8a8b8').style('font-size', '11px');
+
+            // tanh 曲线
+            const lineFn = d3.line().x(d => xScale(d.x)).y(d => yScale(d.y)).curve(d3.curveMonotoneX);
+
+            svg.append('path')
+                .datum(tanhData)
+                .attr('d', lineFn)
+                .attr('fill', 'none')
+                .attr('stroke', '#16c79a')
+                .attr('stroke-width', 2.5);
+
+            // 导数曲线
+            svg.append('path')
+                .datum(derivData)
+                .attr('d', lineFn)
+                .attr('fill', 'none')
+                .attr('stroke', '#ff5252')
+                .attr('stroke-width', 2.5)
+                .attr('stroke-dasharray', '6,3');
+
+            // 图例
+            const legend = svg.append('g').attr('transform', `translate(${width - 160}, 5)`);
+            legend.append('line').attr('x1', 0).attr('x2', 20).attr('y1', 0).attr('y2', 0)
+                .attr('stroke', '#16c79a').attr('stroke-width', 2.5);
+            legend.append('text').attr('x', 25).attr('y', 4).text('tanh(x)')
+                .style('fill', '#16c79a').style('font-size', '12px');
+
+            legend.append('line').attr('x1', 0).attr('x2', 20).attr('y1', 20).attr('y2', 20)
+                .attr('stroke', '#ff5252').attr('stroke-width', 2.5).attr('stroke-dasharray', '6,3');
+            legend.append('text').attr('x', 25).attr('y', 24).text("tanh'(x) = 1-tanh\u00B2")
+                .style('fill', '#ff5252').style('font-size', '12px');
+
+            // 标注最大值
+            svg.append('circle').attr('cx', xScale(0)).attr('cy', yScale(1)).attr('r', 4)
+                .attr('fill', '#ff5252');
+            svg.append('text').attr('x', xScale(0) + 8).attr('y', yScale(1) + 4)
+                .text('max = 1').style('fill', '#ff5252').style('font-size', '11px');
+        }
+
+        /* === Section 1: Jacobian 交互 === */
+        let whhRenderer = null;
+        let jacobianRenderer = null;
+
+        function updateJacobianSection() {
+            const scale = parseFloat(document.getElementById('whh-scale').value);
+            const dim = parseInt(document.getElementById('hidden-dim').value);
+
+            document.getElementById('whh-scale-val').textContent = scale.toFixed(2);
+            document.getElementById('hidden-dim-val').textContent = dim;
+
+            const Whh = makeWhhWithScale(dim, scale, globalSeed);
+
+            // 生成一个典型隐藏状态
+            const h = RNNUtils.randomVector(dim, 0.6, globalSeed + 7).map(v => Math.tanh(v));
+
+            const J = computeJacobian(Whh, h);
+            const sNorm = spectralNorm(J);
+            const frobNorm = RNNUtils.jacobianNorm(Whh, h);
+            const maxDeriv = Math.max(...h.map(v => 1 - v * v));
+
+            // 更新指标
+            const metricSpectral = document.getElementById('metric-spectral');
+            metricSpectral.querySelector('.value').textContent = fmtNum(sNorm, 3);
+            metricSpectral.className = 'metric-card ' + (sNorm < 1 ? 'info' : sNorm > 1 ? 'danger' : 'success');
+
+            document.getElementById('metric-maxderiv').querySelector('.value').textContent = fmtNum(maxDeriv, 3);
+            document.getElementById('metric-maxderiv').className = 'metric-card warning';
+
+            const statusCard = document.getElementById('metric-status');
+            if (sNorm < 0.95) {
+                statusCard.querySelector('.value').textContent = '消失';
+                statusCard.className = 'metric-card info';
+            } else if (sNorm > 1.05) {
+                statusCard.querySelector('.value').textContent = '爆炸';
+                statusCard.className = 'metric-card danger';
+            } else {
+                statusCard.querySelector('.value').textContent = '稳定';
+                statusCard.className = 'metric-card success';
+            }
+
+            // 渲染矩阵
+            const whhContainer = document.getElementById('whh-matrix-container');
+            whhContainer.innerHTML = '';
+            whhRenderer = new MatrixRenderer({
+                container: whhContainer,
+                data: Whh,
+                cellSize: dim <= 3 ? 48 : 38,
+                showValues: true,
+                title: ''
+            });
+
+            const jacContainer = document.getElementById('jacobian-matrix-container');
+            jacContainer.innerHTML = '';
+            jacobianRenderer = new MatrixRenderer({
+                container: jacContainer,
+                data: J,
+                cellSize: dim <= 3 ? 48 : 38,
+                showValues: true,
+                title: `谱范数: ${fmtNum(sNorm, 3)}`
+            });
+        }
+
+        document.getElementById('whh-scale').addEventListener('input', updateJacobianSection);
+        document.getElementById('hidden-dim').addEventListener('input', updateJacobianSection);
+        document.getElementById('btn-reseed').addEventListener('click', () => {
+            globalSeed = Math.floor(Math.random() * 1e6);
+            updateJacobianSection();
+        });
+
+        /* === Section 2: 梯度消失演示 === */
+        function drawGradientChart(containerId, data, opts) {
+            const container = document.getElementById(containerId);
+            container.innerHTML = '';
+
+            const margin = { top: 25, right: 30, bottom: 45, left: 65 };
+            const width = container.clientWidth - margin.left - margin.right;
+            const height = 280 - margin.top - margin.bottom;
+
+            const svg = d3.select(container).append('svg')
+                .attr('width', width + margin.left + margin.right)
+                .attr('height', height + margin.top + margin.bottom)
+                .append('g')
+                .attr('transform', `translate(${margin.left},${margin.top})`);
+
+            const xScale = d3.scaleLinear()
+                .domain([0, data.length - 1])
+                .range([0, width]);
+
+            const useLog = opts.logScale !== false;
+            const minVal = Math.max(1e-20, d3.min(data, d => d.y));
+            const maxVal = d3.max(data, d => d.y);
+
+            let yScale;
+            if (useLog && maxVal / minVal > 100) {
+                yScale = d3.scaleLog()
+                    .domain([Math.max(1e-15, minVal * 0.5), maxVal * 2])
+                    .range([height, 0])
+                    .clamp(true);
+            } else {
+                yScale = d3.scaleLinear()
+                    .domain([0, maxVal * 1.1])
+                    .range([height, 0]);
+            }
+
+            // 网格线
+            svg.append('g')
+                .selectAll('line')
+                .data(yScale.ticks(5))
+                .enter().append('line')
+                .attr('x1', 0).attr('x2', width)
+                .attr('y1', d => yScale(d)).attr('y2', d => yScale(d))
+                .attr('stroke', '#2a2a4a').attr('stroke-dasharray', '3,3');
+
+            // x 轴
+            svg.append('g')
+                .attr('transform', `translate(0,${height})`)
+                .call(d3.axisBottom(xScale).ticks(Math.min(data.length, 10)).tickFormat(d => `t=${Math.round(d)}`))
+                .selectAll('text').style('fill', '#a8a8b8').style('font-size', '10px');
+            svg.selectAll('.domain, .tick line').attr('stroke', '#3a3a5a');
+
+            // y 轴
+            svg.append('g')
+                .call(d3.axisLeft(yScale).ticks(5, useLog ? '.1e' : '.3f'))
+                .selectAll('text').style('fill', '#a8a8b8').style('font-size', '10px');
+
+            // y 轴标签
+            svg.append('text')
+                .attr('transform', 'rotate(-90)')
+                .attr('x', -height / 2)
+                .attr('y', -50)
+                .attr('text-anchor', 'middle')
+                .style('fill', '#a8a8b8')
+                .style('font-size', '11px')
+                .text(opts.yLabel || '梯度范数');
+
+            // 标题
+            if (opts.title) {
+                svg.append('text')
+                    .attr('x', width / 2)
+                    .attr('y', -8)
+                    .attr('text-anchor', 'middle')
+                    .style('fill', '#e8e8e8')
+                    .style('font-size', '13px')
+                    .style('font-weight', '600')
+                    .text(opts.title);
+            }
+
+            // 线条
+            const lineFn = d3.line()
+                .x(d => xScale(d.x))
+                .y(d => yScale(Math.max(useLog ? 1e-15 : 0, d.y)))
+                .curve(d3.curveMonotoneX);
+
+            const path = svg.append('path')
+                .datum(data)
+                .attr('d', lineFn)
+                .attr('fill', 'none')
+                .attr('stroke', opts.color || '#4fc3f7')
+                .attr('stroke-width', 2.5);
+
+            // 动画
+            if (opts.animate !== false) {
+                const totalLen = path.node().getTotalLength();
+                path.attr('stroke-dasharray', totalLen)
+                    .attr('stroke-dashoffset', totalLen);
+                gsap.to(path.node(), {
+                    strokeDashoffset: 0,
+                    duration: 1.2,
+                    ease: 'power2.out'
+                });
+            }
+
+            // 数据点
+            const circles = svg.selectAll('.dot')
+                .data(data)
+                .enter().append('circle')
+                .attr('class', 'dot')
+                .attr('cx', d => xScale(d.x))
+                .attr('cy', d => yScale(Math.max(useLog ? 1e-15 : 0, d.y)))
+                .attr('r', data.length > 30 ? 2 : 3.5)
+                .attr('fill', opts.color || '#4fc3f7')
+                .attr('opacity', 0);
+
+            if (opts.animate !== false) {
+                gsap.to(circles.nodes(), {
+                    opacity: 0.8,
+                    duration: 0.3,
+                    stagger: 0.03,
+                    delay: 0.5
+                });
+            } else {
+                circles.attr('opacity', 0.8);
+            }
+
+            // 参考线 y=1
+            if (opts.showBaseline) {
+                const yPos = yScale(1);
+                if (yPos > 0 && yPos < height) {
+                    svg.append('line')
+                        .attr('x1', 0).attr('x2', width)
+                        .attr('y1', yPos).attr('y2', yPos)
+                        .attr('stroke', '#16c79a')
+                        .attr('stroke-width', 1)
+                        .attr('stroke-dasharray', '6,3')
+                        .attr('opacity', 0.6);
+                    svg.append('text')
+                        .attr('x', width - 5).attr('y', yPos - 5)
+                        .attr('text-anchor', 'end')
+                        .style('fill', '#16c79a')
+                        .style('font-size', '10px')
+                        .text('y = 1');
+                }
+            }
+
+            return svg;
+        }
+
+        function runVanishingDemo() {
+            const eigenval = parseFloat(document.getElementById('vanish-eigenval').value);
+            const seqLen = parseInt(document.getElementById('vanish-seqlen').value);
+
+            document.getElementById('vanish-eigenval-val').textContent = eigenval.toFixed(2);
+            document.getElementById('vanish-seqlen-val').textContent = seqLen;
+
+            const dim = 4;
+            const Whh = makeWhhWithEigenval(dim, eigenval, 77);
+            const sim = simulateGradientFlow(Whh, seqLen, 77);
+
+            const data = sim.cumulativeNorms.map((v, i) => ({ x: i, y: v }));
+
+            drawGradientChart('vanish-chart', data, {
+                title: `梯度范数变化（特征值 ≈ ${eigenval.toFixed(2)}）`,
+                color: '#4fc3f7',
+                logScale: true,
+                showBaseline: true,
+                yLabel: '累积梯度范数'
+            });
+
+            // 更新指标
+            const initial = data[data.length - 1].y;
+            const final = data[0].y;
+            document.getElementById('metric-vanish-initial').querySelector('.value').textContent = fmtNum(initial, 4);
+            document.getElementById('metric-vanish-final').querySelector('.value').textContent = fmtNum(final, 4);
+
+            const ratio = initial > 1e-15 ? final / initial : 0;
+            document.getElementById('metric-vanish-ratio').querySelector('.value').textContent =
+                ratio < 0.001 ? ratio.toExponential(2) + 'x' : fmtNum(ratio, 4) + 'x';
+        }
+
+        document.getElementById('vanish-eigenval').addEventListener('input', function() {
+            document.getElementById('vanish-eigenval-val').textContent = parseFloat(this.value).toFixed(2);
+        });
+        document.getElementById('vanish-seqlen').addEventListener('input', function() {
+            document.getElementById('vanish-seqlen-val').textContent = this.value;
+        });
+        document.getElementById('btn-run-vanish').addEventListener('click', runVanishingDemo);
+
+        /* === Section 3: 梯度爆炸演示 === */
+        let lastExplodeData = null;
+
+        function runExplodingDemo() {
+            const eigenval = parseFloat(document.getElementById('explode-eigenval').value);
+            const seqLen = parseInt(document.getElementById('explode-seqlen').value);
+
+            document.getElementById('explode-eigenval-val').textContent = eigenval.toFixed(2);
+            document.getElementById('explode-seqlen-val').textContent = seqLen;
+
+            const dim = 4;
+            const Whh = makeWhhWithEigenval(dim, eigenval, 99);
+            const sim = simulateGradientFlow(Whh, seqLen, 99);
+
+            const data = sim.cumulativeNorms.map((v, i) => ({ x: i, y: Math.min(v, 1e15) }));
+            lastExplodeData = data;
+
+            drawGradientChart('explode-chart', data, {
+                title: `梯度范数变化（特征值 ≈ ${eigenval.toFixed(2)}）`,
+                color: '#ff5252',
+                logScale: true,
+                showBaseline: true,
+                yLabel: '累积梯度范数'
+            });
+
+            // 更新指标
+            const initial = data[data.length - 1].y;
+            const final = data[0].y;
+
+            document.getElementById('metric-explode-initial').querySelector('.value').textContent = fmtNum(initial, 4);
+
+            const finalDisplay = final > 1e10 ? 'Inf (溢出)' : fmtNum(final, 4);
+            document.getElementById('metric-explode-final').querySelector('.value').textContent = finalDisplay;
+
+            const ratio = initial > 1e-15 ? final / initial : Infinity;
+            document.getElementById('metric-explode-ratio').querySelector('.value').textContent =
+                ratio > 1e6 ? ratio.toExponential(2) + 'x' : fmtNum(ratio, 2) + 'x';
+        }
+
+        function runClipDemo() {
+            if (!lastExplodeData) runExplodingDemo();
+
+            const theta = parseFloat(document.getElementById('clip-threshold').value);
+            document.getElementById('clip-threshold-val').textContent = theta.toFixed(1);
+
+            const data = lastExplodeData;
+
+            // 原始数据
+            drawGradientChart('clip-before-chart', data, {
+                title: '裁剪前',
+                color: '#ff5252',
+                logScale: true,
+                showBaseline: true,
+                animate: false,
+                yLabel: '梯度范数'
+            });
+
+            // 裁剪后数据
+            const clipped = data.map(d => ({
+                x: d.x,
+                y: d.y > theta ? theta : d.y
+            }));
+
+            drawGradientChart('clip-after-chart', clipped, {
+                title: `裁剪后（阈值 θ = ${theta.toFixed(1)}）`,
+                color: '#16c79a',
+                logScale: false,
+                showBaseline: false,
+                animate: true,
+                yLabel: '梯度范数'
+            });
+        }
+
+        document.getElementById('explode-eigenval').addEventListener('input', function() {
+            document.getElementById('explode-eigenval-val').textContent = parseFloat(this.value).toFixed(2);
+        });
+        document.getElementById('explode-seqlen').addEventListener('input', function() {
+            document.getElementById('explode-seqlen-val').textContent = this.value;
+        });
+        document.getElementById('clip-threshold').addEventListener('input', function() {
+            document.getElementById('clip-threshold-val').textContent = parseFloat(this.value).toFixed(1);
+        });
+        document.getElementById('btn-run-explode').addEventListener('click', runExplodingDemo);
+        document.getElementById('btn-run-clip').addEventListener('click', runClipDemo);
+
+        /* === Section 4: 长距离依赖实验 === */
+        function simulateLongRangeDependency(maxLen) {
+            // 模拟 vanilla RNN 在"记住首位信号"任务上的准确率
+            // 使用预计算的衰减模型：accuracy ≈ sigmoid(k * gradient_influence)
+            // gradient_influence 随 T 指数衰减
+            const results = [];
+            const eigenval = 0.85; // 典型 vanilla RNN
+            const dim = 8;
+            const rng = RNNUtils.seededRandom(123);
+
+            for (let T = 2; T <= maxLen; T++) {
+                // 梯度影响近似为 eigenval^T
+                const gradientInfluence = Math.pow(eigenval, T);
+
+                // 将梯度影响映射到准确率
+                // 短序列时准确率高，长序列退化到50%（随机水平）
+                // acc = 0.5 + 0.5 * sigmoid(10 * gradientInfluence - 2)
+                const x = 10 * gradientInfluence - 2;
+                const sig = 1 / (1 + Math.exp(-x));
+                let accuracy = 0.5 + 0.48 * sig;
+
+                // 加一些随机波动
+                accuracy += (rng() - 0.5) * 0.03;
+                accuracy = Math.max(0.45, Math.min(1.0, accuracy));
+
+                results.push({ T, accuracy });
+            }
+
+            return results;
+        }
+
+        function runLongRangeExperiment() {
+            const maxLen = parseInt(document.getElementById('longrange-maxlen').value);
+            document.getElementById('longrange-maxlen-val').textContent = maxLen;
+
+            const results = simulateLongRangeDependency(maxLen);
+            const container = document.getElementById('longrange-chart');
+            container.innerHTML = '';
+
+            const margin = { top: 25, right: 30, bottom: 45, left: 55 };
+            const width = container.clientWidth - margin.left - margin.right;
+            const height = 300 - margin.top - margin.bottom;
+
+            const svg = d3.select(container).append('svg')
+                .attr('width', width + margin.left + margin.right)
+                .attr('height', height + margin.top + margin.bottom)
+                .append('g')
+                .attr('transform', `translate(${margin.left},${margin.top})`);
+
+            const xScale = d3.scaleLinear().domain([2, maxLen]).range([0, width]);
+            const yScale = d3.scaleLinear().domain([0.4, 1.05]).range([height, 0]);
+
+            // 网格线
+            svg.append('g')
+                .selectAll('line')
+                .data([0.5, 0.6, 0.7, 0.8, 0.9, 1.0])
+                .enter().append('line')
+                .attr('x1', 0).attr('x2', width)
+                .attr('y1', d => yScale(d)).attr('y2', d => yScale(d))
+                .attr('stroke', '#2a2a4a').attr('stroke-dasharray', '3,3');
+
+            // 随机基线 50%
+            svg.append('line')
+                .attr('x1', 0).attr('x2', width)
+                .attr('y1', yScale(0.5)).attr('y2', yScale(0.5))
+                .attr('stroke', '#ff5252')
+                .attr('stroke-width', 1.5)
+                .attr('stroke-dasharray', '8,4')
+                .attr('opacity', 0.7);
+            svg.append('text')
+                .attr('x', width - 5).attr('y', yScale(0.5) - 6)
+                .attr('text-anchor', 'end')
+                .style('fill', '#ff5252')
+                .style('font-size', '11px')
+                .text('随机基线 50%');
+
+            // 坐标轴
+            svg.append('g')
+                .attr('transform', `translate(0,${height})`)
+                .call(d3.axisBottom(xScale).ticks(8))
+                .selectAll('text').style('fill', '#a8a8b8').style('font-size', '10px');
+            svg.selectAll('.domain, .tick line').attr('stroke', '#3a3a5a');
+
+            svg.append('g')
+                .call(d3.axisLeft(yScale).ticks(6).tickFormat(d3.format('.0%')))
+                .selectAll('text').style('fill', '#a8a8b8').style('font-size', '10px');
+
+            // x 轴标签
+            svg.append('text')
+                .attr('x', width / 2)
+                .attr('y', height + 38)
+                .attr('text-anchor', 'middle')
+                .style('fill', '#a8a8b8')
+                .style('font-size', '12px')
+                .text('序列长度 T');
+
+            // y 轴标签
+            svg.append('text')
+                .attr('transform', 'rotate(-90)')
+                .attr('x', -height / 2)
+                .attr('y', -42)
+                .attr('text-anchor', 'middle')
+                .style('fill', '#a8a8b8')
+                .style('font-size', '12px')
+                .text('准确率');
+
+            // 标题
+            svg.append('text')
+                .attr('x', width / 2)
+                .attr('y', -8)
+                .attr('text-anchor', 'middle')
+                .style('fill', '#e8e8e8')
+                .style('font-size', '13px')
+                .style('font-weight', '600')
+                .text('Vanilla RNN 在长距离依赖任务上的表现');
+
+            // 准确率曲线
+            const lineData = results.map(r => ({ x: r.T, y: r.accuracy }));
+            const lineFn = d3.line()
+                .x(d => xScale(d.x))
+                .y(d => yScale(d.y))
+                .curve(d3.curveMonotoneX);
+
+            const path = svg.append('path')
+                .datum(lineData)
+                .attr('d', lineFn)
+                .attr('fill', 'none')
+                .attr('stroke', '#b388ff')
+                .attr('stroke-width', 2.5);
+
+            // 动画
+            const totalLen = path.node().getTotalLength();
+            path.attr('stroke-dasharray', totalLen)
+                .attr('stroke-dashoffset', totalLen);
+            gsap.to(path.node(), {
+                strokeDashoffset: 0,
+                duration: 1.5,
+                ease: 'power2.out'
+            });
+
+            // 关键点标注
+            const keyPoints = [
+                results.find(r => r.T === 5),
+                results.find(r => r.T === 20),
+                results[results.length - 1]
+            ].filter(Boolean);
+
+            const pointColors = ['#16c79a', '#ffab40', '#ff5252'];
+
+            keyPoints.forEach((pt, i) => {
+                svg.append('circle')
+                    .attr('cx', xScale(pt.T))
+                    .attr('cy', yScale(pt.accuracy))
+                    .attr('r', 5)
+                    .attr('fill', pointColors[i])
+                    .attr('opacity', 0);
+
+                gsap.to(svg.selectAll('circle').nodes()[i], {
+                    opacity: 1,
+                    duration: 0.3,
+                    delay: 1.5 + i * 0.2
+                });
+            });
+
+            // 更新指标卡片
+            const acc5 = results.find(r => r.T === 5);
+            const acc20 = results.find(r => r.T === 20);
+            const accMax = results[results.length - 1];
+
+            document.getElementById('metric-lr-short').querySelector('.value').textContent =
+                acc5 ? (acc5.accuracy * 100).toFixed(1) + '%' : '—';
+            document.getElementById('metric-lr-mid').querySelector('.value').textContent =
+                acc20 ? (acc20.accuracy * 100).toFixed(1) + '%' : '—';
+            document.getElementById('metric-lr-long').querySelector('.value').textContent =
+                accMax ? (accMax.accuracy * 100).toFixed(1) + '%' : '—';
+        }
+
+        document.getElementById('longrange-maxlen').addEventListener('input', function() {
+            document.getElementById('longrange-maxlen-val').textContent = this.value;
+        });
+        document.getElementById('btn-run-longrange').addEventListener('click', runLongRangeExperiment);
+
+        /* === Section 5: 高速公路图示 === */
+        function drawHighwayDiagram() {
+            const svg = d3.select('#highway-svg');
+            svg.selectAll('*').remove();
+
+            const w = 700, h = 160;
+            const cellY = 40;
+            const hiddenY = 110;
+            const numSteps = 5;
+            const stepW = w / (numSteps + 1);
+
+            // 细胞状态通道（高速公路）
+            svg.append('rect')
+                .attr('x', 40).attr('y', cellY - 12)
+                .attr('width', w - 80).attr('height', 24)
+                .attr('rx', 12)
+                .attr('fill', 'rgba(22, 199, 154, 0.1)')
+                .attr('stroke', '#16c79a')
+                .attr('stroke-width', 1.5)
+                .attr('stroke-dasharray', '8,4');
+
+            svg.append('text')
+                .attr('x', 20).attr('y', cellY + 4)
+                .style('fill', '#16c79a')
+                .style('font-size', '11px')
+                .style('font-weight', '600')
+                .text('c');
+
+            // 隐藏状态通道
+            for (let i = 0; i < numSteps; i++) {
+                const x = stepW * (i + 1);
+
+                // 隐藏状态节点
+                svg.append('circle')
+                    .attr('cx', x).attr('cy', hiddenY)
+                    .attr('r', 18)
+                    .attr('fill', 'rgba(79, 195, 247, 0.15)')
+                    .attr('stroke', '#4fc3f7')
+                    .attr('stroke-width', 1.5);
+
+                svg.append('text')
+                    .attr('x', x).attr('y', hiddenY + 4)
+                    .attr('text-anchor', 'middle')
+                    .style('fill', '#4fc3f7')
+                    .style('font-size', '11px')
+                    .style('font-weight', '600')
+                    .text(`h${i}`);
+
+                // 细胞状态节点
+                svg.append('circle')
+                    .attr('cx', x).attr('cy', cellY)
+                    .attr('r', 12)
+                    .attr('fill', 'rgba(22, 199, 154, 0.25)')
+                    .attr('stroke', '#16c79a')
+                    .attr('stroke-width', 1.5);
+
+                svg.append('text')
+                    .attr('x', x).attr('y', cellY + 4)
+                    .attr('text-anchor', 'middle')
+                    .style('fill', '#16c79a')
+                    .style('font-size', '9px')
+                    .style('font-weight', '600')
+                    .text(`c${i}`);
+
+                // 连接线：h → h（下方通道）
+                if (i < numSteps - 1) {
+                    const nx = stepW * (i + 2);
+                    svg.append('line')
+                        .attr('x1', x + 18).attr('y1', hiddenY)
+                        .attr('x2', nx - 18).attr('y2', hiddenY)
+                        .attr('stroke', '#4fc3f7')
+                        .attr('stroke-width', 1.5)
+                        .attr('opacity', 0.5)
+                        .attr('marker-end', 'none');
+
+                    // h 通道上的 x 标记（表示乘法）
+                    const midX = (x + nx) / 2;
+                    svg.append('text')
+                        .attr('x', midX).attr('y', hiddenY + 4)
+                        .attr('text-anchor', 'middle')
+                        .style('fill', '#ff5252')
+                        .style('font-size', '12px')
+                        .style('font-weight', '700')
+                        .text('\u00D7');
+                }
+
+                // 连接线 c → h（垂直）
+                svg.append('line')
+                    .attr('x1', x).attr('y1', cellY + 12)
+                    .attr('x2', x).attr('y2', hiddenY - 18)
+                    .attr('stroke', '#a8a8b8')
+                    .attr('stroke-width', 1)
+                    .attr('stroke-dasharray', '3,3')
+                    .attr('opacity', 0.5);
+            }
+
+            // 细胞状态流动箭头
+            for (let i = 0; i < numSteps - 1; i++) {
+                const x1 = stepW * (i + 1) + 12;
+                const x2 = stepW * (i + 2) - 12;
+
+                svg.append('line')
+                    .attr('x1', x1).attr('y1', cellY)
+                    .attr('x2', x2).attr('y2', cellY)
+                    .attr('stroke', '#16c79a')
+                    .attr('stroke-width', 2.5)
+                    .attr('opacity', 0.8);
+
+                // 箭头
+                svg.append('polygon')
+                    .attr('points', `${x2},${cellY - 5} ${x2 + 8},${cellY} ${x2},${cellY + 5}`)
+                    .attr('fill', '#16c79a')
+                    .attr('opacity', 0.8);
+            }
+
+            // 标注
+            svg.append('text')
+                .attr('x', w / 2).attr('y', cellY - 22)
+                .attr('text-anchor', 'middle')
+                .style('fill', '#16c79a')
+                .style('font-size', '12px')
+                .style('font-weight', '600')
+                .text('细胞状态（梯度高速公路）— 梯度无衰减流过');
+
+            svg.append('text')
+                .attr('x', w / 2).attr('y', hiddenY + 38)
+                .attr('text-anchor', 'middle')
+                .style('fill', '#4fc3f7')
+                .style('font-size', '11px')
+                .text('隐藏状态（受权重矩阵影响 — 梯度衰减/爆炸）');
+
+            // 动画：梯度脉冲沿细胞状态通道流动
+            const pulse = svg.append('circle')
+                .attr('cx', stepW * numSteps)
+                .attr('cy', cellY)
+                .attr('r', 6)
+                .attr('fill', '#16c79a')
+                .attr('opacity', 0);
+
+            function animatePulse() {
+                gsap.fromTo(pulse.node(),
+                    { attr: { cx: stepW * numSteps, opacity: 0.9 } },
+                    {
+                        attr: { cx: stepW, opacity: 0.3 },
+                        duration: 2,
+                        ease: 'power1.inOut',
+                        onComplete: () => {
+                            gsap.delayedCall(1, animatePulse);
+                        }
+                    }
+                );
+            }
+            animatePulse();
+        }
+
+        /* === 初始化 === */
+        function init() {
+            drawTanhChart();
+            updateJacobianSection();
+            drawHighwayDiagram();
+
+            // 响应窗口大小变化
+            let resizeTimer;
+            window.addEventListener('resize', () => {
+                clearTimeout(resizeTimer);
+                resizeTimer = setTimeout(() => {
+                    drawTanhChart();
+                    drawHighwayDiagram();
+                }, 250);
+            });
+        }
+
+        // 等待 DOM 和 KaTeX 就绪
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', init);
+        } else {
+            init();
+        }
+
+    })();
+    </script>
+</body>
+</html>

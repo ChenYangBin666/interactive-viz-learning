@@ -1,0 +1,731 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Transformer 交互式可视化学习</title>
+    <link rel="stylesheet" href="shared/styles/common.css">
+    <link rel="stylesheet" href="shared/styles/components.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+SC:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <style>
+        body { overflow-x: hidden; }
+
+        /* ===== Hero ===== */
+        .hero {
+            text-align: center;
+            padding: calc(var(--header-height) + 2rem) 2rem 3rem;
+            position: relative;
+        }
+        .hero h1 {
+            font-size: 2.8rem;
+            margin-bottom: 0.5rem;
+            background: linear-gradient(135deg, #16c79a, #4fc3f7, #b388ff);
+            background-size: 200% 200%;
+            animation: heroGradient 6s ease infinite;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        @keyframes heroGradient {
+            0%, 100% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+        }
+        .hero .subtitle {
+            font-size: 1.1rem;
+            color: var(--text-secondary);
+            max-width: 640px;
+            margin: 0 auto 2rem;
+        }
+        .hero .tags {
+            display: flex;
+            justify-content: center;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+
+        /* ===== Attention formula decoration ===== */
+        .hero-formula {
+            margin-top: 1.5rem;
+            font-family: var(--font-mono);
+            font-size: 0.95rem;
+            color: var(--text-muted);
+            letter-spacing: 0.02em;
+            opacity: 0.7;
+        }
+        .hero-formula .hl {
+            color: var(--accent-green);
+            font-weight: 600;
+        }
+
+        /* ===== Background Canvas ===== */
+        .bg-canvas {
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            pointer-events: none;
+            z-index: -1;
+            opacity: 0.12;
+        }
+
+        /* ===== Matrix Grid Overlay ===== */
+        .grid-overlay {
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            pointer-events: none;
+            z-index: -2;
+            opacity: 0.03;
+            background-image:
+                linear-gradient(rgba(22, 199, 154, 0.3) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(22, 199, 154, 0.3) 1px, transparent 1px);
+            background-size: 60px 60px;
+        }
+
+        /* ===== Metro Roadmap ===== */
+        .roadmap {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 2rem;
+            position: relative;
+        }
+        .roadmap-title {
+            text-align: center;
+            margin-bottom: 2.5rem;
+        }
+
+        .metro-line {
+            position: relative;
+            padding-left: 60px;
+        }
+
+        /* Vertical rail with Transformer-themed gradient */
+        .metro-line::before {
+            content: '';
+            position: absolute;
+            left: 27px;
+            top: 0;
+            bottom: 0;
+            width: 4px;
+            background: linear-gradient(
+                to bottom,
+                #16c79a 0%,
+                #16c79a 22%,
+                #4fc3f7 22%,
+                #4fc3f7 50%,
+                #b388ff 50%,
+                #b388ff 72%,
+                #ffab40 72%,
+                #ffab40 100%
+            );
+            border-radius: 2px;
+        }
+
+        /* Attention arrow decoration along the rail */
+        .metro-line::after {
+            content: '';
+            position: absolute;
+            left: 22px;
+            top: 0;
+            bottom: 0;
+            width: 14px;
+            background: repeating-linear-gradient(
+                to bottom,
+                transparent 0px,
+                transparent 56px,
+                rgba(22, 199, 154, 0.08) 56px,
+                rgba(22, 199, 154, 0.08) 60px
+            );
+            pointer-events: none;
+        }
+
+        .station {
+            position: relative;
+            margin-bottom: 1rem;
+            cursor: pointer;
+            transition: transform 0.25s var(--anim-ease);
+        }
+        .station:hover {
+            transform: translateX(6px);
+        }
+
+        /* Station dot — square with rounded corners for "token" feel */
+        .station-dot {
+            position: absolute;
+            left: -41px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 22px;
+            height: 22px;
+            border-radius: 5px;
+            border: 3px solid var(--accent-green);
+            background: var(--bg-primary);
+            z-index: 2;
+            transition: all 0.3s;
+        }
+        .station:hover .station-dot {
+            background: var(--accent-green);
+            box-shadow: 0 0 14px rgba(22, 199, 154, 0.5);
+            border-radius: 50%;
+        }
+
+        /* Phase colors for station dots */
+        .station[data-phase="embedding"] .station-dot { border-color: #16c79a; }
+        .station[data-phase="attention"] .station-dot { border-color: #4fc3f7; }
+        .station[data-phase="architecture"] .station-dot { border-color: #b388ff; }
+        .station[data-phase="applied"] .station-dot { border-color: #ffab40; }
+
+        .station-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1.2rem 1.5rem;
+            transition: all 0.3s;
+            position: relative;
+            overflow: hidden;
+        }
+        /* Subtle attention-line decoration on card hover */
+        .station-card::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 2px;
+            background: linear-gradient(90deg, transparent, var(--accent-green), transparent);
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+        .station:hover .station-card::before {
+            opacity: 1;
+        }
+        .station:hover .station-card {
+            border-color: var(--accent-green);
+            box-shadow: var(--shadow-glow);
+        }
+
+        .station-header {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            margin-bottom: 0.4rem;
+        }
+        .station-num {
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            min-width: 2.5rem;
+        }
+        .station-name {
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+        .station-desc {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            margin: 0;
+            padding-left: 3.25rem;
+        }
+        .station-keywords {
+            display: flex;
+            gap: 0.4rem;
+            flex-wrap: wrap;
+            padding-left: 3.25rem;
+            margin-top: 0.5rem;
+        }
+        .station-keywords span {
+            font-size: 0.7rem;
+            padding: 0.1rem 0.4rem;
+            background: rgba(22, 199, 154, 0.08);
+            border-radius: 4px;
+            color: var(--text-muted);
+        }
+
+        /* Phase separators */
+        .phase-label {
+            position: relative;
+            padding: 0.5rem 0 0.5rem 0;
+            margin-bottom: 0.5rem;
+            margin-top: 1rem;
+        }
+        .phase-label span {
+            font-size: 0.75rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            padding: 0.2rem 0.8rem;
+            border-radius: 4px;
+        }
+        .phase-label.embedding span { color: #16c79a; background: rgba(22,199,154,0.1); }
+        .phase-label.attention span { color: #4fc3f7; background: rgba(79,195,247,0.1); }
+        .phase-label.architecture span { color: #b388ff; background: rgba(179,136,255,0.1); }
+        .phase-label.applied span { color: #ffab40; background: rgba(255,171,64,0.1); }
+
+
+        /* ===== Protocol Warning ===== */
+        .protocol-warning {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.9);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+        }
+        .protocol-warning .inner {
+            background: var(--bg-secondary);
+            border: 1px solid var(--accent-orange);
+            border-radius: var(--radius-lg);
+            padding: 2rem 3rem;
+            max-width: 500px;
+            text-align: center;
+        }
+        .protocol-warning h2 { color: var(--accent-orange); }
+        .protocol-warning code {
+            display: block;
+            margin: 1rem 0;
+            padding: 0.75rem;
+            background: var(--bg-primary);
+            border-radius: var(--radius-sm);
+            font-size: 0.9rem;
+        }
+
+        /* ===== Architecture Diagram (decorative) ===== */
+        .arch-diagram {
+            max-width: 900px;
+            margin: 0 auto 2rem;
+            padding: 0 2rem;
+            display: flex;
+            justify-content: center;
+            gap: 0.3rem;
+            flex-wrap: wrap;
+        }
+        .arch-block {
+            padding: 0.35rem 0.7rem;
+            border-radius: var(--radius-sm);
+            font-size: 0.7rem;
+            font-weight: 600;
+            border: 1px solid;
+            opacity: 0.6;
+            transition: opacity 0.3s, transform 0.3s;
+        }
+        .arch-block:hover {
+            opacity: 1;
+            transform: translateY(-2px);
+        }
+        .arch-block.emb { color: #16c79a; border-color: rgba(22,199,154,0.3); background: rgba(22,199,154,0.06); }
+        .arch-block.attn { color: #4fc3f7; border-color: rgba(79,195,247,0.3); background: rgba(79,195,247,0.06); }
+        .arch-block.arch { color: #b388ff; border-color: rgba(179,136,255,0.3); background: rgba(179,136,255,0.06); }
+        .arch-block.app { color: #ffab40; border-color: rgba(255,171,64,0.3); background: rgba(255,171,64,0.06); }
+        .arch-arrow {
+            display: flex;
+            align-items: center;
+            color: var(--text-muted);
+            font-size: 0.8rem;
+            opacity: 0.4;
+        }
+
+        /* ===== Footer ===== */
+        .footer {
+            text-align: center;
+            padding: 3rem 2rem;
+            color: var(--text-muted);
+            font-size: 0.8rem;
+        }
+        .footer a {
+            color: var(--accent-green);
+        }
+
+
+        /* ===== Responsive ===== */
+        @media (max-width: 768px) {
+            .hero h1 { font-size: 2rem; }
+            .hero .subtitle { font-size: 0.95rem; }
+            .roadmap { padding: 1rem; }
+            .metro-line { padding-left: 50px; }
+            .station-dot { left: -35px; width: 18px; height: 18px; }
+            .station-desc { padding-left: 2.5rem; }
+            .station-keywords { padding-left: 2.5rem; }
+            .arch-diagram { display: none; }
+            .hero-formula { font-size: 0.8rem; }
+        }
+    </style>
+</head>
+<body>
+
+<!-- Top Navigation -->
+<nav class="top-nav">
+    <div class="nav-left">
+        <a href="../index.html" class="nav-home" title="算法总览">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+                <path d="M3 12l9-8 9 8"/>
+                <path d="M5 10v9a1 1 0 001 1h4v-5h4v5h4a1 1 0 001-1v-9"/>
+            </svg>
+        </a>
+        <span class="nav-sep">›</span>
+        <a href="index.html" class="logo">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
+                <rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
+                <path d="M10 6.5h4M10 17.5h4M6.5 10v4M17.5 10v4" stroke-dasharray="2 1"/>
+            </svg>
+            Transformer 学习
+        </a>
+    </div>
+</nav>
+
+<!-- Protocol Warning -->
+<div id="protocolWarning" class="protocol-warning hidden">
+    <div class="inner">
+        <h2>请使用本地服务器</h2>
+        <p>直接打开 HTML 文件（file:// 协议）会导致跨域问题。请使用以下方式启动：</p>
+        <code>python -m http.server 8080</code>
+        <p class="text-sm text-muted">或使用 VS Code 的 Live Server 插件</p>
+        <button class="btn btn-primary mt-2" onclick="document.getElementById('protocolWarning').classList.add('hidden')">
+            我知道了，继续浏览
+        </button>
+    </div>
+</div>
+
+<!-- Grid Overlay (attention matrix pattern) -->
+<div class="grid-overlay"></div>
+
+<!-- Background Canvas (floating tokens + attention beams) -->
+<canvas id="bgCanvas" class="bg-canvas"></canvas>
+
+<!-- Hero Section -->
+<div class="hero">
+    <h1>Transformer 交互式可视化学习</h1>
+    <p class="subtitle">
+        通过交互式可视化，彻底理解 Transformer 的每一个概念 ——
+        从词嵌入到注意力机制，从编码器到解码器，再到实际应用
+    </p>
+    <div class="tags">
+        <span class="badge badge-green">交互式</span>
+        <span class="badge badge-blue">可视化</span>
+        <span class="badge badge-purple">逐步动画</span>
+        <span class="badge badge-orange">全中文</span>
+    </div>
+    <div class="hero-formula">
+        <span class="hl">Attention</span>(Q, K, V) = softmax( QK<sup>T</sup> / <span class="hl">&radic;d<sub>k</sub></span> ) V
+    </div>
+</div>
+
+<!-- Architecture Overview (decorative mini-diagram) -->
+<div class="arch-diagram">
+    <div class="arch-block emb">Input Embedding</div>
+    <div class="arch-arrow">&rarr;</div>
+    <div class="arch-block emb">Positional Encoding</div>
+    <div class="arch-arrow">&rarr;</div>
+    <div class="arch-block attn">Self-Attention</div>
+    <div class="arch-arrow">&rarr;</div>
+    <div class="arch-block attn">Multi-Head</div>
+    <div class="arch-arrow">&rarr;</div>
+    <div class="arch-block arch">Encoder</div>
+    <div class="arch-arrow">&rarr;</div>
+    <div class="arch-block arch">Decoder</div>
+    <div class="arch-arrow">&rarr;</div>
+    <div class="arch-block app">Output</div>
+</div>
+
+<!-- Roadmap -->
+<div class="roadmap">
+    <div class="roadmap-title">
+        <h2>学习路线图</h2>
+        <p class="text-sm text-muted">按顺序学习效果最佳，也可跳转到感兴趣的模块</p>
+    </div>
+
+    <div class="metro-line">
+        <!-- Phase: Embedding -->
+        <div class="phase-label embedding"><span>输入表示</span></div>
+
+        <div class="station" data-id="01" data-phase="embedding" onclick="goTo('01-sequence-embedding/')">
+            <div class="station-dot"></div>
+            <div class="station-card">
+                <div class="station-header">
+                    <span class="station-num">01</span>
+                    <span class="station-name">序列与嵌入</span>
+                </div>
+                <p class="station-desc">理解序列数据和词嵌入，从 one-hot 到稠密向量空间</p>
+                <div class="station-keywords">
+                    <span>序列数据</span><span>词嵌入</span><span>向量空间</span><span>Tokenization</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="station" data-id="02" data-phase="embedding" onclick="goTo('02-attention-intuition/')">
+            <div class="station-dot"></div>
+            <div class="station-card">
+                <div class="station-header">
+                    <span class="station-num">02</span>
+                    <span class="station-name">注意力直觉</span>
+                </div>
+                <p class="station-desc">为什么需要注意力机制？从 RNN 的瓶颈到注意力的突破</p>
+                <div class="station-keywords">
+                    <span>RNN瓶颈</span><span>对齐问题</span><span>动态权重</span><span>上下文感知</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Phase: Attention -->
+        <div class="phase-label attention"><span>注意力机制</span></div>
+
+        <div class="station" data-id="03" data-phase="attention" onclick="goTo('03-scaled-dot-product/')">
+            <div class="station-dot"></div>
+            <div class="station-card">
+                <div class="station-header">
+                    <span class="station-num">03</span>
+                    <span class="station-name">缩放点积注意力</span>
+                </div>
+                <p class="station-desc">Attention(Q,K,V) 的完整计算过程，逐步可视化矩阵运算</p>
+                <div class="station-keywords">
+                    <span>Q/K/V矩阵</span><span>点积计算</span><span>缩放因子</span><span>Softmax</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="station" data-id="04" data-phase="attention" onclick="goTo('04-multi-head/')">
+            <div class="station-dot"></div>
+            <div class="station-card">
+                <div class="station-header">
+                    <span class="station-num">04</span>
+                    <span class="station-name">多头注意力</span>
+                </div>
+                <p class="station-desc">并行多个注意力头，捕获不同维度的语义关系</p>
+                <div class="station-keywords">
+                    <span>多头并行</span><span>子空间</span><span>拼接投影</span><span>语义捕获</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="station" data-id="05" data-phase="attention" onclick="goTo('05-positional-encoding/')">
+            <div class="station-dot"></div>
+            <div class="station-card">
+                <div class="station-header">
+                    <span class="station-num">05</span>
+                    <span class="station-name">位置编码</span>
+                </div>
+                <p class="station-desc">让模型感知序列顺序，正弦位置编码的数学直觉</p>
+                <div class="station-keywords">
+                    <span>正弦编码</span><span>相对位置</span><span>频率分布</span><span>RoPE</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Phase: Architecture -->
+        <div class="phase-label architecture"><span>完整架构</span></div>
+
+        <div class="station" data-id="06" data-phase="architecture" onclick="goTo('06-encoder/')">
+            <div class="station-dot"></div>
+            <div class="station-card">
+                <div class="station-header">
+                    <span class="station-num">06</span>
+                    <span class="station-name">Transformer 编码器</span>
+                </div>
+                <p class="station-desc">完整的编码器架构：自注意力、残差连接、层归一化、FFN</p>
+                <div class="station-keywords">
+                    <span>自注意力</span><span>残差连接</span><span>LayerNorm</span><span>FFN</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="station" data-id="07" data-phase="architecture" onclick="goTo('07-decoder/')">
+            <div class="station-dot"></div>
+            <div class="station-card">
+                <div class="station-header">
+                    <span class="station-num">07</span>
+                    <span class="station-name">Transformer 解码器</span>
+                </div>
+                <p class="station-desc">解码器与自回归生成，掩码注意力与交叉注意力</p>
+                <div class="station-keywords">
+                    <span>掩码注意力</span><span>交叉注意力</span><span>自回归</span><span>因果掩码</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Phase: Applied -->
+        <div class="phase-label applied"><span>训练与应用</span></div>
+
+        <div class="station" data-id="08" data-phase="applied" onclick="goTo('08-training/')">
+            <div class="station-dot"></div>
+            <div class="station-card">
+                <div class="station-header">
+                    <span class="station-num">08</span>
+                    <span class="station-name">训练与优化</span>
+                </div>
+                <p class="station-desc">训练技巧和推理策略：学习率调度、标签平滑、Beam Search</p>
+                <div class="station-keywords">
+                    <span>Warmup</span><span>标签平滑</span><span>Dropout</span><span>Beam Search</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="station" data-id="09" data-phase="applied" onclick="goTo('09-playground/')">
+            <div class="station-dot"></div>
+            <div class="station-card">
+                <div class="station-header">
+                    <span class="station-num">09</span>
+                    <span class="station-name">应用与游乐场</span>
+                </div>
+                <p class="station-desc">动手实验各种配置：调整头数、层数、维度，观察输出变化</p>
+                <div class="station-keywords">
+                    <span>参数调节</span><span>可视化对比</span><span>BERT/GPT</span><span>实时推理</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<!-- Footer -->
+<div class="footer">
+    <p>Transformer 交互式可视化学习 | 纯前端实现 · 无服务器依赖 · 全中文</p>
+</div>
+
+<script>
+// ========== Protocol Check ==========
+if (window.location.protocol === 'file:') {
+    document.getElementById('protocolWarning').classList.remove('hidden');
+}
+
+// ========== Navigation ==========
+function goTo(path) {
+    window.location.href = path + 'index.html';
+}
+
+// ========== Background Animation: Floating Tokens + Attention Beams ==========
+(function() {
+    var canvas = document.getElementById('bgCanvas');
+    var ctx = canvas.getContext('2d');
+    var w, h;
+    var tokens = [];
+    var TOKEN_COUNT = 24;
+    var BEAM_DIST = 180;
+
+    // Sample token labels for floating boxes
+    var tokenLabels = [
+        'Q', 'K', 'V', 'Attn', 'FFN', 'Norm',
+        'Emb', 'Pos', 'Softmax', 'Linear',
+        'Mask', 'Head', 'Enc', 'Dec',
+        'dk', 'dv', 'W_q', 'W_k', 'W_v', 'W_o',
+        'Add', 'Proj', 'Token', 'PE'
+    ];
+
+    function resize() {
+        w = canvas.width = window.innerWidth;
+        h = canvas.height = window.innerHeight;
+    }
+    resize();
+    window.addEventListener('resize', resize);
+
+    // Initialize tokens
+    for (var i = 0; i < TOKEN_COUNT; i++) {
+        tokens.push({
+            x: Math.random() * w,
+            y: Math.random() * h,
+            vx: (Math.random() - 0.5) * 0.4,
+            vy: (Math.random() - 0.5) * 0.4,
+            size: 28 + Math.random() * 20,
+            label: tokenLabels[i % tokenLabels.length],
+            hue: Math.random() > 0.5 ? 160 : 200, // green-ish or blue-ish
+            phase: Math.random() * Math.PI * 2
+        });
+    }
+
+    function draw() {
+        ctx.clearRect(0, 0, w, h);
+        var time = Date.now() * 0.001;
+
+        // Draw attention beams between nearby tokens
+        for (var i = 0; i < tokens.length; i++) {
+            for (var j = i + 1; j < tokens.length; j++) {
+                var dx = tokens[i].x - tokens[j].x;
+                var dy = tokens[i].y - tokens[j].y;
+                var dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist < BEAM_DIST) {
+                    var alpha = (1 - dist / BEAM_DIST) * 0.4;
+                    ctx.save();
+                    ctx.strokeStyle = 'rgba(22, 199, 154, ' + alpha + ')';
+                    ctx.lineWidth = 1;
+                    ctx.setLineDash([4, 4]);
+                    ctx.lineDashOffset = -time * 20;
+                    ctx.beginPath();
+                    ctx.moveTo(tokens[i].x, tokens[i].y);
+                    ctx.lineTo(tokens[j].x, tokens[j].y);
+                    ctx.stroke();
+                    ctx.restore();
+
+                    // Small attention weight circle at midpoint
+                    if (dist < BEAM_DIST * 0.6) {
+                        var mx = (tokens[i].x + tokens[j].x) / 2;
+                        var my = (tokens[i].y + tokens[j].y) / 2;
+                        ctx.beginPath();
+                        ctx.arc(mx, my, 2, 0, Math.PI * 2);
+                        ctx.fillStyle = 'rgba(79, 195, 247, ' + (alpha * 0.8) + ')';
+                        ctx.fill();
+                    }
+                }
+            }
+        }
+
+        // Draw token boxes
+        for (var k = 0; k < tokens.length; k++) {
+            var t = tokens[k];
+            var pulse = Math.sin(time * 1.5 + t.phase) * 0.15 + 0.85;
+            var s = t.size * pulse;
+            var halfS = s / 2;
+
+            // Token box
+            ctx.globalAlpha = 0.6;
+            ctx.fillStyle = 'rgba(22, 33, 62, 0.8)';
+            ctx.strokeStyle = t.hue === 160
+                ? 'rgba(22, 199, 154, 0.5)'
+                : 'rgba(79, 195, 247, 0.5)';
+            ctx.lineWidth = 1;
+
+            // Rounded rect
+            var r = 4;
+            var x1 = t.x - halfS;
+            var y1 = t.y - halfS * 0.6;
+            var bw = s;
+            var bh = s * 0.6;
+            ctx.beginPath();
+            ctx.moveTo(x1 + r, y1);
+            ctx.lineTo(x1 + bw - r, y1);
+            ctx.arcTo(x1 + bw, y1, x1 + bw, y1 + r, r);
+            ctx.lineTo(x1 + bw, y1 + bh - r);
+            ctx.arcTo(x1 + bw, y1 + bh, x1 + bw - r, y1 + bh, r);
+            ctx.lineTo(x1 + r, y1 + bh);
+            ctx.arcTo(x1, y1 + bh, x1, y1 + bh - r, r);
+            ctx.lineTo(x1, y1 + r);
+            ctx.arcTo(x1, y1, x1 + r, y1, r);
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+
+            // Label
+            ctx.globalAlpha = 0.7;
+            ctx.fillStyle = t.hue === 160 ? '#16c79a' : '#4fc3f7';
+            ctx.font = Math.max(9, s * 0.25) + 'px JetBrains Mono, monospace';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(t.label, t.x, t.y);
+
+            ctx.globalAlpha = 1;
+
+            // Update position
+            t.x += t.vx;
+            t.y += t.vy;
+            if (t.x < -50) t.x = w + 50;
+            if (t.x > w + 50) t.x = -50;
+            if (t.y < -50) t.y = h + 50;
+            if (t.y > h + 50) t.y = -50;
+        }
+
+        requestAnimationFrame(draw);
+    }
+    draw();
+})();
+</script>
+</body>
+</html>

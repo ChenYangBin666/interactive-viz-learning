@@ -1,0 +1,1054 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>分裂准则 — 随机森林可视化</title>
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+SC:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <!-- KaTeX -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+    <!-- D3 & GSAP -->
+    <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.2/dist/gsap.min.js"></script>
+    <!-- Project styles -->
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+    <style>
+        .page-header { margin-bottom: 2rem; }
+        .breadcrumb { font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.5rem; }
+        .breadcrumb a { color: var(--text-muted); }
+        .breadcrumb a:hover { color: var(--accent-green); }
+
+        .ball-bar { display: flex; gap: 2px; flex-wrap: wrap; padding: 0.75rem; background: var(--bg-card); border-radius: var(--radius-sm); margin: 0.75rem 0; }
+        .ball { width: 14px; height: 14px; border-radius: 50%; transition: background 0.3s; }
+
+        .metric-display { font-family: var(--font-mono); font-size: 1.8rem; font-weight: 700; margin: 0.5rem 0; }
+
+        .formula-box { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 1rem 1.2rem; margin: 0.75rem 0; text-align: center; }
+
+        .split-info-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.75rem; margin: 1rem 0; }
+        .split-info-item { background: var(--bg-card); border-radius: var(--radius-sm); padding: 0.75rem; text-align: center; }
+        .split-info-item .label { font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.25rem; }
+        .split-info-item .value { font-family: var(--font-mono); font-size: 1.1rem; font-weight: 600; }
+
+        .legend-inline { display: flex; gap: 1.2rem; margin: 0.5rem 0; font-size: 0.8rem; color: var(--text-secondary); }
+        .legend-inline .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }
+
+        .tree-and-scatter { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+        @media (max-width: 900px) { .tree-and-scatter { grid-template-columns: 1fr; } }
+
+        .step-desc { background: var(--bg-card); border-left: 3px solid var(--accent-green); padding: 0.75rem 1rem; border-radius: 0 var(--radius-sm) var(--radius-sm) 0; margin: 0.75rem 0; font-size: 0.9rem; color: var(--text-secondary); min-height: 3rem; }
+    </style>
+</head>
+<body>
+
+<div class="page-container">
+    <div class="page-header">
+        <div class="breadcrumb"><a href="../index.html">随机森林</a> / 模块 02</div>
+        <h1>分裂准则</h1>
+        <p>决策树通过选择最佳分裂点来构建——但如何衡量"最佳"？本模块将带你深入理解熵、基尼不纯度与信息增益。</p>
+    </div>
+
+    <!-- ============ Section 1: 信息熵直觉 ============ -->
+    <div class="section" id="sec-entropy">
+        <div class="section-title">
+            <div class="icon">1</div>
+            <h2>信息熵直觉</h2>
+        </div>
+        <div class="split-layout">
+            <div class="text-panel">
+                <p>信息熵衡量一个集合的<strong>不确定性</strong>。当所有样本属于同一类别时，熵为 0（完全确定）；当两类各占一半时，熵达到最大值 1（最不确定）。</p>
+                <div class="formula-box">
+                    <span class="katex-formula" data-formula="H = -\sum_{i=1}^{C} p_i \log_2 p_i"></span>
+                </div>
+                <div class="slider-group mt-2">
+                    <label>类别 A 比例:</label>
+                    <input type="range" id="entropy-slider" min="0" max="100" value="50" step="1">
+                    <span class="slider-value" id="entropy-ratio">50%</span>
+                </div>
+                <div class="ball-bar" id="entropy-balls"></div>
+                <div style="text-align:center;">
+                    <div style="font-size:0.8rem;color:var(--text-muted);">当前熵值</div>
+                    <div class="metric-display" id="entropy-value" style="color:var(--accent-green);">1.000</div>
+                </div>
+                <div class="info-box success mt-2">
+                    <p id="entropy-hint">当两类比例相等时，不确定性最大，熵值达到峰值 1.0。</p>
+                </div>
+            </div>
+            <div class="viz-panel">
+                <div class="viz-area" id="entropy-chart" style="min-height:380px;">
+                    <span class="watermark">信息熵曲线</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============ Section 2: 基尼不纯度 ============ -->
+    <div class="section" id="sec-gini">
+        <div class="section-title">
+            <div class="icon">2</div>
+            <h2>基尼不纯度</h2>
+        </div>
+        <div class="split-layout">
+            <div class="text-panel">
+                <p>基尼不纯度是另一种衡量集合纯度的指标，计算更快且常被 CART 算法使用。分类误差则是最简单的度量。</p>
+                <div class="formula-box">
+                    <span class="katex-formula" data-formula="G = 1 - \sum_{i=1}^{C} p_i^2"></span>
+                </div>
+                <div class="formula-box">
+                    <span class="katex-formula" data-formula="E = 1 - \max(p_i)"></span>
+                </div>
+                <div class="slider-group mt-2">
+                    <label>类别 A 比例:</label>
+                    <input type="range" id="gini-slider" min="0" max="100" value="50" step="1">
+                    <span class="slider-value" id="gini-ratio">50%</span>
+                </div>
+                <div class="split-info-grid">
+                    <div class="split-info-item">
+                        <div class="label">信息熵</div>
+                        <div class="value" id="gini-entropy-val" style="color:var(--accent-green);">1.000</div>
+                    </div>
+                    <div class="split-info-item">
+                        <div class="label">基尼不纯度</div>
+                        <div class="value" id="gini-gini-val" style="color:var(--accent-orange);">0.500</div>
+                    </div>
+                    <div class="split-info-item">
+                        <div class="label">分类误差</div>
+                        <div class="value" id="gini-error-val" style="color:var(--accent-purple);">0.500</div>
+                    </div>
+                </div>
+                <div class="legend-inline">
+                    <span><span class="dot" style="background:var(--accent-green);"></span>信息熵</span>
+                    <span><span class="dot" style="background:var(--accent-orange);"></span>基尼不纯度</span>
+                    <span><span class="dot" style="background:var(--accent-purple);"></span>分类误差</span>
+                </div>
+                <div class="info-box mt-2">
+                    <p>三条曲线形状相似，但熵对中间区域更敏感，基尼次之，分类误差最平坦。在实践中，熵和基尼的选择对结果影响通常很小。</p>
+                </div>
+            </div>
+            <div class="viz-panel">
+                <div class="viz-area" id="gini-chart" style="min-height:380px;">
+                    <span class="watermark">三种不纯度指标对比</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============ Section 3: 信息增益 ============ -->
+    <div class="section" id="sec-ig">
+        <div class="section-title">
+            <div class="icon">3</div>
+            <h2>信息增益</h2>
+        </div>
+        <p>决策树选择能带来最大<strong>信息增益</strong>的分裂点——即分裂后子集纯度提升最多的位置。拖动下方的分裂线，观察信息增益如何变化。</p>
+        <div class="formula-box" style="max-width:700px;">
+            <span class="katex-formula" data-formula="IG = H(\text{parent}) - \frac{|S_L|}{|S|} H(S_L) - \frac{|S_R|}{|S|} H(S_R)"></span>
+        </div>
+        <div class="split-layout mt-2">
+            <div class="text-panel">
+                <div class="split-info-grid">
+                    <div class="split-info-item">
+                        <div class="label">左子集</div>
+                        <div class="value" id="ig-left-counts">—</div>
+                    </div>
+                    <div class="split-info-item">
+                        <div class="label">右子集</div>
+                        <div class="value" id="ig-right-counts">—</div>
+                    </div>
+                    <div class="split-info-item">
+                        <div class="label">信息增益</div>
+                        <div class="value" id="ig-gain-val" style="color:var(--accent-green);">—</div>
+                    </div>
+                </div>
+                <div class="split-info-grid">
+                    <div class="split-info-item">
+                        <div class="label">父集熵</div>
+                        <div class="value" id="ig-parent-h">—</div>
+                    </div>
+                    <div class="split-info-item">
+                        <div class="label">左子集熵</div>
+                        <div class="value" id="ig-left-h">—</div>
+                    </div>
+                    <div class="split-info-item">
+                        <div class="label">右子集熵</div>
+                        <div class="value" id="ig-right-h">—</div>
+                    </div>
+                </div>
+                <div class="info-box success mt-2">
+                    <p id="ig-hint">拖动分裂线找到信息增益最大的位置！</p>
+                </div>
+            </div>
+            <div class="viz-panel">
+                <div class="viz-area" id="ig-scatter" style="min-height:420px;">
+                    <span class="watermark">拖动分裂线</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============ Section 4: 多特征分裂选择 ============ -->
+    <div class="section" id="sec-multi">
+        <div class="section-title">
+            <div class="icon">4</div>
+            <h2>多特征分裂选择</h2>
+        </div>
+        <p>在多维数据中，决策树需要在所有特征的所有可能阈值中找到最优分裂。下方展示了对 X 轴和 Y 轴每个位置的信息增益热力图。</p>
+        <div class="flex gap-md mb-2" style="flex-wrap:wrap;">
+            <div class="btn-group">
+                <button class="btn active" id="multi-btn-entropy" onclick="setMultiCriterion('entropy')">信息熵</button>
+                <button class="btn" id="multi-btn-gini" onclick="setMultiCriterion('gini')">基尼不纯度</button>
+            </div>
+            <div class="split-info-grid" style="flex:1;min-width:300px;">
+                <div class="split-info-item">
+                    <div class="label">最佳特征</div>
+                    <div class="value" id="multi-best-feat">—</div>
+                </div>
+                <div class="split-info-item">
+                    <div class="label">最佳阈值</div>
+                    <div class="value" id="multi-best-thresh">—</div>
+                </div>
+                <div class="split-info-item">
+                    <div class="label">最大增益</div>
+                    <div class="value" id="multi-best-gain" style="color:var(--accent-green);">—</div>
+                </div>
+            </div>
+        </div>
+        <div class="viz-area" id="multi-chart" style="min-height:480px;">
+            <span class="watermark">多特征分裂选择</span>
+        </div>
+    </div>
+
+    <!-- ============ Section 5: 分步分裂动画 ============ -->
+    <div class="section" id="sec-anim">
+        <div class="section-title">
+            <div class="icon">5</div>
+            <h2>分步分裂动画</h2>
+        </div>
+        <p>观察决策树如何一步步选择最优分裂、划分数据并递归构建。每一步都会在散点图上绘制决策边界，同时在右侧展示树结构的生长过程。</p>
+        <div class="anim-controls mb-2">
+            <button class="btn btn-sm" id="anim-reset" onclick="animReset()">重置</button>
+            <button class="btn btn-sm btn-primary" id="anim-step" onclick="animStep()">下一步</button>
+            <button class="btn btn-sm" id="anim-play" onclick="animPlay()">自动播放</button>
+            <div class="progress-bar"><div class="fill" id="anim-progress" style="width:0%"></div></div>
+            <span class="step-label" id="anim-step-label">0 / 0</span>
+        </div>
+        <div class="step-desc" id="anim-desc">点击"下一步"开始构建决策树。</div>
+        <div class="tree-and-scatter">
+            <div class="viz-area" id="anim-scatter" style="min-height:400px;">
+                <span class="watermark">数据与决策边界</span>
+            </div>
+            <div class="viz-area" id="anim-tree" style="min-height:400px;">
+                <span class="watermark">决策树结构</span>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<!-- Project scripts -->
+<script src="../shared/scripts/rf-utils.js"></script>
+
+<script>
+/* ============================================================
+   Module 02 — Splitting Criteria Interactive Visualizations
+   ============================================================ */
+
+// ---- Shared Colors ----
+const COL_A = '#ff5252';
+const COL_B = '#4fc3f7';
+const COL_GREEN = '#16c79a';
+const COL_ORANGE = '#ffab40';
+const COL_PURPLE = '#b388ff';
+const BG_SEC = '#16213e';
+const BG_CARD = '#0f3460';
+const BORDER = '#2a2a4a';
+const TEXT_MUT = '#6c6c7c';
+const TEXT_SEC = '#a8a8b8';
+
+// ---- KaTeX Init ----
+document.addEventListener('DOMContentLoaded', () => {
+    if (typeof renderMathInElement === 'function') {
+        renderMathInElement(document.body, {
+            delimiters: [
+                { left: '$$', right: '$$', display: true },
+                { left: '$', right: '$', display: false },
+            ]
+        });
+    }
+    document.querySelectorAll('.katex-formula').forEach(el => {
+        katex.render(el.dataset.formula, el, { displayMode: false, throwOnError: false });
+    });
+    initEntropy();
+    initGini();
+    initIG();
+    initMulti();
+    initAnim();
+});
+
+/* ==============================================================
+   Section 1: 信息熵直觉
+   ============================================================== */
+function initEntropy() {
+    const N = 40;
+    const slider = document.getElementById('entropy-slider');
+    const ballBar = document.getElementById('entropy-balls');
+
+    // Create balls
+    for (let i = 0; i < N; i++) {
+        const b = document.createElement('div');
+        b.className = 'ball';
+        ballBar.appendChild(b);
+    }
+
+    // SVG chart
+    const container = document.getElementById('entropy-chart');
+    const W = container.clientWidth || 500;
+    const H = container.clientHeight || 380;
+    const margin = { top: 30, right: 30, bottom: 50, left: 60 };
+    const w = W - margin.left - margin.right;
+    const h = H - margin.top - margin.bottom;
+
+    const svg = d3.select('#entropy-chart').append('svg').attr('width', W).attr('height', H);
+    const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+
+    const xScale = d3.scaleLinear().domain([0, 1]).range([0, w]);
+    const yScale = d3.scaleLinear().domain([0, 1.05]).range([h, 0]);
+
+    // Axes
+    g.append('g').attr('transform', `translate(0,${h})`).call(d3.axisBottom(xScale).ticks(5).tickFormat(d => (d * 100) + '%'))
+        .call(ax => ax.selectAll('text').attr('fill', TEXT_SEC).style('font-size', '11px'))
+        .call(ax => ax.selectAll('line,path').attr('stroke', BORDER));
+    g.append('g').call(d3.axisLeft(yScale).ticks(5))
+        .call(ax => ax.selectAll('text').attr('fill', TEXT_SEC).style('font-size', '11px'))
+        .call(ax => ax.selectAll('line,path').attr('stroke', BORDER));
+
+    // Axis labels
+    g.append('text').attr('x', w / 2).attr('y', h + 40).attr('text-anchor', 'middle').attr('fill', TEXT_SEC).style('font-size', '12px').text('类别 A 比例 (p)');
+    g.append('text').attr('transform', 'rotate(-90)').attr('x', -h / 2).attr('y', -45).attr('text-anchor', 'middle').attr('fill', TEXT_SEC).style('font-size', '12px').text('熵值 H(p)');
+
+    // Entropy curve data
+    const curveData = [];
+    for (let i = 0; i <= 100; i++) {
+        const p = i / 100;
+        const ent = (p === 0 || p === 1) ? 0 : -(p * Math.log2(p) + (1 - p) * Math.log2(1 - p));
+        curveData.push({ p, ent });
+    }
+
+    const line = d3.line().x(d => xScale(d.p)).y(d => yScale(d.ent)).curve(d3.curveBasis);
+
+    // Fill area
+    const area = d3.area().x(d => xScale(d.p)).y0(h).y1(d => yScale(d.ent)).curve(d3.curveBasis);
+    g.append('path').datum(curveData).attr('d', area).attr('fill', COL_GREEN).attr('opacity', 0.08);
+
+    g.append('path').datum(curveData).attr('d', line).attr('fill', 'none').attr('stroke', COL_GREEN).attr('stroke-width', 2.5);
+
+    // Marker
+    const marker = g.append('g');
+    marker.append('circle').attr('r', 7).attr('fill', COL_GREEN).attr('stroke', '#fff').attr('stroke-width', 2);
+    marker.append('line').attr('y1', 0).attr('y2', 0).attr('stroke', COL_GREEN).attr('stroke-width', 1).attr('stroke-dasharray', '4,3').attr('class', 'marker-line');
+
+    function updateEntropy() {
+        const pct = +slider.value;
+        const p = pct / 100;
+        const ent = (p === 0 || p === 1) ? 0 : -(p * Math.log2(p) + (1 - p) * Math.log2(1 - p));
+
+        document.getElementById('entropy-ratio').textContent = pct + '%';
+        document.getElementById('entropy-value').textContent = ent.toFixed(3);
+
+        // Balls
+        const nA = Math.round(N * p);
+        ballBar.querySelectorAll('.ball').forEach((b, i) => {
+            b.style.background = i < nA ? COL_A : COL_B;
+        });
+
+        // Marker
+        marker.attr('transform', `translate(${xScale(p)},${yScale(ent)})`);
+        marker.select('.marker-line').attr('y2', h - yScale(ent));
+
+        // Hint
+        const hint = document.getElementById('entropy-hint');
+        if (pct === 50) hint.textContent = '当两类比例相等时，不确定性最大，熵值达到峰值 1.0。';
+        else if (pct === 0 || pct === 100) hint.textContent = '所有样本属于同一类别，完全确定，熵为 0。';
+        else if (pct < 20 || pct > 80) hint.textContent = '集合较纯净，熵值较低——分类更有把握。';
+        else hint.textContent = '两类混合程度较高，熵值较大——不确定性较强。';
+    }
+
+    slider.addEventListener('input', updateEntropy);
+    updateEntropy();
+}
+
+/* ==============================================================
+   Section 2: 基尼不纯度（三曲线对比）
+   ============================================================== */
+function initGini() {
+    const slider = document.getElementById('gini-slider');
+    const container = document.getElementById('gini-chart');
+    const W = container.clientWidth || 500;
+    const H = container.clientHeight || 380;
+    const margin = { top: 30, right: 30, bottom: 50, left: 60 };
+    const w = W - margin.left - margin.right;
+    const h = H - margin.top - margin.bottom;
+
+    const svg = d3.select('#gini-chart').append('svg').attr('width', W).attr('height', H);
+    const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+
+    const xScale = d3.scaleLinear().domain([0, 1]).range([0, w]);
+    const yScale = d3.scaleLinear().domain([0, 1.05]).range([h, 0]);
+
+    g.append('g').attr('transform', `translate(0,${h})`).call(d3.axisBottom(xScale).ticks(5).tickFormat(d => (d * 100) + '%'))
+        .call(ax => { ax.selectAll('text').attr('fill', TEXT_SEC).style('font-size', '11px'); ax.selectAll('line,path').attr('stroke', BORDER); });
+    g.append('g').call(d3.axisLeft(yScale).ticks(5))
+        .call(ax => { ax.selectAll('text').attr('fill', TEXT_SEC).style('font-size', '11px'); ax.selectAll('line,path').attr('stroke', BORDER); });
+
+    g.append('text').attr('x', w / 2).attr('y', h + 40).attr('text-anchor', 'middle').attr('fill', TEXT_SEC).style('font-size', '12px').text('类别 A 比例 (p)');
+    g.append('text').attr('transform', 'rotate(-90)').attr('x', -h / 2).attr('y', -45).attr('text-anchor', 'middle').attr('fill', TEXT_SEC).style('font-size', '12px').text('不纯度');
+
+    const pts = 101;
+    const entropyData = [], giniData = [], errorData = [];
+    for (let i = 0; i <= 100; i++) {
+        const p = i / 100;
+        const ent = (p === 0 || p === 1) ? 0 : -(p * Math.log2(p) + (1 - p) * Math.log2(1 - p));
+        const gin = 2 * p * (1 - p);
+        const err = 1 - Math.max(p, 1 - p);
+        entropyData.push({ p, v: ent });
+        giniData.push({ p, v: gin });
+        errorData.push({ p, v: err });
+    }
+
+    const line = d3.line().x(d => xScale(d.p)).y(d => yScale(d.v)).curve(d3.curveBasis);
+
+    g.append('path').datum(entropyData).attr('d', line).attr('fill', 'none').attr('stroke', COL_GREEN).attr('stroke-width', 2.5);
+    g.append('path').datum(giniData).attr('d', line).attr('fill', 'none').attr('stroke', COL_ORANGE).attr('stroke-width', 2.5);
+    g.append('path').datum(errorData).attr('d', line).attr('fill', 'none').attr('stroke', COL_PURPLE).attr('stroke-width', 2.5).attr('stroke-dasharray', '6,4');
+
+    // Legend on chart
+    const legendG = g.append('g').attr('transform', `translate(${w - 120}, 10)`);
+    [[COL_GREEN, '信息熵', ''], [COL_ORANGE, '基尼', ''], [COL_PURPLE, '分类误差', '6,4']].forEach(([c, t, dash], i) => {
+        legendG.append('line').attr('x1', 0).attr('x2', 20).attr('y1', i * 20).attr('y2', i * 20).attr('stroke', c).attr('stroke-width', 2.5).attr('stroke-dasharray', dash);
+        legendG.append('text').attr('x', 26).attr('y', i * 20 + 4).text(t).attr('fill', TEXT_SEC).style('font-size', '11px');
+    });
+
+    // Markers (vertical line + dots)
+    const vLine = g.append('line').attr('y1', 0).attr('y2', h).attr('stroke', '#fff').attr('stroke-width', 1).attr('opacity', 0.3).attr('stroke-dasharray', '3,3');
+    const mEnt = g.append('circle').attr('r', 5).attr('fill', COL_GREEN).attr('stroke', '#fff').attr('stroke-width', 1.5);
+    const mGin = g.append('circle').attr('r', 5).attr('fill', COL_ORANGE).attr('stroke', '#fff').attr('stroke-width', 1.5);
+    const mErr = g.append('circle').attr('r', 5).attr('fill', COL_PURPLE).attr('stroke', '#fff').attr('stroke-width', 1.5);
+
+    function update() {
+        const pct = +slider.value;
+        const p = pct / 100;
+        const ent = (p === 0 || p === 1) ? 0 : -(p * Math.log2(p) + (1 - p) * Math.log2(1 - p));
+        const gin = 2 * p * (1 - p);
+        const err = 1 - Math.max(p, 1 - p);
+
+        document.getElementById('gini-ratio').textContent = pct + '%';
+        document.getElementById('gini-entropy-val').textContent = ent.toFixed(3);
+        document.getElementById('gini-gini-val').textContent = gin.toFixed(3);
+        document.getElementById('gini-error-val').textContent = err.toFixed(3);
+
+        const cx = xScale(p);
+        vLine.attr('x1', cx).attr('x2', cx);
+        mEnt.attr('cx', cx).attr('cy', yScale(ent));
+        mGin.attr('cx', cx).attr('cy', yScale(gin));
+        mErr.attr('cx', cx).attr('cy', yScale(err));
+    }
+
+    slider.addEventListener('input', update);
+    update();
+}
+
+/* ==============================================================
+   Section 3: 信息增益
+   ============================================================== */
+function initIG() {
+    const rng = RFUtils.seededRandom(77);
+    const N = 50;
+    const data = [];
+    for (let i = 0; i < N; i++) {
+        const x = rng() * 10;
+        const label = (x + (rng() - 0.5) * 4 > 5) ? 1 : 0;
+        data.push({ x, y: rng() * 6, label });
+    }
+    data.sort((a, b) => a.x - b.x);
+
+    const container = document.getElementById('ig-scatter');
+    const W = container.clientWidth || 500;
+    const H = container.clientHeight || 420;
+    const margin = { top: 20, right: 20, bottom: 80, left: 50 };
+    const w = W - margin.left - margin.right;
+    const h = H - margin.top - margin.bottom;
+
+    const svg = d3.select('#ig-scatter').append('svg').attr('width', W).attr('height', H);
+    const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+
+    const xScale = d3.scaleLinear().domain([0, 10]).range([0, w]);
+    const yScale = d3.scaleLinear().domain([0, 6]).range([h, 0]);
+
+    g.append('g').attr('transform', `translate(0,${h})`).call(d3.axisBottom(xScale).ticks(5))
+        .call(ax => { ax.selectAll('text').attr('fill', TEXT_SEC).style('font-size', '11px'); ax.selectAll('line,path').attr('stroke', BORDER); });
+    g.append('g').call(d3.axisLeft(yScale).ticks(5))
+        .call(ax => { ax.selectAll('text').attr('fill', TEXT_SEC).style('font-size', '11px'); ax.selectAll('line,path').attr('stroke', BORDER); });
+
+    // Points
+    g.selectAll('.pt').data(data).join('circle')
+        .attr('class', 'pt')
+        .attr('cx', d => xScale(d.x))
+        .attr('cy', d => yScale(d.y))
+        .attr('r', 5)
+        .attr('fill', d => d.label === 0 ? COL_A : COL_B)
+        .attr('opacity', 0.85);
+
+    // Split line
+    let splitX = 5;
+    const splitLine = g.append('line')
+        .attr('x1', xScale(splitX)).attr('x2', xScale(splitX))
+        .attr('y1', 0).attr('y2', h)
+        .attr('stroke', COL_GREEN).attr('stroke-width', 2.5)
+        .attr('stroke-dasharray', '6,4')
+        .style('cursor', 'ew-resize');
+
+    // Split label
+    const splitLabel = g.append('text').attr('y', -6).attr('text-anchor', 'middle').attr('fill', COL_GREEN).style('font-size', '11px').style('font-family', 'var(--font-mono)');
+
+    // IG bar chart at bottom
+    const barH = 50;
+    const barY = h + 25;
+    const nBins = 50;
+    const igValues = [];
+    const parentC0 = data.filter(d => d.label === 0).length;
+    const parentC1 = data.filter(d => d.label === 1).length;
+    const parentH = RFUtils.entropy([parentC0, parentC1]);
+
+    for (let i = 0; i < nBins; i++) {
+        const thresh = (i + 0.5) / nBins * 10;
+        const left = data.filter(d => d.x <= thresh);
+        const right = data.filter(d => d.x > thresh);
+        const lc = [left.filter(d => d.label === 0).length, left.filter(d => d.label === 1).length];
+        const rc = [right.filter(d => d.label === 0).length, right.filter(d => d.label === 1).length];
+        const ig = RFUtils.informationGain([parentC0, parentC1], lc, rc, 'entropy');
+        igValues.push({ thresh, ig });
+    }
+    const maxIG = d3.max(igValues, d => d.ig);
+    const igYScale = d3.scaleLinear().domain([0, maxIG * 1.1]).range([0, barH]);
+
+    g.selectAll('.ig-bar').data(igValues).join('rect')
+        .attr('class', 'ig-bar')
+        .attr('x', d => xScale(d.thresh) - w / nBins / 2)
+        .attr('y', d => barY + barH - igYScale(d.ig))
+        .attr('width', w / nBins - 1)
+        .attr('height', d => igYScale(d.ig))
+        .attr('fill', d => d.ig === maxIG ? COL_GREEN : COL_ORANGE)
+        .attr('opacity', 0.7);
+
+    g.append('text').attr('x', -5).attr('y', barY + barH / 2).attr('text-anchor', 'end').attr('fill', TEXT_MUT).style('font-size', '10px').text('IG');
+
+    // Best split marker
+    const bestSplit = igValues.reduce((a, b) => a.ig > b.ig ? a : b);
+    g.append('line')
+        .attr('x1', xScale(bestSplit.thresh)).attr('x2', xScale(bestSplit.thresh))
+        .attr('y1', barY).attr('y2', barY + barH)
+        .attr('stroke', COL_GREEN).attr('stroke-width', 1.5);
+
+    // Drag behavior
+    const drag = d3.drag()
+        .on('drag', function (event) {
+            const mx = Math.max(0, Math.min(w, event.x));
+            splitX = xScale.invert(mx);
+            updateIG();
+        });
+
+    // Invisible wider drag target
+    const dragTarget = g.append('rect')
+        .attr('x', xScale(splitX) - 10).attr('y', 0).attr('width', 20).attr('height', h)
+        .attr('fill', 'transparent').style('cursor', 'ew-resize').call(drag);
+
+    function updateIG() {
+        const sx = xScale(splitX);
+        splitLine.attr('x1', sx).attr('x2', sx);
+        splitLabel.attr('x', sx).text('x=' + splitX.toFixed(2));
+        dragTarget.attr('x', sx - 10);
+
+        const left = data.filter(d => d.x <= splitX);
+        const right = data.filter(d => d.x > splitX);
+        const lc = [left.filter(d => d.label === 0).length, left.filter(d => d.label === 1).length];
+        const rc = [right.filter(d => d.label === 0).length, right.filter(d => d.label === 1).length];
+        const lH = RFUtils.entropy(lc);
+        const rH = RFUtils.entropy(rc);
+        const ig = RFUtils.informationGain([parentC0, parentC1], lc, rc, 'entropy');
+
+        document.getElementById('ig-left-counts').innerHTML = `<span style="color:${COL_A}">${lc[0]}</span> / <span style="color:${COL_B}">${lc[1]}</span>`;
+        document.getElementById('ig-right-counts').innerHTML = `<span style="color:${COL_A}">${rc[0]}</span> / <span style="color:${COL_B}">${rc[1]}</span>`;
+        document.getElementById('ig-gain-val').textContent = ig.toFixed(4);
+        document.getElementById('ig-parent-h').textContent = parentH.toFixed(3);
+        document.getElementById('ig-left-h').textContent = lH.toFixed(3);
+        document.getElementById('ig-right-h').textContent = rH.toFixed(3);
+
+        // Color points by side
+        g.selectAll('.pt').attr('opacity', d => d.x <= splitX ? 0.9 : 0.9)
+            .attr('stroke', d => d.x <= splitX ? 'rgba(255,255,255,0.3)' : 'none')
+            .attr('stroke-width', 1);
+
+        // Hint
+        const hint = document.getElementById('ig-hint');
+        if (Math.abs(splitX - bestSplit.thresh) < 0.3) {
+            hint.textContent = '找到了！这个位置的信息增益最大，是最优分裂点。';
+            hint.parentElement.className = 'info-box success mt-2';
+        } else {
+            hint.textContent = `当前信息增益: ${ig.toFixed(4)}，最大值: ${bestSplit.ig.toFixed(4)}。继续拖动试试！`;
+            hint.parentElement.className = 'info-box warning mt-2';
+        }
+    }
+
+    updateIG();
+}
+
+/* ==============================================================
+   Section 4: 多特征分裂选择
+   ============================================================== */
+let multiCriterion = 'entropy';
+let multiData = null;
+let multiRedraw = null;
+
+function setMultiCriterion(c) {
+    multiCriterion = c;
+    document.getElementById('multi-btn-entropy').classList.toggle('active', c === 'entropy');
+    document.getElementById('multi-btn-gini').classList.toggle('active', c === 'gini');
+    if (multiRedraw) multiRedraw();
+}
+
+function initMulti() {
+    const rng = RFUtils.seededRandom(123);
+    const N = 60;
+    multiData = [];
+    for (let i = 0; i < N; i++) {
+        const x = rng() * 10;
+        const y = rng() * 10;
+        const label = (0.6 * x + 0.4 * y + (rng() - 0.5) * 3 > 5) ? 1 : 0;
+        multiData.push({ x, y, label });
+    }
+
+    const container = document.getElementById('multi-chart');
+    const W = container.clientWidth || 800;
+    const H = container.clientHeight || 480;
+    const heatH = 30;
+    const margin = { top: heatH + 10, right: 60, bottom: 50, left: 60 };
+    const w = W - margin.left - margin.right;
+    const h = H - margin.top - margin.bottom - heatH - 10;
+
+    const svg = d3.select('#multi-chart').append('svg').attr('width', W).attr('height', H);
+    const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+
+    const xScale = d3.scaleLinear().domain([0, 10]).range([0, w]);
+    const yScale = d3.scaleLinear().domain([0, 10]).range([h, 0]);
+
+    g.append('g').attr('transform', `translate(0,${h})`).call(d3.axisBottom(xScale).ticks(5))
+        .call(ax => { ax.selectAll('text').attr('fill', TEXT_SEC).style('font-size', '11px'); ax.selectAll('line,path').attr('stroke', BORDER); });
+    g.append('g').call(d3.axisLeft(yScale).ticks(5))
+        .call(ax => { ax.selectAll('text').attr('fill', TEXT_SEC).style('font-size', '11px'); ax.selectAll('line,path').attr('stroke', BORDER); });
+
+    g.append('text').attr('x', w / 2).attr('y', h + 40).attr('text-anchor', 'middle').attr('fill', TEXT_SEC).style('font-size', '12px').text('特征 X');
+    g.append('text').attr('transform', 'rotate(-90)').attr('x', -h / 2).attr('y', -45).attr('text-anchor', 'middle').attr('fill', TEXT_SEC).style('font-size', '12px').text('特征 Y');
+
+    // Points
+    const points = g.selectAll('.mpt').data(multiData).join('circle')
+        .attr('class', 'mpt')
+        .attr('cx', d => xScale(d.x)).attr('cy', d => yScale(d.y))
+        .attr('r', 5).attr('fill', d => d.label === 0 ? COL_A : COL_B).attr('opacity', 0.8);
+
+    // Heatmaps containers
+    const topHeatG = svg.append('g').attr('transform', `translate(${margin.left}, 0)`);
+    const rightHeatG = svg.append('g').attr('transform', `translate(${margin.left + w + 5}, ${margin.top})`);
+
+    // Best split line
+    const bestLine = g.append('line').attr('stroke', COL_GREEN).attr('stroke-width', 2.5).attr('stroke-dasharray', '6,4');
+    const bestText = g.append('text').attr('fill', COL_GREEN).style('font-size', '11px').style('font-family', 'var(--font-mono)');
+
+    const nBins = 40;
+    const parentC0 = multiData.filter(d => d.label === 0).length;
+    const parentC1 = multiData.filter(d => d.label === 1).length;
+
+    function computeGains(featureKey) {
+        const gains = [];
+        for (let i = 0; i < nBins; i++) {
+            const thresh = (i + 0.5) / nBins * 10;
+            const left = multiData.filter(d => d[featureKey] <= thresh);
+            const right = multiData.filter(d => d[featureKey] > thresh);
+            const lc = [left.filter(d => d.label === 0).length, left.filter(d => d.label === 1).length];
+            const rc = [right.filter(d => d.label === 0).length, right.filter(d => d.label === 1).length];
+            const ig = RFUtils.informationGain([parentC0, parentC1], lc, rc, multiCriterion);
+            gains.push({ thresh, ig });
+        }
+        return gains;
+    }
+
+    function redraw() {
+        const xGains = computeGains('x');
+        const yGains = computeGains('y');
+        const allGains = [...xGains.map(d => d.ig), ...yGains.map(d => d.ig)];
+        const maxGain = d3.max(allGains) || 0.001;
+
+        const colorScale = d3.scaleSequential(d3.interpolateYlOrRd).domain([0, maxGain]);
+
+        // Top heatmap (X splits)
+        topHeatG.selectAll('rect').remove();
+        topHeatG.selectAll('rect').data(xGains).join('rect')
+            .attr('x', d => xScale(d.thresh) - w / nBins / 2)
+            .attr('y', 0).attr('width', w / nBins).attr('height', heatH)
+            .attr('fill', d => colorScale(d.ig)).attr('rx', 1);
+
+        // Right heatmap (Y splits)
+        rightHeatG.selectAll('rect').remove();
+        rightHeatG.selectAll('rect').data(yGains).join('rect')
+            .attr('x', 0).attr('y', d => yScale(d.thresh) - h / nBins / 2)
+            .attr('width', heatH).attr('height', h / nBins)
+            .attr('fill', d => colorScale(d.ig)).attr('rx', 1);
+
+        // Find best overall
+        const bestX = xGains.reduce((a, b) => a.ig > b.ig ? a : b);
+        const bestY = yGains.reduce((a, b) => a.ig > b.ig ? a : b);
+        let bestFeat, bestThresh, bestGain;
+        if (bestX.ig >= bestY.ig) {
+            bestFeat = 'X'; bestThresh = bestX.thresh; bestGain = bestX.ig;
+            bestLine.attr('x1', xScale(bestThresh)).attr('x2', xScale(bestThresh)).attr('y1', 0).attr('y2', h);
+            bestText.attr('x', xScale(bestThresh) + 5).attr('y', 15).text(`X=${bestThresh.toFixed(1)}`);
+        } else {
+            bestFeat = 'Y'; bestThresh = bestY.thresh; bestGain = bestY.ig;
+            bestLine.attr('x1', 0).attr('x2', w).attr('y1', yScale(bestThresh)).attr('y2', yScale(bestThresh));
+            bestText.attr('x', 5).attr('y', yScale(bestThresh) - 5).text(`Y=${bestThresh.toFixed(1)}`);
+        }
+
+        document.getElementById('multi-best-feat').textContent = '特征 ' + bestFeat;
+        document.getElementById('multi-best-thresh').textContent = bestThresh.toFixed(2);
+        document.getElementById('multi-best-gain').textContent = bestGain.toFixed(4);
+    }
+
+    multiRedraw = redraw;
+    redraw();
+}
+
+/* ==============================================================
+   Section 5: 分步分裂动画
+   ============================================================== */
+let animSteps = [];
+let animIdx = 0;
+let animPlaying = false;
+let animTimer = null;
+let animSvgScatter = null;
+let animSvgTree = null;
+let animGScatter = null;
+let animGTree = null;
+let animXScale = null;
+let animYScale = null;
+let animScatterW, animScatterH;
+let animData = null;
+
+function initAnim() {
+    const rng = RFUtils.seededRandom(55);
+    const N = 50;
+    animData = [];
+    for (let i = 0; i < N; i++) {
+        const x = rng() * 10;
+        const y = rng() * 10;
+        const label = (0.5 * x + 0.5 * y + (rng() - 0.5) * 3 > 5) ? 1 : 0;
+        animData.push({ x, y, label });
+    }
+
+    // Build tree and record steps
+    animSteps = buildTreeWithSteps(animData);
+
+    // Scatter SVG
+    const sc = document.getElementById('anim-scatter');
+    const W1 = sc.clientWidth || 400;
+    const H1 = sc.clientHeight || 400;
+    const margin = { top: 20, right: 20, bottom: 40, left: 45 };
+    animScatterW = W1 - margin.left - margin.right;
+    animScatterH = H1 - margin.top - margin.bottom;
+
+    animSvgScatter = d3.select('#anim-scatter').append('svg').attr('width', W1).attr('height', H1);
+    animGScatter = animSvgScatter.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+
+    animXScale = d3.scaleLinear().domain([0, 10]).range([0, animScatterW]);
+    animYScale = d3.scaleLinear().domain([0, 10]).range([animScatterH, 0]);
+
+    animGScatter.append('g').attr('transform', `translate(0,${animScatterH})`).call(d3.axisBottom(animXScale).ticks(5))
+        .call(ax => { ax.selectAll('text').attr('fill', TEXT_SEC).style('font-size', '10px'); ax.selectAll('line,path').attr('stroke', BORDER); });
+    animGScatter.append('g').call(d3.axisLeft(animYScale).ticks(5))
+        .call(ax => { ax.selectAll('text').attr('fill', TEXT_SEC).style('font-size', '10px'); ax.selectAll('line,path').attr('stroke', BORDER); });
+
+    // Boundary layer (behind points)
+    animGScatter.append('g').attr('class', 'boundaries');
+
+    // Points
+    animGScatter.selectAll('.apt').data(animData).join('circle')
+        .attr('class', 'apt')
+        .attr('cx', d => animXScale(d.x)).attr('cy', d => animYScale(d.y))
+        .attr('r', 4.5).attr('fill', d => d.label === 0 ? COL_A : COL_B).attr('opacity', 0.8);
+
+    // Tree SVG
+    const tc = document.getElementById('anim-tree');
+    const W2 = tc.clientWidth || 400;
+    const H2 = tc.clientHeight || 400;
+
+    animSvgTree = d3.select('#anim-tree').append('svg').attr('width', W2).attr('height', H2);
+    animGTree = animSvgTree.append('g').attr('transform', `translate(${W2 / 2}, 30)`);
+
+    updateAnimUI();
+}
+
+function buildTreeWithSteps(data) {
+    const steps = [];
+    const regions = [{ x0: 0, x1: 10, y0: 0, y1: 10 }];
+
+    function _build(subset, depth, regionIdx, nodeId) {
+        if (depth >= 3 || subset.length < 4) {
+            const maj = subset.filter(d => d.label === 1).length > subset.length / 2 ? 1 : 0;
+            steps.push({
+                type: 'leaf',
+                nodeId,
+                depth,
+                region: { ...regions[regionIdx] },
+                prediction: maj,
+                counts: [subset.filter(d => d.label === 0).length, subset.filter(d => d.label === 1).length],
+                desc: `深度 ${depth}: 叶节点 — 预测类别 ${maj}（${subset.length} 个样本）`
+            });
+            return;
+        }
+
+        const classes = [subset.filter(d => d.label === 0).length, subset.filter(d => d.label === 1).length];
+        if (classes[0] === 0 || classes[1] === 0) {
+            const maj = classes[0] > classes[1] ? 0 : 1;
+            steps.push({
+                type: 'leaf',
+                nodeId,
+                depth,
+                region: { ...regions[regionIdx] },
+                prediction: maj,
+                counts: classes,
+                desc: `深度 ${depth}: 纯净节点 — 所有样本属于类别 ${maj}`
+            });
+            return;
+        }
+
+        // Find best split on x and y
+        const splitX = RFUtils.findBestSplit(subset, 0, 'entropy', 'label');
+        const splitY = RFUtils.findBestSplit(subset, 1, 'entropy', 'label');
+        const best = splitX.gain >= splitY.gain ? splitX : splitY;
+        const featName = best.featureIndex === 0 ? 'X' : 'Y';
+
+        steps.push({
+            type: 'split',
+            nodeId,
+            depth,
+            feature: best.featureIndex,
+            threshold: best.threshold,
+            gain: best.gain,
+            region: { ...regions[regionIdx] },
+            counts: classes,
+            desc: `深度 ${depth}: 在特征 ${featName} = ${best.threshold.toFixed(2)} 处分裂（增益 ${best.gain.toFixed(3)}）`
+        });
+
+        const getVal = d => best.featureIndex === 0 ? d.x : d.y;
+        const leftData = subset.filter(d => getVal(d) <= best.threshold);
+        const rightData = subset.filter(d => getVal(d) > best.threshold);
+
+        // Create sub-regions
+        const r = regions[regionIdx];
+        let leftRegion, rightRegion;
+        if (best.featureIndex === 0) {
+            leftRegion = { x0: r.x0, x1: best.threshold, y0: r.y0, y1: r.y1 };
+            rightRegion = { x0: best.threshold, x1: r.x1, y0: r.y0, y1: r.y1 };
+        } else {
+            leftRegion = { x0: r.x0, x1: r.x1, y0: r.y0, y1: best.threshold };
+            rightRegion = { x0: r.x0, x1: r.x1, y0: best.threshold, y1: r.y1 };
+        }
+        const li = regions.length; regions.push(leftRegion);
+        const ri = regions.length; regions.push(rightRegion);
+
+        _build(leftData, depth + 1, li, nodeId * 2 + 1);
+        _build(rightData, depth + 1, ri, nodeId * 2 + 2);
+    }
+
+    _build(data, 0, 0, 0);
+    return steps;
+}
+
+function updateAnimUI() {
+    const total = animSteps.length;
+    document.getElementById('anim-step-label').textContent = `${animIdx} / ${total}`;
+    document.getElementById('anim-progress').style.width = (total > 0 ? (animIdx / total * 100) : 0) + '%';
+
+    if (animIdx === 0) {
+        document.getElementById('anim-desc').textContent = '点击"下一步"开始构建决策树。';
+    } else {
+        document.getElementById('anim-desc').textContent = animSteps[animIdx - 1].desc;
+    }
+
+    // Draw boundaries and tree up to current step
+    drawAnimBoundaries();
+    drawAnimTree();
+}
+
+function drawAnimBoundaries() {
+    const bG = animGScatter.select('.boundaries');
+    bG.selectAll('*').remove();
+
+    for (let i = 0; i < animIdx; i++) {
+        const s = animSteps[i];
+        if (s.type === 'split') {
+            const r = s.region;
+            if (s.feature === 0) {
+                bG.append('line')
+                    .attr('x1', animXScale(s.threshold)).attr('x2', animXScale(s.threshold))
+                    .attr('y1', animYScale(r.y1)).attr('y2', animYScale(r.y0))
+                    .attr('stroke', COL_GREEN).attr('stroke-width', 2)
+                    .attr('opacity', i === animIdx - 1 ? 1 : 0.5);
+            } else {
+                bG.append('line')
+                    .attr('x1', animXScale(r.x0)).attr('x2', animXScale(r.x1))
+                    .attr('y1', animYScale(s.threshold)).attr('y2', animYScale(s.threshold))
+                    .attr('stroke', COL_ORANGE).attr('stroke-width', 2)
+                    .attr('opacity', i === animIdx - 1 ? 1 : 0.5);
+            }
+        }
+        if (s.type === 'leaf') {
+            const r = s.region;
+            bG.append('rect')
+                .attr('x', animXScale(r.x0)).attr('y', animYScale(r.y1))
+                .attr('width', animXScale(r.x1) - animXScale(r.x0))
+                .attr('height', animYScale(r.y0) - animYScale(r.y1))
+                .attr('fill', s.prediction === 0 ? COL_A : COL_B)
+                .attr('opacity', 0.08);
+        }
+    }
+}
+
+function drawAnimTree() {
+    animGTree.selectAll('*').remove();
+    const shownSteps = animSteps.slice(0, animIdx);
+    if (shownSteps.length === 0) {
+        animGTree.append('text').attr('text-anchor', 'middle').attr('fill', TEXT_MUT).style('font-size', '13px').text('等待开始...');
+        return;
+    }
+
+    // Layout: compute positions based on nodeId
+    const treeW = (animSvgTree.attr('width') || 400) - 60;
+    const levelH = 65;
+    const nodes = [];
+
+    shownSteps.forEach(s => {
+        const depth = s.depth;
+        // Compute x position from nodeId
+        // At depth d, positions range from 0 to 2^d - 1
+        // nodeId at depth d: offset = nodeId - (2^d - 1)
+        const nodesAtDepth = Math.pow(2, depth);
+        const offsetInLevel = s.nodeId - (Math.pow(2, depth) - 1);
+        const xPos = (offsetInLevel + 0.5) / nodesAtDepth * treeW - treeW / 2;
+        const yPos = depth * levelH;
+
+        nodes.push({ ...s, tx: xPos, ty: yPos });
+    });
+
+    // Draw edges
+    nodes.forEach(n => {
+        if (n.nodeId > 0) {
+            const parentId = Math.floor((n.nodeId - 1) / 2);
+            const parent = nodes.find(p => p.nodeId === parentId);
+            if (parent) {
+                animGTree.append('line')
+                    .attr('x1', parent.tx).attr('y1', parent.ty + 15)
+                    .attr('x2', n.tx).attr('y2', n.ty - 15)
+                    .attr('stroke', BORDER).attr('stroke-width', 1.5);
+            }
+        }
+    });
+
+    // Draw nodes
+    nodes.forEach((n, i) => {
+        const isLatest = i === nodes.length - 1;
+        const nodeG = animGTree.append('g').attr('transform', `translate(${n.tx},${n.ty})`);
+
+        if (n.type === 'split') {
+            nodeG.append('rect')
+                .attr('x', -40).attr('y', -15).attr('width', 80).attr('height', 30)
+                .attr('rx', 6).attr('fill', BG_CARD)
+                .attr('stroke', isLatest ? COL_GREEN : BORDER).attr('stroke-width', isLatest ? 2 : 1);
+            const featName = n.feature === 0 ? 'X' : 'Y';
+            nodeG.append('text').attr('text-anchor', 'middle').attr('y', 4)
+                .attr('fill', isLatest ? COL_GREEN : TEXT_SEC)
+                .style('font-size', '10px').style('font-family', 'var(--font-mono)')
+                .text(`${featName}<=${n.threshold.toFixed(1)}`);
+        } else {
+            nodeG.append('circle')
+                .attr('r', 15)
+                .attr('fill', n.prediction === 0 ? COL_A : COL_B)
+                .attr('opacity', 0.3)
+                .attr('stroke', isLatest ? '#fff' : 'none').attr('stroke-width', 2);
+            nodeG.append('text').attr('text-anchor', 'middle').attr('y', 4)
+                .attr('fill', '#fff')
+                .style('font-size', '10px').style('font-weight', '600')
+                .text(`${n.counts[0]}/${n.counts[1]}`);
+        }
+    });
+}
+
+function animStep() {
+    if (animIdx >= animSteps.length) return;
+    animIdx++;
+    updateAnimUI();
+
+    // Animate the latest boundary
+    const latestBound = animGScatter.select('.boundaries').selectAll('line, rect').filter(function (d, i, nodes) {
+        return i === nodes.length - 1;
+    });
+    if (!latestBound.empty()) {
+        gsap.from(latestBound.node(), { opacity: 0, duration: 0.5, ease: 'power2.out' });
+    }
+}
+
+function animReset() {
+    animIdx = 0;
+    animPlaying = false;
+    if (animTimer) { clearInterval(animTimer); animTimer = null; }
+    document.getElementById('anim-play').textContent = '自动播放';
+    updateAnimUI();
+}
+
+function animPlay() {
+    if (animPlaying) {
+        animPlaying = false;
+        if (animTimer) { clearInterval(animTimer); animTimer = null; }
+        document.getElementById('anim-play').textContent = '自动播放';
+        return;
+    }
+    if (animIdx >= animSteps.length) animReset();
+    animPlaying = true;
+    document.getElementById('anim-play').textContent = '暂停';
+    animTimer = setInterval(() => {
+        if (animIdx >= animSteps.length) {
+            animPlaying = false;
+            clearInterval(animTimer);
+            animTimer = null;
+            document.getElementById('anim-play').textContent = '自动播放';
+            return;
+        }
+        animStep();
+    }, 1200);
+}
+
+</script>
+
+<!-- Module scripts -->
+<script>
+/* Placeholder hooks for external scripts — they are non-critical */
+try { if (typeof AnimationController !== 'undefined') { /* animation-controller.js loaded */ } } catch(e) {}
+</script>
+<script src="animation-controller.js" onerror=""></script>
+<script src="matrix-renderer.js" onerror=""></script>
+<script src="nav.js" onerror=""></script>
+<script src="katex-init.js" onerror=""></script>
+</body>
+</html>

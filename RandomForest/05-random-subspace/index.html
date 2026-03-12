@@ -1,0 +1,1492 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>模块 05 — 随机子空间 | 随机森林</title>
+
+    <!-- KaTeX -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+
+    <!-- D3.js -->
+    <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+
+    <!-- GSAP -->
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.2/dist/gsap.min.js"></script>
+
+    <!-- Shared styles -->
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+
+    <style>
+        .section-desc {
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+            line-height: 1.8;
+            margin-bottom: 1.2rem;
+        }
+        .section-desc strong {
+            color: var(--accent-orange);
+        }
+        .section-desc em {
+            color: var(--accent-green);
+            font-style: normal;
+            font-weight: 600;
+        }
+        .viz-box {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1.2rem;
+            position: relative;
+        }
+        .viz-box .watermark {
+            position: absolute;
+            bottom: 0.5rem;
+            right: 0.75rem;
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            opacity: 0.5;
+        }
+        .controls-row {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            flex-wrap: wrap;
+            margin-bottom: 1rem;
+        }
+        .metric-box {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.4rem 0.8rem;
+            background: rgba(22, 199, 154, 0.08);
+            border: 1px solid rgba(22, 199, 154, 0.2);
+            border-radius: var(--radius-sm);
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+        }
+        .metric-box .val {
+            font-family: var(--font-mono);
+            color: var(--accent-green);
+            font-weight: 700;
+        }
+        .compare-label {
+            text-align: center;
+            font-size: 0.9rem;
+            font-weight: 600;
+            margin-bottom: 0.75rem;
+            padding: 0.4rem;
+            border-radius: var(--radius-sm);
+        }
+        .compare-label.bagging {
+            background: rgba(255, 171, 64, 0.12);
+            color: var(--accent-orange);
+        }
+        .compare-label.rf {
+            background: rgba(22, 199, 154, 0.12);
+            color: var(--accent-green);
+        }
+        .tree-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 0.75rem;
+        }
+        .tree-card {
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            padding: 0.5rem;
+            text-align: center;
+        }
+        .tree-card .tree-label {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            margin-bottom: 0.3rem;
+        }
+        .highlight-corr {
+            border-color: var(--accent-orange) !important;
+            box-shadow: 0 0 8px rgba(255, 171, 64, 0.3);
+        }
+        .highlight-diverse {
+            border-color: var(--accent-green) !important;
+            box-shadow: 0 0 8px rgba(22, 199, 154, 0.3);
+        }
+        .flow-container {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            overflow-x: auto;
+            padding: 1rem 0;
+        }
+        .flow-step {
+            flex-shrink: 0;
+            min-width: 120px;
+            padding: 0.8rem 1rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            text-align: center;
+            opacity: 0.3;
+            transform: translateY(10px);
+            transition: all 0.4s;
+        }
+        .flow-step.active {
+            opacity: 1;
+            transform: translateY(0);
+            border-color: var(--accent-green);
+        }
+        .flow-step .step-icon {
+            font-size: 1.5rem;
+            margin-bottom: 0.3rem;
+        }
+        .flow-step .step-name {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+        }
+        .flow-arrow {
+            flex-shrink: 0;
+            color: var(--text-muted);
+            font-size: 1.2rem;
+            opacity: 0.3;
+            transition: opacity 0.4s;
+        }
+        .flow-arrow.active {
+            opacity: 1;
+            color: var(--accent-green);
+        }
+        .feature-col {
+            transition: opacity 0.3s, transform 0.3s;
+        }
+        .feature-col.dimmed {
+            opacity: 0.2;
+        }
+        .feature-col.selected {
+            opacity: 1;
+        }
+    </style>
+</head>
+<body>
+
+<div class="page-container">
+    <div class="page-header">
+        <div class="breadcrumb"><a href="../index.html">随机森林</a> / 模块 05</div>
+        <h1>随机子空间</h1>
+    </div>
+
+    <!-- ====== Section 1: 为什么需要随机特征 ====== -->
+    <div class="section" id="sec-why">
+        <div class="section-title">
+            <div class="icon">1</div>
+            <h2>为什么需要随机特征</h2>
+        </div>
+        <div class="section-desc">
+            <p>Bagging 通过自助采样构建多棵树，但有一个问题：如果数据中存在一个<strong>非常强的特征</strong>，
+            那么每棵树都会在第一次分裂时选择它。结果所有树的结构高度相似，它们的预测也高度<strong>相关</strong>。</p>
+            <p>相关的树组成的集成，方差减少效果有限。我们需要打破这种相关性。</p>
+        </div>
+        <div class="controls-row">
+            <button class="btn btn-primary" id="btn-show-corr">展示 Bagging 相关性</button>
+            <button class="btn" id="btn-reset-corr">重置</button>
+            <div class="metric-box">根节点相同率：<span class="val" id="corr-rate">—</span></div>
+        </div>
+        <div class="viz-box" id="viz-corr" style="min-height:320px;">
+            <svg id="svg-corr" width="100%" height="320"></svg>
+            <span class="watermark">随机森林 · 模块05</span>
+        </div>
+    </div>
+
+    <!-- ====== Section 2: 随机特征选择 ====== -->
+    <div class="section" id="sec-select">
+        <div class="section-title">
+            <div class="icon">2</div>
+            <h2>随机特征选择</h2>
+        </div>
+        <div class="section-desc">
+            <p>在每个分裂节点处，不再考虑全部 $p$ 个特征，而是<em>随机选取 $m$ 个特征</em>作为候选，
+            只从这 $m$ 个中选出最佳分裂。经典推荐值为 $m = \lfloor\sqrt{p}\rfloor$。</p>
+            <p>下方展示一个有 <strong>6 个特征</strong>的数据集。调节 $m$ 的值，观察每次分裂时哪些特征被选中。</p>
+        </div>
+        <div class="controls-row">
+            <div class="slider-group" style="min-width:280px;">
+                <label>候选特征数 $m$：</label>
+                <input type="range" id="slider-m" min="1" max="6" value="2" step="1">
+                <span class="slider-value" id="val-m">2</span>
+            </div>
+            <button class="btn btn-primary" id="btn-resample">重新随机选取</button>
+            <div class="metric-box">$m / p$：<span class="val" id="m-ratio">2/6</span></div>
+        </div>
+        <div class="viz-box" id="viz-select" style="min-height:380px;">
+            <svg id="svg-select" width="100%" height="380"></svg>
+            <span class="watermark">随机森林 · 模块05</span>
+        </div>
+    </div>
+
+    <!-- ====== Section 3: 树的多样性 ====== -->
+    <div class="section" id="sec-diversity">
+        <div class="section-title">
+            <div class="icon">3</div>
+            <h2>树的多样性</h2>
+        </div>
+        <div class="section-desc">
+            <p>左侧是<strong>仅用 Bagging</strong>（$m = p$）构建的树，右侧是 <em>Bagging + 随机特征选择</em>（$m = \sqrt{p}$）的树。
+            观察它们的结构差异——随机特征让树更加多样化。</p>
+            <p>我们用<strong>不一致率</strong>（disagreement rate）衡量多样性：任取两棵树，它们在测试样本上预测不同的比例。</p>
+        </div>
+        <div class="controls-row">
+            <button class="btn btn-primary" id="btn-build-diversity">构建对比</button>
+            <button class="btn" id="btn-reset-diversity">重置</button>
+            <div class="metric-box">Bagging 不一致率：<span class="val" id="disagree-bag">—</span></div>
+            <div class="metric-box">RF 不一致率：<span class="val" id="disagree-rf">—</span></div>
+        </div>
+        <div class="compare-grid cols-2">
+            <div>
+                <div class="compare-label bagging">仅 Bagging（m = p）</div>
+                <div class="viz-box" style="min-height:340px;">
+                    <div class="tree-grid" id="trees-bagging"></div>
+                </div>
+            </div>
+            <div>
+                <div class="compare-label rf">Bagging + 随机特征（m = &radic;p）</div>
+                <div class="viz-box" style="min-height:340px;">
+                    <div class="tree-grid" id="trees-rf"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ====== Section 4: m 值的影响 ====== -->
+    <div class="section" id="sec-m-effect">
+        <div class="section-title">
+            <div class="icon">4</div>
+            <h2>$m$ 值的影响</h2>
+        </div>
+        <div class="section-desc">
+            <p>$m$ 控制着<strong>随机性</strong>与<strong>单棵树强度</strong>之间的权衡：</p>
+            <p>$m = 1$：极端随机，每棵树很弱但非常多样。$m = \sqrt{p}$：推荐值，平衡点。$m = p$：等同于 Bagging，树强但高度相关。</p>
+            <p>随着 $m$ 增大，单棵树准确率上升，但树之间的相关性也上升。集成效果存在一个<em>最优甜蜜点</em>。</p>
+        </div>
+        <div class="controls-row">
+            <div class="slider-group" style="min-width:280px;">
+                <label>$m$ 值：</label>
+                <input type="range" id="slider-m2" min="1" max="8" value="3" step="1">
+                <span class="slider-value" id="val-m2">3</span>
+            </div>
+            <button class="btn btn-primary" id="btn-run-m">运行实验</button>
+            <div class="metric-box">集成准确率：<span class="val" id="ensemble-acc">—</span></div>
+        </div>
+        <div class="viz-box" id="viz-m-effect" style="min-height:360px;">
+            <svg id="svg-m-chart" width="100%" height="360"></svg>
+            <span class="watermark">随机森林 · 模块05</span>
+        </div>
+    </div>
+
+    <!-- ====== Section 5: 从 Bagging 到随机森林 ====== -->
+    <div class="section" id="sec-summary">
+        <div class="section-title">
+            <div class="icon">5</div>
+            <h2>从 Bagging 到随机森林</h2>
+        </div>
+        <div class="section-desc">
+            <p>现在我们拥有了构建<em>随机森林</em>的完整配方：</p>
+            <p>原始数据 &rarr; <strong>自助采样</strong>（Bootstrap，模块04）&rarr; <strong>随机特征选择</strong>（本模块）&rarr; 构建决策树 &rarr; 集成投票。</p>
+            <p>点击播放，观看完整流程动画。下一个模块将正式整合所有步骤。</p>
+        </div>
+        <div class="controls-row">
+            <button class="btn btn-primary" id="btn-play-flow">播放流程</button>
+            <button class="btn" id="btn-reset-flow">重置</button>
+        </div>
+        <div class="viz-box" style="padding:1.5rem;">
+            <div class="flow-container" id="flow-container">
+                <div class="flow-step" data-step="0">
+                    <div class="step-icon">📊</div>
+                    <div class="step-name">原始数据</div>
+                </div>
+                <div class="flow-arrow">&rarr;</div>
+                <div class="flow-step" data-step="1">
+                    <div class="step-icon">🔄</div>
+                    <div class="step-name">Bootstrap 采样</div>
+                </div>
+                <div class="flow-arrow">&rarr;</div>
+                <div class="flow-step" data-step="2">
+                    <div class="step-icon">🎲</div>
+                    <div class="step-name">随机特征选择</div>
+                </div>
+                <div class="flow-arrow">&rarr;</div>
+                <div class="flow-step" data-step="3">
+                    <div class="step-icon">🌳</div>
+                    <div class="step-name">构建决策树</div>
+                </div>
+                <div class="flow-arrow">&rarr;</div>
+                <div class="flow-step" data-step="4">
+                    <div class="step-icon">🗳</div>
+                    <div class="step-name">集成投票</div>
+                </div>
+            </div>
+            <div id="flow-detail" style="min-height:280px; margin-top:1rem;">
+                <svg id="svg-flow" width="100%" height="280"></svg>
+            </div>
+            <span class="watermark">随机森林 · 模块05</span>
+        </div>
+    </div>
+
+</div>
+
+<!-- Shared scripts -->
+<script src="../shared/scripts/rf-utils.js"></script>
+<script src="../shared/scripts/animation-controller.js"></script>
+<script src="../shared/scripts/matrix-renderer.js"></script>
+<script src="../shared/scripts/nav.js"></script>
+<script src="../shared/scripts/katex-init.js"></script>
+
+<script>
+(function() {
+    'use strict';
+
+    const COLORS = {
+        green: '#16c79a',
+        orange: '#ffab40',
+        blue: '#4fc3f7',
+        purple: '#b388ff',
+        red: '#ff5252',
+        yellow: '#ffd740',
+        pink: '#ff80ab',
+        text: '#e8e8e8',
+        textSec: '#a8a8b8',
+        textMuted: '#6c6c7c',
+        bgPrimary: '#1a1a2e',
+        bgSecondary: '#16213e',
+        border: '#2a2a4a',
+    };
+
+    const FEATURE_NAMES = ['年龄', '收入', '学历', '工龄', '信用分', '负债率'];
+    const FEATURE_COLORS = [COLORS.red, COLORS.blue, COLORS.green, COLORS.orange, COLORS.purple, COLORS.pink];
+    const P = 6; // total features
+
+    // Seeded random from RFUtils
+    const rng = RFUtils.seededRandom(42);
+    function randInt(lo, hi) { return lo + Math.floor(rng() * (hi - lo)); }
+
+    // Generate a sample dataset (20 rows, 6 features)
+    function genDataset(n, seed) {
+        const r = RFUtils.seededRandom(seed || 42);
+        const rows = [];
+        for (let i = 0; i < n; i++) {
+            const feats = [];
+            for (let j = 0; j < P; j++) {
+                feats.push(+(r() * 10).toFixed(1));
+            }
+            // label: mainly depends on feature 0 and 1
+            const score = feats[0] * 0.5 + feats[1] * 0.3 - 3 + (r() - 0.5) * 2;
+            rows.push({ features: feats, label: score > 0 ? 1 : 0 });
+        }
+        return rows;
+    }
+
+    const DATASET = genDataset(60, 42);
+    const TEST_DATA = genDataset(40, 999);
+
+    // ===================================================================
+    // Section 1: Bagging correlation problem
+    // ===================================================================
+    (function initCorrSection() {
+        const svgEl = document.getElementById('svg-corr');
+        const container = svgEl.parentElement;
+        const width = container.clientWidth - 2.4 * 16;
+        const height = 320;
+        svgEl.setAttribute('width', width);
+        svgEl.setAttribute('height', height);
+
+        const svg = d3.select('#svg-corr');
+        svg.selectAll('*').remove();
+
+        const nTrees = 5;
+        const treeW = Math.min(140, (width - 60) / nTrees - 10);
+        const startX = (width - nTrees * (treeW + 10) + 10) / 2;
+
+        function drawBaggedTrees(animate) {
+            svg.selectAll('*').remove();
+
+            // Build bagged trees (m = p, so all features considered)
+            const trees = [];
+            for (let t = 0; t < nTrees; t++) {
+                const { sample } = RFUtils.bootstrapSample(DATASET, 42 + t * 137);
+                const tree = RFUtils.buildTree(sample, {
+                    maxDepth: 3,
+                    maxFeatures: null, // all features = bagging only
+                    seed: 42 + t * 251,
+                });
+                trees.push(tree);
+            }
+
+            // Count how many have the same root split feature
+            const rootFeatures = trees.map(t => t.splitFeature);
+            const rootMode = rootFeatures.sort((a, b) =>
+                rootFeatures.filter(v => v === b).length - rootFeatures.filter(v => v === a).length
+            )[0];
+            const sameCount = rootFeatures.filter(f => f === rootMode).length;
+            document.getElementById('corr-rate').textContent = sameCount + '/' + nTrees;
+
+            // Draw each tree
+            trees.forEach((tree, t) => {
+                const cx = startX + t * (treeW + 10) + treeW / 2;
+                const g = svg.append('g').attr('transform', `translate(${cx}, 20)`);
+
+                // Tree label
+                g.append('text')
+                    .attr('x', 0).attr('y', 0)
+                    .attr('text-anchor', 'middle')
+                    .attr('fill', COLORS.textSec)
+                    .attr('font-size', 12)
+                    .text(`树 ${t + 1}`);
+
+                drawMiniTree(g, tree, 0, 25, treeW / 2, 0, animate ? t * 200 : 0, rootMode);
+            });
+
+            // Correlation warning
+            if (sameCount >= 3) {
+                const warn = svg.append('g').attr('transform', `translate(${width / 2}, ${height - 30})`);
+                warn.append('text')
+                    .attr('text-anchor', 'middle')
+                    .attr('fill', COLORS.orange)
+                    .attr('font-size', 13)
+                    .attr('font-weight', 600)
+                    .text(`⚠ ${sameCount}/${nTrees} 棵树的根节点都选择了「${FEATURE_NAMES[rootMode]}」——树高度相关！`)
+                    .attr('opacity', 0)
+                    .transition().delay(animate ? nTrees * 200 + 400 : 0).duration(500)
+                    .attr('opacity', 1);
+            }
+        }
+
+        function drawMiniTree(g, node, x, y, spread, depth, delay, highlightFeature) {
+            if (!node) return;
+            const nodeR = 12;
+            const yGap = 55;
+
+            const isSameRoot = depth === 0 && node.splitFeature === highlightFeature;
+            const fillColor = node.isLeaf
+                ? (node.prediction === 1 ? COLORS.blue : COLORS.red)
+                : FEATURE_COLORS[node.splitFeature] || COLORS.textMuted;
+            const strokeColor = isSameRoot ? COLORS.orange : 'none';
+            const strokeW = isSameRoot ? 3 : 0;
+
+            const circle = g.append('circle')
+                .attr('cx', x).attr('cy', y)
+                .attr('r', 0)
+                .attr('fill', fillColor)
+                .attr('stroke', strokeColor)
+                .attr('stroke-width', strokeW)
+                .attr('opacity', 0.9);
+
+            circle.transition().delay(delay).duration(300)
+                .attr('r', nodeR);
+
+            if (!node.isLeaf) {
+                const featureLabel = g.append('text')
+                    .attr('x', x).attr('y', y + 4)
+                    .attr('text-anchor', 'middle')
+                    .attr('fill', COLORS.bgPrimary)
+                    .attr('font-size', 8)
+                    .attr('font-weight', 700)
+                    .text(FEATURE_NAMES[node.splitFeature]?.substring(0, 2))
+                    .attr('opacity', 0);
+                featureLabel.transition().delay(delay + 150).duration(200).attr('opacity', 1);
+            }
+
+            if (!node.isLeaf && node.left) {
+                const childSpread = spread * 0.55;
+                const lx = x - childSpread;
+                const ly = y + yGap;
+                // edge
+                const line = g.append('line')
+                    .attr('x1', x).attr('y1', y + nodeR)
+                    .attr('x2', x).attr('y2', y + nodeR)
+                    .attr('stroke', COLORS.border)
+                    .attr('stroke-width', 1.5);
+                line.transition().delay(delay + 200).duration(300)
+                    .attr('x2', lx).attr('y2', ly - nodeR);
+
+                drawMiniTree(g, node.left, lx, ly, childSpread, depth + 1, delay + 250, highlightFeature);
+            }
+            if (!node.isLeaf && node.right) {
+                const childSpread = spread * 0.55;
+                const rx = x + childSpread;
+                const ry = y + yGap;
+                const line = g.append('line')
+                    .attr('x1', x).attr('y1', y + nodeR)
+                    .attr('x2', x).attr('y2', y + nodeR)
+                    .attr('stroke', COLORS.border)
+                    .attr('stroke-width', 1.5);
+                line.transition().delay(delay + 200).duration(300)
+                    .attr('x2', rx).attr('y2', ry - nodeR);
+
+                drawMiniTree(g, node.right, rx, ry, childSpread, depth + 1, delay + 250, highlightFeature);
+            }
+        }
+
+        document.getElementById('btn-show-corr').addEventListener('click', () => drawBaggedTrees(true));
+        document.getElementById('btn-reset-corr').addEventListener('click', () => {
+            svg.selectAll('*').remove();
+            document.getElementById('corr-rate').textContent = '—';
+        });
+
+        // Draw on load
+        drawBaggedTrees(false);
+    })();
+
+    // ===================================================================
+    // Section 2: Random feature selection visualization
+    // ===================================================================
+    (function initSelectSection() {
+        const svgEl = document.getElementById('svg-select');
+        const container = svgEl.parentElement;
+        let width = container.clientWidth - 2.4 * 16;
+        if (width < 400) width = 400;
+        const height = 380;
+        svgEl.setAttribute('width', width);
+        svgEl.setAttribute('height', height);
+
+        const svg = d3.select('#svg-select');
+        const sliderM = document.getElementById('slider-m');
+        const valM = document.getElementById('val-m');
+        const mRatio = document.getElementById('m-ratio');
+
+        const nRows = 12;
+        const cellW = Math.min(65, (width - 200) / P);
+        const cellH = 22;
+        const tableX = 40;
+        const tableY = 50;
+
+        let selectedFeatures = [];
+        let sampleSeed = 100;
+
+        function draw(animate) {
+            svg.selectAll('*').remove();
+            const m = +sliderM.value;
+            valM.textContent = m;
+            mRatio.textContent = m + '/' + P;
+
+            // Header
+            svg.append('text')
+                .attr('x', tableX - 5).attr('y', tableY - 15)
+                .attr('fill', COLORS.textMuted).attr('font-size', 11)
+                .text('样本');
+
+            // Feature column headers
+            for (let j = 0; j < P; j++) {
+                const x = tableX + 40 + j * cellW;
+                svg.append('text')
+                    .attr('x', x + cellW / 2).attr('y', tableY - 15)
+                    .attr('text-anchor', 'middle')
+                    .attr('fill', FEATURE_COLORS[j])
+                    .attr('font-size', 11)
+                    .attr('font-weight', 600)
+                    .text(FEATURE_NAMES[j]);
+            }
+
+            // Rows of data
+            for (let i = 0; i < nRows; i++) {
+                const y = tableY + i * cellH;
+                // Row number
+                svg.append('text')
+                    .attr('x', tableX + 15).attr('y', y + cellH / 2 + 4)
+                    .attr('text-anchor', 'middle')
+                    .attr('fill', COLORS.textMuted).attr('font-size', 10)
+                    .text(i + 1);
+
+                for (let j = 0; j < P; j++) {
+                    const x = tableX + 40 + j * cellW;
+                    const val = DATASET[i].features[j];
+                    const isSelected = selectedFeatures.includes(j);
+
+                    const rect = svg.append('rect')
+                        .attr('x', x).attr('y', y)
+                        .attr('width', cellW - 2).attr('height', cellH - 2)
+                        .attr('rx', 3)
+                        .attr('fill', isSelected
+                            ? `rgba(${hexToRgb(FEATURE_COLORS[j])}, 0.25)`
+                            : 'rgba(42, 42, 74, 0.3)')
+                        .attr('stroke', isSelected ? FEATURE_COLORS[j] : 'transparent')
+                        .attr('stroke-width', isSelected ? 1.5 : 0);
+
+                    if (animate && isSelected) {
+                        rect.attr('opacity', 0)
+                            .transition().delay(j * 80 + 200).duration(400)
+                            .attr('opacity', 1);
+                    }
+
+                    svg.append('text')
+                        .attr('x', x + (cellW - 2) / 2).attr('y', y + cellH / 2 + 3)
+                        .attr('text-anchor', 'middle')
+                        .attr('fill', isSelected ? COLORS.text : COLORS.textMuted)
+                        .attr('font-size', 10)
+                        .attr('font-family', 'JetBrains Mono, monospace')
+                        .text(val.toFixed(1));
+                }
+            }
+
+            // Right side: show "candidate" explanation
+            const rightX = tableX + 40 + P * cellW + 30;
+            const arrowY = tableY + nRows * cellH / 2;
+
+            svg.append('text')
+                .attr('x', rightX).attr('y', arrowY - 40)
+                .attr('fill', COLORS.text).attr('font-size', 13).attr('font-weight', 600)
+                .text('候选特征子集');
+
+            svg.append('text')
+                .attr('x', rightX).attr('y', arrowY - 18)
+                .attr('fill', COLORS.textSec).attr('font-size', 11)
+                .text(`随机选取 m = ${m} 个：`);
+
+            selectedFeatures.forEach((fi, idx) => {
+                const chip = svg.append('g')
+                    .attr('transform', `translate(${rightX + idx * 70}, ${arrowY + 5})`);
+
+                chip.append('rect')
+                    .attr('width', 62).attr('height', 26)
+                    .attr('rx', 13)
+                    .attr('fill', `rgba(${hexToRgb(FEATURE_COLORS[fi])}, 0.2)`)
+                    .attr('stroke', FEATURE_COLORS[fi]);
+
+                chip.append('text')
+                    .attr('x', 31).attr('y', 17)
+                    .attr('text-anchor', 'middle')
+                    .attr('fill', FEATURE_COLORS[fi])
+                    .attr('font-size', 11).attr('font-weight', 600)
+                    .text(FEATURE_NAMES[fi]);
+
+                if (animate) {
+                    chip.attr('opacity', 0)
+                        .transition().delay(400 + idx * 120).duration(400)
+                        .attr('opacity', 1);
+                }
+            });
+
+            // Arrow from table to right panel
+            svg.append('line')
+                .attr('x1', tableX + 40 + P * cellW + 10).attr('y1', arrowY)
+                .attr('x2', rightX - 10).attr('y2', arrowY)
+                .attr('stroke', COLORS.green).attr('stroke-width', 1.5)
+                .attr('marker-end', 'url(#arrowGreen)');
+
+            // Arrow marker
+            svg.append('defs').append('marker')
+                .attr('id', 'arrowGreen')
+                .attr('viewBox', '0 0 10 10')
+                .attr('refX', 8).attr('refY', 5)
+                .attr('markerWidth', 6).attr('markerHeight', 6)
+                .attr('orient', 'auto')
+                .append('path')
+                .attr('d', 'M 0 0 L 10 5 L 0 10 z')
+                .attr('fill', COLORS.green);
+
+            // Show excluded features below
+            const excludedY = arrowY + 55;
+            const excluded = Array.from({length: P}, (_, i) => i).filter(i => !selectedFeatures.includes(i));
+            if (excluded.length > 0) {
+                svg.append('text')
+                    .attr('x', rightX).attr('y', excludedY)
+                    .attr('fill', COLORS.textMuted).attr('font-size', 11)
+                    .text('未选中（本次不考虑）：');
+
+                excluded.forEach((fi, idx) => {
+                    svg.append('text')
+                        .attr('x', rightX + idx * 60).attr('y', excludedY + 22)
+                        .attr('fill', COLORS.textMuted).attr('font-size', 10)
+                        .attr('text-decoration', 'line-through')
+                        .text(FEATURE_NAMES[fi]);
+                });
+            }
+        }
+
+        function resample() {
+            sampleSeed += 7;
+            const m = +sliderM.value;
+            const r = RFUtils.seededRandom(sampleSeed);
+            const indices = Array.from({length: P}, (_, i) => i);
+            // Fisher-Yates
+            for (let i = indices.length - 1; i > 0; i--) {
+                const j = Math.floor(r() * (i + 1));
+                [indices[i], indices[j]] = [indices[j], indices[i]];
+            }
+            selectedFeatures = indices.slice(0, m).sort((a, b) => a - b);
+            draw(true);
+        }
+
+        sliderM.addEventListener('input', () => {
+            resample();
+        });
+
+        document.getElementById('btn-resample').addEventListener('click', resample);
+
+        // Init
+        resample();
+    })();
+
+    // ===================================================================
+    // Section 3: Tree diversity comparison
+    // ===================================================================
+    (function initDiversitySection() {
+        const nTrees = 6;
+
+        function buildAndShow() {
+            const bagContainer = document.getElementById('trees-bagging');
+            const rfContainer = document.getElementById('trees-rf');
+            bagContainer.innerHTML = '';
+            rfContainer.innerHTML = '';
+
+            const bagTrees = [];
+            const rfTrees = [];
+
+            for (let t = 0; t < nTrees; t++) {
+                const { sample } = RFUtils.bootstrapSample(DATASET, 42 + t * 137);
+
+                // Bagging: m = p
+                const bagTree = RFUtils.buildTree(sample, {
+                    maxDepth: 3, maxFeatures: null, seed: 42 + t * 251,
+                });
+                bagTrees.push(bagTree);
+
+                // RF: m = sqrt(p) ≈ 2
+                const rfTree = RFUtils.buildTree(sample, {
+                    maxDepth: 3, maxFeatures: Math.round(Math.sqrt(P)), seed: 42 + t * 251,
+                });
+                rfTrees.push(rfTree);
+            }
+
+            // Calculate disagreement rates
+            const bagDisagree = calcDisagreement(bagTrees, TEST_DATA);
+            const rfDisagree = calcDisagreement(rfTrees, TEST_DATA);
+
+            document.getElementById('disagree-bag').textContent = (bagDisagree * 100).toFixed(1) + '%';
+            document.getElementById('disagree-rf').textContent = (rfDisagree * 100).toFixed(1) + '%';
+
+            // Render mini trees
+            renderTreeCards(bagTrees, bagContainer, 'bagging');
+            renderTreeCards(rfTrees, rfContainer, 'rf');
+        }
+
+        function calcDisagreement(trees, testData) {
+            let totalPairs = 0;
+            let disagreeCount = 0;
+            for (let i = 0; i < trees.length; i++) {
+                for (let j = i + 1; j < trees.length; j++) {
+                    for (const d of testData) {
+                        const pi = RFUtils.predictTree(trees[i], d).prediction;
+                        const pj = RFUtils.predictTree(trees[j], d).prediction;
+                        if (pi !== pj) disagreeCount++;
+                        totalPairs++;
+                    }
+                }
+            }
+            return totalPairs > 0 ? disagreeCount / totalPairs : 0;
+        }
+
+        function renderTreeCards(trees, container, type) {
+            trees.forEach((tree, t) => {
+                const card = document.createElement('div');
+                card.className = 'tree-card' + (type === 'bagging' ? ' highlight-corr' : ' highlight-diverse');
+                card.innerHTML = `<div class="tree-label">树 ${t + 1}</div>`;
+
+                const svgW = 140;
+                const svgH = 160;
+                const svgEl = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+                svgEl.setAttribute('width', svgW);
+                svgEl.setAttribute('height', svgH);
+                svgEl.style.display = 'block';
+                svgEl.style.margin = '0 auto';
+                card.appendChild(svgEl);
+
+                const g = d3.select(svgEl).append('g').attr('transform', `translate(${svgW / 2}, 10)`);
+                drawCompactTree(g, tree, 0, 0, svgW * 0.4, 0);
+
+                // Feature info
+                const info = document.createElement('div');
+                info.style.cssText = 'font-size:0.7rem;color:#a8a8b8;margin-top:0.3rem;';
+                const rootFeat = tree.isLeaf ? '叶' : FEATURE_NAMES[tree.splitFeature];
+                info.textContent = `根: ${rootFeat}`;
+                card.appendChild(info);
+
+                container.appendChild(card);
+            });
+        }
+
+        function drawCompactTree(g, node, x, y, spread, depth) {
+            if (!node) return;
+            const r = 8;
+            const yGap = 38;
+            const fillColor = node.isLeaf
+                ? (node.prediction === 1 ? COLORS.blue : COLORS.red)
+                : FEATURE_COLORS[node.splitFeature] || COLORS.textMuted;
+
+            g.append('circle')
+                .attr('cx', x).attr('cy', y).attr('r', r)
+                .attr('fill', fillColor).attr('opacity', 0.85);
+
+            if (!node.isLeaf && node.left) {
+                const cs = spread * 0.5;
+                const lx = x - cs, ly = y + yGap;
+                g.append('line')
+                    .attr('x1', x).attr('y1', y + r)
+                    .attr('x2', lx).attr('y2', ly - r)
+                    .attr('stroke', COLORS.border).attr('stroke-width', 1);
+                drawCompactTree(g, node.left, lx, ly, cs, depth + 1);
+            }
+            if (!node.isLeaf && node.right) {
+                const cs = spread * 0.5;
+                const rx = x + cs, ry = y + yGap;
+                g.append('line')
+                    .attr('x1', x).attr('y1', y + r)
+                    .attr('x2', rx).attr('y2', ry - r)
+                    .attr('stroke', COLORS.border).attr('stroke-width', 1);
+                drawCompactTree(g, node.right, rx, ry, cs, depth + 1);
+            }
+        }
+
+        document.getElementById('btn-build-diversity').addEventListener('click', buildAndShow);
+        document.getElementById('btn-reset-diversity').addEventListener('click', () => {
+            document.getElementById('trees-bagging').innerHTML = '';
+            document.getElementById('trees-rf').innerHTML = '';
+            document.getElementById('disagree-bag').textContent = '—';
+            document.getElementById('disagree-rf').textContent = '—';
+        });
+
+        buildAndShow();
+    })();
+
+    // ===================================================================
+    // Section 4: m value effect chart
+    // ===================================================================
+    (function initMEffectSection() {
+        const svgEl = document.getElementById('svg-m-chart');
+        const container = svgEl.parentElement;
+        let width = container.clientWidth - 2.4 * 16;
+        if (width < 400) width = 400;
+        const height = 360;
+        svgEl.setAttribute('width', width);
+        svgEl.setAttribute('height', height);
+
+        const svg = d3.select('#svg-m-chart');
+        const sliderM2 = document.getElementById('slider-m2');
+        const valM2 = document.getElementById('val-m2');
+        const ensembleAccEl = document.getElementById('ensemble-acc');
+
+        const nFeat = 8;
+        sliderM2.max = nFeat;
+
+        // Generate a richer dataset for this experiment
+        const expData = RFUtils.generateMultiFeatureData(80, nFeat, 42);
+        const expTest = RFUtils.generateMultiFeatureData(40, nFeat, 999);
+
+        // Pre-compute results for each m
+        let results = null;
+
+        function computeAll() {
+            results = [];
+            for (let m = 1; m <= nFeat; m++) {
+                const nTrees = 15;
+                const trees = [];
+                for (let t = 0; t < nTrees; t++) {
+                    const { sample } = RFUtils.bootstrapSample(expData, 42 + t * 137);
+                    const tree = RFUtils.buildTree(sample, {
+                        maxDepth: 4,
+                        maxFeatures: m,
+                        seed: 42 + t * 251,
+                    });
+                    trees.push(tree);
+                }
+
+                // Individual tree accuracy (average)
+                let totalTreeAcc = 0;
+                for (const tree of trees) {
+                    let correct = 0;
+                    for (const d of expTest) {
+                        if (RFUtils.predictTree(tree, d).prediction === d.label) correct++;
+                    }
+                    totalTreeAcc += correct / expTest.length;
+                }
+                const avgTreeAcc = totalTreeAcc / nTrees;
+
+                // Ensemble accuracy
+                let ensembleCorrect = 0;
+                for (const d of expTest) {
+                    const votes = {};
+                    for (const tree of trees) {
+                        const pred = RFUtils.predictTree(tree, d).prediction;
+                        votes[pred] = (votes[pred] || 0) + 1;
+                    }
+                    let best = null, bestC = -1;
+                    for (const [k, v] of Object.entries(votes)) {
+                        if (v > bestC) { best = +k; bestC = v; }
+                    }
+                    if (best === d.label) ensembleCorrect++;
+                }
+                const ensembleAcc = ensembleCorrect / expTest.length;
+
+                // Tree correlation (pairwise agreement rate on test set)
+                let pairTotal = 0, pairAgree = 0;
+                for (let i = 0; i < trees.length; i++) {
+                    for (let j = i + 1; j < trees.length; j++) {
+                        for (const d of expTest) {
+                            const pi = RFUtils.predictTree(trees[i], d).prediction;
+                            const pj = RFUtils.predictTree(trees[j], d).prediction;
+                            if (pi === pj) pairAgree++;
+                            pairTotal++;
+                        }
+                    }
+                }
+                const correlation = pairTotal > 0 ? pairAgree / pairTotal : 0;
+
+                results.push({ m, avgTreeAcc, ensembleAcc, correlation });
+            }
+        }
+
+        function drawChart(highlightM) {
+            svg.selectAll('*').remove();
+
+            if (!results) return;
+
+            const margin = { top: 40, right: 50, bottom: 50, left: 55 };
+            const w = width - margin.left - margin.right;
+            const h = height - margin.top - margin.bottom;
+
+            const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+
+            const xScale = d3.scaleLinear().domain([1, nFeat]).range([0, w]);
+            const yScale = d3.scaleLinear().domain([0.4, 1.0]).range([h, 0]);
+
+            // Grid
+            for (let tick = 0.4; tick <= 1.0; tick += 0.1) {
+                g.append('line')
+                    .attr('x1', 0).attr('y1', yScale(tick))
+                    .attr('x2', w).attr('y2', yScale(tick))
+                    .attr('stroke', COLORS.border).attr('stroke-width', 0.5);
+            }
+
+            // X axis
+            g.append('g')
+                .attr('transform', `translate(0,${h})`)
+                .call(d3.axisBottom(xScale).ticks(nFeat).tickFormat(d => d))
+                .call(g => g.selectAll('text').attr('fill', COLORS.textSec).attr('font-size', 11))
+                .call(g => g.selectAll('line').attr('stroke', COLORS.border))
+                .call(g => g.select('.domain').attr('stroke', COLORS.border));
+
+            // Y axis
+            g.append('g')
+                .call(d3.axisLeft(yScale).ticks(6).tickFormat(d => (d * 100).toFixed(0) + '%'))
+                .call(g => g.selectAll('text').attr('fill', COLORS.textSec).attr('font-size', 11))
+                .call(g => g.selectAll('line').attr('stroke', COLORS.border))
+                .call(g => g.select('.domain').attr('stroke', COLORS.border));
+
+            // Axis labels
+            svg.append('text')
+                .attr('x', margin.left + w / 2).attr('y', height - 8)
+                .attr('text-anchor', 'middle')
+                .attr('fill', COLORS.textSec).attr('font-size', 12)
+                .text('候选特征数 m');
+
+            // Lines
+            const lineGen = (accessor) => d3.line()
+                .x(d => xScale(d.m))
+                .y(d => yScale(accessor(d)))
+                .curve(d3.curveMonotoneX);
+
+            // Individual tree accuracy
+            g.append('path')
+                .datum(results)
+                .attr('fill', 'none')
+                .attr('stroke', COLORS.blue)
+                .attr('stroke-width', 2)
+                .attr('d', lineGen(d => d.avgTreeAcc));
+
+            // Ensemble accuracy
+            g.append('path')
+                .datum(results)
+                .attr('fill', 'none')
+                .attr('stroke', COLORS.green)
+                .attr('stroke-width', 2.5)
+                .attr('d', lineGen(d => d.ensembleAcc));
+
+            // Correlation
+            g.append('path')
+                .datum(results)
+                .attr('fill', 'none')
+                .attr('stroke', COLORS.orange)
+                .attr('stroke-width', 2)
+                .attr('stroke-dasharray', '6,3')
+                .attr('d', lineGen(d => d.correlation));
+
+            // Data points
+            results.forEach(r => {
+                g.append('circle')
+                    .attr('cx', xScale(r.m)).attr('cy', yScale(r.avgTreeAcc))
+                    .attr('r', 3).attr('fill', COLORS.blue);
+                g.append('circle')
+                    .attr('cx', xScale(r.m)).attr('cy', yScale(r.ensembleAcc))
+                    .attr('r', 4).attr('fill', COLORS.green);
+                g.append('circle')
+                    .attr('cx', xScale(r.m)).attr('cy', yScale(r.correlation))
+                    .attr('r', 3).attr('fill', COLORS.orange);
+            });
+
+            // Highlight line for current m
+            if (highlightM >= 1 && highlightM <= nFeat) {
+                const r = results[highlightM - 1];
+                g.append('line')
+                    .attr('x1', xScale(highlightM)).attr('y1', 0)
+                    .attr('x2', xScale(highlightM)).attr('y2', h)
+                    .attr('stroke', COLORS.text).attr('stroke-width', 1)
+                    .attr('stroke-dasharray', '4,4').attr('opacity', 0.5);
+
+                // Label values
+                g.append('circle')
+                    .attr('cx', xScale(r.m)).attr('cy', yScale(r.ensembleAcc))
+                    .attr('r', 7).attr('fill', 'none')
+                    .attr('stroke', COLORS.green).attr('stroke-width', 2);
+
+                ensembleAccEl.textContent = (r.ensembleAcc * 100).toFixed(1) + '%';
+            }
+
+            // sqrt(p) marker
+            const sqrtP = Math.round(Math.sqrt(nFeat));
+            g.append('line')
+                .attr('x1', xScale(sqrtP)).attr('y1', h + 5)
+                .attr('x2', xScale(sqrtP)).attr('y2', h + 20)
+                .attr('stroke', COLORS.green).attr('stroke-width', 2);
+            g.append('text')
+                .attr('x', xScale(sqrtP)).attr('y', h + 34)
+                .attr('text-anchor', 'middle')
+                .attr('fill', COLORS.green).attr('font-size', 10).attr('font-weight', 600)
+                .text('√p ≈ ' + sqrtP);
+
+            // Legend
+            const legendX = w - 160;
+            const legendY = 0;
+            const legendItems = [
+                { label: '单棵树准确率', color: COLORS.blue, dash: '' },
+                { label: '集成准确率', color: COLORS.green, dash: '' },
+                { label: '树间相关性', color: COLORS.orange, dash: '6,3' },
+            ];
+            legendItems.forEach((item, i) => {
+                const ly = legendY + i * 20;
+                g.append('line')
+                    .attr('x1', legendX).attr('y1', ly + 4)
+                    .attr('x2', legendX + 20).attr('y2', ly + 4)
+                    .attr('stroke', item.color).attr('stroke-width', 2)
+                    .attr('stroke-dasharray', item.dash);
+                g.append('text')
+                    .attr('x', legendX + 26).attr('y', ly + 8)
+                    .attr('fill', COLORS.textSec).attr('font-size', 11)
+                    .text(item.label);
+            });
+        }
+
+        sliderM2.addEventListener('input', () => {
+            valM2.textContent = sliderM2.value;
+            drawChart(+sliderM2.value);
+        });
+
+        document.getElementById('btn-run-m').addEventListener('click', () => {
+            computeAll();
+            drawChart(+sliderM2.value);
+        });
+
+        // Auto run
+        computeAll();
+        drawChart(+sliderM2.value);
+    })();
+
+    // ===================================================================
+    // Section 5: Complete RF recipe flow
+    // ===================================================================
+    (function initFlowSection() {
+        const flowSteps = document.querySelectorAll('.flow-step');
+        const flowArrows = document.querySelectorAll('.flow-arrow');
+        const svgEl = document.getElementById('svg-flow');
+        const container = svgEl.parentElement;
+        let width = container.clientWidth;
+        if (width < 400) width = 400;
+        const height = 280;
+        svgEl.setAttribute('width', width);
+        svgEl.setAttribute('height', height);
+
+        const svg = d3.select('#svg-flow');
+        let animTimer = null;
+
+        function resetFlow() {
+            if (animTimer) { clearTimeout(animTimer); animTimer = null; }
+            flowSteps.forEach(s => s.classList.remove('active'));
+            flowArrows.forEach(a => a.classList.remove('active'));
+            svg.selectAll('*').remove();
+        }
+
+        function playFlow() {
+            resetFlow();
+
+            const stepActions = [
+                // Step 0: Original data
+                () => {
+                    flowSteps[0].classList.add('active');
+                    drawOriginalData(svg, width, height);
+                },
+                // Step 1: Bootstrap
+                () => {
+                    flowArrows[0].classList.add('active');
+                    flowSteps[1].classList.add('active');
+                    drawBootstrap(svg, width, height);
+                },
+                // Step 2: Random feature selection
+                () => {
+                    flowArrows[1].classList.add('active');
+                    flowSteps[2].classList.add('active');
+                    drawRandomFeatures(svg, width, height);
+                },
+                // Step 3: Build trees
+                () => {
+                    flowArrows[2].classList.add('active');
+                    flowSteps[3].classList.add('active');
+                    drawBuildTrees(svg, width, height);
+                },
+                // Step 4: Voting
+                () => {
+                    flowArrows[3].classList.add('active');
+                    flowSteps[4].classList.add('active');
+                    drawVoting(svg, width, height);
+                },
+            ];
+
+            let i = 0;
+            function doStep() {
+                if (i >= stepActions.length) return;
+                svg.selectAll('*').remove();
+                stepActions[i]();
+                i++;
+                if (i < stepActions.length) {
+                    animTimer = setTimeout(doStep, 2000);
+                }
+            }
+            doStep();
+        }
+
+        function drawOriginalData(svg, w, h) {
+            const g = svg.append('g');
+            const n = 30;
+            const data = DATASET.slice(0, n);
+            const margin = 40;
+            const plotW = w - margin * 2;
+            const plotH = h - margin * 2;
+
+            g.append('text')
+                .attr('x', w / 2).attr('y', 20)
+                .attr('text-anchor', 'middle')
+                .attr('fill', COLORS.text).attr('font-size', 13).attr('font-weight', 600)
+                .text('原始数据集（60个样本 × 6个特征）');
+
+            // Scatter of first 2 features
+            const xExt = d3.extent(data, d => d.features[0]);
+            const yExt = d3.extent(data, d => d.features[1]);
+            const xS = d3.scaleLinear().domain(xExt).range([margin, margin + plotW]);
+            const yS = d3.scaleLinear().domain(yExt).range([margin + plotH, margin]);
+
+            data.forEach((d, i) => {
+                g.append('circle')
+                    .attr('cx', xS(d.features[0]))
+                    .attr('cy', yS(d.features[1]))
+                    .attr('r', 0)
+                    .attr('fill', d.label === 1 ? COLORS.blue : COLORS.red)
+                    .attr('opacity', 0.7)
+                    .transition().delay(i * 30).duration(300)
+                    .attr('r', 5);
+            });
+        }
+
+        function drawBootstrap(svg, w, h) {
+            const g = svg.append('g');
+            g.append('text')
+                .attr('x', w / 2).attr('y', 20)
+                .attr('text-anchor', 'middle')
+                .attr('fill', COLORS.text).attr('font-size', 13).attr('font-weight', 600)
+                .text('Bootstrap 采样：有放回抽取 n 个样本');
+
+            const nBoxes = 3;
+            const boxW = Math.min(180, (w - 80) / nBoxes);
+            const startX = (w - nBoxes * boxW - (nBoxes - 1) * 20) / 2;
+
+            for (let b = 0; b < nBoxes; b++) {
+                const bx = startX + b * (boxW + 20);
+                const by = 45;
+                const boxG = g.append('g')
+                    .attr('transform', `translate(${bx}, ${by})`)
+                    .attr('opacity', 0);
+
+                boxG.transition().delay(b * 300).duration(400).attr('opacity', 1);
+
+                boxG.append('rect')
+                    .attr('width', boxW).attr('height', h - 70)
+                    .attr('rx', 8)
+                    .attr('fill', 'rgba(22, 199, 154, 0.05)')
+                    .attr('stroke', COLORS.green)
+                    .attr('stroke-dasharray', '4,4');
+
+                boxG.append('text')
+                    .attr('x', boxW / 2).attr('y', 20)
+                    .attr('text-anchor', 'middle')
+                    .attr('fill', COLORS.green).attr('font-size', 11).attr('font-weight', 600)
+                    .text(`样本集 ${b + 1}`);
+
+                // Random dots
+                const r = RFUtils.seededRandom(b * 31 + 7);
+                for (let i = 0; i < 15; i++) {
+                    boxG.append('circle')
+                        .attr('cx', 15 + r() * (boxW - 30))
+                        .attr('cy', 35 + r() * (h - 120))
+                        .attr('r', 4)
+                        .attr('fill', r() > 0.5 ? COLORS.blue : COLORS.red)
+                        .attr('opacity', 0.6);
+                }
+            }
+        }
+
+        function drawRandomFeatures(svg, w, h) {
+            const g = svg.append('g');
+            g.append('text')
+                .attr('x', w / 2).attr('y', 20)
+                .attr('text-anchor', 'middle')
+                .attr('fill', COLORS.text).attr('font-size', 13).attr('font-weight', 600)
+                .text('每个节点随机选取 m 个特征作为候选');
+
+            const colW = 40;
+            const totalW = P * colW + (P - 1) * 8;
+            const startX = (w - totalW) / 2;
+
+            // Draw all feature columns
+            for (let j = 0; j < P; j++) {
+                const x = startX + j * (colW + 8);
+                const colG = g.append('g').attr('transform', `translate(${x}, 50)`);
+
+                colG.append('rect')
+                    .attr('width', colW).attr('height', h - 90)
+                    .attr('rx', 6)
+                    .attr('fill', `rgba(${hexToRgb(FEATURE_COLORS[j])}, 0.08)`)
+                    .attr('stroke', FEATURE_COLORS[j])
+                    .attr('stroke-width', 1);
+
+                colG.append('text')
+                    .attr('x', colW / 2).attr('y', -8)
+                    .attr('text-anchor', 'middle')
+                    .attr('fill', FEATURE_COLORS[j])
+                    .attr('font-size', 10).attr('font-weight', 600)
+                    .text(FEATURE_NAMES[j]);
+            }
+
+            // Highlight selected ones (animated)
+            const m = Math.round(Math.sqrt(P));
+            const selected = [0, 3]; // simulate a selection
+            selected.forEach((j, idx) => {
+                const x = startX + j * (colW + 8);
+                g.append('rect')
+                    .attr('x', x - 3).attr('y', 47)
+                    .attr('width', colW + 6).attr('height', h - 84)
+                    .attr('rx', 8)
+                    .attr('fill', 'none')
+                    .attr('stroke', COLORS.green)
+                    .attr('stroke-width', 2.5)
+                    .attr('opacity', 0)
+                    .transition().delay(600 + idx * 300).duration(400)
+                    .attr('opacity', 1);
+            });
+
+            g.append('text')
+                .attr('x', w / 2).attr('y', h - 10)
+                .attr('text-anchor', 'middle')
+                .attr('fill', COLORS.green).attr('font-size', 12)
+                .text(`m = ${m}：随机选中 ${m} 个特征`)
+                .attr('opacity', 0)
+                .transition().delay(1200).duration(400)
+                .attr('opacity', 1);
+        }
+
+        function drawBuildTrees(svg, w, h) {
+            const g = svg.append('g');
+            g.append('text')
+                .attr('x', w / 2).attr('y', 20)
+                .attr('text-anchor', 'middle')
+                .attr('fill', COLORS.text).attr('font-size', 13).attr('font-weight', 600)
+                .text('在各自的样本和特征子集上构建决策树');
+
+            const nTrees = 3;
+            const treeW = Math.min(160, (w - 60) / nTrees);
+            const startX = (w - nTrees * (treeW + 20) + 20) / 2;
+
+            for (let t = 0; t < nTrees; t++) {
+                const cx = startX + t * (treeW + 20) + treeW / 2;
+                const tg = g.append('g').attr('transform', `translate(${cx}, 45)`);
+
+                tg.append('text')
+                    .attr('x', 0).attr('y', 0)
+                    .attr('text-anchor', 'middle')
+                    .attr('fill', COLORS.textSec).attr('font-size', 11)
+                    .text(`树 ${t + 1}`);
+
+                const { sample } = RFUtils.bootstrapSample(DATASET, 42 + t * 137);
+                const tree = RFUtils.buildTree(sample, {
+                    maxDepth: 3, maxFeatures: Math.round(Math.sqrt(P)), seed: 42 + t * 251,
+                });
+
+                drawFlowMiniTree(tg, tree, 0, 20, treeW * 0.35, 0, t * 200);
+            }
+        }
+
+        function drawFlowMiniTree(g, node, x, y, spread, depth, delay) {
+            if (!node) return;
+            const r = 8;
+            const yGap = 40;
+            const fillColor = node.isLeaf
+                ? (node.prediction === 1 ? COLORS.blue : COLORS.red)
+                : FEATURE_COLORS[node.splitFeature] || COLORS.textMuted;
+
+            g.append('circle')
+                .attr('cx', x).attr('cy', y).attr('r', 0).attr('fill', fillColor)
+                .transition().delay(delay + depth * 150).duration(250)
+                .attr('r', r);
+
+            if (!node.isLeaf && node.left) {
+                const cs = spread * 0.55;
+                g.append('line')
+                    .attr('x1', x).attr('y1', y + r)
+                    .attr('x2', x - cs).attr('y2', y + yGap - r)
+                    .attr('stroke', COLORS.border).attr('stroke-width', 1)
+                    .attr('opacity', 0)
+                    .transition().delay(delay + depth * 150 + 100).duration(200)
+                    .attr('opacity', 1);
+                drawFlowMiniTree(g, node.left, x - cs, y + yGap, cs, depth + 1, delay);
+            }
+            if (!node.isLeaf && node.right) {
+                const cs = spread * 0.55;
+                g.append('line')
+                    .attr('x1', x).attr('y1', y + r)
+                    .attr('x2', x + cs).attr('y2', y + yGap - r)
+                    .attr('stroke', COLORS.border).attr('stroke-width', 1)
+                    .attr('opacity', 0)
+                    .transition().delay(delay + depth * 150 + 100).duration(200)
+                    .attr('opacity', 1);
+                drawFlowMiniTree(g, node.right, x + cs, y + yGap, cs, depth + 1, delay);
+            }
+        }
+
+        function drawVoting(svg, w, h) {
+            const g = svg.append('g');
+            g.append('text')
+                .attr('x', w / 2).attr('y', 20)
+                .attr('text-anchor', 'middle')
+                .attr('fill', COLORS.text).attr('font-size', 13).attr('font-weight', 600)
+                .text('多数投票 → 最终预测');
+
+            const nTrees = 5;
+            const treeAreaY = 50;
+            const treeSpacing = Math.min(100, (w - 80) / nTrees);
+            const startX = (w - nTrees * treeSpacing + treeSpacing) / 2;
+
+            const votes = [];
+            const voteR = RFUtils.seededRandom(77);
+            for (let t = 0; t < nTrees; t++) {
+                const pred = voteR() > 0.35 ? 1 : 0;
+                votes.push(pred);
+            }
+
+            // Tree icons
+            for (let t = 0; t < nTrees; t++) {
+                const cx = startX + t * treeSpacing;
+                const tg = g.append('g').attr('transform', `translate(${cx}, ${treeAreaY})`);
+
+                // Simple tree icon
+                tg.append('polygon')
+                    .attr('points', '0,-20 -15,10 15,10')
+                    .attr('fill', COLORS.green).attr('opacity', 0.5);
+                tg.append('rect')
+                    .attr('x', -3).attr('y', 10).attr('width', 6).attr('height', 10)
+                    .attr('fill', COLORS.orange).attr('opacity', 0.5);
+
+                // Prediction
+                const predColor = votes[t] === 1 ? COLORS.blue : COLORS.red;
+                const predLabel = votes[t] === 1 ? 'A' : 'B';
+
+                const voteG = tg.append('g').attr('opacity', 0);
+                voteG.transition().delay(500 + t * 200).duration(400).attr('opacity', 1);
+
+                voteG.append('circle')
+                    .attr('cx', 0).attr('cy', 45)
+                    .attr('r', 14).attr('fill', predColor).attr('opacity', 0.8);
+                voteG.append('text')
+                    .attr('x', 0).attr('y', 49)
+                    .attr('text-anchor', 'middle')
+                    .attr('fill', COLORS.bgPrimary).attr('font-size', 11).attr('font-weight', 700)
+                    .text(predLabel);
+
+                // Arrow down
+                voteG.append('line')
+                    .attr('x1', 0).attr('y1', 60)
+                    .attr('x2', 0).attr('y2', 80)
+                    .attr('stroke', COLORS.border).attr('stroke-width', 1.5);
+            }
+
+            // Final vote box
+            const countA = votes.filter(v => v === 1).length;
+            const countB = votes.filter(v => v === 0).length;
+            const winner = countA >= countB ? 1 : 0;
+            const winColor = winner === 1 ? COLORS.blue : COLORS.red;
+            const winLabel = winner === 1 ? 'A' : 'B';
+
+            const resultG = g.append('g')
+                .attr('transform', `translate(${w / 2}, ${treeAreaY + 110})`)
+                .attr('opacity', 0);
+            resultG.transition().delay(1500).duration(500).attr('opacity', 1);
+
+            resultG.append('rect')
+                .attr('x', -90).attr('y', -20)
+                .attr('width', 180).attr('height', 50)
+                .attr('rx', 10)
+                .attr('fill', `rgba(${hexToRgb(winColor)}, 0.15)`)
+                .attr('stroke', winColor).attr('stroke-width', 2);
+
+            resultG.append('text')
+                .attr('x', 0).attr('y', 10)
+                .attr('text-anchor', 'middle')
+                .attr('fill', winColor).attr('font-size', 14).attr('font-weight', 700)
+                .text(`最终预测：类别 ${winLabel}（${Math.max(countA, countB)}/${nTrees} 票）`);
+
+            // Merge arrows
+            for (let t = 0; t < nTrees; t++) {
+                const cx = startX + t * treeSpacing;
+                g.append('line')
+                    .attr('x1', cx).attr('y1', treeAreaY + 85)
+                    .attr('x2', w / 2).attr('y2', treeAreaY + 90)
+                    .attr('stroke', COLORS.border).attr('stroke-width', 1)
+                    .attr('opacity', 0)
+                    .transition().delay(1200 + t * 50).duration(300)
+                    .attr('opacity', 0.5);
+            }
+        }
+
+        document.getElementById('btn-play-flow').addEventListener('click', playFlow);
+        document.getElementById('btn-reset-flow').addEventListener('click', resetFlow);
+    })();
+
+    // ===================================================================
+    // Utility: hex color to rgb string
+    // ===================================================================
+    function hexToRgb(hex) {
+        const r = parseInt(hex.slice(1, 3), 16);
+        const g = parseInt(hex.slice(3, 5), 16);
+        const b = parseInt(hex.slice(5, 7), 16);
+        return `${r}, ${g}, ${b}`;
+    }
+
+})();
+</script>
+
+</body>
+</html>

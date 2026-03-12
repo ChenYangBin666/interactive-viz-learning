@@ -1,0 +1,1189 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>正则化 — XGBoost 可视化学习</title>
+    <!-- KaTeX -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+    <!-- D3.js -->
+    <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+    <!-- GSAP -->
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.2/dist/gsap.min.js"></script>
+    <!-- Shared styles -->
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+    <style>
+        .module-header {
+            margin-bottom: 2rem;
+        }
+        .module-header .breadcrumb {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            margin-bottom: 0.5rem;
+        }
+        .module-header .breadcrumb a {
+            color: var(--text-muted);
+        }
+        .module-header .breadcrumb a:hover {
+            color: var(--accent-green);
+        }
+        .module-header h1 {
+            background: linear-gradient(135deg, var(--accent-yellow), var(--accent-orange));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .svg-viz {
+            width: 100%;
+            height: 100%;
+        }
+        .svg-viz text {
+            font-family: var(--font-cn), var(--font-sans);
+        }
+        .controls-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1rem;
+            margin-bottom: 1rem;
+            align-items: center;
+        }
+        .metric-box {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            padding: 0.3rem 0.7rem;
+            background: rgba(255, 215, 64, 0.08);
+            border: 1px solid rgba(255, 215, 64, 0.2);
+            border-radius: var(--radius-sm);
+            font-size: 0.82rem;
+            font-family: var(--font-mono);
+        }
+        .metric-box .label { color: var(--text-secondary); }
+        .metric-box .value { color: var(--accent-yellow); font-weight: 600; }
+        .compare-label {
+            text-align: center;
+            font-size: 0.9rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            padding: 0.3rem 0.6rem;
+            border-radius: var(--radius-sm);
+        }
+        .compare-label.bad {
+            color: var(--accent-red);
+            background: rgba(255, 82, 82, 0.1);
+        }
+        .compare-label.good {
+            color: var(--accent-green);
+            background: rgba(22, 199, 154, 0.1);
+        }
+        .tree-node {
+            cursor: default;
+        }
+        .tree-node circle {
+            transition: fill 0.3s, r 0.3s;
+        }
+        .tree-link {
+            stroke: var(--border-color);
+            stroke-width: 2;
+            fill: none;
+        }
+        .tree-link.pruned {
+            stroke: var(--accent-red);
+            stroke-dasharray: 4 3;
+            opacity: 0.4;
+        }
+        .sampling-cell {
+            transition: opacity 0.4s, fill 0.3s;
+        }
+        .sampling-cell.disabled {
+            opacity: 0.15;
+        }
+        .weight-bar {
+            transition: width 0.5s ease, fill 0.3s;
+        }
+        .loss-line {
+            fill: none;
+            stroke-width: 2;
+        }
+        .axis-label {
+            font-size: 0.75rem;
+            fill: var(--text-muted);
+        }
+    </style>
+</head>
+<body>
+    <!-- Shared scripts -->
+    <script src="../shared/scripts/xgb-utils.js"></script>
+    <script src="../shared/scripts/animation-controller.js"></script>
+    <script src="../shared/scripts/matrix-renderer.js"></script>
+    <script src="../shared/scripts/nav.js"></script>
+    <script src="../shared/scripts/katex-init.js"></script>
+
+    <div class="page-container">
+        <!-- Header -->
+        <div class="module-header">
+            <div class="breadcrumb"><a href="../index.html">XGBoost</a> / 模块 05</div>
+            <h1>正则化</h1>
+            <p>控制模型复杂度，防止过拟合——XGBoost 的核心优势之一。通过 $\lambda$、$\gamma$、学习率和采样等手段，在偏差与方差之间取得平衡。</p>
+        </div>
+
+        <!-- ============ Section 1: 过拟合问题 ============ -->
+        <div class="section" id="sec-overfit">
+            <div class="section-title">
+                <div class="icon">1</div>
+                <h2>过拟合问题</h2>
+            </div>
+            <p>不加任何正则化约束，XGBoost 可以完美拟合训练数据中的每一个噪声点，但在新数据上表现极差。添加正则化后，模型学到的是数据的真实模式而非噪声。</p>
+
+            <div class="controls-row">
+                <button class="btn btn-primary" id="btn-overfit-run">运行对比</button>
+                <button class="btn" id="btn-overfit-reset">重置</button>
+                <div class="metric-box">
+                    <span class="label">无正则化训练损失:</span>
+                    <span class="value" id="metric-overfit-train">—</span>
+                </div>
+                <div class="metric-box">
+                    <span class="label">有正则化训练损失:</span>
+                    <span class="value" id="metric-reg-train">—</span>
+                </div>
+            </div>
+
+            <div class="compare-grid cols-2">
+                <div>
+                    <div class="compare-label bad">无正则化 (λ=0, γ=0, depth=8, η=1.0)</div>
+                    <div class="viz-area" style="min-height:350px">
+                        <svg id="viz-overfit-bad" class="svg-viz"></svg>
+                    </div>
+                </div>
+                <div>
+                    <div class="compare-label good">有正则化 (λ=3, γ=1.5, depth=4, η=0.3)</div>
+                    <div class="viz-area" style="min-height:350px">
+                        <svg id="viz-overfit-good" class="svg-viz"></svg>
+                    </div>
+                </div>
+            </div>
+            <div class="info-box mt-2">
+                <p>左图：预测曲线剧烈震荡，完美穿过每个训练点（包括噪声）。右图：正则化后曲线平滑，接近数据的真实趋势 $\sin(x) \cdot 2 + 0.3x$。</p>
+            </div>
+        </div>
+
+        <!-- ============ Section 2: λ (L2 正则化) ============ -->
+        <div class="section" id="sec-lambda">
+            <div class="section-title">
+                <div class="icon">2</div>
+                <h2>$\lambda$ (L2 正则化)</h2>
+            </div>
+            <div class="split-layout">
+                <div class="text-panel">
+                    <p>XGBoost 的目标函数包含正则化项：</p>
+                    <div class="katex-display">$$\Omega(f) = \gamma T + \frac{1}{2}\lambda \sum_{j=1}^{T} w_j^2$$</div>
+                    <p>$\lambda$ 控制 L2 正则化强度。最优叶子权重公式为：</p>
+                    <div class="katex-display">$$w_j^* = -\frac{G_j}{H_j + \lambda}$$</div>
+                    <p>当 $\lambda$ 增大，分母变大，叶子权重被"压缩"向零——这就是<strong>权重收缩</strong>效果。预测曲线因此变得更加平滑。</p>
+
+                    <div class="slider-group mt-2">
+                        <label>$\lambda$ 值:</label>
+                        <input type="range" id="slider-lambda" min="0" max="10" step="0.1" value="0">
+                        <span class="slider-value" id="val-lambda">0.0</span>
+                    </div>
+
+                    <div class="info-box mt-2">
+                        <p>观察右侧：条形图显示每个叶子的权重大小。随着 $\lambda$ 增加，所有权重都趋向于 0，极端权重被大幅压缩。</p>
+                    </div>
+                </div>
+                <div class="viz-panel">
+                    <div class="viz-area" style="min-height:260px">
+                        <svg id="viz-lambda-curve" class="svg-viz"></svg>
+                    </div>
+                    <div class="viz-area mt-1" style="min-height:220px">
+                        <svg id="viz-lambda-weights" class="svg-viz"></svg>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ============ Section 3: γ (复杂度惩罚) ============ -->
+        <div class="section" id="sec-gamma">
+            <div class="section-title">
+                <div class="icon">3</div>
+                <h2>$\gamma$ (复杂度惩罚)</h2>
+            </div>
+            <div class="split-layout">
+                <div class="text-panel">
+                    <p>$\gamma$ 惩罚树的叶子数量 $T$。分裂增益公式为：</p>
+                    <div class="katex-display">$$\text{Gain} = \frac{1}{2}\left[\frac{G_L^2}{H_L+\lambda} + \frac{G_R^2}{H_R+\lambda} - \frac{(G_L+G_R)^2}{H_L+H_R+\lambda}\right] - \gamma$$</div>
+                    <p>只有当增益 > $\gamma$ 时才会执行分裂。<strong>$\gamma$ 越大，要求越高的增益才能分裂</strong>——这相当于后剪枝。</p>
+
+                    <div class="slider-group mt-2">
+                        <label>$\gamma$ 值:</label>
+                        <input type="range" id="slider-gamma" min="0" max="5" step="0.1" value="0">
+                        <span class="slider-value" id="val-gamma">0.0</span>
+                    </div>
+
+                    <div class="controls-row mt-1">
+                        <div class="metric-box">
+                            <span class="label">叶子数:</span>
+                            <span class="value" id="metric-gamma-leaves">—</span>
+                        </div>
+                        <div class="metric-box">
+                            <span class="label">树深度:</span>
+                            <span class="value" id="metric-gamma-depth">—</span>
+                        </div>
+                    </div>
+
+                    <div class="info-box mt-2 warning">
+                        <p>红色虚线表示被剪掉的分支（增益 < $\gamma$）。树逐渐变成一棵更小、更简洁的树。</p>
+                    </div>
+                </div>
+                <div class="viz-panel">
+                    <div class="viz-area" style="min-height:380px">
+                        <svg id="viz-gamma-tree" class="svg-viz"></svg>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ============ Section 4: 收缩率 (学习率) ============ -->
+        <div class="section" id="sec-eta">
+            <div class="section-title">
+                <div class="icon">4</div>
+                <h2>收缩率 (学习率 $\eta$)</h2>
+            </div>
+            <p>学习率 $\eta$ 缩小每棵树的贡献：$\hat{y}^{(t)} = \hat{y}^{(t-1)} + \eta \cdot f_t(x)$。较小的 $\eta$ 意味着每棵树只做微小修正，需要更多轮次，但泛化更好。</p>
+
+            <div class="controls-row">
+                <div class="slider-group" style="flex:1;min-width:200px">
+                    <label>$\eta$ 值:</label>
+                    <input type="range" id="slider-eta" min="0.05" max="1.0" step="0.05" value="0.3">
+                    <span class="slider-value" id="val-eta">0.30</span>
+                </div>
+                <div class="slider-group" style="flex:1;min-width:200px">
+                    <label>训练轮次:</label>
+                    <input type="range" id="slider-rounds" min="5" max="80" step="1" value="20">
+                    <span class="slider-value" id="val-rounds">20</span>
+                </div>
+                <button class="btn btn-primary" id="btn-eta-run">训练</button>
+            </div>
+
+            <div class="compare-grid cols-2">
+                <div>
+                    <div class="viz-area" style="min-height:300px">
+                        <svg id="viz-eta-loss" class="svg-viz"></svg>
+                    </div>
+                    <p class="text-sm text-center mt-1" style="color:var(--text-muted)">损失曲线对比</p>
+                </div>
+                <div>
+                    <div class="viz-area" style="min-height:300px">
+                        <svg id="viz-eta-pred" class="svg-viz"></svg>
+                    </div>
+                    <p class="text-sm text-center mt-1" style="color:var(--text-muted)">预测曲线演化</p>
+                </div>
+            </div>
+            <div class="info-box success mt-2">
+                <p><strong>经验法则：</strong>较低的 $\eta$（如 0.01~0.1）+ 较多轮次通常能获得更好的泛化性能，但训练时间更长。这就是偏差-方差权衡中的"慢学习"策略。</p>
+            </div>
+        </div>
+
+        <!-- ============ Section 5: 列采样与行采样 ============ -->
+        <div class="section" id="sec-sampling">
+            <div class="section-title">
+                <div class="icon">5</div>
+                <h2>列采样与行采样</h2>
+            </div>
+            <div class="split-layout">
+                <div class="text-panel">
+                    <p><code>colsample_bytree</code> 对每棵树随机选择特征子集，<code>subsample</code> 随机选择样本子集。两者都通过增加<strong>树之间的多样性</strong>来防止过拟合。</p>
+
+                    <div class="slider-group mt-2">
+                        <label>列采样率:</label>
+                        <input type="range" id="slider-colsample" min="0.3" max="1.0" step="0.1" value="1.0">
+                        <span class="slider-value" id="val-colsample">1.0</span>
+                    </div>
+                    <div class="slider-group mt-1">
+                        <label>行采样率:</label>
+                        <input type="range" id="slider-subsample" min="0.3" max="1.0" step="0.1" value="1.0">
+                        <span class="slider-value" id="val-subsample">1.0</span>
+                    </div>
+
+                    <div class="controls-row mt-1">
+                        <button class="btn btn-primary" id="btn-sample-run">生成 3 棵树</button>
+                    </div>
+
+                    <div class="info-box mt-2">
+                        <p>矩阵中灰色单元格代表该棵树"看不到"的数据。每棵树只使用数据的一个子集，迫使模型从不同角度学习。</p>
+                    </div>
+                </div>
+                <div class="viz-panel">
+                    <div class="compare-grid cols-3" id="sampling-matrices">
+                        <div>
+                            <div class="compare-label" style="color:var(--accent-blue);background:rgba(79,195,247,0.1)">树 1</div>
+                            <div class="viz-area" style="min-height:280px">
+                                <svg id="viz-sample-t1" class="svg-viz"></svg>
+                            </div>
+                        </div>
+                        <div>
+                            <div class="compare-label" style="color:var(--accent-purple);background:rgba(179,136,255,0.1)">树 2</div>
+                            <div class="viz-area" style="min-height:280px">
+                                <svg id="viz-sample-t2" class="svg-viz"></svg>
+                            </div>
+                        </div>
+                        <div>
+                            <div class="compare-label" style="color:var(--accent-green);background:rgba(22,199,154,0.1)">树 3</div>
+                            <div class="viz-area" style="min-height:280px">
+                                <svg id="viz-sample-t3" class="svg-viz"></svg>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============ Inline JS ============ -->
+    <script>
+    (function() {
+        'use strict';
+
+        /* ================ Helpers ================ */
+        const U = typeof XGBUtils !== 'undefined' ? XGBUtils : null;
+        const rng = U ? U.seededRandom(77) : (() => { let s=77; return()=>{s=(s*16807)%2147483647;return(s-1)/2147483646;}; })();
+
+        function seededRandom(seed) {
+            let s = seed;
+            return () => { s = (s * 16807 + 0) % 2147483647; return (s - 1) / 2147483646; };
+        }
+
+        function genRegressionData(n, seed, noise) {
+            const r = seededRandom(seed);
+            const data = [];
+            for (let i = 0; i < n; i++) {
+                const x = -5 + (10 * i / (n - 1));
+                const trueY = Math.sin(x) * 2 + x * 0.3;
+                const target = trueY + (r() - 0.5) * noise * 2;
+                data.push({ x, target, trueY });
+            }
+            return data;
+        }
+
+        /* Simple 1D XGBoost for regression */
+        function trainXGB1D(data, opts) {
+            const { nRounds=10, lr=0.3, maxDepth=3, lambda=1, gamma=0 } = opts;
+            const n = data.length;
+            const xs = data.map(d => d.x);
+            const ys = data.map(d => d.target);
+            const mean = ys.reduce((a,b) => a+b, 0) / n;
+            let preds = new Array(n).fill(mean);
+            const trees = [];
+            const losses = [];
+
+            for (let round = 0; round < nRounds; round++) {
+                const grad = preds.map((p, i) => p - ys[i]);
+                const hess = new Array(n).fill(1);
+                const tree = build1DTree(xs, grad, hess, 0, maxDepth, lambda, gamma);
+                trees.push(tree);
+                for (let i = 0; i < n; i++) {
+                    preds[i] += lr * predict1DTree(tree, xs[i]);
+                }
+                const loss = preds.reduce((s, p, i) => s + (p - ys[i]) ** 2, 0) / n;
+                losses.push(loss);
+            }
+            return { trees, losses, mean, lr };
+        }
+
+        function build1DTree(xs, grad, hess, depth, maxDepth, lambda, gamma) {
+            const indices = grad.map((_, i) => i);
+            return _build1D(xs, grad, hess, indices, depth, maxDepth, lambda, gamma);
+        }
+
+        function _build1D(xs, grad, hess, indices, depth, maxDepth, lambda, gamma) {
+            const G = indices.reduce((s, i) => s + grad[i], 0);
+            const H = indices.reduce((s, i) => s + hess[i], 0);
+            const weight = -G / (H + lambda);
+            const node = { weight, indices: [...indices], isLeaf: true };
+
+            if (depth >= maxDepth || indices.length < 2) return node;
+
+            const sorted = [...indices].sort((a, b) => xs[a] - xs[b]);
+            let bestGain = -Infinity, bestThresh = 0;
+            let GL = 0, HL = 0;
+            const GAll = G, HAll = H;
+
+            for (let i = 0; i < sorted.length - 1; i++) {
+                GL += grad[sorted[i]];
+                HL += hess[sorted[i]];
+                const GR = GAll - GL;
+                const HR = HAll - HL;
+                if (xs[sorted[i]] === xs[sorted[i+1]]) continue;
+                const gain = 0.5 * (GL*GL/(HL+lambda) + GR*GR/(HR+lambda) - GAll*GAll/(HAll+lambda)) - gamma;
+                if (gain > bestGain) {
+                    bestGain = gain;
+                    bestThresh = (xs[sorted[i]] + xs[sorted[i+1]]) / 2;
+                }
+            }
+
+            if (bestGain <= 0) return node;
+
+            node.isLeaf = false;
+            node.threshold = bestThresh;
+            node.gain = bestGain;
+            const leftIdx = indices.filter(i => xs[i] <= bestThresh);
+            const rightIdx = indices.filter(i => xs[i] > bestThresh);
+            if (leftIdx.length === 0 || rightIdx.length === 0) { node.isLeaf = true; return node; }
+            node.left = _build1D(xs, grad, hess, leftIdx, depth+1, maxDepth, lambda, gamma);
+            node.right = _build1D(xs, grad, hess, rightIdx, depth+1, maxDepth, lambda, gamma);
+            return node;
+        }
+
+        function predict1DTree(tree, x) {
+            let node = tree;
+            while (!node.isLeaf) {
+                node = x <= node.threshold ? node.left : node.right;
+            }
+            return node.weight;
+        }
+
+        function predictXGB1D(model, x) {
+            let pred = model.mean;
+            for (const tree of model.trees) {
+                pred += model.lr * predict1DTree(tree, x);
+            }
+            return pred;
+        }
+
+        function getLeafWeights(tree) {
+            const leaves = [];
+            function walk(node, path) {
+                if (node.isLeaf) {
+                    leaves.push({ weight: node.weight, path, samples: node.indices.length });
+                } else {
+                    walk(node.left, path + 'L');
+                    walk(node.right, path + 'R');
+                }
+            }
+            walk(tree, '');
+            return leaves;
+        }
+
+        /* SVG helper */
+        function clearSVG(id) {
+            const svg = d3.select('#' + id);
+            svg.selectAll('*').remove();
+            const el = svg.node();
+            const rect = el.parentElement.getBoundingClientRect();
+            const w = rect.width || 600;
+            const h = rect.height || 350;
+            svg.attr('viewBox', `0 0 ${w} ${h}`);
+            return { svg, w, h };
+        }
+
+        /* ================ SECTION 1: Overfit ================ */
+        const overfitData = genRegressionData(40, 42, 1.5);
+
+        function drawOverfitChart(svgId, data, model, title) {
+            const { svg, w, h } = clearSVG(svgId);
+            const m = { t: 25, r: 20, b: 35, l: 45 };
+            const iw = w - m.l - m.r, ih = h - m.t - m.b;
+            const g = svg.append('g').attr('transform', `translate(${m.l},${m.t})`);
+
+            const xExt = d3.extent(data, d => d.x);
+            const allY = data.map(d => d.target);
+            const xScale = d3.scaleLinear().domain([xExt[0]-0.3, xExt[1]+0.3]).range([0, iw]);
+            const yMin = d3.min(allY) - 1;
+            const yMax = d3.max(allY) + 1;
+            const yScale = d3.scaleLinear().domain([yMin, yMax]).range([ih, 0]);
+
+            // Axes
+            g.append('g').attr('transform', `translate(0,${ih})`).call(d3.axisBottom(xScale).ticks(6))
+                .selectAll('text').attr('fill', 'var(--text-muted)').style('font-size', '0.7rem');
+            g.append('g').call(d3.axisLeft(yScale).ticks(5))
+                .selectAll('text').attr('fill', 'var(--text-muted)').style('font-size', '0.7rem');
+            g.selectAll('.domain, .tick line').attr('stroke', 'var(--border-color)');
+
+            // True function
+            const trueLine = d3.line().x(d => xScale(d.x)).y(d => yScale(d.trueY)).curve(d3.curveNatural);
+            g.append('path').datum(data).attr('d', trueLine)
+                .attr('fill', 'none').attr('stroke', 'var(--text-muted)').attr('stroke-width', 1.5)
+                .attr('stroke-dasharray', '5 3').attr('opacity', 0.6);
+
+            // Data points
+            g.selectAll('.dot').data(data).enter().append('circle')
+                .attr('cx', d => xScale(d.x)).attr('cy', d => yScale(d.target))
+                .attr('r', 3.5).attr('fill', 'var(--accent-blue)').attr('opacity', 0.7);
+
+            // Prediction curve
+            if (model) {
+                const predPoints = [];
+                for (let px = xExt[0] - 0.3; px <= xExt[1] + 0.3; px += 0.05) {
+                    predPoints.push({ x: px, y: predictXGB1D(model, px) });
+                }
+                const predLine = d3.line().x(d => xScale(d.x)).y(d => yScale(d.y));
+                const path = g.append('path').datum(predPoints).attr('d', predLine)
+                    .attr('fill', 'none').attr('stroke', 'var(--accent-yellow)').attr('stroke-width', 2.5);
+                // Animate
+                const totalLen = path.node().getTotalLength();
+                path.attr('stroke-dasharray', totalLen).attr('stroke-dashoffset', totalLen);
+                gsap.to(path.node(), { strokeDashoffset: 0, duration: 1.2, ease: 'power2.out' });
+            }
+
+            // Legend
+            const lg = g.append('g').attr('transform', `translate(${iw-130}, 5)`);
+            lg.append('line').attr('x1',0).attr('y1',0).attr('x2',20).attr('y2',0)
+                .attr('stroke','var(--text-muted)').attr('stroke-dasharray','5 3');
+            lg.append('text').attr('x',25).attr('y',4).text('真实函数')
+                .attr('fill','var(--text-muted)').style('font-size','0.7rem');
+            lg.append('line').attr('x1',0).attr('y1',16).attr('x2',20).attr('y2',16)
+                .attr('stroke','var(--accent-yellow)').attr('stroke-width',2);
+            lg.append('text').attr('x',25).attr('y',20).text('预测曲线')
+                .attr('fill','var(--accent-yellow)').style('font-size','0.7rem');
+        }
+
+        function runOverfit() {
+            const badModel = trainXGB1D(overfitData, { nRounds: 50, lr: 1.0, maxDepth: 8, lambda: 0, gamma: 0 });
+            const goodModel = trainXGB1D(overfitData, { nRounds: 30, lr: 0.3, maxDepth: 4, lambda: 3, gamma: 1.5 });
+
+            drawOverfitChart('viz-overfit-bad', overfitData, badModel);
+            drawOverfitChart('viz-overfit-good', overfitData, goodModel);
+
+            const lastBad = badModel.losses[badModel.losses.length - 1];
+            const lastGood = goodModel.losses[goodModel.losses.length - 1];
+            document.getElementById('metric-overfit-train').textContent = lastBad.toFixed(4);
+            document.getElementById('metric-reg-train').textContent = lastGood.toFixed(4);
+        }
+
+        document.getElementById('btn-overfit-run').addEventListener('click', runOverfit);
+        document.getElementById('btn-overfit-reset').addEventListener('click', () => {
+            drawOverfitChart('viz-overfit-bad', overfitData, null);
+            drawOverfitChart('viz-overfit-good', overfitData, null);
+            document.getElementById('metric-overfit-train').textContent = '—';
+            document.getElementById('metric-reg-train').textContent = '—';
+        });
+
+        // Initial draw
+        drawOverfitChart('viz-overfit-bad', overfitData, null);
+        drawOverfitChart('viz-overfit-good', overfitData, null);
+
+        /* ================ SECTION 2: Lambda (L2) ================ */
+        const lambdaData = genRegressionData(30, 55, 1.2);
+        const sliderLambda = document.getElementById('slider-lambda');
+        const valLambda = document.getElementById('val-lambda');
+
+        function drawLambdaViz(lambdaVal) {
+            const model = trainXGB1D(lambdaData, { nRounds: 15, lr: 0.3, maxDepth: 4, lambda: lambdaVal, gamma: 0 });
+
+            // Curve
+            const { svg: svgC, w: wC, h: hC } = clearSVG('viz-lambda-curve');
+            const mc = { t: 20, r: 20, b: 30, l: 40 };
+            const iwc = wC - mc.l - mc.r, ihc = hC - mc.t - mc.b;
+            const gc = svgC.append('g').attr('transform', `translate(${mc.l},${mc.t})`);
+
+            const xExt = d3.extent(lambdaData, d => d.x);
+            const xSc = d3.scaleLinear().domain([xExt[0]-0.3, xExt[1]+0.3]).range([0, iwc]);
+            const ySc = d3.scaleLinear().domain([-6, 6]).range([ihc, 0]);
+
+            gc.append('g').attr('transform', `translate(0,${ihc})`).call(d3.axisBottom(xSc).ticks(6))
+                .selectAll('text').attr('fill', 'var(--text-muted)').style('font-size', '0.65rem');
+            gc.append('g').call(d3.axisLeft(ySc).ticks(5))
+                .selectAll('text').attr('fill', 'var(--text-muted)').style('font-size', '0.65rem');
+            gc.selectAll('.domain, .tick line').attr('stroke', 'var(--border-color)');
+
+            gc.selectAll('.dot').data(lambdaData).enter().append('circle')
+                .attr('cx', d => xSc(d.x)).attr('cy', d => ySc(d.target))
+                .attr('r', 3).attr('fill', 'var(--accent-blue)').attr('opacity', 0.6);
+
+            // True line
+            const trueL = d3.line().x(d => xSc(d.x)).y(d => ySc(d.trueY)).curve(d3.curveNatural);
+            gc.append('path').datum(lambdaData).attr('d', trueL)
+                .attr('fill', 'none').attr('stroke', 'var(--text-muted)').attr('stroke-width', 1)
+                .attr('stroke-dasharray', '4 3').attr('opacity', 0.5);
+
+            const predPts = [];
+            for (let px = xExt[0]-0.3; px <= xExt[1]+0.3; px += 0.08) {
+                predPts.push({ x: px, y: predictXGB1D(model, px) });
+            }
+            const predL = d3.line().x(d => xSc(d.x)).y(d => ySc(d.y));
+            gc.append('path').datum(predPts).attr('d', predL)
+                .attr('fill', 'none').attr('stroke', 'var(--accent-yellow)').attr('stroke-width', 2.5);
+
+            gc.append('text').attr('x', iwc/2).attr('y', -5).attr('text-anchor', 'middle')
+                .attr('fill', 'var(--text-secondary)').style('font-size', '0.75rem')
+                .text(`λ = ${lambdaVal.toFixed(1)} — 预测曲线`);
+
+            // Weights bar chart
+            const allLeaves = [];
+            model.trees.forEach((tree, ti) => {
+                getLeafWeights(tree).forEach(lf => {
+                    allLeaves.push({ ...lf, treeIdx: ti, id: `t${ti}_${lf.path}` });
+                });
+            });
+            // Take a subset for display (last tree's leaves)
+            const lastTreeLeaves = allLeaves.filter(l => l.treeIdx === model.trees.length - 1);
+            const displayLeaves = lastTreeLeaves.length > 0 ? lastTreeLeaves : allLeaves.slice(0, 8);
+
+            const { svg: svgW, w: wW, h: hW } = clearSVG('viz-lambda-weights');
+            const mw = { t: 25, r: 20, b: 25, l: 50 };
+            const iww = wW - mw.l - mw.r, ihw = hW - mw.t - mw.b;
+            const gw = svgW.append('g').attr('transform', `translate(${mw.l},${mw.t})`);
+
+            const maxAbs = Math.max(3, d3.max(displayLeaves, d => Math.abs(d.weight)));
+            const xWScale = d3.scaleLinear().domain([-maxAbs, maxAbs]).range([0, iww]);
+            const yWScale = d3.scaleBand().domain(displayLeaves.map((_, i) => i)).range([0, ihw]).padding(0.25);
+
+            gw.append('g').attr('transform', `translate(0,${ihw})`).call(d3.axisBottom(xWScale).ticks(5))
+                .selectAll('text').attr('fill', 'var(--text-muted)').style('font-size', '0.65rem');
+            gw.selectAll('.domain, .tick line').attr('stroke', 'var(--border-color)');
+
+            // Zero line
+            gw.append('line')
+                .attr('x1', xWScale(0)).attr('x2', xWScale(0))
+                .attr('y1', 0).attr('y2', ihw)
+                .attr('stroke', 'var(--border-color)').attr('stroke-width', 1);
+
+            // Labels
+            gw.selectAll('.lbl').data(displayLeaves).enter().append('text')
+                .attr('x', -5).attr('y', (_, i) => yWScale(i) + yWScale.bandwidth() / 2 + 4)
+                .attr('text-anchor', 'end').attr('fill', 'var(--text-muted)').style('font-size', '0.65rem')
+                .text((d, i) => `叶${i + 1}`);
+
+            // Bars
+            gw.selectAll('.bar').data(displayLeaves).enter().append('rect')
+                .attr('class', 'weight-bar')
+                .attr('x', d => d.weight >= 0 ? xWScale(0) : xWScale(d.weight))
+                .attr('y', (_, i) => yWScale(i))
+                .attr('width', d => Math.abs(xWScale(d.weight) - xWScale(0)))
+                .attr('height', yWScale.bandwidth())
+                .attr('rx', 3)
+                .attr('fill', d => d.weight >= 0 ? 'var(--accent-green)' : 'var(--accent-red)')
+                .attr('opacity', 0.8);
+
+            // Weight values
+            gw.selectAll('.wval').data(displayLeaves).enter().append('text')
+                .attr('x', d => d.weight >= 0 ? xWScale(d.weight) + 4 : xWScale(d.weight) - 4)
+                .attr('y', (_, i) => yWScale(i) + yWScale.bandwidth() / 2 + 4)
+                .attr('text-anchor', d => d.weight >= 0 ? 'start' : 'end')
+                .attr('fill', 'var(--text-secondary)').style('font-size', '0.65rem').style('font-family', 'var(--font-mono)')
+                .text(d => d.weight.toFixed(2));
+
+            gw.append('text').attr('x', iww/2).attr('y', -8).attr('text-anchor', 'middle')
+                .attr('fill', 'var(--text-secondary)').style('font-size', '0.75rem')
+                .text('最后一棵树的叶子权重');
+        }
+
+        sliderLambda.addEventListener('input', () => {
+            const v = parseFloat(sliderLambda.value);
+            valLambda.textContent = v.toFixed(1);
+            drawLambdaViz(v);
+        });
+        drawLambdaViz(0);
+
+        /* ================ SECTION 3: Gamma (Pruning) ================ */
+        const gammaData = genRegressionData(40, 33, 1.0);
+        const sliderGamma = document.getElementById('slider-gamma');
+        const valGamma = document.getElementById('val-gamma');
+
+        /* Build a deep tree then prune by gamma */
+        function buildFullTree1D(data) {
+            const xs = data.map(d => d.x);
+            const ys = data.map(d => d.target);
+            const mean = ys.reduce((a,b) => a+b,0) / ys.length;
+            const preds = new Array(ys.length).fill(mean);
+            const grad = preds.map((p, i) => p - ys[i]);
+            const hess = new Array(ys.length).fill(1);
+            // Build deep tree with gamma=0
+            return build1DTree(xs, grad, hess, 0, 5, 1, 0);
+        }
+
+        function computeGains(node) {
+            if (!node || node.isLeaf) return;
+            // Recompute gain for this split
+            if (node.left && node.right) {
+                const GL = node.left.indices.reduce((s, i) => s + gammaGrads[i], 0);
+                const HL = node.left.indices.length;
+                const GR = node.right.indices.reduce((s, i) => s + gammaGrads[i], 0);
+                const HR = node.right.indices.length;
+                const G = GL + GR;
+                const H = HL + HR;
+                node.rawGain = 0.5 * (GL*GL/(HL+1) + GR*GR/(HR+1) - G*G/(H+1));
+            }
+            computeGains(node.left);
+            computeGains(node.right);
+        }
+
+        // Precompute gradients for gamma visualization
+        const gammaXs = gammaData.map(d => d.x);
+        const gammaYs = gammaData.map(d => d.target);
+        const gammaMean = gammaYs.reduce((a,b) => a+b,0) / gammaYs.length;
+        const gammaGrads = gammaYs.map(y => gammaMean - y);
+
+        const fullTree = buildFullTree1D(gammaData);
+        computeGains(fullTree);
+
+        function pruneTree(node, gamma) {
+            if (!node || node.isLeaf) return node;
+            const pruned = { ...node };
+            pruned.left = pruneTree(node.left, gamma);
+            pruned.right = pruneTree(node.right, gamma);
+            if (!pruned.isLeaf && (pruned.rawGain || 0) < gamma) {
+                pruned.isLeaf = true;
+                pruned.pruned = true;
+            }
+            return pruned;
+        }
+
+        function countLeaves(node) {
+            if (!node) return 0;
+            if (node.isLeaf) return 1;
+            return countLeaves(node.left) + countLeaves(node.right);
+        }
+
+        function treeMaxDepth(node) {
+            if (!node || node.isLeaf) return 0;
+            return 1 + Math.max(treeMaxDepth(node.left), treeMaxDepth(node.right));
+        }
+
+        function drawGammaTree(gammaVal) {
+            const pruned = pruneTree(fullTree, gammaVal);
+            document.getElementById('metric-gamma-leaves').textContent = countLeaves(pruned);
+            document.getElementById('metric-gamma-depth').textContent = treeMaxDepth(pruned);
+
+            const { svg, w, h } = clearSVG('viz-gamma-tree');
+            const m = { t: 30, r: 30, b: 30, l: 30 };
+            const iw = w - m.l - m.r, ih = h - m.t - m.b;
+            const g = svg.append('g').attr('transform', `translate(${m.l},${m.t})`);
+
+            // Flatten the full tree for layout, mark pruned nodes
+            const nodes = [];
+            const links = [];
+            let nodeId = 0;
+
+            function layout(node, x, y, dx, parent) {
+                if (!node) return;
+                const id = nodeId++;
+                const isPruned = node.isLeaf && node.pruned;
+                const n = { id, x, y, isLeaf: node.isLeaf, weight: node.weight, threshold: node.threshold, gain: node.rawGain, pruned: isPruned };
+                nodes.push(n);
+                if (parent !== null) {
+                    links.push({ source: parent, target: id, pruned: isPruned });
+                }
+                if (!node.isLeaf) {
+                    layout(node.left, x - dx, y + 1, dx * 0.5, id);
+                    layout(node.right, x + dx, y + 1, dx * 0.5, id);
+                }
+                // Show pruned branches of the original tree too
+                if (isPruned && !fullTree.isLeaf) {
+                    // Find corresponding node in full tree to show what was pruned
+                }
+            }
+
+            // Layout the full tree to show pruning
+            function layoutFull(orig, prunedNode, x, y, dx, parent) {
+                if (!orig) return;
+                const id = nodeId++;
+                const wasPruned = prunedNode && prunedNode.isLeaf && !orig.isLeaf;
+                const n = {
+                    id, x, y,
+                    isLeaf: orig.isLeaf,
+                    weight: orig.weight,
+                    threshold: orig.threshold,
+                    gain: orig.rawGain,
+                    pruned: wasPruned,
+                    inPrunedSubtree: false
+                };
+                nodes.push(n);
+                if (parent !== null) {
+                    links.push({ source: parent, target: id, pruned: wasPruned || (parent !== null && nodes[parent] && nodes[parent].inPrunedSubtree) });
+                }
+                if (!orig.isLeaf) {
+                    if (wasPruned) {
+                        // Children are in pruned subtree
+                        layoutPrunedSub(orig.left, x - dx, y + 1, dx * 0.5, id);
+                        layoutPrunedSub(orig.right, x + dx, y + 1, dx * 0.5, id);
+                    } else {
+                        layoutFull(orig.left, prunedNode && !prunedNode.isLeaf ? prunedNode.left : null, x - dx, y + 1, dx * 0.5, id);
+                        layoutFull(orig.right, prunedNode && !prunedNode.isLeaf ? prunedNode.right : null, x + dx, y + 1, dx * 0.5, id);
+                    }
+                }
+            }
+
+            function layoutPrunedSub(orig, x, y, dx, parent) {
+                if (!orig) return;
+                const id = nodeId++;
+                const n = { id, x, y, isLeaf: orig.isLeaf, weight: orig.weight, threshold: orig.threshold, gain: orig.rawGain, pruned: true, inPrunedSubtree: true };
+                nodes.push(n);
+                links.push({ source: parent, target: id, pruned: true });
+                if (!orig.isLeaf) {
+                    layoutPrunedSub(orig.left, x - dx, y + 1, dx * 0.5, id);
+                    layoutPrunedSub(orig.right, x + dx, y + 1, dx * 0.5, id);
+                }
+            }
+
+            layoutFull(fullTree, pruned, 0, 0, 2.5, null);
+
+            const maxY = d3.max(nodes, d => d.y) || 1;
+            const xExtent = d3.extent(nodes, d => d.x);
+            const xRange = (xExtent[1] - xExtent[0]) || 1;
+
+            const xSc = d3.scaleLinear().domain([xExtent[0] - 0.5, xExtent[1] + 0.5]).range([0, iw]);
+            const ySc = d3.scaleLinear().domain([-0.3, maxY + 0.5]).range([0, ih]);
+
+            // Links
+            g.selectAll('.tree-link').data(links).enter().append('line')
+                .attr('class', d => 'tree-link' + (d.pruned ? ' pruned' : ''))
+                .attr('x1', d => xSc(nodes[d.source].x))
+                .attr('y1', d => ySc(nodes[d.source].y))
+                .attr('x2', d => xSc(nodes[d.target].x))
+                .attr('y2', d => ySc(nodes[d.target].y))
+                .attr('stroke', d => d.pruned ? 'var(--accent-red)' : 'var(--border-color)')
+                .attr('stroke-width', d => d.pruned ? 1.5 : 2)
+                .attr('stroke-dasharray', d => d.pruned ? '4 3' : 'none')
+                .attr('opacity', d => d.pruned ? 0.35 : 0.8);
+
+            // Nodes
+            const nodeG = g.selectAll('.tree-node').data(nodes).enter().append('g')
+                .attr('class', 'tree-node')
+                .attr('transform', d => `translate(${xSc(d.x)},${ySc(d.y)})`);
+
+            nodeG.append('circle')
+                .attr('r', d => d.isLeaf ? 14 : 18)
+                .attr('fill', d => {
+                    if (d.pruned || d.inPrunedSubtree) return 'rgba(255,82,82,0.15)';
+                    if (d.isLeaf) return 'rgba(22,199,154,0.2)';
+                    return 'rgba(79,195,247,0.2)';
+                })
+                .attr('stroke', d => {
+                    if (d.pruned || d.inPrunedSubtree) return 'var(--accent-red)';
+                    if (d.isLeaf) return 'var(--accent-green)';
+                    return 'var(--accent-blue)';
+                })
+                .attr('stroke-width', 2)
+                .attr('opacity', d => (d.pruned || d.inPrunedSubtree) ? 0.4 : 1);
+
+            nodeG.append('text')
+                .attr('text-anchor', 'middle').attr('dy', '0.35em')
+                .style('font-size', '0.6rem').style('font-family', 'var(--font-mono)')
+                .attr('fill', d => (d.pruned || d.inPrunedSubtree) ? 'var(--accent-red)' : 'var(--text-primary)')
+                .attr('opacity', d => (d.pruned || d.inPrunedSubtree) ? 0.4 : 1)
+                .text(d => {
+                    if (d.isLeaf && !d.inPrunedSubtree && !d.pruned) return d.weight.toFixed(1);
+                    if (!d.isLeaf && d.threshold !== undefined) return `x<${d.threshold.toFixed(1)}`;
+                    return d.weight ? d.weight.toFixed(1) : '';
+                });
+
+            // Gain labels for non-leaf
+            nodeG.filter(d => !d.isLeaf && d.gain !== undefined && !d.inPrunedSubtree)
+                .append('text')
+                .attr('text-anchor', 'middle').attr('dy', '-1.5em')
+                .style('font-size', '0.55rem').style('font-family', 'var(--font-mono)')
+                .attr('fill', d => (d.gain < gammaVal) ? 'var(--accent-red)' : 'var(--accent-green)')
+                .text(d => `G=${d.gain.toFixed(2)}`);
+
+            // Legend
+            const lg = g.append('g').attr('transform', `translate(5, ${ih - 30})`);
+            lg.append('circle').attr('r', 6).attr('fill', 'rgba(22,199,154,0.2)').attr('stroke', 'var(--accent-green)').attr('stroke-width', 1.5);
+            lg.append('text').attr('x', 12).attr('y', 4).text('保留节点').attr('fill', 'var(--text-muted)').style('font-size', '0.65rem');
+            lg.append('circle').attr('cx', 90).attr('r', 6).attr('fill', 'rgba(255,82,82,0.15)').attr('stroke', 'var(--accent-red)').attr('stroke-width', 1.5).attr('opacity', 0.5);
+            lg.append('text').attr('x', 102).attr('y', 4).text('剪枝节点').attr('fill', 'var(--text-muted)').style('font-size', '0.65rem');
+            lg.append('text').attr('x', 180).attr('y', 4).text(`γ阈值 = ${gammaVal.toFixed(1)}`).attr('fill', 'var(--accent-yellow)').style('font-size', '0.65rem');
+        }
+
+        sliderGamma.addEventListener('input', () => {
+            const v = parseFloat(sliderGamma.value);
+            valGamma.textContent = v.toFixed(1);
+            drawGammaTree(v);
+        });
+        drawGammaTree(0);
+
+        /* ================ SECTION 4: Learning Rate ================ */
+        const etaData = genRegressionData(35, 88, 1.0);
+        const sliderEta = document.getElementById('slider-eta');
+        const valEta = document.getElementById('val-eta');
+        const sliderRounds = document.getElementById('slider-rounds');
+        const valRounds = document.getElementById('val-rounds');
+
+        sliderEta.addEventListener('input', () => { valEta.textContent = parseFloat(sliderEta.value).toFixed(2); });
+        sliderRounds.addEventListener('input', () => { valRounds.textContent = sliderRounds.value; });
+
+        function drawEtaViz() {
+            const eta = parseFloat(sliderEta.value);
+            const rounds = parseInt(sliderRounds.value);
+
+            // Train with current eta and a reference
+            const modelCur = trainXGB1D(etaData, { nRounds: rounds, lr: eta, maxDepth: 3, lambda: 1, gamma: 0 });
+            const refEta = eta >= 0.5 ? 0.1 : 1.0;
+            const modelRef = trainXGB1D(etaData, { nRounds: rounds, lr: refEta, maxDepth: 3, lambda: 1, gamma: 0 });
+
+            // Loss curves
+            const { svg: svgL, w: wL, h: hL } = clearSVG('viz-eta-loss');
+            const ml = { t: 25, r: 20, b: 35, l: 50 };
+            const iwl = wL - ml.l - ml.r, ihl = hL - ml.t - ml.b;
+            const gl = svgL.append('g').attr('transform', `translate(${ml.l},${ml.t})`);
+
+            const allLoss = [...modelCur.losses, ...modelRef.losses];
+            const maxLoss = Math.max(d3.max(allLoss), 0.1);
+            const xSl = d3.scaleLinear().domain([0, rounds - 1]).range([0, iwl]);
+            const ySl = d3.scaleLinear().domain([0, maxLoss * 1.1]).range([ihl, 0]);
+
+            gl.append('g').attr('transform', `translate(0,${ihl})`).call(d3.axisBottom(xSl).ticks(6))
+                .selectAll('text').attr('fill', 'var(--text-muted)').style('font-size', '0.65rem');
+            gl.append('g').call(d3.axisLeft(ySl).ticks(5))
+                .selectAll('text').attr('fill', 'var(--text-muted)').style('font-size', '0.65rem');
+            gl.selectAll('.domain, .tick line').attr('stroke', 'var(--border-color)');
+
+            // Axis labels
+            gl.append('text').attr('x', iwl / 2).attr('y', ihl + 30).attr('text-anchor', 'middle')
+                .attr('class', 'axis-label').text('训练轮次');
+            gl.append('text').attr('x', -ihl / 2).attr('y', -38).attr('text-anchor', 'middle')
+                .attr('class', 'axis-label').attr('transform', 'rotate(-90)').text('MSE 损失');
+
+            const lineFn = d3.line().x((d, i) => xSl(i)).y(d => ySl(d)).curve(d3.curveMonotoneX);
+
+            const pathCur = gl.append('path').datum(modelCur.losses).attr('d', lineFn)
+                .attr('class', 'loss-line').attr('stroke', 'var(--accent-yellow)');
+            const pathRef = gl.append('path').datum(modelRef.losses).attr('d', lineFn)
+                .attr('class', 'loss-line').attr('stroke', 'var(--accent-purple)').attr('stroke-dasharray', '5 3');
+
+            // Animate
+            [pathCur, pathRef].forEach(p => {
+                const len = p.node().getTotalLength();
+                p.attr('stroke-dasharray', len).attr('stroke-dashoffset', len);
+                gsap.to(p.node(), { strokeDashoffset: 0, duration: 1, ease: 'power2.out' });
+                // Restore dash for ref line after animation
+            });
+            setTimeout(() => {
+                pathRef.attr('stroke-dasharray', '5 3');
+            }, 1100);
+
+            // Legend
+            const lgL = gl.append('g').attr('transform', `translate(${iwl - 200}, 10)`);
+            lgL.append('line').attr('x1', 0).attr('y1', 0).attr('x2', 18).attr('y2', 0)
+                .attr('stroke', 'var(--accent-yellow)').attr('stroke-width', 2);
+            lgL.append('text').attr('x', 22).attr('y', 4).text(`η = ${eta.toFixed(2)}`)
+                .attr('fill', 'var(--accent-yellow)').style('font-size', '0.7rem');
+            lgL.append('line').attr('x1', 0).attr('y1', 18).attr('x2', 18).attr('y2', 18)
+                .attr('stroke', 'var(--accent-purple)').attr('stroke-width', 2).attr('stroke-dasharray', '5 3');
+            lgL.append('text').attr('x', 22).attr('y', 22).text(`η = ${refEta.toFixed(2)} (对比)`)
+                .attr('fill', 'var(--accent-purple)').style('font-size', '0.7rem');
+
+            gl.append('text').attr('x', iwl / 2).attr('y', -8).attr('text-anchor', 'middle')
+                .attr('fill', 'var(--text-secondary)').style('font-size', '0.75rem')
+                .text('训练损失曲线');
+
+            // Prediction curves at different rounds
+            const { svg: svgP, w: wP, h: hP } = clearSVG('viz-eta-pred');
+            const mp = { t: 25, r: 20, b: 35, l: 45 };
+            const iwp = wP - mp.l - mp.r, ihp = hP - mp.t - mp.b;
+            const gp = svgP.append('g').attr('transform', `translate(${mp.l},${mp.t})`);
+
+            const xExt = d3.extent(etaData, d => d.x);
+            const xSp = d3.scaleLinear().domain([xExt[0] - 0.3, xExt[1] + 0.3]).range([0, iwp]);
+            const ySp = d3.scaleLinear().domain([-5, 5]).range([ihp, 0]);
+
+            gp.append('g').attr('transform', `translate(0,${ihp})`).call(d3.axisBottom(xSp).ticks(6))
+                .selectAll('text').attr('fill', 'var(--text-muted)').style('font-size', '0.65rem');
+            gp.append('g').call(d3.axisLeft(ySp).ticks(5))
+                .selectAll('text').attr('fill', 'var(--text-muted)').style('font-size', '0.65rem');
+            gp.selectAll('.domain, .tick line').attr('stroke', 'var(--border-color)');
+
+            gp.selectAll('.dot').data(etaData).enter().append('circle')
+                .attr('cx', d => xSp(d.x)).attr('cy', d => ySp(d.target))
+                .attr('r', 2.5).attr('fill', 'var(--accent-blue)').attr('opacity', 0.5);
+
+            // Show prediction at different stages
+            const stages = [
+                { r: Math.min(3, rounds), color: 'rgba(255,171,64,0.4)', label: `轮${Math.min(3, rounds)}` },
+                { r: Math.floor(rounds / 2), color: 'rgba(255,171,64,0.7)', label: `轮${Math.floor(rounds / 2)}` },
+                { r: rounds, color: 'var(--accent-yellow)', label: `轮${rounds}` }
+            ].filter(s => s.r > 0);
+
+            stages.forEach(stage => {
+                const stageModel = trainXGB1D(etaData, { nRounds: stage.r, lr: eta, maxDepth: 3, lambda: 1, gamma: 0 });
+                const predPts = [];
+                for (let px = xExt[0] - 0.3; px <= xExt[1] + 0.3; px += 0.1) {
+                    predPts.push({ x: px, y: predictXGB1D(stageModel, px) });
+                }
+                const line = d3.line().x(d => xSp(d.x)).y(d => ySp(d.y));
+                gp.append('path').datum(predPts).attr('d', line)
+                    .attr('fill', 'none').attr('stroke', stage.color).attr('stroke-width', stage === stages[stages.length-1] ? 2.5 : 1.5);
+            });
+
+            // True curve
+            const trueL = d3.line().x(d => xSp(d.x)).y(d => ySp(d.trueY)).curve(d3.curveNatural);
+            gp.append('path').datum(etaData).attr('d', trueL)
+                .attr('fill', 'none').attr('stroke', 'var(--text-muted)').attr('stroke-width', 1)
+                .attr('stroke-dasharray', '4 3').attr('opacity', 0.5);
+
+            // Legend
+            const lgP = gp.append('g').attr('transform', `translate(${iwp - 110}, 10)`);
+            stages.forEach((s, i) => {
+                lgP.append('line').attr('x1', 0).attr('y1', i * 16).attr('x2', 16).attr('y2', i * 16)
+                    .attr('stroke', s.color).attr('stroke-width', 2);
+                lgP.append('text').attr('x', 20).attr('y', i * 16 + 4)
+                    .text(s.label).attr('fill', 'var(--text-secondary)').style('font-size', '0.65rem');
+            });
+
+            gp.append('text').attr('x', iwp / 2).attr('y', -8).attr('text-anchor', 'middle')
+                .attr('fill', 'var(--text-secondary)').style('font-size', '0.75rem')
+                .text(`预测曲线演化 (η=${eta.toFixed(2)})`);
+        }
+
+        document.getElementById('btn-eta-run').addEventListener('click', drawEtaViz);
+        drawEtaViz();
+
+        /* ================ SECTION 5: Sampling ================ */
+        const sliderColsample = document.getElementById('slider-colsample');
+        const valColsample = document.getElementById('val-colsample');
+        const sliderSubsample = document.getElementById('slider-subsample');
+        const valSubsample = document.getElementById('val-subsample');
+
+        sliderColsample.addEventListener('input', () => { valColsample.textContent = parseFloat(sliderColsample.value).toFixed(1); });
+        sliderSubsample.addEventListener('input', () => { valSubsample.textContent = parseFloat(sliderSubsample.value).toFixed(1); });
+
+        const nSampRows = 12;
+        const nSampCols = 6;
+        const featureNames = ['年龄', '收入', '消费', '信用', '活跃', '区域'];
+
+        function drawSamplingMatrix(svgId, treeIdx, colRate, rowRate, treeColor) {
+            const { svg, w, h } = clearSVG(svgId);
+            const m = { t: 35, r: 10, b: 20, l: 35 };
+            const iw = w - m.l - m.r, ih = h - m.t - m.b;
+            const g = svg.append('g').attr('transform', `translate(${m.l},${m.t})`);
+
+            const cellW = Math.min(iw / nSampCols, 35);
+            const cellH = Math.min(ih / nSampRows, 20);
+            const totalW = cellW * nSampCols;
+            const totalH = cellH * nSampRows;
+            const offsetX = (iw - totalW) / 2;
+            const offsetY = (ih - totalH) / 2;
+
+            const rngS = seededRandom(treeIdx * 137 + 7);
+
+            // Determine which cols/rows are active
+            const nActiveCols = Math.max(1, Math.round(nSampCols * colRate));
+            const nActiveRows = Math.max(1, Math.round(nSampRows * rowRate));
+
+            const colOrder = Array.from({ length: nSampCols }, (_, i) => i);
+            for (let i = colOrder.length - 1; i > 0; i--) {
+                const j = Math.floor(rngS() * (i + 1));
+                [colOrder[i], colOrder[j]] = [colOrder[j], colOrder[i]];
+            }
+            const activeCols = new Set(colOrder.slice(0, nActiveCols));
+
+            const rowOrder = Array.from({ length: nSampRows }, (_, i) => i);
+            for (let i = rowOrder.length - 1; i > 0; i--) {
+                const j = Math.floor(rngS() * (i + 1));
+                [rowOrder[i], rowOrder[j]] = [rowOrder[j], rowOrder[i]];
+            }
+            const activeRows = new Set(rowOrder.slice(0, nActiveRows));
+
+            // Column headers
+            for (let c = 0; c < nSampCols; c++) {
+                g.append('text')
+                    .attr('x', offsetX + c * cellW + cellW / 2)
+                    .attr('y', offsetY - 6)
+                    .attr('text-anchor', 'middle')
+                    .attr('fill', activeCols.has(c) ? treeColor : 'var(--text-muted)')
+                    .style('font-size', '0.55rem')
+                    .attr('opacity', activeCols.has(c) ? 1 : 0.3)
+                    .text(featureNames[c]);
+            }
+
+            // Row headers
+            for (let r = 0; r < nSampRows; r++) {
+                g.append('text')
+                    .attr('x', offsetX - 5)
+                    .attr('y', offsetY + r * cellH + cellH / 2 + 3)
+                    .attr('text-anchor', 'end')
+                    .attr('fill', activeRows.has(r) ? 'var(--text-secondary)' : 'var(--text-muted)')
+                    .style('font-size', '0.55rem')
+                    .attr('opacity', activeRows.has(r) ? 1 : 0.3)
+                    .text(`#${r + 1}`);
+            }
+
+            // Cells
+            const rngV = seededRandom(42);
+            for (let r = 0; r < nSampRows; r++) {
+                for (let c = 0; c < nSampCols; c++) {
+                    const active = activeCols.has(c) && activeRows.has(r);
+                    const val = rngV();
+                    const hue = val * 120;
+
+                    g.append('rect')
+                        .attr('class', 'sampling-cell' + (active ? '' : ' disabled'))
+                        .attr('x', offsetX + c * cellW + 1)
+                        .attr('y', offsetY + r * cellH + 1)
+                        .attr('width', cellW - 2)
+                        .attr('height', cellH - 2)
+                        .attr('rx', 2)
+                        .attr('fill', active ? `hsla(${hue}, 60%, 45%, 0.6)` : 'var(--border-color)')
+                        .attr('stroke', active ? treeColor : 'none')
+                        .attr('stroke-width', active ? 0.5 : 0)
+                        .attr('opacity', active ? 1 : 0.15);
+                }
+            }
+
+            // Stats
+            g.append('text')
+                .attr('x', offsetX + totalW / 2).attr('y', offsetY + totalH + 15)
+                .attr('text-anchor', 'middle')
+                .attr('fill', 'var(--text-muted)').style('font-size', '0.6rem')
+                .text(`${nActiveRows} 行 × ${nActiveCols} 列`);
+        }
+
+        function drawAllSampling() {
+            const colRate = parseFloat(sliderColsample.value);
+            const rowRate = parseFloat(sliderSubsample.value);
+            drawSamplingMatrix('viz-sample-t1', 1, colRate, rowRate, 'var(--accent-blue)');
+            drawSamplingMatrix('viz-sample-t2', 2, colRate, rowRate, 'var(--accent-purple)');
+            drawSamplingMatrix('viz-sample-t3', 3, colRate, rowRate, 'var(--accent-green)');
+        }
+
+        document.getElementById('btn-sample-run').addEventListener('click', () => {
+            drawAllSampling();
+        });
+        drawAllSampling();
+
+        /* ================ KaTeX Auto Render ================ */
+        document.addEventListener('DOMContentLoaded', () => {
+            if (typeof renderMathInElement === 'function') {
+                renderMathInElement(document.body, {
+                    delimiters: [
+                        { left: '$$', right: '$$', display: true },
+                        { left: '$', right: '$', display: false }
+                    ],
+                    throwOnError: false
+                });
+            }
+        });
+
+        // Also try rendering immediately in case DOM is already loaded
+        if (document.readyState !== 'loading' && typeof renderMathInElement === 'function') {
+            renderMathInElement(document.body, {
+                delimiters: [
+                    { left: '$$', right: '$$', display: true },
+                    { left: '$', right: '$', display: false }
+                ],
+                throwOnError: false
+            });
+        }
+
+        /* ================ Resize Handler ================ */
+        let resizeTimer;
+        window.addEventListener('resize', () => {
+            clearTimeout(resizeTimer);
+            resizeTimer = setTimeout(() => {
+                // Re-draw current states
+                drawOverfitChart('viz-overfit-bad', overfitData, null);
+                drawOverfitChart('viz-overfit-good', overfitData, null);
+                drawLambdaViz(parseFloat(sliderLambda.value));
+                drawGammaTree(parseFloat(sliderGamma.value));
+                drawEtaViz();
+                drawAllSampling();
+            }, 300);
+        });
+
+    })();
+    </script>
+</body>
+</html>

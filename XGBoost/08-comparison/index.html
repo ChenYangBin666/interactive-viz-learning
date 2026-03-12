@@ -1,0 +1,1445 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>对比分析 — XGBoost 可视化学习</title>
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+SC:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.2/gsap.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        /* ===== Page-specific ===== */
+        .breadcrumb {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            margin-bottom: 0.5rem;
+        }
+        .breadcrumb a { color: var(--accent-blue); }
+        .page-header { margin-bottom: 2.5rem; }
+        .page-header h1 {
+            font-size: 2.2rem;
+            background: linear-gradient(135deg, var(--accent-yellow), var(--accent-orange));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        /* Side-by-side viz panels */
+        .dual-panel {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5rem;
+        }
+        @media (max-width: 900px) { .dual-panel { grid-template-columns: 1fr; } }
+
+        .panel-label {
+            text-align: center;
+            font-weight: 700;
+            font-size: 1rem;
+            margin-bottom: 0.5rem;
+            padding: 0.4rem 0.8rem;
+            border-radius: var(--radius-sm);
+        }
+        .panel-label.rf { background: rgba(79, 195, 247, 0.15); color: var(--accent-blue); }
+        .panel-label.xgb { background: rgba(22, 199, 154, 0.15); color: var(--accent-green); }
+        .panel-label.gbdt { background: rgba(255, 171, 64, 0.15); color: var(--accent-orange); }
+        .panel-label.lgb { background: rgba(179, 136, 255, 0.15); color: var(--accent-purple); }
+
+        /* Canvas containers */
+        .canvas-wrap {
+            position: relative;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+        }
+        .canvas-wrap canvas { display: block; width: 100%; }
+
+        /* Comparison table */
+        .cmp-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.85rem;
+            margin-top: 1rem;
+        }
+        .cmp-table th, .cmp-table td {
+            padding: 0.6rem 0.8rem;
+            border: 1px solid var(--border-color);
+            text-align: left;
+        }
+        .cmp-table th {
+            background: var(--bg-card);
+            color: var(--accent-yellow);
+            font-weight: 600;
+        }
+        .cmp-table td { color: var(--text-secondary); }
+        .cmp-table tr:hover td { background: rgba(22, 199, 154, 0.05); }
+
+        /* Flow diagram */
+        .flow-svg { width: 100%; }
+
+        /* Checklist */
+        .checklist { list-style: none; padding: 0; }
+        .checklist li {
+            display: flex;
+            align-items: center;
+            gap: 0.7rem;
+            padding: 0.65rem 0.8rem;
+            border-bottom: 1px solid var(--border-color);
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+        }
+        .checklist li:last-child { border-bottom: none; }
+        .check-icon {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.75rem;
+            flex-shrink: 0;
+            opacity: 0;
+            transform: scale(0);
+        }
+        .check-icon.yes { background: rgba(22, 199, 154, 0.2); color: var(--accent-green); }
+        .check-icon.no { background: rgba(255, 82, 82, 0.2); color: var(--accent-red); }
+        .check-icon.partial { background: rgba(255, 171, 64, 0.2); color: var(--accent-orange); }
+        .check-label { flex: 1; }
+        .check-tags { display: flex; gap: 0.4rem; }
+        .check-tag {
+            font-size: 0.7rem;
+            padding: 0.1rem 0.4rem;
+            border-radius: 4px;
+            font-weight: 600;
+        }
+
+        /* Tree growth animation */
+        .tree-viz-area {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            min-height: 340px;
+            position: relative;
+        }
+
+        /* Decision flowchart */
+        .flowchart-area {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1rem;
+            min-height: 400px;
+        }
+        .flow-node {
+            padding: 0.6rem 1rem;
+            border-radius: var(--radius-md);
+            font-size: 0.85rem;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s;
+            border: 2px solid transparent;
+        }
+        .flow-node.question {
+            background: var(--bg-card);
+            border-color: var(--accent-blue);
+            color: var(--text-primary);
+        }
+        .flow-node.answer {
+            background: rgba(22, 199, 154, 0.1);
+            border-color: var(--accent-green);
+            color: var(--accent-green);
+            font-weight: 600;
+        }
+        .flow-node.highlighted {
+            box-shadow: 0 0 20px rgba(255, 215, 64, 0.4);
+            border-color: var(--accent-yellow);
+        }
+
+        /* Quiz card */
+        .quiz-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1.5rem;
+            margin-top: 1.5rem;
+        }
+        .quiz-q {
+            font-size: 1rem;
+            color: var(--text-primary);
+            margin-bottom: 1rem;
+            font-weight: 600;
+        }
+        .quiz-options { display: flex; flex-wrap: wrap; gap: 0.6rem; }
+        .quiz-opt {
+            padding: 0.5rem 1rem;
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            background: var(--bg-card);
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all 0.2s;
+            font-family: inherit;
+            font-size: 0.85rem;
+        }
+        .quiz-opt:hover { border-color: var(--accent-green); color: var(--text-primary); }
+        .quiz-opt.selected { border-color: var(--accent-green); background: rgba(22, 199, 154, 0.15); color: var(--accent-green); font-weight: 600; }
+
+        .recommendation-box {
+            margin-top: 1.5rem;
+            padding: 1.2rem;
+            border-radius: var(--radius-md);
+            border: 2px solid var(--accent-yellow);
+            background: rgba(255, 215, 64, 0.05);
+        }
+        .recommendation-box h4 { color: var(--accent-yellow); margin-bottom: 0.5rem; }
+
+        /* Parabola vs linear diagram */
+        .optim-svg { width: 100%; max-width: 500px; }
+
+        .section-desc {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            margin-bottom: 1.5rem;
+        }
+    </style>
+</head>
+<body>
+<div class="page-container">
+    <!-- Header -->
+    <div class="page-header">
+        <div class="breadcrumb"><a href="../index.html">XGBoost</a> / 模块 08</div>
+        <h1>对比分析</h1>
+        <p class="section-desc">将 XGBoost 放在更大的机器学习版图中，与随机森林、GBDT、LightGBM 逐一比较优劣。</p>
+    </div>
+
+    <!-- ====== Section 1: RF vs XGBoost ====== -->
+    <div class="section" id="sec-rf-xgb">
+        <div class="section-title">
+            <div class="icon">1</div>
+            <h2>随机森林 vs XGBoost</h2>
+        </div>
+        <p class="section-desc">在相同的二维数据上，对比 Bagging（随机森林）与 Boosting（XGBoost）的决策边界差异。</p>
+
+        <div class="anim-controls mb-2">
+            <button class="btn btn-sm btn-primary" id="btn-rf-xgb-run">构建模型</button>
+            <button class="btn btn-sm" id="btn-rf-xgb-reset">重置</button>
+            <div class="progress-bar"><div class="fill" id="rf-xgb-progress" style="width:0%"></div></div>
+            <span class="step-label" id="rf-xgb-step">就绪</span>
+        </div>
+
+        <div class="dual-panel">
+            <div>
+                <div class="panel-label rf">随机森林 (Bagging)</div>
+                <div class="canvas-wrap">
+                    <canvas id="canvas-rf" width="400" height="360"></canvas>
+                </div>
+                <div class="info-box mt-1">
+                    <p><strong>并行训练</strong>：N 棵独立的树同时构建，最终投票/平均</p>
+                </div>
+            </div>
+            <div>
+                <div class="panel-label xgb">XGBoost (Boosting)</div>
+                <div class="canvas-wrap">
+                    <canvas id="canvas-xgb" width="400" height="360"></canvas>
+                </div>
+                <div class="info-box success mt-1">
+                    <p><strong>顺序训练</strong>：每棵树拟合前一轮的残差，逐步纠正错误</p>
+                </div>
+            </div>
+        </div>
+
+        <table class="cmp-table mt-2">
+            <thead>
+                <tr><th>维度</th><th>随机森林</th><th>XGBoost</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>训练方式</td><td>并行（Bagging）</td><td>顺序（Boosting）</td></tr>
+                <tr><td>偏差-方差</td><td>降低方差</td><td>降低偏差</td></tr>
+                <tr><td>过拟合倾向</td><td>较低（天然抗过拟合）</td><td>需要正则化控制</td></tr>
+                <tr><td>准确率上限</td><td>中等偏上</td><td>通常更高</td></tr>
+                <tr><td>训练速度</td><td>易并行，可扩展</td><td>顺序依赖，但工程优化强</td></tr>
+                <tr><td>适用场景</td><td>快速基线、噪声数据</td><td>追求极致精度、竞赛</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- ====== Section 2: Bagging vs Boosting ====== -->
+    <div class="section" id="sec-bag-boost">
+        <div class="section-title">
+            <div class="icon">2</div>
+            <h2>Bagging vs Boosting 原理对比</h2>
+        </div>
+        <p class="section-desc">两种集成学习范式如何组合弱学习器：Bagging 独立组合降方差，Boosting 逐步纠错降偏差。</p>
+
+        <div class="anim-controls mb-2">
+            <button class="btn btn-sm btn-primary" id="btn-bag-boost-play">播放动画</button>
+            <button class="btn btn-sm" id="btn-bag-boost-reset">重置</button>
+        </div>
+
+        <div class="dual-panel">
+            <div>
+                <div class="panel-label rf">Bagging 路径</div>
+                <div class="canvas-wrap" style="min-height:380px;">
+                    <svg id="svg-bagging" class="flow-svg" viewBox="0 0 420 380"></svg>
+                </div>
+            </div>
+            <div>
+                <div class="panel-label xgb">Boosting 路径</div>
+                <div class="canvas-wrap" style="min-height:380px;">
+                    <svg id="svg-boosting" class="flow-svg" viewBox="0 0 420 380"></svg>
+                </div>
+            </div>
+        </div>
+
+        <div class="compare-grid cols-2 mt-2">
+            <div class="info-box">
+                <p><strong>Bagging 核心</strong>：从原始数据有放回抽样 → 训练多棵独立树 → 平均/投票。<br>效果：<span style="color:var(--accent-blue)">降低方差</span>，对噪声更鲁棒。</p>
+            </div>
+            <div class="info-box success">
+                <p><strong>Boosting 核心</strong>：顺序构建，每棵树拟合前一轮残差 → 累加预测。<br>效果：<span style="color:var(--accent-green)">降低偏差</span>，逐步逼近真实函数。</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- ====== Section 3: GBDT vs XGBoost ====== -->
+    <div class="section" id="sec-gbdt-xgb">
+        <div class="section-title">
+            <div class="icon">3</div>
+            <h2>GBDT vs XGBoost</h2>
+        </div>
+        <p class="section-desc">XGBoost 在传统梯度提升树(GBDT)基础上做了哪些关键改进？</p>
+
+        <div class="anim-controls mb-2">
+            <button class="btn btn-sm btn-primary" id="btn-checklist-play">逐条展示</button>
+        </div>
+
+        <div class="compare-grid cols-2">
+            <div class="card">
+                <div class="card-header">
+                    <h3 style="color:var(--accent-orange)">GBDT (传统)</h3>
+                </div>
+                <ul class="checklist" id="checklist-gbdt">
+                    <li><span class="check-icon yes">G</span><span class="check-label">一阶梯度（梯度下降）</span></li>
+                    <li><span class="check-icon no">-</span><span class="check-label">无二阶梯度</span></li>
+                    <li><span class="check-icon no">-</span><span class="check-label">无正则化项</span></li>
+                    <li><span class="check-icon no">-</span><span class="check-label">无列采样</span></li>
+                    <li><span class="check-icon no">-</span><span class="check-label">无稀疏感知</span></li>
+                    <li><span class="check-icon no">-</span><span class="check-label">未优化工程实现</span></li>
+                </ul>
+            </div>
+            <div class="card">
+                <div class="card-header">
+                    <h3 style="color:var(--accent-green)">XGBoost (增强)</h3>
+                </div>
+                <ul class="checklist" id="checklist-xgb">
+                    <li><span class="check-icon yes">G</span><span class="check-label">一阶梯度</span></li>
+                    <li>
+                        <span class="check-icon yes">H</span>
+                        <span class="check-label">二阶梯度（牛顿法）</span>
+                        <span class="check-tags"><span class="check-tag" style="background:rgba(22,199,154,0.15);color:var(--accent-green)">关键</span></span>
+                    </li>
+                    <li>
+                        <span class="check-icon yes">&Omega;</span>
+                        <span class="check-label">正则化项 <span class="katex-inline">\Omega(f) = \gamma T + \frac{1}{2}\lambda\|w\|^2</span></span>
+                        <span class="check-tags"><span class="check-tag" style="background:rgba(22,199,154,0.15);color:var(--accent-green)">关键</span></span>
+                    </li>
+                    <li><span class="check-icon yes">C</span><span class="check-label">列采样（类似随机森林思想）</span></li>
+                    <li><span class="check-icon yes">S</span><span class="check-label">稀疏感知（自动处理缺失值）</span></li>
+                    <li><span class="check-icon yes">E</span><span class="check-label">工程优化（缓存、并行分裂、分位数近似）</span></li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- Parabola vs Linear fit -->
+        <div class="card mt-2">
+            <h3 style="margin-bottom:0.75rem;">二阶 vs 一阶：权重估计的精度</h3>
+            <p style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:1rem;">
+                一阶梯度下降用直线近似损失函数来找最优权重，而二阶牛顿法用抛物线近似，一步就能更接近最优点。
+            </p>
+            <div class="dual-panel">
+                <div class="canvas-wrap">
+                    <canvas id="canvas-first-order" width="380" height="260"></canvas>
+                    <div style="text-align:center;padding:0.4rem;font-size:0.8rem;color:var(--accent-orange)">一阶：线性近似（需多步）</div>
+                </div>
+                <div class="canvas-wrap">
+                    <canvas id="canvas-second-order" width="380" height="260"></canvas>
+                    <div style="text-align:center;padding:0.4rem;font-size:0.8rem;color:var(--accent-green)">二阶：抛物线近似（一步到位）</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ====== Section 4: XGBoost vs LightGBM ====== -->
+    <div class="section" id="sec-xgb-lgb">
+        <div class="section-title">
+            <div class="icon">4</div>
+            <h2>XGBoost vs LightGBM</h2>
+        </div>
+        <p class="section-desc">两种主流梯度提升框架的核心区别——树生长策略与工程取舍。</p>
+
+        <div class="anim-controls mb-2">
+            <button class="btn btn-sm btn-primary" id="btn-tree-grow-play">播放生长动画</button>
+            <button class="btn btn-sm" id="btn-tree-grow-reset">重置</button>
+            <div class="progress-bar"><div class="fill" id="tree-grow-progress" style="width:0%"></div></div>
+            <span class="step-label" id="tree-grow-step">就绪</span>
+        </div>
+
+        <div class="dual-panel">
+            <div>
+                <div class="panel-label xgb">XGBoost: Level-wise（逐层生长）</div>
+                <div class="tree-viz-area" id="tree-level-wise">
+                    <svg id="svg-level-wise" width="100%" height="340" viewBox="0 0 500 340"></svg>
+                </div>
+            </div>
+            <div>
+                <div class="panel-label lgb">LightGBM: Leaf-wise（逐叶生长）</div>
+                <div class="tree-viz-area" id="tree-leaf-wise">
+                    <svg id="svg-leaf-wise" width="100%" height="340" viewBox="0 0 500 340"></svg>
+                </div>
+            </div>
+        </div>
+
+        <table class="cmp-table mt-2">
+            <thead><tr><th>维度</th><th>XGBoost</th><th>LightGBM</th></tr></thead>
+            <tbody>
+                <tr><td>树生长策略</td><td>Level-wise（逐层）</td><td>Leaf-wise（逐叶，最大增益优先）</td></tr>
+                <tr><td>分裂查找</td><td>预排序 / 直方图</td><td>直方图（GOSS + EFB）</td></tr>
+                <tr><td>训练速度</td><td>中等</td><td>更快（大数据优势显著）</td></tr>
+                <tr><td>小数据过拟合</td><td>较可控</td><td>Leaf-wise 易过拟合</td></tr>
+                <tr><td>大数据表现</td><td>好</td><td>更优（采样 + 直方图加速）</td></tr>
+                <tr><td>类别特征</td><td>需要编码</td><td>原生支持</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- ====== Section 5: When to Choose What ====== -->
+    <div class="section" id="sec-when">
+        <div class="section-title">
+            <div class="icon">5</div>
+            <h2>何时选择什么</h2>
+        </div>
+        <p class="section-desc">回答几个简单的问题，获得算法推荐。也可以查看完整的决策流程图。</p>
+
+        <!-- Decision Flowchart SVG -->
+        <div class="flowchart-area mb-2">
+            <svg id="svg-flowchart" width="100%" height="420" viewBox="0 0 900 420"></svg>
+        </div>
+
+        <!-- Interactive Quiz -->
+        <div class="quiz-card" id="quiz-area">
+            <div class="quiz-q" id="quiz-question">你的数据集大小是？</div>
+            <div class="quiz-options" id="quiz-options"></div>
+            <div id="quiz-recommendation" class="hidden"></div>
+        </div>
+    </div>
+</div>
+
+<!-- Shared scripts -->
+<script src="../shared/scripts/xgb-utils.js"></script>
+<script src="../shared/scripts/animation-controller.js"></script>
+<script src="../shared/scripts/matrix-renderer.js"></script>
+<script src="../shared/scripts/nav.js"></script>
+<script src="../shared/scripts/katex-init.js"></script>
+
+<script>
+/* ==========================================================
+   Module 08 — Comparison Visualizations
+   ========================================================== */
+(() => {
+'use strict';
+
+const COLORS = {
+    bg: '#1a1a2e', bgSec: '#16213e', bgCard: '#0f3460',
+    green: '#16c79a', blue: '#4fc3f7', purple: '#b388ff',
+    orange: '#ffab40', red: '#ff5252', yellow: '#ffd740',
+    pink: '#ff80ab', text: '#e8e8e8', muted: '#6c6c7c',
+    border: '#2a2a4a',
+    class0: '#4fc3f7', class1: '#ff80ab'
+};
+
+/* ============================================================
+   Section 1: Random Forest vs XGBoost — Decision Boundaries
+   ============================================================ */
+function initRFvsXGB() {
+    const data = XGBUtils.generateClassificationData(200, 42, 0.4);
+    const canvasRF = document.getElementById('canvas-rf');
+    const canvasXGB = document.getElementById('canvas-xgb');
+    const ctxRF = canvasRF.getContext('2d');
+    const ctxXGB = canvasXGB.getContext('2d');
+    const W = canvasRF.width, H = canvasRF.height;
+    const xMin = -5, xMax = 5, yMin = -5, yMax = 5;
+
+    function toPixel(x, y) {
+        return [(x - xMin) / (xMax - xMin) * W, (1 - (y - yMin) / (yMax - yMin)) * H];
+    }
+
+    function drawPoints(ctx) {
+        data.forEach(p => {
+            const [px, py] = toPixel(p.x, p.y);
+            ctx.beginPath();
+            ctx.arc(px, py, 3, 0, Math.PI * 2);
+            ctx.fillStyle = p.label === 1 ? COLORS.class1 : COLORS.class0;
+            ctx.globalAlpha = 0.85;
+            ctx.fill();
+            ctx.globalAlpha = 1;
+        });
+    }
+
+    function drawBackground(ctx) {
+        ctx.fillStyle = COLORS.bgSec;
+        ctx.fillRect(0, 0, W, H);
+    }
+
+    // Simulate RF: averaged axis-aligned cuts with randomness (creates smoother, broader boundary)
+    function rfPredict(x, y, trees) {
+        let sum = 0;
+        trees.forEach(t => {
+            let score = 0;
+            t.forEach(cut => {
+                if (cut.axis === 0) score += (x > cut.val ? cut.right : cut.left);
+                else score += (y > cut.val ? cut.right : cut.left);
+            });
+            sum += score > 0 ? 1 : 0;
+        });
+        return sum / trees.length;
+    }
+
+    // Simulate XGBoost: sequential residual fit (creates tighter, more adaptive boundary)
+    function xgbPredict(x, y, rounds) {
+        let score = 0;
+        rounds.forEach(r => {
+            let val = r.base;
+            r.splits.forEach(s => {
+                if (s.axis === 0) val += (x > s.val ? s.right : s.left);
+                else val += (y > s.val ? s.right : s.left);
+            });
+            score += val;
+        });
+        return 1 / (1 + Math.exp(-score));
+    }
+
+    // Build simulated RF trees
+    const rng = XGBUtils.seededRandom ? (() => { let s=42; return () => { s=(s*16807)%2147483647; return (s-1)/2147483646; }; })() : Math.random;
+    function buildRFTrees(nTrees) {
+        const trees = [];
+        for (let t = 0; t < nTrees; t++) {
+            const cuts = [];
+            for (let c = 0; c < 3; c++) {
+                const axis = rng() > 0.5 ? 0 : 1;
+                const val = (rng() - 0.5) * 8;
+                cuts.push({ axis, val, left: (rng() - 0.5) * 2, right: (rng() - 0.5) * 2 });
+            }
+            trees.push(cuts);
+        }
+        return trees;
+    }
+
+    // Build simulated XGBoost rounds (sequential residuals → more complex boundary)
+    function buildXGBRounds(nRounds) {
+        const rounds = [];
+        let s = 77;
+        for (let r = 0; r < nRounds; r++) {
+            const splits = [];
+            const nSplits = 2 + Math.floor(r * 0.5);
+            for (let i = 0; i < nSplits; i++) {
+                s = (s * 16807) % 2147483647;
+                const axis = s % 2;
+                s = (s * 16807) % 2147483647;
+                const val = ((s % 1000) / 1000 - 0.5) * 8;
+                s = (s * 16807) % 2147483647;
+                const lr = 0.3 / (1 + r * 0.1);
+                splits.push({ axis, val, left: -lr * (1 + (s % 100) / 100), right: lr * (1 + (s % 100) / 100) });
+            }
+            rounds.push({ base: r === 0 ? 0 : 0, splits });
+        }
+        return rounds;
+    }
+
+    // Better simulation: use actual data to fit simple boundary models
+    function betterRFPredict(x, y, nTrees) {
+        // RF: many trees averaging a simple boundary with jitter
+        let votes = 0;
+        let s = 123;
+        for (let t = 0; t < nTrees; t++) {
+            s = (s * 16807) % 2147483647;
+            const jitterX = ((s % 1000) / 1000 - 0.5) * 2;
+            s = (s * 16807) % 2147483647;
+            const jitterY = ((s % 1000) / 1000 - 0.5) * 1.5;
+            const boundary = 0.5 * (x + jitterX) + Math.sin(x + jitterX) * 1.2;
+            if (y > boundary + jitterY) votes++;
+        }
+        return votes / nTrees;
+    }
+
+    function betterXGBPredict(x, y, nRounds) {
+        // XGBoost: sequential fit → sharper boundary
+        let score = 0;
+        const trueBoundary = 0.5 * x + Math.sin(x) * 1.5;
+        const diff = y - trueBoundary;
+        // Approximate with increasing precision
+        for (let r = 0; r < nRounds; r++) {
+            const lr = 0.3;
+            const residual = diff - score;
+            score += lr * residual * (0.8 + r * 0.05);
+        }
+        return 1 / (1 + Math.exp(-score * 2));
+    }
+
+    function drawBoundary(ctx, predictFn, step) {
+        const res = 4;
+        for (let px = 0; px < W; px += res) {
+            for (let py = 0; py < H; py += res) {
+                const x = xMin + (px / W) * (xMax - xMin);
+                const y = yMax - (py / H) * (yMax - yMin);
+                const prob = predictFn(x, y, step);
+                const r = Math.round(79 + (255 - 79) * prob);
+                const g = Math.round(195 + (128 - 195) * prob);
+                const b = Math.round(247 + (171 - 247) * prob);
+                ctx.fillStyle = `rgba(${r},${g},${b},0.15)`;
+                ctx.fillRect(px, py, res, res);
+            }
+        }
+    }
+
+    let animRunning = false;
+    function runAnimation() {
+        if (animRunning) return;
+        animRunning = true;
+        const totalSteps = 10;
+        let step = 0;
+
+        function tick() {
+            step++;
+            const progress = (step / totalSteps) * 100;
+            document.getElementById('rf-xgb-progress').style.width = progress + '%';
+            document.getElementById('rf-xgb-step').textContent = `步骤 ${step}/${totalSteps}`;
+
+            // RF canvas
+            drawBackground(ctxRF);
+            drawBoundary(ctxRF, (x, y) => betterRFPredict(x, y, step * 5), step);
+            drawPoints(ctxRF);
+            ctxRF.fillStyle = COLORS.muted;
+            ctxRF.font = '12px JetBrains Mono';
+            ctxRF.fillText(`${step * 5} 棵树`, 10, 20);
+
+            // XGB canvas
+            drawBackground(ctxXGB);
+            drawBoundary(ctxXGB, (x, y) => betterXGBPredict(x, y, step * 2), step);
+            drawPoints(ctxXGB);
+            ctxXGB.fillStyle = COLORS.muted;
+            ctxXGB.font = '12px JetBrains Mono';
+            ctxXGB.fillText(`${step * 2} 轮迭代`, 10, 20);
+
+            if (step < totalSteps) {
+                setTimeout(tick, 400);
+            } else {
+                animRunning = false;
+                document.getElementById('rf-xgb-step').textContent = '完成';
+            }
+        }
+        tick();
+    }
+
+    function resetRFXGB() {
+        animRunning = false;
+        drawBackground(ctxRF);
+        drawPoints(ctxRF);
+        drawBackground(ctxXGB);
+        drawPoints(ctxXGB);
+        document.getElementById('rf-xgb-progress').style.width = '0%';
+        document.getElementById('rf-xgb-step').textContent = '就绪';
+    }
+
+    document.getElementById('btn-rf-xgb-run').addEventListener('click', runAnimation);
+    document.getElementById('btn-rf-xgb-reset').addEventListener('click', resetRFXGB);
+    resetRFXGB();
+}
+
+/* ============================================================
+   Section 2: Bagging vs Boosting Animated Diagram
+   ============================================================ */
+function initBaggingBoosting() {
+    const svgBag = d3.select('#svg-bagging');
+    const svgBoost = d3.select('#svg-boosting');
+
+    function drawBaggingDiagram(svg) {
+        const g = svg.append('g');
+        // Original data box
+        g.append('rect').attr('x', 140).attr('y', 10).attr('width', 140).attr('height', 36)
+            .attr('rx', 8).attr('fill', COLORS.bgCard).attr('stroke', COLORS.blue);
+        g.append('text').attr('x', 210).attr('y', 33).attr('text-anchor', 'middle')
+            .attr('fill', COLORS.blue).attr('font-size', 13).attr('font-weight', 600).text('原始数据集');
+
+        // Bootstrap samples
+        const bx = [60, 160, 260];
+        bx.forEach((x, i) => {
+            // Arrow down
+            g.append('line').attr('x1', 210).attr('y1', 50).attr('x2', x + 50).attr('y2', 85)
+                .attr('stroke', COLORS.border).attr('stroke-width', 1.5).attr('class', 'bag-arrow').attr('opacity', 0);
+            // Sample box
+            g.append('rect').attr('x', x).attr('y', 90).attr('width', 100).attr('height', 30)
+                .attr('rx', 6).attr('fill', COLORS.bgSec).attr('stroke', COLORS.border).attr('class', 'bag-sample').attr('opacity', 0);
+            g.append('text').attr('x', x + 50).attr('y', 110).attr('text-anchor', 'middle')
+                .attr('fill', COLORS.text).attr('font-size', 11).text(`自助样本 ${i + 1}`).attr('class', 'bag-sample').attr('opacity', 0);
+        });
+
+        // Independent trees
+        bx.forEach((x, i) => {
+            g.append('line').attr('x1', x + 50).attr('y1', 124).attr('x2', x + 50).attr('y2', 155)
+                .attr('stroke', COLORS.border).attr('stroke-width', 1.5).attr('class', 'bag-tree-arrow').attr('opacity', 0);
+            g.append('rect').attr('x', x + 10).attr('y', 160).attr('width', 80).attr('height', 55)
+                .attr('rx', 8).attr('fill', 'rgba(79,195,247,0.1)').attr('stroke', COLORS.blue).attr('class', 'bag-tree').attr('opacity', 0);
+            g.append('text').attr('x', x + 50).attr('y', 185).attr('text-anchor', 'middle')
+                .attr('fill', COLORS.blue).attr('font-size', 11).attr('font-weight', 600).text(`树 ${i + 1}`).attr('class', 'bag-tree').attr('opacity', 0);
+            g.append('text').attr('x', x + 50).attr('y', 205).attr('text-anchor', 'middle')
+                .attr('fill', COLORS.muted).attr('font-size', 9).text('独立训练').attr('class', 'bag-tree').attr('opacity', 0);
+        });
+
+        // Arrows to average
+        bx.forEach((x) => {
+            g.append('line').attr('x1', x + 50).attr('y1', 220).attr('x2', 210).attr('y2', 270)
+                .attr('stroke', COLORS.border).attr('stroke-width', 1.5).attr('class', 'bag-vote-arrow').attr('opacity', 0);
+        });
+
+        // Average box
+        g.append('rect').attr('x', 130).attr('y', 275).attr('width', 160).attr('height', 40)
+            .attr('rx', 8).attr('fill', 'rgba(79,195,247,0.15)').attr('stroke', COLORS.blue).attr('stroke-width', 2).attr('class', 'bag-final').attr('opacity', 0);
+        g.append('text').attr('x', 210).attr('y', 300).attr('text-anchor', 'middle')
+            .attr('fill', COLORS.blue).attr('font-size', 13).attr('font-weight', 700).text('平均 / 投票').attr('class', 'bag-final').attr('opacity', 0);
+
+        // Result label
+        g.append('text').attr('x', 210).attr('y', 345).attr('text-anchor', 'middle')
+            .attr('fill', COLORS.text).attr('font-size', 12).text('降低方差').attr('class', 'bag-result').attr('opacity', 0);
+    }
+
+    function drawBoostingDiagram(svg) {
+        const g = svg.append('g');
+        // Original data
+        g.append('rect').attr('x', 140).attr('y', 10).attr('width', 140).attr('height', 36)
+            .attr('rx', 8).attr('fill', COLORS.bgCard).attr('stroke', COLORS.green);
+        g.append('text').attr('x', 210).attr('y', 33).attr('text-anchor', 'middle')
+            .attr('fill', COLORS.green).attr('font-size', 13).attr('font-weight', 600).text('原始数据集');
+
+        const steps = ['树 1: 拟合数据', '计算残差', '树 2: 拟合残差', '更新残差', '树 3: 拟合残差'];
+        const yPositions = [80, 120, 160, 200, 240];
+
+        steps.forEach((label, i) => {
+            const isTree = i % 2 === 0;
+            // Arrow
+            g.append('line').attr('x1', 210).attr('y1', i === 0 ? 50 : yPositions[i - 1] + 25)
+                .attr('x2', 210).attr('y2', yPositions[i] - 5)
+                .attr('stroke', COLORS.border).attr('stroke-width', 1.5).attr('class', 'boost-arrow').attr('data-step', i).attr('opacity', 0);
+
+            if (isTree) {
+                g.append('rect').attr('x', 110).attr('y', yPositions[i] - 5).attr('width', 200).attr('height', 34)
+                    .attr('rx', 8).attr('fill', 'rgba(22,199,154,0.1)').attr('stroke', COLORS.green).attr('class', 'boost-step').attr('data-step', i).attr('opacity', 0);
+            } else {
+                g.append('rect').attr('x', 110).attr('y', yPositions[i] - 5).attr('width', 200).attr('height', 34)
+                    .attr('rx', 8).attr('fill', COLORS.bgSec).attr('stroke', COLORS.orange).attr('stroke-dasharray', '4,3').attr('class', 'boost-step').attr('data-step', i).attr('opacity', 0);
+            }
+            g.append('text').attr('x', 210).attr('y', yPositions[i] + 16).attr('text-anchor', 'middle')
+                .attr('fill', isTree ? COLORS.green : COLORS.orange).attr('font-size', 11).attr('font-weight', 600)
+                .text(label).attr('class', 'boost-step').attr('data-step', i).attr('opacity', 0);
+        });
+
+        // Final sum
+        g.append('line').attr('x1', 210).attr('y1', 270).attr('x2', 210).attr('y2', 290)
+            .attr('stroke', COLORS.border).attr('stroke-width', 1.5).attr('class', 'boost-final').attr('opacity', 0);
+        g.append('rect').attr('x', 120).attr('y', 295).attr('width', 180).attr('height', 40)
+            .attr('rx', 8).attr('fill', 'rgba(22,199,154,0.15)').attr('stroke', COLORS.green).attr('stroke-width', 2).attr('class', 'boost-final').attr('opacity', 0);
+        g.append('text').attr('x', 210).attr('y', 320).attr('text-anchor', 'middle')
+            .attr('fill', COLORS.green).attr('font-size', 13).attr('font-weight', 700).text('累加预测').attr('class', 'boost-final').attr('opacity', 0);
+        g.append('text').attr('x', 210).attr('y', 360).attr('text-anchor', 'middle')
+            .attr('fill', COLORS.text).attr('font-size', 12).text('降低偏差').attr('class', 'boost-result').attr('opacity', 0);
+    }
+
+    drawBaggingDiagram(svgBag);
+    drawBoostingDiagram(svgBoost);
+
+    let playing = false;
+    function playAnimation() {
+        if (playing) return;
+        playing = true;
+        const tl = gsap.timeline({ onComplete: () => { playing = false; } });
+
+        // Bagging animation
+        tl.to('#svg-bagging .bag-arrow', { opacity: 1, duration: 0.3, stagger: 0.1 })
+          .to('#svg-bagging .bag-sample', { opacity: 1, duration: 0.3, stagger: 0.05 })
+          .to('#svg-bagging .bag-tree-arrow', { opacity: 1, duration: 0.2, stagger: 0.1 })
+          .to('#svg-bagging .bag-tree', { opacity: 1, duration: 0.4, stagger: 0.05 })
+          .to('#svg-bagging .bag-vote-arrow', { opacity: 1, duration: 0.3, stagger: 0.1 })
+          .to('#svg-bagging .bag-final', { opacity: 1, duration: 0.4 })
+          .to('#svg-bagging .bag-result', { opacity: 1, duration: 0.3 });
+
+        // Boosting animation (slightly delayed)
+        const tl2 = gsap.timeline({ delay: 0.3 });
+        for (let i = 0; i < 5; i++) {
+            tl2.to(`#svg-boosting .boost-arrow[data-step="${i}"]`, { opacity: 1, duration: 0.2 })
+               .to(`#svg-boosting .boost-step[data-step="${i}"]`, { opacity: 1, duration: 0.3 });
+        }
+        tl2.to('#svg-boosting .boost-final', { opacity: 1, duration: 0.4 })
+           .to('#svg-boosting .boost-result', { opacity: 1, duration: 0.3 });
+    }
+
+    function resetAnimation() {
+        playing = false;
+        gsap.killTweensOf('#svg-bagging *');
+        gsap.killTweensOf('#svg-boosting *');
+        svgBag.selectAll('.bag-arrow, .bag-sample, .bag-tree-arrow, .bag-tree, .bag-vote-arrow, .bag-final, .bag-result').attr('opacity', 0);
+        svgBoost.selectAll('.boost-arrow, .boost-step, .boost-final, .boost-result').attr('opacity', 0);
+    }
+
+    document.getElementById('btn-bag-boost-play').addEventListener('click', playAnimation);
+    document.getElementById('btn-bag-boost-reset').addEventListener('click', resetAnimation);
+}
+
+/* ============================================================
+   Section 3: GBDT vs XGBoost Checklist + Optimization Viz
+   ============================================================ */
+function initGBDTvsXGB() {
+    const checklistGBDT = document.querySelectorAll('#checklist-gbdt .check-icon');
+    const checklistXGB = document.querySelectorAll('#checklist-xgb .check-icon');
+
+    document.getElementById('btn-checklist-play').addEventListener('click', () => {
+        const allIcons = [...checklistGBDT, ...checklistXGB];
+        allIcons.forEach((el, i) => {
+            gsap.to(el, {
+                opacity: 1,
+                scale: 1,
+                duration: 0.4,
+                delay: i * 0.2,
+                ease: 'back.out(2)'
+            });
+        });
+    });
+
+    // Draw first-order vs second-order optimization
+    drawOptimizationComparison();
+}
+
+function drawOptimizationComparison() {
+    const c1 = document.getElementById('canvas-first-order');
+    const c2 = document.getElementById('canvas-second-order');
+    const ctx1 = c1.getContext('2d');
+    const ctx2 = c2.getContext('2d');
+    const W = c1.width, H = c1.height;
+
+    // Loss function: f(w) = (w - 2)^2 + 1
+    function loss(w) { return (w - 2) * (w - 2) + 1; }
+    function grad(w) { return 2 * (w - 2); }
+    function hess() { return 2; }
+
+    const wMin = -1, wMax = 5;
+    const lMax = 12;
+    function toP(w, l) {
+        return [(w - wMin) / (wMax - wMin) * (W - 60) + 30, H - 40 - (l / lMax) * (H - 60)];
+    }
+
+    function drawAxes(ctx) {
+        ctx.fillStyle = COLORS.bgSec;
+        ctx.fillRect(0, 0, W, H);
+        ctx.strokeStyle = COLORS.border;
+        ctx.lineWidth = 1;
+        // x-axis
+        ctx.beginPath();
+        const [x0, y0] = toP(wMin, 0);
+        const [x1] = toP(wMax, 0);
+        ctx.moveTo(x0, y0); ctx.lineTo(x1, y0); ctx.stroke();
+        // y-axis
+        ctx.beginPath();
+        const [, yt] = toP(wMin, lMax);
+        ctx.moveTo(x0, y0); ctx.lineTo(x0, yt); ctx.stroke();
+        ctx.fillStyle = COLORS.muted;
+        ctx.font = '10px JetBrains Mono';
+        ctx.fillText('w', x1 + 5, y0 + 4);
+        ctx.fillText('L(w)', x0 - 5, yt - 8);
+    }
+
+    function drawLossCurve(ctx) {
+        ctx.beginPath();
+        ctx.strokeStyle = COLORS.yellow;
+        ctx.lineWidth = 2;
+        for (let w = wMin; w <= wMax; w += 0.05) {
+            const [px, py] = toP(w, loss(w));
+            w === wMin ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+        }
+        ctx.stroke();
+    }
+
+    // First-order: gradient descent with tangent lines
+    function drawFirstOrder() {
+        drawAxes(ctx1);
+        drawLossCurve(ctx1);
+        let w = -0.5;
+        const lr = 0.3;
+        const steps = 5;
+        for (let i = 0; i < steps; i++) {
+            const g = grad(w);
+            const l = loss(w);
+            const [px, py] = toP(w, l);
+
+            // Draw tangent line
+            ctx1.beginPath();
+            ctx1.strokeStyle = COLORS.orange;
+            ctx1.lineWidth = 1.5;
+            ctx1.setLineDash([4, 3]);
+            const tw1 = w - 1, tw2 = w + 1;
+            const tl1 = l + g * (tw1 - w), tl2 = l + g * (tw2 - w);
+            const [px1, py1] = toP(tw1, Math.max(0, tl1));
+            const [px2, py2] = toP(tw2, Math.max(0, tl2));
+            ctx1.moveTo(px1, py1); ctx1.lineTo(px2, py2);
+            ctx1.stroke();
+            ctx1.setLineDash([]);
+
+            // Point
+            ctx1.beginPath();
+            ctx1.arc(px, py, 5, 0, Math.PI * 2);
+            ctx1.fillStyle = i === steps - 1 ? COLORS.orange : COLORS.yellow;
+            ctx1.fill();
+
+            // Step label
+            ctx1.fillStyle = COLORS.muted;
+            ctx1.font = '9px JetBrains Mono';
+            ctx1.fillText(`w${i}`, px + 7, py - 5);
+
+            w = w - lr * g;
+        }
+        // Final point
+        const [fpx, fpy] = toP(w, loss(w));
+        ctx1.beginPath();
+        ctx1.arc(fpx, fpy, 5, 0, Math.PI * 2);
+        ctx1.fillStyle = COLORS.orange;
+        ctx1.fill();
+
+        // Optimum marker
+        const [ox, oy] = toP(2, 1);
+        ctx1.beginPath();
+        ctx1.arc(ox, oy, 4, 0, Math.PI * 2);
+        ctx1.strokeStyle = COLORS.green;
+        ctx1.lineWidth = 2;
+        ctx1.stroke();
+        ctx1.fillStyle = COLORS.muted;
+        ctx1.font = '10px JetBrains Mono';
+        ctx1.fillText('最优', ox + 7, oy + 3);
+    }
+
+    // Second-order: Newton's method with parabola fit
+    function drawSecondOrder() {
+        drawAxes(ctx2);
+        drawLossCurve(ctx2);
+        let w = -0.5;
+        const steps = 2;
+        for (let i = 0; i < steps; i++) {
+            const g = grad(w);
+            const h = hess();
+            const l = loss(w);
+            const [px, py] = toP(w, l);
+
+            // Draw parabola approximation
+            ctx2.beginPath();
+            ctx2.strokeStyle = COLORS.green;
+            ctx2.lineWidth = 1.5;
+            ctx2.setLineDash([4, 3]);
+            for (let dw = -2; dw <= 2; dw += 0.05) {
+                const wt = w + dw;
+                const lt = l + g * dw + 0.5 * h * dw * dw;
+                if (lt < 0 || lt > lMax) continue;
+                const [qx, qy] = toP(wt, lt);
+                dw === -2 ? ctx2.moveTo(qx, qy) : ctx2.lineTo(qx, qy);
+            }
+            ctx2.stroke();
+            ctx2.setLineDash([]);
+
+            // Point
+            ctx2.beginPath();
+            ctx2.arc(px, py, 5, 0, Math.PI * 2);
+            ctx2.fillStyle = i === 0 ? COLORS.yellow : COLORS.green;
+            ctx2.fill();
+            ctx2.fillStyle = COLORS.muted;
+            ctx2.font = '9px JetBrains Mono';
+            ctx2.fillText(`w${i}`, px + 7, py - 5);
+
+            // Newton step: w_new = w - g/h
+            w = w - g / h;
+        }
+        // Final point (should be at optimum)
+        const [fpx, fpy] = toP(w, loss(w));
+        ctx2.beginPath();
+        ctx2.arc(fpx, fpy, 6, 0, Math.PI * 2);
+        ctx2.fillStyle = COLORS.green;
+        ctx2.fill();
+        ctx2.fillStyle = COLORS.green;
+        ctx2.font = '11px JetBrains Mono';
+        ctx2.fillText('一步到达最优!', fpx + 10, fpy + 4);
+    }
+
+    drawFirstOrder();
+    drawSecondOrder();
+}
+
+/* ============================================================
+   Section 4: XGBoost vs LightGBM — Tree Growth Animation
+   ============================================================ */
+function initTreeGrowth() {
+    const svgLW = d3.select('#svg-level-wise');
+    const svgLeaf = d3.select('#svg-leaf-wise');
+
+    // Tree node data: id, x, y, depth, gain, children, isLeaf
+    const nodeW = 50, nodeH = 28, vGap = 60, startY = 30;
+
+    function nodePositions(depth, index, totalAtDepth) {
+        const totalWidth = 480;
+        const spacing = totalWidth / (totalAtDepth + 1);
+        return { x: spacing * (index + 1), y: startY + depth * vGap };
+    }
+
+    // Build a binary tree with gains
+    const gains = [45, 32, 38, 15, 22, 28, 20, 8, 10, 18, 12, 25, 14, 16, 9];
+    function buildTree(maxDepth) {
+        const nodes = [];
+        let id = 0;
+        function addNode(depth, idx, total) {
+            const pos = nodePositions(depth, idx, total);
+            const node = { id: id++, depth, pos, gain: gains[nodes.length % gains.length], children: [] };
+            nodes.push(node);
+            if (depth < maxDepth) {
+                const leftId = nodes.length;
+                addNode(depth + 1, idx * 2, total * 2);
+                const rightId = nodes.length;
+                addNode(depth + 1, idx * 2 + 1, total * 2);
+                node.children = [leftId, rightId];
+            }
+            return node;
+        }
+        addNode(0, 0, 1);
+        return nodes;
+    }
+
+    const treeNodes = buildTree(3);
+
+    // Level-wise: animate by depth level
+    function drawLevelWise(svg, step) {
+        svg.selectAll('*').remove();
+        const g = svg.append('g');
+
+        treeNodes.forEach(node => {
+            if (node.depth > step) return;
+            const opacity = node.depth === step ? 1 : 0.6;
+
+            // Draw edges to children
+            node.children.forEach(cid => {
+                const child = treeNodes[cid];
+                if (child.depth <= step) {
+                    g.append('line')
+                        .attr('x1', node.pos.x).attr('y1', node.pos.y + nodeH / 2)
+                        .attr('x2', child.pos.x).attr('y2', child.pos.y - nodeH / 2)
+                        .attr('stroke', COLORS.border).attr('stroke-width', 1.5);
+                }
+            });
+
+            // Node rectangle
+            const isCurrentLevel = node.depth === step;
+            g.append('rect')
+                .attr('x', node.pos.x - nodeW / 2).attr('y', node.pos.y - nodeH / 2)
+                .attr('width', nodeW).attr('height', nodeH).attr('rx', 6)
+                .attr('fill', isCurrentLevel ? 'rgba(22,199,154,0.2)' : COLORS.bgSec)
+                .attr('stroke', isCurrentLevel ? COLORS.green : COLORS.border)
+                .attr('stroke-width', isCurrentLevel ? 2 : 1)
+                .attr('opacity', opacity);
+
+            g.append('text')
+                .attr('x', node.pos.x).attr('y', node.pos.y + 4)
+                .attr('text-anchor', 'middle')
+                .attr('fill', isCurrentLevel ? COLORS.green : COLORS.muted)
+                .attr('font-size', 10).attr('font-weight', isCurrentLevel ? 700 : 400)
+                .text(`G=${node.gain}`);
+        });
+
+        // Label
+        g.append('text').attr('x', 250).attr('y', 330).attr('text-anchor', 'middle')
+            .attr('fill', COLORS.green).attr('font-size', 12).attr('font-weight', 600)
+            .text(`深度 ${step}: 同层所有节点一起分裂`);
+    }
+
+    // Leaf-wise: always split the leaf with highest gain
+    function drawLeafWise(svg, step) {
+        svg.selectAll('*').remove();
+        const g = svg.append('g');
+
+        // Compute leaf-wise order: start with root, always expand highest gain leaf
+        const expanded = new Set();
+        const expandOrder = [];
+        const available = [0]; // root
+
+        for (let s = 0; s <= step && available.length > 0; s++) {
+            // Find leaf with max gain
+            let bestIdx = 0;
+            let bestGain = -1;
+            available.forEach((nodeIdx, i) => {
+                if (treeNodes[nodeIdx].gain > bestGain) {
+                    bestGain = treeNodes[nodeIdx].gain;
+                    bestIdx = i;
+                }
+            });
+            const chosen = available[bestIdx];
+            available.splice(bestIdx, 1);
+            expanded.add(chosen);
+            expandOrder.push(chosen);
+            // Add children as new available
+            treeNodes[chosen].children.forEach(cid => available.push(cid));
+        }
+
+        const lastExpanded = expandOrder[expandOrder.length - 1];
+
+        // Draw all nodes that are visible (expanded + their immediate children)
+        const visible = new Set();
+        expandOrder.forEach(idx => {
+            visible.add(idx);
+            treeNodes[idx].children.forEach(cid => visible.add(cid));
+        });
+
+        treeNodes.forEach(node => {
+            if (!visible.has(node.id)) return;
+            const isLatest = node.id === lastExpanded;
+            const isExpanded = expanded.has(node.id);
+            const isLeafCandidate = !isExpanded && visible.has(node.id);
+
+            // Edges
+            node.children.forEach(cid => {
+                if (visible.has(cid)) {
+                    g.append('line')
+                        .attr('x1', node.pos.x).attr('y1', node.pos.y + nodeH / 2)
+                        .attr('x2', treeNodes[cid].pos.x).attr('y2', treeNodes[cid].pos.y - nodeH / 2)
+                        .attr('stroke', COLORS.border).attr('stroke-width', 1.5);
+                }
+            });
+
+            const color = isLatest ? COLORS.purple : isLeafCandidate ? COLORS.orange : COLORS.muted;
+            g.append('rect')
+                .attr('x', node.pos.x - nodeW / 2).attr('y', node.pos.y - nodeH / 2)
+                .attr('width', nodeW).attr('height', nodeH).attr('rx', 6)
+                .attr('fill', isLatest ? 'rgba(179,136,255,0.2)' : isLeafCandidate ? 'rgba(255,171,64,0.1)' : COLORS.bgSec)
+                .attr('stroke', isLatest ? COLORS.purple : isLeafCandidate ? COLORS.orange : COLORS.border)
+                .attr('stroke-width', isLatest ? 2 : 1);
+
+            g.append('text')
+                .attr('x', node.pos.x).attr('y', node.pos.y + 4)
+                .attr('text-anchor', 'middle')
+                .attr('fill', color).attr('font-size', 10)
+                .attr('font-weight', isLatest ? 700 : 400)
+                .text(`G=${node.gain}`);
+        });
+
+        g.append('text').attr('x', 250).attr('y', 330).attr('text-anchor', 'middle')
+            .attr('fill', COLORS.purple).attr('font-size', 12).attr('font-weight', 600)
+            .text(`步骤 ${step}: 选增益最大的叶子分裂`);
+    }
+
+    let currentStep = 0;
+    const maxSteps = 7;
+    let growAnim = null;
+
+    function playGrowth() {
+        if (growAnim) return;
+        currentStep = 0;
+        function tick() {
+            const lwStep = Math.min(currentStep, 3);
+            drawLevelWise(svgLW, lwStep);
+            drawLeafWise(svgLeaf, currentStep);
+
+            const progress = ((currentStep + 1) / maxSteps) * 100;
+            document.getElementById('tree-grow-progress').style.width = progress + '%';
+            document.getElementById('tree-grow-step').textContent = `步骤 ${currentStep + 1}/${maxSteps}`;
+
+            currentStep++;
+            if (currentStep < maxSteps) {
+                growAnim = setTimeout(tick, 700);
+            } else {
+                growAnim = null;
+                document.getElementById('tree-grow-step').textContent = '完成';
+            }
+        }
+        tick();
+    }
+
+    function resetGrowth() {
+        if (growAnim) { clearTimeout(growAnim); growAnim = null; }
+        currentStep = 0;
+        svgLW.selectAll('*').remove();
+        svgLeaf.selectAll('*').remove();
+        document.getElementById('tree-grow-progress').style.width = '0%';
+        document.getElementById('tree-grow-step').textContent = '就绪';
+
+        // Draw initial state (root only)
+        drawLevelWise(svgLW, 0);
+        drawLeafWise(svgLeaf, 0);
+    }
+
+    document.getElementById('btn-tree-grow-play').addEventListener('click', playGrowth);
+    document.getElementById('btn-tree-grow-reset').addEventListener('click', resetGrowth);
+    resetGrowth();
+}
+
+/* ============================================================
+   Section 5: When to Choose What — Flowchart + Quiz
+   ============================================================ */
+function initDecisionGuide() {
+    drawFlowchart();
+    initQuiz();
+}
+
+function drawFlowchart() {
+    const svg = d3.select('#svg-flowchart');
+    const g = svg.append('g');
+
+    const nodes = [
+        { id: 'start', x: 450, y: 30, w: 160, h: 36, text: '你的数据特点？', type: 'question' },
+        { id: 'q-size', x: 200, y: 100, w: 160, h: 36, text: '数据量 < 1K?', type: 'question' },
+        { id: 'q-large', x: 700, y: 100, w: 160, h: 36, text: '数据量 > 100K?', type: 'question' },
+        { id: 'a-rf', x: 80, y: 190, w: 150, h: 36, text: '随机森林 / XGBoost', type: 'answer' },
+        { id: 'q-interp', x: 320, y: 190, w: 170, h: 36, text: '需要可解释性？', type: 'question' },
+        { id: 'a-lgbm', x: 780, y: 190, w: 130, h: 36, text: 'LightGBM', type: 'answer' },
+        { id: 'q-sparse', x: 600, y: 190, w: 150, h: 36, text: '稀疏特征多？', type: 'question' },
+        { id: 'a-tree', x: 230, y: 280, w: 140, h: 36, text: '单棵树 / RF', type: 'answer' },
+        { id: 'a-xgb-best', x: 420, y: 280, w: 180, h: 36, text: 'XGBoost + 调参', type: 'answer' },
+        { id: 'a-xgb-sparse', x: 630, y: 280, w: 140, h: 36, text: 'XGBoost', type: 'answer' },
+        { id: 'a-lgbm2', x: 780, y: 280, w: 140, h: 36, text: 'LightGBM + 调参', type: 'answer' },
+    ];
+
+    const edges = [
+        { from: 'start', to: 'q-size', label: '小数据' },
+        { from: 'start', to: 'q-large', label: '大数据' },
+        { from: 'q-size', to: 'a-rf', label: '是' },
+        { from: 'q-size', to: 'q-interp', label: '否' },
+        { from: 'q-large', to: 'a-lgbm', label: '是' },
+        { from: 'q-large', to: 'q-sparse', label: '否' },
+        { from: 'q-interp', to: 'a-tree', label: '是' },
+        { from: 'q-interp', to: 'a-xgb-best', label: '否' },
+        { from: 'q-sparse', to: 'a-xgb-sparse', label: '是' },
+        { from: 'q-sparse', to: 'a-lgbm2', label: '否' },
+    ];
+
+    const nodeMap = {};
+    nodes.forEach(n => nodeMap[n.id] = n);
+
+    // Draw edges
+    edges.forEach(e => {
+        const from = nodeMap[e.from], to = nodeMap[e.to];
+        const x1 = from.x, y1 = from.y + from.h / 2;
+        const x2 = to.x, y2 = to.y - to.h / 2;
+        const midY = (y1 + y2) / 2;
+
+        g.append('path')
+            .attr('d', `M${x1},${y1} C${x1},${midY} ${x2},${midY} ${x2},${y2}`)
+            .attr('fill', 'none').attr('stroke', COLORS.border).attr('stroke-width', 1.5)
+            .attr('class', `edge-${e.from}-${e.to}`);
+
+        // Edge label
+        const lx = (x1 + x2) / 2, ly = midY - 6;
+        g.append('text').attr('x', lx).attr('y', ly).attr('text-anchor', 'middle')
+            .attr('fill', COLORS.muted).attr('font-size', 10).text(e.label);
+    });
+
+    // Draw nodes
+    nodes.forEach(n => {
+        const isAnswer = n.type === 'answer';
+        g.append('rect')
+            .attr('x', n.x - n.w / 2).attr('y', n.y - n.h / 2)
+            .attr('width', n.w).attr('height', n.h)
+            .attr('rx', isAnswer ? 8 : 18)
+            .attr('fill', isAnswer ? 'rgba(22,199,154,0.1)' : COLORS.bgCard)
+            .attr('stroke', isAnswer ? COLORS.green : COLORS.blue)
+            .attr('stroke-width', 1.5)
+            .attr('class', `flownode-${n.id}`);
+
+        g.append('text')
+            .attr('x', n.x).attr('y', n.y + 5)
+            .attr('text-anchor', 'middle')
+            .attr('fill', isAnswer ? COLORS.green : COLORS.text)
+            .attr('font-size', 11).attr('font-weight', isAnswer ? 700 : 400)
+            .text(n.text).attr('class', `flowtext-${n.id}`);
+    });
+}
+
+function initQuiz() {
+    const questions = [
+        {
+            q: '你的数据集大小是？',
+            opts: [
+                { text: '小数据 (<1K 样本)', val: 'small' },
+                { text: '中等 (1K-100K)', val: 'medium' },
+                { text: '大数据 (>100K)', val: 'large' }
+            ]
+        },
+        {
+            q: '最看重什么？',
+            opts: [
+                { text: '预测精度', val: 'accuracy' },
+                { text: '模型可解释性', val: 'interpretability' },
+                { text: '训练速度', val: 'speed' }
+            ]
+        },
+        {
+            q: '特征是否高度稀疏（如文本、ID类）？',
+            opts: [
+                { text: '是，很多稀疏特征', val: 'sparse' },
+                { text: '否，主要是密集数值特征', val: 'dense' }
+            ]
+        }
+    ];
+
+    let currentQ = 0;
+    const answers = {};
+
+    function renderQuestion() {
+        const q = questions[currentQ];
+        document.getElementById('quiz-question').textContent = `问题 ${currentQ + 1}/${questions.length}: ${q.q}`;
+        const optContainer = document.getElementById('quiz-options');
+        optContainer.innerHTML = '';
+        document.getElementById('quiz-recommendation').classList.add('hidden');
+
+        q.opts.forEach(opt => {
+            const btn = document.createElement('button');
+            btn.className = 'quiz-opt';
+            btn.textContent = opt.text;
+            btn.addEventListener('click', () => {
+                answers[currentQ] = opt.val;
+                btn.classList.add('selected');
+                setTimeout(() => {
+                    currentQ++;
+                    if (currentQ < questions.length) {
+                        renderQuestion();
+                    } else {
+                        showRecommendation();
+                    }
+                }, 300);
+            });
+            optContainer.appendChild(btn);
+        });
+    }
+
+    function showRecommendation() {
+        const size = answers[0];
+        const priority = answers[1];
+        const sparse = answers[2];
+
+        let algo = '', reason = '';
+
+        if (size === 'small') {
+            if (priority === 'interpretability') {
+                algo = '随机森林 / 单棵决策树';
+                reason = '小数据 + 可解释性需求 → 简单模型不易过拟合，且容易理解。';
+            } else {
+                algo = 'XGBoost（少量迭代 + 较强正则化）';
+                reason = '小数据上 XGBoost 配合正则化可以获得很好的精度，但要注意控制过拟合。';
+            }
+        } else if (size === 'large') {
+            if (priority === 'speed') {
+                algo = 'LightGBM';
+                reason = '大数据 + 追求速度 → LightGBM 的直方图加速 + GOSS 采样是最佳选择。';
+            } else if (sparse === 'sparse') {
+                algo = 'XGBoost';
+                reason = '大数据 + 稀疏特征 → XGBoost 的稀疏感知特性可以自动高效处理缺失值和稀疏输入。';
+            } else {
+                algo = 'LightGBM / XGBoost（均可）';
+                reason = '大数据 + 密集特征 → 两者都是好选择。LightGBM 更快，XGBoost 略微更稳健。';
+            }
+        } else {
+            // medium
+            if (priority === 'interpretability') {
+                algo = '随机森林';
+                reason = '中等数据 + 可解释性 → 随机森林提供特征重要性排序，较易理解。';
+            } else if (sparse === 'sparse') {
+                algo = 'XGBoost';
+                reason = '中等数据 + 稀疏特征 → XGBoost 的稀疏感知特性是天然优势。';
+            } else if (priority === 'speed') {
+                algo = 'LightGBM';
+                reason = '追求速度时 LightGBM 通常更快，直方图算法加速明显。';
+            } else {
+                algo = 'XGBoost + 仔细调参';
+                reason = '中等数据追求极致精度 → XGBoost 配合交叉验证调参是经典竞赛方案。';
+            }
+        }
+
+        const recDiv = document.getElementById('quiz-recommendation');
+        recDiv.classList.remove('hidden');
+        recDiv.innerHTML = `
+            <div class="recommendation-box">
+                <h4>推荐算法: ${algo}</h4>
+                <p style="color:var(--text-secondary);font-size:0.9rem;margin:0">${reason}</p>
+            </div>
+        `;
+
+        // Add restart button
+        const optContainer = document.getElementById('quiz-options');
+        optContainer.innerHTML = '';
+        const restartBtn = document.createElement('button');
+        restartBtn.className = 'btn btn-sm';
+        restartBtn.textContent = '重新选择';
+        restartBtn.addEventListener('click', () => {
+            currentQ = 0;
+            renderQuestion();
+        });
+        optContainer.appendChild(restartBtn);
+
+        // Highlight flowchart node
+        highlightFlowchartPath(algo);
+    }
+
+    function highlightFlowchartPath(algo) {
+        // Reset all nodes
+        d3.selectAll('[class^="flownode-"]').attr('stroke-width', 1.5);
+
+        let targetId = 'a-xgb-best';
+        if (algo.includes('随机森林') && algo.includes('单棵')) targetId = 'a-tree';
+        else if (algo.includes('随机森林')) targetId = 'a-rf';
+        else if (algo.includes('LightGBM') && !algo.includes('XGBoost')) targetId = 'a-lgbm';
+        else if (algo.includes('LightGBM') && algo.includes('XGBoost')) targetId = 'a-lgbm2';
+        else if (algo.includes('XGBoost') && algo.includes('稀疏')) targetId = 'a-xgb-sparse';
+
+        gsap.to(`.flownode-${targetId}`, {
+            attr: { 'stroke-width': 3, stroke: COLORS.yellow },
+            duration: 0.4,
+            yoyo: true,
+            repeat: 3
+        });
+    }
+
+    renderQuestion();
+}
+
+/* ============================================================
+   KaTeX Inline Rendering
+   ============================================================ */
+function renderInlineKatex() {
+    document.querySelectorAll('.katex-inline').forEach(el => {
+        try {
+            katex.render(el.textContent, el, { throwOnError: false, displayMode: false });
+        } catch (e) { /* ignore */ }
+    });
+}
+
+/* ============================================================
+   Initialize Everything
+   ============================================================ */
+document.addEventListener('DOMContentLoaded', () => {
+    renderInlineKatex();
+    initRFvsXGB();
+    initBaggingBoosting();
+    initGBDTvsXGB();
+    initTreeGrowth();
+    initDecisionGuide();
+});
+
+})();
+</script>
+</body>
+</html>

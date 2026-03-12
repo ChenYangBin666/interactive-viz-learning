@@ -1,0 +1,1209 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>01 - 序列数据基础 | RNN-LSTM 学习</title>
+
+    <!-- Shared Styles -->
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+
+    <!-- KaTeX -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+
+    <!-- CDN Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+
+    <style>
+        /* ========== Module-specific Styles ========== */
+        .hero-banner {
+            text-align: center;
+            padding: 2rem 0 1.5rem;
+        }
+        .hero-banner h1 {
+            font-size: 2.2rem;
+            background: linear-gradient(135deg, var(--accent-green), var(--accent-blue));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .hero-banner .subtitle {
+            color: var(--text-secondary);
+            font-size: 1.05rem;
+            margin-top: 0.3rem;
+        }
+
+        .section-anchor {
+            scroll-margin-top: calc(var(--header-height) + 1rem);
+        }
+
+        .seq-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 1rem; margin: 1.5rem 0; }
+        .seq-card { background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 1.2rem; cursor: pointer; transition: all 0.3s; position: relative; overflow: hidden; }
+        .seq-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: var(--card-accent, var(--accent-green)); transform: scaleX(0); transition: transform 0.3s; }
+        .seq-card:hover::before, .seq-card.active::before { transform: scaleX(1); }
+        .seq-card:hover, .seq-card.active { border-color: var(--card-accent, var(--accent-green)); box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3); }
+        .seq-card .card-icon { font-size: 1.8rem; margin-bottom: 0.6rem; }
+        .seq-card h4 { color: var(--text-primary); margin-bottom: 0.3rem; }
+        .seq-card .card-desc { font-size: 0.82rem; color: var(--text-muted); line-height: 1.5; }
+
+        .timeline-viz { position: relative; width: 100%; min-height: 320px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-md); overflow: hidden; }
+        .timeline-viz .watermark { position: absolute; bottom: 0.5rem; right: 0.75rem; font-size: 0.7rem; color: var(--text-muted); opacity: 0.5; }
+        .timestep-token { display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: var(--radius-sm); font-family: var(--font-mono); font-size: 0.85rem; font-weight: 600; border: 2px solid transparent; transition: all 0.3s; }
+        .timestep-token.highlight { border-color: var(--accent-green); box-shadow: 0 0 10px rgba(22, 199, 154, 0.3); transform: scale(1.1); }
+
+        .encoding-display { background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 1.2rem; margin: 1rem 0; min-height: 180px; }
+        .encoding-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(32px, 1fr)); gap: 4px; margin-top: 0.75rem; }
+        .encoding-cell { aspect-ratio: 1; border-radius: 3px; display: flex; align-items: center; justify-content: center; font-family: var(--font-mono); font-size: 0.65rem; transition: all 0.3s; }
+
+        .order-demo { display: flex; flex-direction: column; gap: 1rem; }
+        .sentence-box { background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 1rem 1.2rem; display: flex; align-items: center; gap: 0.75rem; cursor: pointer; transition: all 0.3s; }
+        .sentence-box:hover { border-color: var(--accent-blue); }
+        .sentence-box.active { border-color: var(--accent-green); box-shadow: var(--shadow-glow); }
+        .sentence-box .label { font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
+        .sentence-chars { display: flex; gap: 0.3rem; flex-wrap: wrap; }
+        .sentence-chars .char-box { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: var(--radius-sm); font-size: 1rem; font-weight: 600; transition: all 0.3s; }
+
+        .challenge-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin: 1rem 0; }
+        @media (max-width: 768px) { .challenge-cards { grid-template-columns: 1fr; } }
+        .window-display { position: relative; margin: 1rem 0; padding: 0.75rem 0; }
+        .window-tokens { display: flex; gap: 2px; overflow-x: auto; padding: 0.5rem 0; }
+        .window-token { flex-shrink: 0; width: 32px; height: 32px; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-family: var(--font-mono); font-size: 0.7rem; color: var(--text-secondary); background: var(--bg-secondary); border: 1px solid var(--border-color); transition: all 0.3s; }
+        .window-token.in-window { background: rgba(22, 199, 154, 0.2); border-color: var(--accent-green); color: var(--accent-green); }
+        .window-token.target { background: rgba(255, 171, 64, 0.2); border-color: var(--accent-orange); color: var(--accent-orange); }
+        .window-token.context-needed { background: rgba(255, 82, 82, 0.15); border-color: var(--accent-red); color: var(--accent-red); }
+
+        .recurrence-viz { width: 100%; min-height: 380px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-md); overflow: hidden; position: relative; }
+        .compare-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin: 1rem 0; }
+        @media (max-width: 768px) { .compare-row { grid-template-columns: 1fr; } }
+        .loop-arrow { stroke: var(--accent-green); fill: none; stroke-width: 2; }
+        .prediction-row { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin: 0.75rem 0; }
+        .pred-char { width: 36px; height: 36px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-sm); font-family: var(--font-mono); font-size: 0.9rem; font-weight: 600; background: var(--bg-card); border: 1px solid var(--border-color); transition: all 0.3s; }
+        .pred-char.given { background: rgba(79, 195, 247, 0.15); border-color: var(--accent-blue); color: var(--accent-blue); }
+        .pred-char.predict { background: rgba(255, 171, 64, 0.15); border-color: var(--accent-orange); color: var(--accent-orange); }
+        .next-hint { display: flex; align-items: center; gap: 0.5rem; padding: 0.75rem 1rem; background: rgba(79, 195, 247, 0.08); border: 1px solid rgba(79, 195, 247, 0.2); border-radius: var(--radius-md); color: var(--accent-blue); font-size: 0.9rem; margin-top: 1rem; }
+    </style>
+</head>
+<body>
+
+<!-- ========== Navigation ========== -->
+<nav class="top-nav">
+    <div class="nav-left">
+        <a href="../../" class="nav-home" title="返回总览">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+        </a>
+        <span class="nav-sep">/</span>
+        <a href="../" class="logo">RNN-LSTM</a>
+        <span class="nav-sep">/</span>
+        <span class="nav-link current">01 序列数据基础</span>
+    </div>
+    <div class="nav-links">
+        <a href="#s1" class="nav-link">什么是序列</a>
+        <a href="#s2" class="nav-link">时间步</a>
+        <a href="#s3" class="nav-link">顺序重要性</a>
+        <a href="#s4" class="nav-link">建模挑战</a>
+        <a href="#s5" class="nav-link">从固定到循环</a>
+    </div>
+</nav>
+
+<!-- ========== Main Content ========== -->
+<div class="page-container">
+
+    <!-- Hero -->
+    <header class="hero-banner">
+        <h1>序列数据基础</h1>
+        <p class="subtitle">理解序列数据的本质、表示方法与建模挑战 —— 迈向循环神经网络的第一步</p>
+    </header>
+
+    <!-- ==================== Section 1: 什么是序列数据 ==================== -->
+    <section class="section section-anchor" id="s1">
+        <div class="section-title">
+            <div class="icon">1</div>
+            <h2>什么是序列数据</h2>
+        </div>
+
+        <p>序列数据是指具有<strong>固有顺序</strong>的数据，每个元素的位置和上下文关系携带重要信息。与图像等空间数据不同，序列中元素的排列顺序不可随意打乱。</p>
+
+        <p>下面是四种常见的序列数据类型。点击卡片查看对应的可视化演示：</p>
+
+        <div class="seq-cards" id="seqCards">
+            <div class="seq-card active" data-type="text" style="--card-accent: var(--accent-blue);">
+                <div class="card-icon">Aa</div>
+                <h4>文本序列</h4>
+                <p class="card-desc">字符或词语按顺序排列，构成句子和段落</p>
+                <span class="badge badge-blue">离散</span>
+            </div>
+            <div class="seq-card" data-type="audio" style="--card-accent: var(--accent-purple);">
+                <div class="card-icon">~</div>
+                <h4>音频波形</h4>
+                <p class="card-desc">声音信号随时间采样，形成波形序列</p>
+                <span class="badge badge-purple">连续</span>
+            </div>
+            <div class="seq-card" data-type="stock" style="--card-accent: var(--accent-orange);">
+                <div class="card-icon">$</div>
+                <h4>股票价格</h4>
+                <p class="card-desc">金融时间序列，反映市场随时间的变化趋势</p>
+                <span class="badge badge-orange">连续</span>
+            </div>
+            <div class="seq-card" data-type="sensor" style="--card-accent: var(--accent-green);">
+                <div class="card-icon">#</div>
+                <h4>传感器数据</h4>
+                <p class="card-desc">温度、加速度等物理量的时间序列记录</p>
+                <span class="badge badge-green">连续</span>
+            </div>
+        </div>
+
+        <div class="timeline-viz" id="timelineViz">
+            <svg width="100%" height="320"></svg>
+            <span class="watermark">序列数据可视化</span>
+        </div>
+
+        <div class="info-box mt-2">
+            <p><strong>关键洞察：</strong>序列数据的核心特征是<em>时间相关性</em> —— 每个数据点的意义取决于其在序列中的位置以及与周围元素的关系。</p>
+        </div>
+    </section>
+
+    <!-- ==================== Section 2: 时间步与输入表示 ==================== -->
+    <section class="section section-anchor" id="s2">
+        <div class="section-title">
+            <div class="icon">2</div>
+            <h2>时间步与输入表示</h2>
+        </div>
+
+        <p>在处理序列数据时，我们将其切分为<strong>离散的时间步</strong>：</p>
+        <div class="katex-display">$$x_1, x_2, x_3, \ldots, x_T$$</div>
+        <p>其中 $T$ 是序列长度，$x_t$ 是第 $t$ 个时间步的输入。</p>
+
+        <div class="split-layout">
+            <div class="text-panel">
+                <h3>控制面板</h3>
+
+                <div class="slider-group mt-1">
+                    <label>序列长度 T：</label>
+                    <input type="range" id="seqLenSlider" min="3" max="16" value="8">
+                    <span class="slider-value" id="seqLenValue">8</span>
+                </div>
+
+                <div class="mt-2">
+                    <h4>编码方式</h4>
+                    <div class="tabs" id="encodingTabs">
+                        <button class="tab active" data-enc="onehot">独热编码</button>
+                        <button class="tab" data-enc="embedding">词嵌入</button>
+                        <button class="tab" data-enc="raw">原始值</button>
+                    </div>
+                </div>
+
+                <div class="encoding-display" id="encodingDisplay">
+                    <p class="text-sm text-muted">点击时间线上的节点查看其编码表示</p>
+                </div>
+
+                <div class="info-box mt-1">
+                    <p><strong>独热编码（One-Hot）</strong>：为每个字符分配一个唯一的二进制向量，维度等于词汇表大小。简单但高维稀疏。</p>
+                </div>
+                <div class="info-box mt-1">
+                    <p><strong>词嵌入（Embedding）</strong>：将离散符号映射到低维连续向量空间，捕捉语义相似性。</p>
+                </div>
+                <div class="info-box mt-1">
+                    <p><strong>原始值（Raw）</strong>：时间序列可以直接用数值作为输入，无需编码。</p>
+                </div>
+            </div>
+
+            <div class="viz-panel">
+                <div class="viz-area" id="timestepViz">
+                    <svg width="100%" height="400"></svg>
+                    <span class="watermark">时间步可视化</span>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ==================== Section 3: 为什么顺序重要 ==================== -->
+    <section class="section section-anchor" id="s3">
+        <div class="section-title">
+            <div class="icon">3</div>
+            <h2>为什么顺序重要</h2>
+        </div>
+
+        <p>序列数据的<strong>顺序</strong>承载了关键语义信息。相同的元素，不同的排列顺序，可以表达完全不同的含义。</p>
+
+        <div class="compare-row">
+            <div>
+                <h3>互动演示：词序改变含义</h3>
+                <p class="text-sm text-muted">点击切换两个句子，观察含义如何变化：</p>
+
+                <div class="order-demo" id="orderDemo">
+                    <div class="sentence-box active" data-idx="0">
+                        <div>
+                            <div class="label">句子 A</div>
+                            <div class="sentence-chars" id="sentA"></div>
+                        </div>
+                    </div>
+                    <div class="sentence-box" data-idx="1">
+                        <div>
+                            <div class="label">句子 B</div>
+                            <div class="sentence-chars" id="sentB"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="info-box mt-2">
+                    <p><strong>观察：</strong>「猫追狗」和「狗追猫」使用完全相同的字，但主语和宾语互换后含义截然不同。</p>
+                </div>
+            </div>
+
+            <div>
+                <h3>词袋模型 vs 序列模型</h3>
+                <p class="text-sm text-muted">词袋模型（Bag-of-Words）丢失顺序信息：</p>
+
+                <div class="viz-area" id="bowViz" style="min-height: 300px;">
+                    <svg width="100%" height="300"></svg>
+                </div>
+
+                <div class="info-box warning mt-1">
+                    <p><strong>问题：</strong>MLP 把输入视为固定长度的"扁平"向量，忽略了位置关系。要正确理解序列，模型必须感知元素的<em>先后顺序</em>。</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Shuffle comparison -->
+        <h3 class="mt-2">动画对比：有序 vs 乱序</h3>
+        <p class="text-sm text-muted">点击按钮观察打乱顺序对序列语义的破坏：</p>
+        <div class="anim-controls mb-2">
+            <button class="btn btn-sm" id="btnShuffle">打乱序列</button>
+            <button class="btn btn-sm" id="btnRestore">恢复顺序</button>
+            <div class="progress-bar"><div class="fill" id="shuffleProgress" style="width:0%"></div></div>
+            <span class="step-label" id="shuffleLabel">有序</span>
+        </div>
+        <div class="viz-area" id="shuffleViz" style="min-height: 180px;">
+            <svg width="100%" height="180"></svg>
+        </div>
+    </section>
+
+    <!-- ==================== Section 4: 序列建模的挑战 ==================== -->
+    <section class="section section-anchor" id="s4">
+        <div class="section-title">
+            <div class="icon">4</div>
+            <h2>序列建模的挑战</h2>
+        </div>
+
+        <p>序列建模面临多个核心挑战。理解这些困难有助于我们认识为什么需要专门的序列模型架构。</p>
+
+        <div class="challenge-cards">
+            <div class="card">
+                <div class="card-header">
+                    <span style="color: var(--accent-blue); font-size: 1.3rem;">&#x29C9;</span>
+                    <h3>变长输入</h3>
+                </div>
+                <p class="text-sm text-muted">不同序列长度各异：一条推文可能 10 个字，一篇文章可能 5000 字。固定输入维度的模型如何处理？</p>
+            </div>
+            <div class="card">
+                <div class="card-header">
+                    <span style="color: var(--accent-orange); font-size: 1.3rem;">&#x27F7;</span>
+                    <h3>长距离依赖</h3>
+                </div>
+                <p class="text-sm text-muted">句子开头的信息可能对结尾的理解至关重要，固定窗口无法捕获远距离的语义关联。</p>
+            </div>
+            <div class="card">
+                <div class="card-header">
+                    <span style="color: var(--accent-purple); font-size: 1.3rem;">&#x2B6F;</span>
+                    <h3>参数共享</h3>
+                </div>
+                <p class="text-sm text-muted">序列中每个位置的处理逻辑应该相似——我们希望在不同时间步之间共享参数。</p>
+            </div>
+            <div class="card">
+                <div class="card-header">
+                    <span style="color: var(--accent-red); font-size: 1.3rem;">&#x23F1;</span>
+                    <h3>实时处理</h3>
+                </div>
+                <p class="text-sm text-muted">某些应用（语音识别、实时翻译）要求模型在序列生成过程中就能逐步输出。</p>
+            </div>
+        </div>
+
+        <h3 class="mt-2">固定窗口 vs 长距离依赖</h3>
+        <p class="text-sm text-muted">拖动滑块改变窗口大小，观察固定窗口如何遗漏远处的上下文信息：</p>
+
+        <div class="slider-group mb-1">
+            <label>窗口大小：</label>
+            <input type="range" id="windowSlider" min="1" max="8" value="3">
+            <span class="slider-value" id="windowValue">3</span>
+        </div>
+
+        <div class="card" id="windowDemo" style="overflow-x: auto;">
+            <p class="text-sm mb-1" style="color: var(--accent-blue);">示例句子：「<span id="windowSentence"></span>」</p>
+            <p class="text-sm text-muted mb-1">预测位置处的字需要理解开头的上下文（标红），但窗口只能看到绿色部分：</p>
+            <div class="window-tokens" id="windowTokens"></div>
+        </div>
+
+        <h3 class="mt-2">下一字符预测任务</h3>
+        <p class="text-sm text-muted">一个简单的序列任务：给定前面的字符，预测下一个字符。点击序列中不同位置体验预测难度：</p>
+
+        <div class="card" id="predictionDemo">
+            <div class="prediction-row" id="predRow"></div>
+            <div class="mt-1" id="predInfo">
+                <p class="text-sm text-muted">点击序列中的字符，查看预测下一字符的上下文需求。</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- ==================== Section 5: 从固定到循环 ==================== -->
+    <section class="section section-anchor" id="s5">
+        <div class="section-title">
+            <div class="icon">5</div>
+            <h2>从固定到循环</h2>
+        </div>
+
+        <p>前面我们看到，固定窗口方法无法很好地处理变长序列和长距离依赖。如何解决？</p>
+
+        <p>核心思想：维护一个<strong>记忆状态（隐藏状态 $h_t$）</strong>，它在每个时间步更新，积累之前所有输入的信息：</p>
+
+        <div class="katex-display">$$h_t = f(h_{t-1}, x_t)$$</div>
+
+        <p>这就是<strong>循环（Recurrence）</strong>的核心——输出不仅取决于当前输入 $x_t$，还取决于之前的"记忆" $h_{t-1}$。这个循环箭头使模型理论上能记住任意长的历史。</p>
+
+        <div class="split-layout">
+            <div class="text-panel">
+                <h3>循环结构要点</h3>
+                <ul style="list-style: none; padding: 0;">
+                    <li class="mb-1" style="color: var(--text-secondary);">
+                        <span style="color: var(--accent-green);">&#x25B6;</span>
+                        每个时间步接收 <strong>当前输入</strong> $x_t$
+                    </li>
+                    <li class="mb-1" style="color: var(--text-secondary);">
+                        <span style="color: var(--accent-blue);">&#x25B6;</span>
+                        从上一步继承 <strong>隐藏状态</strong> $h_{t-1}$
+                    </li>
+                    <li class="mb-1" style="color: var(--text-secondary);">
+                        <span style="color: var(--accent-purple);">&#x25B6;</span>
+                        用函数 $f$ 合并两者，输出新的 $h_t$
+                    </li>
+                    <li class="mb-1" style="color: var(--text-secondary);">
+                        <span style="color: var(--accent-orange);">&#x25B6;</span>
+                        根据 $h_t$ 生成 <strong>输出</strong> $y_t$
+                    </li>
+                </ul>
+
+                <div class="info-box success mt-2">
+                    <p><strong>下一步：</strong>在模块 02 中，我们将正式定义 Vanilla RNN 的数学公式，并动手实现一个简单的循环网络。</p>
+                </div>
+
+                <div class="anim-controls mt-2">
+                    <button class="btn btn-sm" id="btnPlayRecurrence">播放动画</button>
+                    <button class="btn btn-sm" id="btnResetRecurrence">重置</button>
+                    <div class="progress-bar"><div class="fill" id="recurrenceProgress" style="width:0%"></div></div>
+                    <span class="step-label" id="recurrenceLabel">t=0</span>
+                </div>
+            </div>
+
+            <div class="viz-panel">
+                <div class="recurrence-viz" id="recurrenceViz">
+                    <svg width="100%" height="380"></svg>
+                </div>
+            </div>
+        </div>
+
+        <div class="next-hint mt-2">
+            &#x2192; 下一模块：<a href="../02-vanilla-rnn/">02 - Vanilla RNN 基础</a>
+        </div>
+
+    </section>
+
+</div><!-- .page-container -->
+
+<!-- ========== Shared Scripts ========== -->
+<script src="../shared/scripts/rnn-utils.js"></script>
+<script src="../shared/scripts/animation-controller.js"></script>
+<script src="../shared/scripts/matrix-renderer.js"></script>
+<script src="../shared/scripts/nav.js"></script>
+<script src="../shared/scripts/katex-init.js"></script>
+
+<!-- ========== Module Logic ========== -->
+<script>
+(function() {
+    'use strict';
+
+    /* ================================================================
+     *  常量与工具
+     * ================================================================ */
+    const COLORS = {
+        green:  '#16c79a',
+        blue:   '#4fc3f7',
+        purple: '#b388ff',
+        orange: '#ffab40',
+        red:    '#ff5252',
+        yellow: '#ffd740',
+        text:   '#e8e8e8',
+        muted:  '#6c6c7c',
+        bg:     '#1a1a2e',
+        bgSec:  '#16213e',
+        border: '#2a2a4a',
+    };
+
+    const sampleText = '深度学习很有趣';
+    const sampleSentenceA = '猫追狗';
+    const sampleSentenceB = '狗追猫';
+    const longSentence = '今天天气很好所以我决定出门散步';
+    const predictionText = '我喜欢深度学习';
+
+    function getVizSize(container) {
+        const rect = container.getBoundingClientRect();
+        return { w: rect.width || 700, h: rect.height || 320 };
+    }
+
+    /* ================================================================
+     *  Section 1: 序列数据类型可视化
+     * ================================================================ */
+    const timelineContainer = document.getElementById('timelineViz');
+    const timelineSvg = d3.select('#timelineViz svg');
+    let activeSeqType = 'text';
+
+    function drawTimeline(type) {
+        const { w, h } = getVizSize(timelineContainer);
+        timelineSvg.attr('viewBox', `0 0 ${w} ${h}`).selectAll('*').remove();
+
+        const margin = { top: 40, right: 40, bottom: 50, left: 60 };
+        const iw = w - margin.left - margin.right;
+        const ih = h - margin.top - margin.bottom;
+        const g = timelineSvg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+
+        let data, xLabel, yLabel, color;
+
+        if (type === 'text') {
+            const chars = sampleText.split('');
+            data = chars.map((c, i) => ({ x: i, y: 0, label: c }));
+            xLabel = '时间步 t';
+            yLabel = '字符';
+            color = COLORS.blue;
+        } else if (type === 'audio') {
+            data = RNNUtils.generateSineSequence(60, 0.08, 0.15, 123).map((v, i) => ({ x: i, y: v }));
+            xLabel = '采样点';
+            yLabel = '振幅';
+            color = COLORS.purple;
+        } else if (type === 'stock') {
+            const rng = RNNUtils.seededRandom(77);
+            let price = 100;
+            data = Array.from({ length: 40 }, (_, i) => {
+                price += (rng() - 0.48) * 3;
+                return { x: i, y: price };
+            });
+            xLabel = '交易日';
+            yLabel = '价格';
+            color = COLORS.orange;
+        } else {
+            const rng = RNNUtils.seededRandom(55);
+            let temp = 22;
+            data = Array.from({ length: 50 }, (_, i) => {
+                temp += (rng() - 0.5) * 1.5 + Math.sin(i * 0.2) * 0.3;
+                return { x: i, y: temp };
+            });
+            xLabel = '时间 (秒)';
+            yLabel = '温度 (°C)';
+            color = COLORS.green;
+        }
+
+        const xScale = d3.scaleLinear().domain([0, d3.max(data, d => d.x)]).range([0, iw]);
+        const yExtent = type === 'text'
+            ? [-1, 1]
+            : [d3.min(data, d => d.y) - 0.5, d3.max(data, d => d.y) + 0.5];
+        const yScale = d3.scaleLinear().domain(yExtent).range([ih, 0]);
+
+        /* Axes */
+        g.append('g').attr('transform', `translate(0,${ih})`)
+            .call(d3.axisBottom(xScale).ticks(Math.min(data.length, 10)))
+            .selectAll('text').attr('fill', COLORS.muted);
+        g.append('g')
+            .call(d3.axisLeft(yScale).ticks(5))
+            .selectAll('text').attr('fill', COLORS.muted);
+        g.selectAll('.domain, .tick line').attr('stroke', COLORS.border);
+
+        g.append('text').attr('x', iw / 2).attr('y', ih + 38).attr('text-anchor', 'middle')
+            .attr('fill', COLORS.muted).attr('font-size', '0.8rem').text(xLabel);
+        g.append('text').attr('x', -ih / 2).attr('y', -42).attr('text-anchor', 'middle')
+            .attr('transform', 'rotate(-90)')
+            .attr('fill', COLORS.muted).attr('font-size', '0.8rem').text(yLabel);
+
+        if (type === 'text') {
+            /* Text: show character boxes on a line */
+            const charData = data;
+            const cy = ih / 2;
+
+            /* connecting line */
+            g.append('line')
+                .attr('x1', xScale(0)).attr('y1', cy)
+                .attr('x2', xScale(0)).attr('y2', cy)
+                .attr('stroke', color).attr('stroke-width', 2).attr('opacity', 0.3)
+                .transition().duration(800)
+                .attr('x2', xScale(charData.length - 1));
+
+            /* arrow */
+            g.append('polygon')
+                .attr('points', '0,-5 10,0 0,5')
+                .attr('fill', color).attr('opacity', 0.5)
+                .attr('transform', `translate(${xScale(charData.length - 1) + 5},${cy})`);
+
+            charData.forEach((d, i) => {
+                const group = g.append('g').attr('transform', `translate(${xScale(d.x)},${cy})`)
+                    .attr('opacity', 0);
+
+                group.append('rect')
+                    .attr('x', -18).attr('y', -18).attr('width', 36).attr('height', 36)
+                    .attr('rx', 6).attr('fill', COLORS.bgSec).attr('stroke', color).attr('stroke-width', 1.5);
+
+                group.append('text').attr('text-anchor', 'middle').attr('dy', '0.35em')
+                    .attr('fill', COLORS.text).attr('font-size', '1rem').attr('font-weight', 600)
+                    .text(d.label);
+
+                group.append('text').attr('text-anchor', 'middle').attr('dy', '-1.8em')
+                    .attr('fill', COLORS.muted).attr('font-size', '0.7rem')
+                    .text(`t=${i + 1}`);
+
+                gsap.to(group.node(), { opacity: 1, duration: 0.4, delay: i * 0.12 });
+            });
+        } else {
+            /* Continuous data: line + dots */
+            const line = d3.line().x(d => xScale(d.x)).y(d => yScale(d.y)).curve(d3.curveMonotoneX);
+
+            const path = g.append('path').datum(data)
+                .attr('d', line)
+                .attr('fill', 'none').attr('stroke', color).attr('stroke-width', 2);
+
+            const totalLen = path.node().getTotalLength();
+            path.attr('stroke-dasharray', totalLen).attr('stroke-dashoffset', totalLen);
+            gsap.to(path.node(), { strokeDashoffset: 0, duration: 1.5, ease: 'power2.out' });
+
+            /* Dots */
+            const step = Math.max(1, Math.floor(data.length / 20));
+            data.filter((_, i) => i % step === 0).forEach((d, idx) => {
+                const dot = g.append('circle')
+                    .attr('cx', xScale(d.x)).attr('cy', yScale(d.y))
+                    .attr('r', 0).attr('fill', color).attr('opacity', 0.8);
+                gsap.to(dot.node(), { attr: { r: 4 }, duration: 0.3, delay: 0.3 + idx * 0.05 });
+            });
+        }
+    }
+
+    /* Card click handlers */
+    document.querySelectorAll('.seq-card').forEach(card => {
+        card.addEventListener('click', () => {
+            document.querySelectorAll('.seq-card').forEach(c => c.classList.remove('active'));
+            card.classList.add('active');
+            activeSeqType = card.dataset.type;
+            drawTimeline(activeSeqType);
+        });
+    });
+
+    /* ================================================================
+     *  Section 2: 时间步与输入表示
+     * ================================================================ */
+    const timestepContainer = document.getElementById('timestepViz');
+    const timestepSvg = d3.select('#timestepViz svg');
+    const seqLenSlider = document.getElementById('seqLenSlider');
+    const seqLenValue = document.getElementById('seqLenValue');
+    let currentSeqLen = 8;
+    let currentEncoding = 'onehot';
+    let selectedTimestep = null;
+
+    function drawTimesteps() {
+        const { w, h } = getVizSize(timestepContainer);
+        timestepSvg.attr('viewBox', `0 0 ${w} ${h}`).selectAll('*').remove();
+
+        const margin = { top: 30, right: 30, bottom: 40, left: 30 };
+        const iw = w - margin.left - margin.right;
+        const ih = h - margin.top - margin.bottom;
+        const g = timestepSvg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+
+        const T = currentSeqLen;
+        const chars = sampleText.split('');
+        const displayChars = [];
+        for (let i = 0; i < T; i++) displayChars.push(chars[i % chars.length]);
+
+        const xScale = d3.scaleLinear().domain([0, T - 1]).range([30, iw - 30]);
+        const cy = ih * 0.4;
+
+        /* Connecting line */
+        g.append('line')
+            .attr('x1', xScale(0)).attr('y1', cy)
+            .attr('x2', xScale(T - 1)).attr('y2', cy)
+            .attr('stroke', COLORS.border).attr('stroke-width', 2);
+
+        /* Arrowhead */
+        g.append('polygon')
+            .attr('points', '0,-4 8,0 0,4')
+            .attr('fill', COLORS.muted)
+            .attr('transform', `translate(${xScale(T - 1) + 12},${cy})`);
+
+        /* Time label */
+        g.append('text').attr('x', iw / 2).attr('y', ih + 10).attr('text-anchor', 'middle')
+            .attr('fill', COLORS.muted).attr('font-size', '0.8rem').text('时间步 t →');
+
+        /* Nodes */
+        displayChars.forEach((ch, i) => {
+            const group = g.append('g')
+                .attr('transform', `translate(${xScale(i)},${cy})`)
+                .style('cursor', 'pointer')
+                .attr('opacity', 0);
+
+            const isSelected = selectedTimestep === i;
+
+            group.append('circle')
+                .attr('r', 20)
+                .attr('fill', isSelected ? 'rgba(22,199,154,0.25)' : COLORS.bgSec)
+                .attr('stroke', isSelected ? COLORS.green : COLORS.blue)
+                .attr('stroke-width', isSelected ? 2.5 : 1.5);
+
+            group.append('text').attr('text-anchor', 'middle').attr('dy', '0.35em')
+                .attr('fill', COLORS.text).attr('font-size', '0.9rem').attr('font-weight', 600)
+                .text(ch);
+
+            group.append('text').attr('text-anchor', 'middle').attr('dy', '-2em')
+                .attr('fill', COLORS.muted).attr('font-size', '0.65rem')
+                .text(`x${subscript(i + 1)}`);
+
+            group.append('text').attr('text-anchor', 'middle').attr('dy', '3em')
+                .attr('fill', COLORS.muted).attr('font-size', '0.65rem')
+                .text(`t=${i + 1}`);
+
+            group.on('click', () => {
+                selectedTimestep = i;
+                drawTimesteps();
+                showEncoding(i, ch, displayChars);
+            });
+
+            gsap.to(group.node(), { opacity: 1, duration: 0.3, delay: i * 0.06 });
+        });
+
+        /* Connector arrows between nodes */
+        for (let i = 0; i < T - 1; i++) {
+            const x1 = xScale(i) + 22;
+            const x2 = xScale(i + 1) - 22;
+            if (x2 > x1) {
+                g.append('line')
+                    .attr('x1', x1).attr('y1', cy).attr('x2', x2).attr('y2', cy)
+                    .attr('stroke', COLORS.blue).attr('stroke-width', 1.5).attr('opacity', 0.4)
+                    .attr('marker-end', 'none');
+            }
+        }
+    }
+
+    function subscript(n) {
+        const subs = '₀₁₂₃₄₅₆₇₈₉';
+        return String(n).split('').map(d => subs[parseInt(d)]).join('');
+    }
+
+    function showEncoding(idx, ch, allChars) {
+        const display = document.getElementById('encodingDisplay');
+        const uniqueChars = [...new Set(allChars)].sort();
+        const vocabSize = uniqueChars.length;
+        const charIdx = uniqueChars.indexOf(ch);
+
+        if (currentEncoding === 'onehot') {
+            const vec = RNNUtils.oneHot(charIdx, vocabSize);
+            let html = `<h4 style="color:${COLORS.green}">独热编码：「${ch}」 → 维度 ${vocabSize}</h4>`;
+            html += '<div class="encoding-grid" style="grid-template-columns: repeat(' + vocabSize + ', 1fr);">';
+            vec.forEach((v, i) => {
+                const bg = v === 1 ? 'rgba(22,199,154,0.6)' : 'rgba(42,42,74,0.5)';
+                const color = v === 1 ? '#fff' : COLORS.muted;
+                html += `<div class="encoding-cell" style="background:${bg};color:${color}">${v}</div>`;
+            });
+            html += '</div>';
+            html += '<div style="display:flex;gap:4px;margin-top:6px;flex-wrap:wrap;">';
+            uniqueChars.forEach((c, i) => {
+                const active = i === charIdx;
+                html += `<span style="font-size:0.7rem;color:${active ? COLORS.green : COLORS.muted}">${c}</span>`;
+            });
+            html += '</div>';
+            display.innerHTML = html;
+
+        } else if (currentEncoding === 'embedding') {
+            const rng = RNNUtils.seededRandom(charIdx * 137 + 42);
+            const embDim = 4;
+            const emb = Array.from({ length: embDim }, () => (rng() - 0.5).toFixed(3));
+            let html = `<h4 style="color:${COLORS.purple}">词嵌入：「${ch}」 → ${embDim}维向量</h4>`;
+            html += '<div class="encoding-grid" style="grid-template-columns: repeat(' + embDim + ', 1fr); max-width: 200px;">';
+            emb.forEach(v => {
+                const val = parseFloat(v);
+                const bg = RNNUtils.valueToColor(val, -0.5, 0.5);
+                html += `<div class="encoding-cell" style="background:${bg};color:#fff;font-size:0.7rem">${v}</div>`;
+            });
+            html += '</div>';
+            html += `<p class="text-sm text-muted mt-1">嵌入向量是低维连续值，相似字符的向量在空间中距离更近。</p>`;
+            display.innerHTML = html;
+
+        } else {
+            const val = RNNUtils.generateSineSequence(currentSeqLen, 0.15, 0.05, 42)[idx];
+            let html = `<h4 style="color:${COLORS.orange}">原始值：时间步 ${idx + 1}</h4>`;
+            html += `<div style="font-family:var(--font-mono);font-size:1.5rem;color:${COLORS.orange};margin:1rem 0;">${val.toFixed(4)}</div>`;
+            html += `<p class="text-sm text-muted">时间序列数据直接使用数值，无需编码转换。</p>`;
+            display.innerHTML = html;
+        }
+    }
+
+    seqLenSlider.addEventListener('input', () => {
+        currentSeqLen = parseInt(seqLenSlider.value);
+        seqLenValue.textContent = currentSeqLen;
+        selectedTimestep = null;
+        drawTimesteps();
+    });
+
+    document.querySelectorAll('#encodingTabs .tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            document.querySelectorAll('#encodingTabs .tab').forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            currentEncoding = tab.dataset.enc;
+            if (selectedTimestep !== null) {
+                const chars = sampleText.split('');
+                const displayChars = [];
+                for (let i = 0; i < currentSeqLen; i++) displayChars.push(chars[i % chars.length]);
+                showEncoding(selectedTimestep, displayChars[selectedTimestep], displayChars);
+            }
+        });
+    });
+
+    /* ================================================================
+     *  Section 3: 为什么顺序重要
+     * ================================================================ */
+
+    /* Sentence order demo */
+    function renderSentenceChars(containerId, text, colorBase) {
+        const container = document.getElementById(containerId);
+        container.innerHTML = '';
+        text.split('').forEach((ch, i) => {
+            const box = document.createElement('div');
+            box.className = 'char-box';
+            box.textContent = ch;
+            box.style.background = `rgba(${colorBase}, 0.15)`;
+            box.style.color = `rgb(${colorBase})`;
+            box.style.opacity = '0';
+            container.appendChild(box);
+            gsap.to(box, { opacity: 1, duration: 0.3, delay: i * 0.08 });
+        });
+    }
+
+    renderSentenceChars('sentA', sampleSentenceA, '79,195,247');
+    renderSentenceChars('sentB', sampleSentenceB, '255,171,64');
+
+    document.querySelectorAll('#orderDemo .sentence-box').forEach(box => {
+        box.addEventListener('click', () => {
+            document.querySelectorAll('#orderDemo .sentence-box').forEach(b => b.classList.remove('active'));
+            box.classList.add('active');
+            drawBowComparison(parseInt(box.dataset.idx));
+        });
+    });
+
+    /* Bag-of-words comparison */
+    function drawBowComparison(activeIdx) {
+        const bowSvg = d3.select('#bowViz svg');
+        const container = document.getElementById('bowViz');
+        const { w, h } = getVizSize(container);
+        bowSvg.attr('viewBox', `0 0 ${w} ${h}`).selectAll('*').remove();
+
+        const g = bowSvg.append('g').attr('transform', 'translate(20,20)');
+        const iw = w - 40;
+        const ih = h - 40;
+
+        const sentences = [sampleSentenceA, sampleSentenceB];
+        const sent = sentences[activeIdx];
+        const chars = sent.split('');
+        const uniqueChars = [...new Set([...sampleSentenceA.split(''), ...sampleSentenceB.split('')])].sort();
+
+        /* Original sequence */
+        g.append('text').attr('x', 0).attr('y', 15).attr('fill', COLORS.muted).attr('font-size', '0.75rem')
+            .text('原始序列（保留顺序）:');
+
+        chars.forEach((ch, i) => {
+            const x = 10 + i * 50;
+            const gChar = g.append('g').attr('transform', `translate(${x}, 40)`).attr('opacity', 0);
+            gChar.append('rect').attr('x', -18).attr('y', -16).attr('width', 36).attr('height', 32)
+                .attr('rx', 4).attr('fill', 'rgba(79,195,247,0.15)').attr('stroke', COLORS.blue).attr('stroke-width', 1);
+            gChar.append('text').attr('text-anchor', 'middle').attr('dy', '0.35em')
+                .attr('fill', COLORS.blue).attr('font-size', '0.9rem').text(ch);
+            gChar.append('text').attr('text-anchor', 'middle').attr('dy', '2em')
+                .attr('fill', COLORS.muted).attr('font-size', '0.6rem').text(`t=${i + 1}`);
+            gsap.to(gChar.node(), { opacity: 1, duration: 0.3, delay: i * 0.1 });
+        });
+
+        /* Arrow */
+        g.append('text').attr('x', iw / 2).attr('y', 95).attr('text-anchor', 'middle')
+            .attr('fill', COLORS.muted).attr('font-size', '1.2rem').text('↓ 词袋化');
+
+        /* Bag-of-words */
+        g.append('text').attr('x', 0).attr('y', 130).attr('fill', COLORS.muted).attr('font-size', '0.75rem')
+            .text('词袋表示（丢失顺序）:');
+
+        const counts = {};
+        chars.forEach(c => counts[c] = (counts[c] || 0) + 1);
+
+        uniqueChars.forEach((ch, i) => {
+            const x = 10 + i * 55;
+            const count = counts[ch] || 0;
+            const gBag = g.append('g').attr('transform', `translate(${x}, 160)`).attr('opacity', 0);
+            const fillOpacity = count > 0 ? 0.2 : 0.05;
+            const strokeColor = count > 0 ? COLORS.orange : COLORS.border;
+            gBag.append('rect').attr('x', -20).attr('y', -16).attr('width', 40).attr('height', 32)
+                .attr('rx', 4).attr('fill', `rgba(255,171,64,${fillOpacity})`).attr('stroke', strokeColor).attr('stroke-width', 1);
+            gBag.append('text').attr('text-anchor', 'middle').attr('dy', '0.35em')
+                .attr('fill', count > 0 ? COLORS.orange : COLORS.muted).attr('font-size', '0.85rem').text(ch);
+            gBag.append('text').attr('text-anchor', 'middle').attr('dy', '2.2em')
+                .attr('fill', COLORS.muted).attr('font-size', '0.6rem').text(`×${count}`);
+            gsap.to(gBag.node(), { opacity: 1, duration: 0.3, delay: 0.3 + i * 0.08 });
+        });
+
+        /* Warning text */
+        g.append('text').attr('x', iw / 2).attr('y', ih - 10).attr('text-anchor', 'middle')
+            .attr('fill', COLORS.red).attr('font-size', '0.8rem').attr('opacity', 0.8)
+            .text('⚠ 两句话的词袋表示完全相同，无法区分！');
+    }
+
+    drawBowComparison(0);
+
+    /* Shuffle animation */
+    const shuffleSvg = d3.select('#shuffleViz svg');
+    const shuffleChars = '循环神经网络处理序列'.split('');
+    let isShuffled = false;
+
+    function drawShuffleViz(chars, shuffled) {
+        const container = document.getElementById('shuffleViz');
+        const { w, h } = getVizSize(container);
+        shuffleSvg.attr('viewBox', `0 0 ${w} ${h}`).selectAll('*').remove();
+
+        const g = shuffleSvg.append('g').attr('transform', `translate(20, ${h / 2})`);
+        const spacing = Math.min(60, (w - 80) / chars.length);
+
+        chars.forEach((ch, i) => {
+            const x = 20 + i * spacing;
+            const node = g.append('g').attr('transform', `translate(${x}, 0)`);
+
+            const color = shuffled ? COLORS.red : COLORS.green;
+            node.append('rect').attr('x', -18).attr('y', -20).attr('width', 36).attr('height', 40)
+                .attr('rx', 6)
+                .attr('fill', shuffled ? 'rgba(255,82,82,0.1)' : 'rgba(22,199,154,0.1)')
+                .attr('stroke', color).attr('stroke-width', 1.5);
+            node.append('text').attr('text-anchor', 'middle').attr('dy', '0.35em')
+                .attr('fill', COLORS.text).attr('font-size', '0.95rem').attr('font-weight', 600).text(ch);
+            node.append('text').attr('text-anchor', 'middle').attr('dy', '-2em')
+                .attr('fill', COLORS.muted).attr('font-size', '0.6rem').text(i + 1);
+
+            if (i < chars.length - 1) {
+                g.append('line')
+                    .attr('x1', x + 20).attr('y1', 0)
+                    .attr('x2', x + spacing - 20).attr('y2', 0)
+                    .attr('stroke', COLORS.border).attr('stroke-width', 1)
+                    .attr('stroke-dasharray', shuffled ? '3,3' : 'none');
+            }
+        });
+    }
+
+    drawShuffleViz(shuffleChars, false);
+
+    document.getElementById('btnShuffle').addEventListener('click', () => {
+        if (isShuffled) return;
+        isShuffled = true;
+        const shuffled = [...shuffleChars];
+        /* Fisher-Yates shuffle */
+        const rng = RNNUtils.seededRandom(Date.now() % 10000);
+        for (let i = shuffled.length - 1; i > 0; i--) {
+            const j = Math.floor(rng() * (i + 1));
+            [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+        }
+        document.getElementById('shuffleProgress').style.width = '100%';
+        document.getElementById('shuffleLabel').textContent = '乱序';
+        drawShuffleViz(shuffled, true);
+    });
+
+    document.getElementById('btnRestore').addEventListener('click', () => {
+        isShuffled = false;
+        document.getElementById('shuffleProgress').style.width = '0%';
+        document.getElementById('shuffleLabel').textContent = '有序';
+        drawShuffleViz(shuffleChars, false);
+    });
+
+    /* ================================================================
+     *  Section 4: 序列建模的挑战
+     * ================================================================ */
+
+    /* Window demo */
+    const windowSlider = document.getElementById('windowSlider');
+    const windowValue = document.getElementById('windowValue');
+    const windowSentence = longSentence;
+    document.getElementById('windowSentence').textContent = windowSentence;
+
+    function renderWindowDemo() {
+        const winSize = parseInt(windowSlider.value);
+        windowValue.textContent = winSize;
+        const container = document.getElementById('windowTokens');
+        container.innerHTML = '';
+
+        const chars = windowSentence.split('');
+        const targetIdx = chars.length - 1;
+        const contextIdx = 0; /* Early context that matters */
+        const winStart = Math.max(0, targetIdx - winSize);
+
+        chars.forEach((ch, i) => {
+            const token = document.createElement('div');
+            token.className = 'window-token';
+            token.textContent = ch;
+
+            if (i === targetIdx) {
+                token.classList.add('target');
+            } else if (i >= winStart && i < targetIdx) {
+                token.classList.add('in-window');
+            } else if (i <= 3) {
+                token.classList.add('context-needed');
+            }
+            container.appendChild(token);
+        });
+    }
+
+    windowSlider.addEventListener('input', renderWindowDemo);
+    renderWindowDemo();
+
+    /* Prediction demo */
+    function renderPredictionDemo() {
+        const container = document.getElementById('predRow');
+        const info = document.getElementById('predInfo');
+        container.innerHTML = '';
+
+        const chars = predictionText.split('');
+        chars.forEach((ch, i) => {
+            const el = document.createElement('div');
+            el.className = 'pred-char given';
+            el.textContent = ch;
+            el.style.cursor = 'pointer';
+            el.addEventListener('click', () => {
+                /* Highlight context up to this point */
+                document.querySelectorAll('#predRow .pred-char').forEach((c, j) => {
+                    c.classList.remove('predict');
+                    c.classList.remove('given');
+                    if (j <= i) c.classList.add('given');
+                    if (j === i + 1) c.classList.add('predict');
+                });
+                const nextChar = i + 1 < chars.length ? chars[i + 1] : '?';
+                const contextLen = i + 1;
+                info.innerHTML = `
+                    <p class="text-sm" style="color:${COLORS.blue}">
+                        上下文长度：<strong>${contextLen}</strong> 个字符 → 预测：「<span style="color:${COLORS.orange}">${nextChar}</span>」
+                    </p>
+                    <p class="text-sm text-muted">
+                        ${contextLen <= 2 ? '上下文太短，预测困难！需要更多前文信息。' :
+                          contextLen <= 4 ? '有一些上下文了，但长距离信息仍可能丢失。' :
+                          '上下文较充分，但模型需要能"记住"这些早期信息。'}
+                    </p>
+                `;
+            });
+            container.appendChild(el);
+        });
+    }
+    renderPredictionDemo();
+
+    /* ================================================================
+     *  Section 5: 从固定到循环
+     * ================================================================ */
+    const recurrenceContainer = document.getElementById('recurrenceViz');
+    const recurrenceSvg = d3.select('#recurrenceViz svg');
+    let recurrenceAnimStep = 0;
+    let recurrenceTimeline = null;
+
+    function drawRecurrenceDiagram(animStep) {
+        const { w, h } = getVizSize(recurrenceContainer);
+        recurrenceSvg.attr('viewBox', `0 0 ${w} ${h}`).selectAll('*').remove();
+
+        const g = recurrenceSvg.append('g');
+        const steps = 5;
+        const boxW = 60;
+        const boxH = 50;
+        const spacing = Math.min(120, (w - 80) / steps);
+        const startX = (w - (steps - 1) * spacing) / 2;
+        const midY = h * 0.45;
+
+        /* Define arrowhead */
+        recurrenceSvg.append('defs').append('marker')
+            .attr('id', 'arrowGreen').attr('viewBox', '0 0 10 10')
+            .attr('refX', 8).attr('refY', 5)
+            .attr('markerWidth', 6).attr('markerHeight', 6)
+            .attr('orient', 'auto-start-reverse')
+            .append('path').attr('d', 'M 0 0 L 10 5 L 0 10 z').attr('fill', COLORS.green);
+
+        recurrenceSvg.append('defs').append('marker')
+            .attr('id', 'arrowBlue').attr('viewBox', '0 0 10 10')
+            .attr('refX', 8).attr('refY', 5)
+            .attr('markerWidth', 6).attr('markerHeight', 6)
+            .attr('orient', 'auto-start-reverse')
+            .append('path').attr('d', 'M 0 0 L 10 5 L 0 10 z').attr('fill', COLORS.blue);
+
+        recurrenceSvg.append('defs').append('marker')
+            .attr('id', 'arrowOrange').attr('viewBox', '0 0 10 10')
+            .attr('refX', 8).attr('refY', 5)
+            .attr('markerWidth', 6).attr('markerHeight', 6)
+            .attr('orient', 'auto-start-reverse')
+            .append('path').attr('d', 'M 0 0 L 10 5 L 0 10 z').attr('fill', COLORS.orange);
+
+        for (let i = 0; i < steps; i++) {
+            const cx = startX + i * spacing;
+            const isActive = i <= animStep;
+            const isCurrent = i === animStep;
+            const opacity = isActive ? 1 : 0.25;
+
+            /* Input arrow (from bottom) */
+            g.append('line')
+                .attr('x1', cx).attr('y1', midY + boxH / 2 + 50)
+                .attr('x2', cx).attr('y2', midY + boxH / 2 + 5)
+                .attr('stroke', COLORS.green).attr('stroke-width', 1.5)
+                .attr('marker-end', 'url(#arrowGreen)').attr('opacity', opacity);
+
+            /* Input label */
+            g.append('text').attr('x', cx).attr('y', midY + boxH / 2 + 68)
+                .attr('text-anchor', 'middle').attr('fill', COLORS.green)
+                .attr('font-size', '0.8rem').attr('font-weight', 600).attr('opacity', opacity)
+                .text(`x${subscript(i + 1)}`);
+
+            /* RNN box */
+            const boxColor = isCurrent ? COLORS.blue : (isActive ? 'rgba(79,195,247,0.5)' : COLORS.border);
+            const boxFill = isCurrent ? 'rgba(79,195,247,0.15)' : (isActive ? 'rgba(79,195,247,0.05)' : 'rgba(42,42,74,0.3)');
+
+            g.append('rect')
+                .attr('x', cx - boxW / 2).attr('y', midY - boxH / 2)
+                .attr('width', boxW).attr('height', boxH)
+                .attr('rx', 8).attr('fill', boxFill)
+                .attr('stroke', boxColor).attr('stroke-width', isCurrent ? 2.5 : 1.5)
+                .attr('opacity', opacity);
+
+            g.append('text').attr('x', cx).attr('y', midY + 5)
+                .attr('text-anchor', 'middle').attr('fill', COLORS.text)
+                .attr('font-size', '0.8rem').attr('font-weight', 700).attr('opacity', opacity)
+                .text('f');
+
+            /* Output arrow (to top) */
+            g.append('line')
+                .attr('x1', cx).attr('y1', midY - boxH / 2 - 5)
+                .attr('x2', cx).attr('y2', midY - boxH / 2 - 45)
+                .attr('stroke', COLORS.orange).attr('stroke-width', 1.5)
+                .attr('marker-end', 'url(#arrowOrange)').attr('opacity', opacity);
+
+            /* Output label */
+            g.append('text').attr('x', cx).attr('y', midY - boxH / 2 - 55)
+                .attr('text-anchor', 'middle').attr('fill', COLORS.orange)
+                .attr('font-size', '0.8rem').attr('font-weight', 600).attr('opacity', opacity)
+                .text(`y${subscript(i + 1)}`);
+
+            /* Hidden state arrow to next (loop) */
+            if (i < steps - 1) {
+                const x1 = cx + boxW / 2 + 3;
+                const x2 = cx + spacing - boxW / 2 - 3;
+                const nextActive = (i + 1) <= animStep;
+                g.append('line')
+                    .attr('x1', x1).attr('y1', midY)
+                    .attr('x2', x2).attr('y2', midY)
+                    .attr('stroke', COLORS.purple).attr('stroke-width', 2)
+                    .attr('marker-end', 'url(#arrowGreen)')
+                    .attr('opacity', nextActive ? 0.8 : 0.15);
+
+                /* h_t label on the arrow */
+                g.append('text').attr('x', (x1 + x2) / 2).attr('y', midY - 10)
+                    .attr('text-anchor', 'middle').attr('fill', COLORS.purple)
+                    .attr('font-size', '0.65rem').attr('opacity', nextActive ? 0.8 : 0.15)
+                    .text(`h${subscript(i + 1)}`);
+            }
+        }
+
+        /* Loop arrow on the abstract diagram */
+        const loopX = startX + (steps - 1) * spacing + boxW / 2 + 15;
+        g.append('path')
+            .attr('d', `M ${loopX} ${midY - 10} C ${loopX + 30} ${midY - 50}, ${loopX + 30} ${midY + 50}, ${loopX} ${midY + 10}`)
+            .attr('fill', 'none').attr('stroke', COLORS.purple).attr('stroke-width', 1.5)
+            .attr('stroke-dasharray', '4,3').attr('opacity', 0.5)
+            .attr('marker-end', 'url(#arrowGreen)');
+
+        g.append('text').attr('x', loopX + 25).attr('y', midY + 4)
+            .attr('text-anchor', 'middle').attr('fill', COLORS.purple)
+            .attr('font-size', '0.7rem').attr('opacity', 0.5).text('循环');
+
+        /* Title labels */
+        g.append('text').attr('x', w / 2).attr('y', 20)
+            .attr('text-anchor', 'middle').attr('fill', COLORS.text)
+            .attr('font-size', '0.85rem').attr('font-weight', 600)
+            .text('循环神经网络展开示意图');
+
+        /* Legend */
+        const legendY = h - 20;
+        const items = [
+            { label: '输入 xₜ', color: COLORS.green },
+            { label: '隐藏状态 hₜ', color: COLORS.purple },
+            { label: '输出 yₜ', color: COLORS.orange },
+            { label: '函数 f', color: COLORS.blue },
+        ];
+        items.forEach((item, i) => {
+            const lx = 30 + i * 130;
+            g.append('rect').attr('x', lx).attr('y', legendY - 8).attr('width', 12).attr('height', 12)
+                .attr('rx', 2).attr('fill', item.color).attr('opacity', 0.7);
+            g.append('text').attr('x', lx + 18).attr('y', legendY + 3)
+                .attr('fill', COLORS.muted).attr('font-size', '0.7rem').text(item.label);
+        });
+    }
+
+    drawRecurrenceDiagram(0);
+
+    document.getElementById('btnPlayRecurrence').addEventListener('click', () => {
+        if (recurrenceTimeline) recurrenceTimeline.kill();
+        recurrenceAnimStep = 0;
+        const totalSteps = 5;
+        let step = 0;
+        recurrenceTimeline = gsap.timeline();
+        for (let s = 0; s < totalSteps; s++) {
+            recurrenceTimeline.call(() => {
+                recurrenceAnimStep = s;
+                drawRecurrenceDiagram(s);
+                document.getElementById('recurrenceProgress').style.width = ((s + 1) / totalSteps * 100) + '%';
+                document.getElementById('recurrenceLabel').textContent = `t=${s + 1}`;
+            }, null, s * 0.7);
+        }
+    });
+
+    document.getElementById('btnResetRecurrence').addEventListener('click', () => {
+        if (recurrenceTimeline) recurrenceTimeline.kill();
+        recurrenceAnimStep = 0;
+        drawRecurrenceDiagram(0);
+        document.getElementById('recurrenceProgress').style.width = '0%';
+        document.getElementById('recurrenceLabel').textContent = 't=0';
+    });
+
+    /* ================================================================
+     *  初始化 & 窗口调整
+     * ================================================================ */
+    function init() {
+        drawTimeline(activeSeqType);
+        drawTimesteps();
+        renderWindowDemo();
+    }
+
+    init();
+
+    let resizeTimer;
+    window.addEventListener('resize', () => {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(() => {
+            drawTimeline(activeSeqType);
+            drawTimesteps();
+            drawBowComparison(document.querySelector('#orderDemo .sentence-box.active')?.dataset.idx || 0);
+            drawShuffleViz(shuffleChars, isShuffled);
+            drawRecurrenceDiagram(recurrenceAnimStep);
+        }, 200);
+    });
+
+    /* KaTeX auto-render */
+    if (typeof renderMathInElement === 'function') {
+        renderMathInElement(document.body, {
+            delimiters: [
+                { left: '$$', right: '$$', display: true },
+                { left: '$', right: '$', display: false },
+            ],
+            throwOnError: false,
+        });
+    }
+
+})();
+</script>
+
+</body>
+</html>

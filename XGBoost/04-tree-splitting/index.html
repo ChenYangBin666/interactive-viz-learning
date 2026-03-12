@@ -1,0 +1,1221 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>树的分裂 — XGBoost 可视化</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+SC:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.2/dist/gsap.min.js"></script>
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+    <style>
+        .page-header { margin-bottom: 2rem; }
+        .breadcrumb { font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.5rem; }
+        .breadcrumb a { color: var(--text-muted); }
+        .breadcrumb a:hover { color: var(--accent-green); }
+
+        .formula-box { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 1rem 1.2rem; margin: 0.75rem 0; text-align: center; }
+
+        .metric-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.5rem; margin: 0.75rem 0; }
+        .metric-item { background: var(--bg-card); border-radius: var(--radius-sm); padding: 0.5rem 0.6rem; text-align: center; }
+        .metric-item .label { font-size: 0.7rem; color: var(--text-muted); margin-bottom: 0.15rem; }
+        .metric-item .value { font-family: var(--font-mono); font-size: 1rem; font-weight: 600; }
+
+        .gain-highlight { color: var(--accent-yellow); }
+        .gain-positive { color: var(--accent-green); }
+        .gain-negative { color: var(--accent-red); }
+
+        .step-desc { background: var(--bg-card); border-left: 3px solid var(--accent-green); padding: 0.75rem 1rem; border-radius: 0 var(--radius-sm) var(--radius-sm) 0; margin: 0.75rem 0; font-size: 0.9rem; color: var(--text-secondary); min-height: 2.5rem; }
+
+        .dual-panel { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+        @media (max-width: 900px) { .dual-panel { grid-template-columns: 1fr; } }
+
+        .controls-row { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; margin: 0.75rem 0; }
+
+        .stat-badge { display: inline-block; padding: 0.2rem 0.6rem; border-radius: 9999px; font-size: 0.75rem; font-weight: 600; font-family: var(--font-mono); }
+
+        .tree-node-pruned { opacity: 0.3; }
+
+        .approx-compare { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin-top: 1rem; }
+        @media (max-width: 768px) { .approx-compare { grid-template-columns: 1fr; } .metric-row { grid-template-columns: repeat(2, 1fr); } }
+    </style>
+</head>
+<body>
+
+<div class="page-container">
+    <div class="page-header">
+        <div class="breadcrumb"><a href="../index.html">XGBoost</a> / 模块 04</div>
+        <h1>树的分裂</h1>
+        <p>XGBoost 通过优化增益公式来决定最佳分裂点。本模块将带你深入理解分裂增益的计算、精确贪心算法、逐层构建策略以及近似分裂算法。</p>
+    </div>
+
+    <!-- ============ Section 1: 增益公式可视化 ============ -->
+    <div class="section" id="sec-gain">
+        <div class="section-title">
+            <div class="icon">1</div>
+            <h2>增益公式可视化</h2>
+        </div>
+        <div class="split-layout">
+            <div class="text-panel">
+                <p>XGBoost 的分裂增益公式决定了是否值得在某个位置做分裂。拖动分裂线，观察左右两侧的梯度统计量如何变化。</p>
+                <div class="formula-box">
+                    $$\text{Gain} = \frac{1}{2}\left[\frac{G_L^2}{H_L+\lambda} + \frac{G_R^2}{H_R+\lambda} - \frac{(G_L+G_R)^2}{H_L+H_R+\lambda}\right] - \gamma$$
+                </div>
+                <div class="slider-group mt-1">
+                    <label>$\lambda$:</label>
+                    <input type="range" id="gain-lambda" min="0" max="5" step="0.1" value="1">
+                    <span class="slider-value" id="gain-lambda-val">1.0</span>
+                </div>
+                <div class="metric-row" id="gain-metrics">
+                    <div class="metric-item"><div class="label">$G_L$</div><div class="value" id="metric-gl">0.00</div></div>
+                    <div class="metric-item"><div class="label">$H_L$</div><div class="value" id="metric-hl">0.00</div></div>
+                    <div class="metric-item"><div class="label">$G_R$</div><div class="value" id="metric-gr">0.00</div></div>
+                    <div class="metric-item"><div class="label">$H_R$</div><div class="value" id="metric-hr">0.00</div></div>
+                </div>
+                <div class="metric-row">
+                    <div class="metric-item"><div class="label">左分数</div><div class="value" id="metric-sl" style="color:var(--accent-blue)">0.00</div></div>
+                    <div class="metric-item"><div class="label">右分数</div><div class="value" id="metric-sr" style="color:var(--accent-purple)">0.00</div></div>
+                    <div class="metric-item"><div class="label">父分数</div><div class="value" id="metric-sp" style="color:var(--text-muted)">0.00</div></div>
+                    <div class="metric-item"><div class="label">增益</div><div class="value gain-highlight" id="metric-gain">0.00</div></div>
+                </div>
+                <div class="info-box success mt-1">
+                    <p id="gain-hint">拖动橙色分裂线查看不同位置的增益值。金色虚线标记最优分裂位置。</p>
+                </div>
+            </div>
+            <div class="viz-panel">
+                <div class="viz-area" id="viz-gain" style="min-height:450px;"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============ Section 2: 精确贪心算法 ============ -->
+    <div class="section" id="sec-greedy">
+        <div class="section-title">
+            <div class="icon">2</div>
+            <h2>精确贪心算法</h2>
+        </div>
+        <p>对于每个特征，XGBoost 排序所有值，逐一扫描每个候选分裂点并计算增益。最终选择全局最大增益的分裂。</p>
+        <div class="step-desc" id="greedy-desc">点击播放，观察算法逐步扫描每个特征的每个候选分裂点。</div>
+        <div id="greedy-controls"></div>
+        <div class="dual-panel mt-1">
+            <div class="viz-area" id="viz-greedy-scatter" style="min-height:380px;"></div>
+            <div class="viz-area" id="viz-greedy-heatstrip" style="min-height:380px;"></div>
+        </div>
+    </div>
+
+    <!-- ============ Section 3: 树的逐层构建 ============ -->
+    <div class="section" id="sec-levelwise">
+        <div class="section-title">
+            <div class="icon">3</div>
+            <h2>树的逐层构建</h2>
+        </div>
+        <p>XGBoost 逐层（level-wise）构建决策树。每一层同时分裂所有叶子节点，而非逐节点分裂。</p>
+        <div class="controls-row">
+            <div class="slider-group">
+                <label>$\gamma$（剪枝）:</label>
+                <input type="range" id="level-gamma" min="0" max="2" step="0.05" value="0">
+                <span class="slider-value" id="level-gamma-val">0.00</span>
+            </div>
+            <button class="btn btn-primary" id="level-build-btn">逐层构建</button>
+            <button class="btn" id="level-reset-btn">重置</button>
+        </div>
+        <div class="step-desc" id="level-desc">点击"逐层构建"观察树的生长过程。</div>
+        <div class="dual-panel mt-1">
+            <div class="viz-area" id="viz-level-scatter" style="min-height:400px;"></div>
+            <div class="viz-area" id="viz-level-tree" style="min-height:400px;"></div>
+        </div>
+    </div>
+
+    <!-- ============ Section 4: gamma 与最小增益 ============ -->
+    <div class="section" id="sec-gamma">
+        <div class="section-title">
+            <div class="icon">4</div>
+            <h2>$\gamma$ 与最小增益</h2>
+        </div>
+        <p>$\gamma$ 是分裂的最小增益阈值——只有增益超过 $\gamma$ 的分裂才会被保留。增大 $\gamma$ 会让树变得更简单。</p>
+        <div class="controls-row">
+            <div class="slider-group" style="flex:1;max-width:400px;">
+                <label>$\gamma$:</label>
+                <input type="range" id="gamma-slider" min="0" max="2" step="0.02" value="0">
+                <span class="slider-value" id="gamma-slider-val">0.00</span>
+            </div>
+            <span class="stat-badge" style="background:rgba(22,199,154,0.15);color:var(--accent-green);" id="gamma-node-count">节点数: 0</span>
+        </div>
+        <div class="dual-panel mt-1">
+            <div class="viz-area" id="viz-gamma-tree" style="min-height:400px;"></div>
+            <div class="viz-area" id="viz-gamma-chart" style="min-height:400px;"></div>
+        </div>
+        <div class="info-box mt-1">
+            <p><strong>核心洞察：</strong>$\gamma$ 是对树复杂度的直接惩罚。增益公式中减去 $\gamma$ 意味着每次分裂必须带来至少 $\gamma$ 的净收益才值得进行。</p>
+        </div>
+    </div>
+
+    <!-- ============ Section 5: 近似分裂算法 ============ -->
+    <div class="section" id="sec-approx">
+        <div class="section-title">
+            <div class="icon">5</div>
+            <h2>近似分裂算法</h2>
+        </div>
+        <p>精确贪心需要排序所有特征值，对大数据集代价高昂。近似算法将特征值分桶（quantile sketch），只在桶边界处评估分裂候选。</p>
+        <div class="controls-row">
+            <div class="slider-group" style="flex:1;max-width:350px;">
+                <label>分桶数:</label>
+                <input type="range" id="approx-buckets" min="3" max="20" step="1" value="8">
+                <span class="slider-value" id="approx-buckets-val">8</span>
+            </div>
+            <button class="btn btn-primary" id="approx-run-btn">运行对比</button>
+        </div>
+        <div class="approx-compare">
+            <div>
+                <h4 style="color:var(--accent-blue);margin-bottom:0.5rem;">精确分裂</h4>
+                <div class="viz-area" id="viz-approx-exact" style="min-height:300px;"></div>
+            </div>
+            <div>
+                <h4 style="color:var(--accent-orange);margin-bottom:0.5rem;">近似分裂</h4>
+                <div class="viz-area" id="viz-approx-approx" style="min-height:300px;"></div>
+            </div>
+        </div>
+        <div class="dual-panel mt-2">
+            <div class="viz-area" id="viz-approx-bar" style="min-height:280px;"></div>
+            <div>
+                <div class="info-box success">
+                    <p><strong>速度 vs 精度：</strong>近似算法将候选分裂点从 $O(n)$ 减少到分桶数量级，精度损失极小但速度大幅提升。</p>
+                </div>
+                <div class="metric-row mt-1" id="approx-metrics">
+                    <div class="metric-item"><div class="label">精确增益</div><div class="value" id="approx-exact-gain" style="color:var(--accent-blue)">—</div></div>
+                    <div class="metric-item"><div class="label">近似增益</div><div class="value" id="approx-approx-gain" style="color:var(--accent-orange)">—</div></div>
+                    <div class="metric-item"><div class="label">精度保持</div><div class="value" id="approx-accuracy" style="color:var(--accent-green)">—</div></div>
+                    <div class="metric-item"><div class="label">候选缩减</div><div class="value" id="approx-reduction" style="color:var(--accent-yellow)">—</div></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<script src="../shared/scripts/xgb-utils.js"></script>
+<script src="../shared/scripts/animation-controller.js"></script>
+<script src="../shared/scripts/matrix-renderer.js"></script>
+<script src="../shared/scripts/nav.js"></script>
+<script src="../shared/scripts/katex-init.js"></script>
+
+<script>
+(function() {
+    'use strict';
+
+    /* ================================================================
+       辅助工具
+    ================================================================ */
+    const rng = XGBUtils.seededRandom(42);
+    const fmt = (v, d=2) => v.toFixed(d);
+    const palette = {
+        yellow: '#ffd740', green: '#16c79a', blue: '#4fc3f7', purple: '#b388ff',
+        orange: '#ffab40', red: '#ff5252', pink: '#ff80ab',
+        bg: '#1a1a2e', bgSec: '#16213e', bgCard: '#0f3460',
+        text: '#e8e8e8', muted: '#6c6c7c', border: '#2a2a4a'
+    };
+
+    /* 生成 1D 回归数据 */
+    function gen1DData(n, seed) {
+        const r = XGBUtils.seededRandom(seed || 55);
+        const data = [];
+        for (let i = 0; i < n; i++) {
+            const x = r() * 8 - 4;
+            const target = Math.sin(x) * 2 + x * 0.5 + (r() - 0.5) * 1.5;
+            data.push({ x, target });
+        }
+        return data.sort((a, b) => a.x - b.x);
+    }
+
+    /* 生成 2D 分类数据 */
+    function gen2DData(n, seed) {
+        return XGBUtils.generateClassificationData(n, seed || 77, 0.4);
+    }
+
+    /* 计算回归梯度和 Hessian */
+    function computeGH_regression(data, preds) {
+        const y = data.map(d => d.target);
+        const g = XGBUtils.mseGradient(y, preds);
+        const h = XGBUtils.mseHessian(y, preds);
+        return { g, h };
+    }
+
+    /* 计算分类梯度和 Hessian */
+    function computeGH_classification(data, preds) {
+        const y = data.map(d => d.label);
+        const g = XGBUtils.logLossGradient(y, preds);
+        const h = XGBUtils.logLossHessian(y, preds);
+        return { g, h };
+    }
+
+    /* ================================================================
+       Section 1: 增益公式可视化
+    ================================================================ */
+    (function initGainViz() {
+        const data = gen1DData(15, 55);
+        const n = data.length;
+        const meanTarget = data.reduce((s, d) => s + d.target, 0) / n;
+        const preds = new Array(n).fill(meanTarget);
+        const { g, h } = computeGH_regression(data, preds);
+
+        const container = document.getElementById('viz-gain');
+        const W = container.clientWidth || 700;
+        const H = 450;
+
+        const svg = d3.select(container).append('svg')
+            .attr('width', '100%').attr('height', H)
+            .attr('viewBox', `0 0 ${W} ${H}`);
+
+        const margin = { top: 40, right: 30, bottom: 50, left: 50 };
+        const w = W - margin.left - margin.right;
+        const hh = H - margin.top - margin.bottom;
+
+        const xScale = d3.scaleLinear()
+            .domain([d3.min(data, d => d.x) - 0.5, d3.max(data, d => d.x) + 0.5])
+            .range([0, w]);
+        const yTarget = d3.scaleLinear()
+            .domain([d3.min(data, d => d.target) - 1, d3.max(data, d => d.target) + 1])
+            .range([hh * 0.6, 0]);
+        const barMax = Math.max(d3.max(g, v => Math.abs(v)), d3.max(h, v => Math.abs(v)), 1);
+        const yBar = d3.scaleLinear().domain([-barMax, barMax]).range([hh, hh * 0.65]);
+
+        const gMain = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+
+        // Axes
+        gMain.append('g').attr('transform', `translate(0,${hh * 0.6})`)
+            .call(d3.axisBottom(xScale).ticks(8)).selectAll('text,line,path').attr('stroke', palette.muted).attr('fill', palette.muted);
+        gMain.append('g').call(d3.axisLeft(yTarget).ticks(5))
+            .selectAll('text,line,path').attr('stroke', palette.muted).attr('fill', palette.muted);
+
+        // x label
+        gMain.append('text').attr('x', w / 2).attr('y', hh + 35).attr('text-anchor', 'middle')
+            .attr('fill', palette.muted).attr('font-size', 12).text('特征 x');
+
+        // Data points
+        gMain.selectAll('.data-pt').data(data).enter().append('circle')
+            .attr('class', 'data-pt')
+            .attr('cx', d => xScale(d.x)).attr('cy', d => yTarget(d.target))
+            .attr('r', 5).attr('fill', palette.blue).attr('opacity', 0.8);
+
+        // Mean line
+        gMain.append('line').attr('x1', 0).attr('x2', w)
+            .attr('y1', yTarget(meanTarget)).attr('y2', yTarget(meanTarget))
+            .attr('stroke', palette.muted).attr('stroke-dasharray', '4,4').attr('opacity', 0.5);
+
+        // Gradient bars
+        const barW = Math.max(4, w / n * 0.5);
+        const barZero = yBar(0);
+
+        const gBars = gMain.selectAll('.g-bar').data(g).enter().append('rect')
+            .attr('class', 'g-bar')
+            .attr('x', (_, i) => xScale(data[i].x) - barW / 2 - barW * 0.3)
+            .attr('y', (v) => v < 0 ? barZero : yBar(v))
+            .attr('width', barW * 0.55)
+            .attr('height', (v) => Math.abs(yBar(v) - barZero))
+            .attr('fill', d => d < 0 ? palette.blue : palette.red)
+            .attr('opacity', 0.7);
+
+        const hBars = gMain.selectAll('.h-bar').data(h).enter().append('rect')
+            .attr('class', 'h-bar')
+            .attr('x', (_, i) => xScale(data[i].x) - barW / 2 + barW * 0.3)
+            .attr('y', (v) => barZero - Math.abs(yBar(v) - barZero))
+            .attr('width', barW * 0.55)
+            .attr('height', (v) => Math.abs(yBar(v) - barZero))
+            .attr('fill', palette.green).attr('opacity', 0.5);
+
+        // Bar legend
+        gMain.append('text').attr('x', w - 5).attr('y', hh * 0.68).attr('text-anchor', 'end')
+            .attr('fill', palette.muted).attr('font-size', 10).text('梯度 g (蓝/红) | Hessian h (绿)');
+
+        // Split line (draggable)
+        const initSplitX = (data[Math.floor(n / 2)].x + data[Math.floor(n / 2) + 1].x) / 2;
+        let splitX = initSplitX;
+
+        const splitLine = gMain.append('line')
+            .attr('y1', 0).attr('y2', hh)
+            .attr('stroke', palette.orange).attr('stroke-width', 3)
+            .attr('x1', xScale(splitX)).attr('x2', xScale(splitX))
+            .attr('cursor', 'ew-resize').attr('opacity', 0.9);
+
+        const splitLabel = gMain.append('text')
+            .attr('y', -8).attr('text-anchor', 'middle')
+            .attr('fill', palette.orange).attr('font-size', 11).attr('font-weight', 600);
+
+        // Optimal line
+        let optimalX = 0;
+        const optLine = gMain.append('line')
+            .attr('y1', 0).attr('y2', hh)
+            .attr('stroke', palette.yellow).attr('stroke-width', 2)
+            .attr('stroke-dasharray', '6,4').attr('opacity', 0.7);
+        const optLabel = gMain.append('text')
+            .attr('y', -8).attr('text-anchor', 'middle')
+            .attr('fill', palette.yellow).attr('font-size', 10);
+
+        // Left/right regions
+        const leftRect = gMain.insert('rect', ':first-child')
+            .attr('y', 0).attr('height', hh).attr('fill', palette.blue).attr('opacity', 0.05);
+        const rightRect = gMain.insert('rect', ':first-child')
+            .attr('y', 0).attr('height', hh).attr('fill', palette.purple).attr('opacity', 0.05);
+
+        // Color data points by side
+        function colorPoints() {
+            gMain.selectAll('.data-pt')
+                .attr('fill', d => d.x <= splitX ? palette.blue : palette.purple);
+        }
+
+        function updateGain() {
+            const lambda = parseFloat(document.getElementById('gain-lambda').value);
+            document.getElementById('gain-lambda-val').textContent = lambda.toFixed(1);
+
+            const leftG = [], leftH = [], rightG = [], rightH = [];
+            for (let i = 0; i < n; i++) {
+                if (data[i].x <= splitX) { leftG.push(g[i]); leftH.push(h[i]); }
+                else { rightG.push(g[i]); rightH.push(h[i]); }
+            }
+
+            const GL = leftG.reduce((a, b) => a + b, 0);
+            const HL = leftH.reduce((a, b) => a + b, 0);
+            const GR = rightG.reduce((a, b) => a + b, 0);
+            const HR = rightH.reduce((a, b) => a + b, 0);
+            const GP = GL + GR, HP = HL + HR;
+
+            const sL = (GL * GL) / (HL + lambda);
+            const sR = (GR * GR) / (HR + lambda);
+            const sP = (GP * GP) / (HP + lambda);
+            const gain = 0.5 * (sL + sR - sP);
+
+            document.getElementById('metric-gl').textContent = fmt(GL);
+            document.getElementById('metric-hl').textContent = fmt(HL);
+            document.getElementById('metric-gr').textContent = fmt(GR);
+            document.getElementById('metric-hr').textContent = fmt(HR);
+            document.getElementById('metric-sl').textContent = fmt(sL);
+            document.getElementById('metric-sr').textContent = fmt(sR);
+            document.getElementById('metric-sp').textContent = fmt(sP);
+
+            const gainEl = document.getElementById('metric-gain');
+            gainEl.textContent = fmt(gain, 3);
+            gainEl.className = 'value ' + (gain > 0 ? 'gain-positive' : gain < 0 ? 'gain-negative' : 'gain-highlight');
+
+            splitLine.attr('x1', xScale(splitX)).attr('x2', xScale(splitX));
+            splitLabel.attr('x', xScale(splitX)).text(`x=${fmt(splitX, 1)}`);
+
+            leftRect.attr('x', 0).attr('width', xScale(splitX));
+            rightRect.attr('x', xScale(splitX)).attr('width', w - xScale(splitX));
+
+            colorPoints();
+        }
+
+        function findOptimal() {
+            const lambda = parseFloat(document.getElementById('gain-lambda').value);
+            let bestGain = -Infinity, bestX = data[0].x;
+            for (let i = 0; i < n - 1; i++) {
+                const threshold = (data[i].x + data[i + 1].x) / 2;
+                const lG = [], lH = [], rG = [], rH = [];
+                for (let j = 0; j < n; j++) {
+                    if (data[j].x <= threshold) { lG.push(g[j]); lH.push(h[j]); }
+                    else { rG.push(g[j]); rH.push(h[j]); }
+                }
+                const gain = XGBUtils.computeSplitGain(lG, lH, rG, rH, lambda, 0);
+                if (gain > bestGain) { bestGain = gain; bestX = threshold; }
+            }
+            optimalX = bestX;
+            optLine.attr('x1', xScale(optimalX)).attr('x2', xScale(optimalX));
+            optLabel.attr('x', xScale(optimalX)).text(`最优 x=${fmt(optimalX, 1)}`);
+        }
+
+        // Drag
+        const drag = d3.drag().on('drag', function(event) {
+            const px = event.x - margin.left;
+            splitX = xScale.invert(XGBUtils.clamp(px, 0, w));
+            updateGain();
+        });
+        splitLine.call(drag);
+
+        // Also drag on svg background
+        svg.on('click', function(event) {
+            const [mx] = d3.pointer(event);
+            const px = mx - margin.left;
+            if (px >= 0 && px <= w) {
+                splitX = xScale.invert(px);
+                updateGain();
+            }
+        });
+
+        document.getElementById('gain-lambda').addEventListener('input', () => {
+            updateGain();
+            findOptimal();
+        });
+
+        findOptimal();
+        updateGain();
+    })();
+
+    /* ================================================================
+       Section 2: 精确贪心算法
+    ================================================================ */
+    (function initGreedyViz() {
+        const data = gen2DData(30, 88);
+        const n = data.length;
+        const posRate = data.filter(d => d.label === 1).length / n;
+        const initPred = XGBUtils.logOdds(posRate);
+        const preds = new Array(n).fill(initPred);
+        const { g, h } = computeGH_classification(data, preds);
+
+        // Gather all split candidates for feature 0 (x) and feature 1 (y)
+        function getSplitCandidates(featureIdx) {
+            const vals = data.map((d, i) => ({ val: featureIdx === 0 ? d.x : d.y, idx: i }));
+            vals.sort((a, b) => a.val - b.val);
+            const candidates = [];
+            for (let i = 0; i < vals.length - 1; i++) {
+                if (vals[i].val === vals[i + 1].val) continue;
+                const threshold = (vals[i].val + vals[i + 1].val) / 2;
+                const leftG = [], leftH = [], rightG = [], rightH = [];
+                for (let j = 0; j < n; j++) {
+                    const v = featureIdx === 0 ? data[j].x : data[j].y;
+                    if (v <= threshold) { leftG.push(g[j]); leftH.push(h[j]); }
+                    else { rightG.push(g[j]); rightH.push(h[j]); }
+                }
+                const gain = XGBUtils.computeSplitGain(leftG, leftH, rightG, rightH, 1, 0);
+                candidates.push({ featureIdx, threshold, gain });
+            }
+            return candidates;
+        }
+
+        const candX = getSplitCandidates(0);
+        const candY = getSplitCandidates(1);
+        const allCandidates = [...candX, ...candY];
+
+        let bestOverall = allCandidates.reduce((best, c) => c.gain > best.gain ? c : best, { gain: -Infinity });
+
+        // Build animation steps
+        const steps = allCandidates.map((c, i) => ({
+            name: `特征${c.featureIdx === 0 ? 'x' : 'y'} 阈值=${fmt(c.threshold, 2)}`,
+            duration: 400,
+            action: (stepIdx, instant) => renderGreedyStep(c, i, instant)
+        }));
+
+        // Scatter SVG
+        const scatterDiv = document.getElementById('viz-greedy-scatter');
+        const sW = scatterDiv.clientWidth || 400;
+        const sH = 380;
+        const sSvg = d3.select(scatterDiv).append('svg')
+            .attr('width', '100%').attr('height', sH)
+            .attr('viewBox', `0 0 ${sW} ${sH}`);
+        const sMarg = { top: 20, right: 20, bottom: 35, left: 40 };
+        const sw = sW - sMarg.left - sMarg.right;
+        const sh = sH - sMarg.top - sMarg.bottom;
+
+        const sxScale = d3.scaleLinear()
+            .domain([d3.min(data, d => d.x) - 0.5, d3.max(data, d => d.x) + 0.5]).range([0, sw]);
+        const syScale = d3.scaleLinear()
+            .domain([d3.min(data, d => d.y) - 0.5, d3.max(data, d => d.y) + 0.5]).range([sh, 0]);
+
+        const sG = sSvg.append('g').attr('transform', `translate(${sMarg.left},${sMarg.top})`);
+        sG.append('g').attr('transform', `translate(0,${sh})`).call(d3.axisBottom(sxScale).ticks(6))
+            .selectAll('text,line,path').attr('stroke', palette.muted).attr('fill', palette.muted);
+        sG.append('g').call(d3.axisLeft(syScale).ticks(6))
+            .selectAll('text,line,path').attr('stroke', palette.muted).attr('fill', palette.muted);
+
+        sG.selectAll('.s-pt').data(data).enter().append('circle')
+            .attr('class', 's-pt')
+            .attr('cx', d => sxScale(d.x)).attr('cy', d => syScale(d.y))
+            .attr('r', 4.5)
+            .attr('fill', d => d.label === 1 ? palette.blue : palette.red)
+            .attr('opacity', 0.75);
+
+        const scanLine = sG.append('line')
+            .attr('stroke', palette.yellow).attr('stroke-width', 2).attr('opacity', 0);
+
+        const bestLine = sG.append('line')
+            .attr('stroke', palette.green).attr('stroke-width', 2.5)
+            .attr('stroke-dasharray', '6,3').attr('opacity', 0);
+
+        // Heat strip SVG
+        const heatDiv = document.getElementById('viz-greedy-heatstrip');
+        const hW = heatDiv.clientWidth || 400;
+        const hH = 380;
+        const hSvg = d3.select(heatDiv).append('svg')
+            .attr('width', '100%').attr('height', hH)
+            .attr('viewBox', `0 0 ${hW} ${hH}`);
+
+        const hMarg = { top: 30, right: 20, bottom: 35, left: 60 };
+        const hw = hW - hMarg.left - hMarg.right;
+        const halfH = (hH - hMarg.top - hMarg.bottom - 40) / 2;
+        const hG = hSvg.append('g').attr('transform', `translate(${hMarg.left},${hMarg.top})`);
+
+        const gainMax = Math.max(d3.max(allCandidates, c => c.gain), 0.1);
+        const gainColorScale = d3.scaleSequential(d3.interpolateYlOrRd).domain([0, gainMax]);
+
+        // Feature x heat strip
+        hG.append('text').attr('x', 0).attr('y', -8).attr('fill', palette.text).attr('font-size', 12).text('特征 x 增益');
+        const xStripScale = d3.scaleLinear()
+            .domain([d3.min(candX, c => c.threshold), d3.max(candX, c => c.threshold)]).range([0, hw]);
+        const xStripW = Math.max(4, hw / candX.length * 0.85);
+
+        hG.selectAll('.hx').data(candX).enter().append('rect')
+            .attr('class', 'hx')
+            .attr('x', c => xStripScale(c.threshold) - xStripW / 2)
+            .attr('y', 0).attr('width', xStripW).attr('height', halfH)
+            .attr('fill', c => gainColorScale(Math.max(0, c.gain)))
+            .attr('opacity', 0.4).attr('rx', 2);
+
+        // Feature y heat strip
+        const yOff = halfH + 40;
+        hG.append('text').attr('x', 0).attr('y', yOff - 8).attr('fill', palette.text).attr('font-size', 12).text('特征 y 增益');
+        const yStripScale = d3.scaleLinear()
+            .domain([d3.min(candY, c => c.threshold), d3.max(candY, c => c.threshold)]).range([0, hw]);
+        const yStripW = Math.max(4, hw / candY.length * 0.85);
+
+        hG.selectAll('.hy').data(candY).enter().append('rect')
+            .attr('class', 'hy')
+            .attr('x', c => yStripScale(c.threshold) - yStripW / 2)
+            .attr('y', yOff).attr('width', yStripW).attr('height', halfH)
+            .attr('fill', c => gainColorScale(Math.max(0, c.gain)))
+            .attr('opacity', 0.4).attr('rx', 2);
+
+        // Scan marker on heat strip
+        const scanMarker = hG.append('circle').attr('r', 6).attr('fill', palette.yellow).attr('opacity', 0);
+        // Gain text
+        const gainText = hG.append('text').attr('text-anchor', 'middle')
+            .attr('fill', palette.yellow).attr('font-size', 11).attr('font-weight', 600).attr('opacity', 0);
+
+        // Best marker
+        const bestMarker = hG.append('circle').attr('r', 8)
+            .attr('fill', 'none').attr('stroke', palette.green).attr('stroke-width', 2.5).attr('opacity', 0);
+
+        let currentBestGain = -Infinity;
+        let currentBestCandidate = null;
+
+        function renderGreedyStep(candidate, idx, instant) {
+            const dur = instant ? 0 : 300;
+            const { featureIdx, threshold, gain } = candidate;
+
+            // Update scan line on scatter
+            if (featureIdx === 0) {
+                scanLine.transition().duration(dur)
+                    .attr('x1', sxScale(threshold)).attr('x2', sxScale(threshold))
+                    .attr('y1', 0).attr('y2', sh).attr('opacity', 0.9);
+            } else {
+                scanLine.transition().duration(dur)
+                    .attr('x1', 0).attr('x2', sw)
+                    .attr('y1', syScale(threshold)).attr('y2', syScale(threshold)).attr('opacity', 0.9);
+            }
+
+            // Update heat strip marker
+            if (featureIdx === 0) {
+                scanMarker.transition().duration(dur)
+                    .attr('cx', xStripScale(threshold)).attr('cy', halfH / 2).attr('opacity', 1);
+                gainText.transition().duration(dur)
+                    .attr('x', xStripScale(threshold)).attr('y', halfH + 16).attr('opacity', 1)
+                    .text(fmt(gain, 3));
+            } else {
+                scanMarker.transition().duration(dur)
+                    .attr('cx', yStripScale(threshold)).attr('cy', yOff + halfH / 2).attr('opacity', 1);
+                gainText.transition().duration(dur)
+                    .attr('x', yStripScale(threshold)).attr('y', yOff + halfH + 16).attr('opacity', 1)
+                    .text(fmt(gain, 3));
+            }
+
+            // Highlight current strip bar
+            hG.selectAll('.hx').attr('opacity', (c, i2) => {
+                if (featureIdx === 0) {
+                    const ci = candX.indexOf(c);
+                    return ci <= candX.indexOf(candidate) ? 0.85 : 0.3;
+                }
+                return 0.85;
+            });
+            hG.selectAll('.hy').attr('opacity', (c, i2) => {
+                if (featureIdx === 1) {
+                    const ci = candY.indexOf(c);
+                    return ci <= candY.indexOf(candidate) ? 0.85 : 0.3;
+                }
+                return featureIdx === 0 ? 0.3 : 0.85;
+            });
+
+            // Track best
+            if (gain > currentBestGain) {
+                currentBestGain = gain;
+                currentBestCandidate = candidate;
+            }
+
+            // Show best line
+            if (currentBestCandidate) {
+                const bc = currentBestCandidate;
+                if (bc.featureIdx === 0) {
+                    bestLine.transition().duration(dur)
+                        .attr('x1', sxScale(bc.threshold)).attr('x2', sxScale(bc.threshold))
+                        .attr('y1', 0).attr('y2', sh).attr('opacity', 0.8);
+                } else {
+                    bestLine.transition().duration(dur)
+                        .attr('x1', 0).attr('x2', sw)
+                        .attr('y1', syScale(bc.threshold)).attr('y2', syScale(bc.threshold)).attr('opacity', 0.8);
+                }
+            }
+
+            // Description
+            const desc = document.getElementById('greedy-desc');
+            desc.innerHTML = `扫描<strong>特征${featureIdx === 0 ? 'x' : 'y'}</strong>，阈值 = ${fmt(threshold, 2)}，增益 = <span style="color:${palette.yellow}">${fmt(gain, 3)}</span>` +
+                (currentBestCandidate ? `<br>当前最佳：特征${currentBestCandidate.featureIdx === 0 ? 'x' : 'y'} 阈值=${fmt(currentBestCandidate.threshold, 2)} 增益=<span style="color:${palette.green}">${fmt(currentBestGain, 3)}</span>` : '');
+        }
+
+        const ctrl = new AnimationController({
+            container: document.getElementById('greedy-controls'),
+            steps: steps,
+            defaultDuration: 400,
+            onStepChange: (idx) => {
+                if (idx < 0) {
+                    currentBestGain = -Infinity;
+                    currentBestCandidate = null;
+                    scanLine.attr('opacity', 0);
+                    bestLine.attr('opacity', 0);
+                    scanMarker.attr('opacity', 0);
+                    gainText.attr('opacity', 0);
+                    hG.selectAll('.hx,.hy').attr('opacity', 0.4);
+                    document.getElementById('greedy-desc').textContent = '点击播放，观察算法逐步扫描每个特征的每个候选分裂点。';
+                }
+            }
+        });
+    })();
+
+    /* ================================================================
+       Section 3: 树的逐层构建
+    ================================================================ */
+    (function initLevelWise() {
+        const data = gen2DData(40, 99);
+        const n = data.length;
+        const posRate = data.filter(d => d.label === 1).length / n;
+        const initPred = XGBUtils.logOdds(posRate);
+        const preds = new Array(n).fill(initPred);
+
+        // Scatter
+        const scatterDiv = document.getElementById('viz-level-scatter');
+        const sW = scatterDiv.clientWidth || 450;
+        const sH = 400;
+        const sSvg = d3.select(scatterDiv).append('svg')
+            .attr('width', '100%').attr('height', sH).attr('viewBox', `0 0 ${sW} ${sH}`);
+        const sM = { top: 20, right: 20, bottom: 35, left: 40 };
+        const sw = sW - sM.left - sM.right, sh = sH - sM.top - sM.bottom;
+        const sxS = d3.scaleLinear().domain([d3.min(data, d => d.x) - 0.5, d3.max(data, d => d.x) + 0.5]).range([0, sw]);
+        const syS = d3.scaleLinear().domain([d3.min(data, d => d.y) - 0.5, d3.max(data, d => d.y) + 0.5]).range([sh, 0]);
+        const sG = sSvg.append('g').attr('transform', `translate(${sM.left},${sM.top})`);
+
+        sG.append('g').attr('transform', `translate(0,${sh})`).call(d3.axisBottom(sxS).ticks(6))
+            .selectAll('text,line,path').attr('stroke', palette.muted).attr('fill', palette.muted);
+        sG.append('g').call(d3.axisLeft(syS).ticks(6))
+            .selectAll('text,line,path').attr('stroke', palette.muted).attr('fill', palette.muted);
+        sG.selectAll('.lpt').data(data).enter().append('circle').attr('class', 'lpt')
+            .attr('cx', d => sxS(d.x)).attr('cy', d => syS(d.y)).attr('r', 4)
+            .attr('fill', d => d.label === 1 ? palette.blue : palette.red).attr('opacity', 0.7);
+
+        const boundaryGroup = sG.append('g').attr('class', 'boundaries');
+
+        // Tree
+        const treeDiv = document.getElementById('viz-level-tree');
+        const tW = treeDiv.clientWidth || 450;
+        const tH = 400;
+        const tSvg = d3.select(treeDiv).append('svg')
+            .attr('width', '100%').attr('height', tH).attr('viewBox', `0 0 ${tW} ${tH}`);
+        const tG = tSvg.append('g').attr('transform', `translate(${tW/2}, 30)`);
+
+        let currentTree = null;
+        let currentLevel = 0;
+
+        function buildTreeLevel(maxDepth, gamma) {
+            const { g, h } = computeGH_classification(data, preds);
+            return XGBUtils.buildXGBTree(data, g, h, { maxDepth, lambda: 1, gamma, minChildWeight: 1, seed: 42 });
+        }
+
+        function getNodesAtDepth(node, depth, current = 0) {
+            if (!node) return [];
+            if (current === depth) return [node];
+            if (node.isLeaf) return [];
+            return [...getNodesAtDepth(node.left, depth, current + 1), ...getNodesAtDepth(node.right, depth, current + 1)];
+        }
+
+        function drawBoundaries(tree, maxDepth) {
+            boundaryGroup.selectAll('*').remove();
+            function drawSplit(node, xMin, xMax, yMin, yMax) {
+                if (!node || node.isLeaf || node.depth > maxDepth) return;
+                const f = node.splitFeature;
+                const t = node.splitThreshold;
+                if (f === 0) {
+                    boundaryGroup.append('line')
+                        .attr('x1', sxS(t)).attr('x2', sxS(t))
+                        .attr('y1', syS(yMax)).attr('y2', syS(yMin))
+                        .attr('stroke', palette.yellow).attr('stroke-width', 2).attr('opacity', 0)
+                        .transition().duration(500).attr('opacity', 0.8);
+                    drawSplit(node.left, xMin, t, yMin, yMax);
+                    drawSplit(node.right, t, xMax, yMin, yMax);
+                } else {
+                    boundaryGroup.append('line')
+                        .attr('x1', sxS(xMin)).attr('x2', sxS(xMax))
+                        .attr('y1', syS(t)).attr('y2', syS(t))
+                        .attr('stroke', palette.orange).attr('stroke-width', 2).attr('opacity', 0)
+                        .transition().duration(500).attr('opacity', 0.8);
+                    drawSplit(node.left, xMin, xMax, yMin, t);
+                    drawSplit(node.right, xMin, xMax, t, yMax);
+                }
+            }
+            const xDom = sxS.domain(), yDom = syS.domain();
+            drawSplit(tree, xDom[0], xDom[1], yDom[0], yDom[1]);
+        }
+
+        function drawTree(tree, maxDepth) {
+            tG.selectAll('*').remove();
+            if (!tree) return;
+            const nodes = [];
+            const links = [];
+            function traverse(node, x, y, dx) {
+                if (!node || node.depth > maxDepth) return;
+                const isVisibleLeaf = node.isLeaf || node.depth === maxDepth;
+                nodes.push({ ...node, px: x, py: y, isVisibleLeaf });
+                if (!node.isLeaf && node.depth < maxDepth) {
+                    const childDx = dx * 0.5;
+                    const childY = y + 60;
+                    links.push({ x1: x, y1: y, x2: x - dx, y2: childY });
+                    links.push({ x1: x, y1: y, x2: x + dx, y2: childY });
+                    traverse(node.left, x - dx, childY, childDx);
+                    traverse(node.right, x + dx, childY, childDx);
+                }
+            }
+            const initDx = Math.min(180, tW * 0.35);
+            traverse(tree, 0, 20, initDx);
+
+            tG.selectAll('.tlink').data(links).enter().append('line').attr('class', 'tlink')
+                .attr('x1', d => d.x1).attr('y1', d => d.y1).attr('x2', d => d.x2).attr('y2', d => d.y2)
+                .attr('stroke', palette.border).attr('stroke-width', 1.5).attr('opacity', 0)
+                .transition().duration(400).attr('opacity', 0.6);
+
+            const nodeG = tG.selectAll('.tnode').data(nodes).enter().append('g').attr('class', 'tnode')
+                .attr('transform', d => `translate(${d.px},${d.py})`).attr('opacity', 0);
+            nodeG.transition().duration(400).attr('opacity', 1);
+
+            nodeG.append('circle').attr('r', d => d.isVisibleLeaf ? 14 : 18)
+                .attr('fill', d => d.isVisibleLeaf ? palette.bgCard : palette.bgSec)
+                .attr('stroke', d => d.isVisibleLeaf ? palette.green : palette.yellow)
+                .attr('stroke-width', 2);
+
+            nodeG.filter(d => !d.isVisibleLeaf).append('text')
+                .attr('text-anchor', 'middle').attr('dy', '0.35em')
+                .attr('fill', palette.yellow).attr('font-size', 8).attr('font-family', 'var(--font-mono)')
+                .text(d => (d.splitFeature === 0 ? 'x' : 'y') + '<' + fmt(d.splitThreshold, 1));
+
+            nodeG.filter(d => !d.isVisibleLeaf).append('text')
+                .attr('text-anchor', 'middle').attr('dy', '-1.6em')
+                .attr('fill', palette.green).attr('font-size', 9).attr('font-weight', 600)
+                .text(d => 'G=' + fmt(d.gain || 0, 2));
+
+            nodeG.filter(d => d.isVisibleLeaf).append('text')
+                .attr('text-anchor', 'middle').attr('dy', '0.35em')
+                .attr('fill', palette.green).attr('font-size', 9).attr('font-family', 'var(--font-mono)')
+                .text(d => fmt(d.weight || 0, 2));
+        }
+
+        let buildLevel = 0;
+        const descEl = document.getElementById('level-desc');
+
+        document.getElementById('level-build-btn').addEventListener('click', () => {
+            const gamma = parseFloat(document.getElementById('level-gamma').value);
+            if (buildLevel === 0) {
+                currentTree = buildTreeLevel(4, gamma);
+            }
+            buildLevel = Math.min(buildLevel + 1, 4);
+            drawBoundaries(currentTree, buildLevel);
+            drawTree(currentTree, buildLevel);
+            descEl.innerHTML = `当前深度: <strong>${buildLevel}</strong>。逐层展开决策边界和树结构。`;
+        });
+
+        document.getElementById('level-reset-btn').addEventListener('click', () => {
+            buildLevel = 0;
+            currentTree = null;
+            boundaryGroup.selectAll('*').remove();
+            tG.selectAll('*').remove();
+            descEl.textContent = '点击"逐层构建"观察树的生长过程。';
+        });
+
+        document.getElementById('level-gamma').addEventListener('input', function() {
+            document.getElementById('level-gamma-val').textContent = parseFloat(this.value).toFixed(2);
+            if (currentTree) {
+                const gamma = parseFloat(this.value);
+                currentTree = buildTreeLevel(4, gamma);
+                drawBoundaries(currentTree, buildLevel);
+                drawTree(currentTree, buildLevel);
+            }
+        });
+    })();
+
+    /* ================================================================
+       Section 4: gamma 与最小增益
+    ================================================================ */
+    (function initGammaViz() {
+        const data = gen2DData(50, 123);
+        const n = data.length;
+        const posRate = data.filter(d => d.label === 1).length / n;
+        const initPred = XGBUtils.logOdds(posRate);
+        const preds = new Array(n).fill(initPred);
+
+        // Tree viz
+        const treeDiv = document.getElementById('viz-gamma-tree');
+        const tW = treeDiv.clientWidth || 500;
+        const tH = 400;
+        const tSvg = d3.select(treeDiv).append('svg')
+            .attr('width', '100%').attr('height', tH).attr('viewBox', `0 0 ${tW} ${tH}`);
+        const tG = tSvg.append('g').attr('transform', `translate(${tW/2},30)`);
+
+        // Complexity chart
+        const chartDiv = document.getElementById('viz-gamma-chart');
+        const cW = chartDiv.clientWidth || 500;
+        const cH = 400;
+        const cSvg = d3.select(chartDiv).append('svg')
+            .attr('width', '100%').attr('height', cH).attr('viewBox', `0 0 ${cW} ${cH}`);
+        const cM = { top: 30, right: 20, bottom: 40, left: 50 };
+        const cw = cW - cM.left - cM.right, ch = cH - cM.top - cM.bottom;
+        const cG = cSvg.append('g').attr('transform', `translate(${cM.left},${cM.top})`);
+
+        // Precompute tree node counts for gamma range
+        const gammaRange = [];
+        const nodeCountData = [];
+        for (let gv = 0; gv <= 2; gv += 0.02) {
+            gammaRange.push(gv);
+            const { g: grad, h: hess } = computeGH_classification(data, preds);
+            const tree = XGBUtils.buildXGBTree(data, grad, hess, { maxDepth: 4, lambda: 1, gamma: gv, seed: 42 });
+            nodeCountData.push({ gamma: gv, nodes: XGBUtils.treeNodeCount(tree) });
+        }
+
+        const gxScale = d3.scaleLinear().domain([0, 2]).range([0, cw]);
+        const gyScale = d3.scaleLinear().domain([0, d3.max(nodeCountData, d => d.nodes) + 2]).range([ch, 0]);
+
+        cG.append('g').attr('transform', `translate(0,${ch})`).call(d3.axisBottom(gxScale).ticks(8))
+            .selectAll('text,line,path').attr('stroke', palette.muted).attr('fill', palette.muted);
+        cG.append('g').call(d3.axisLeft(gyScale).ticks(6))
+            .selectAll('text,line,path').attr('stroke', palette.muted).attr('fill', palette.muted);
+        cG.append('text').attr('x', cw / 2).attr('y', ch + 32).attr('text-anchor', 'middle')
+            .attr('fill', palette.muted).attr('font-size', 12).text('gamma');
+        cG.append('text').attr('x', -ch / 2).attr('y', -35).attr('text-anchor', 'middle')
+            .attr('transform', 'rotate(-90)').attr('fill', palette.muted).attr('font-size', 12).text('节点数');
+
+        // Area
+        const area = d3.area()
+            .x(d => gxScale(d.gamma))
+            .y0(ch)
+            .y1(d => gyScale(d.nodes))
+            .curve(d3.curveStepAfter);
+        cG.append('path').datum(nodeCountData)
+            .attr('d', area).attr('fill', palette.green).attr('opacity', 0.15);
+
+        // Line
+        const line = d3.line()
+            .x(d => gxScale(d.gamma))
+            .y(d => gyScale(d.nodes))
+            .curve(d3.curveStepAfter);
+        cG.append('path').datum(nodeCountData)
+            .attr('d', line).attr('fill', 'none').attr('stroke', palette.green).attr('stroke-width', 2);
+
+        // Gamma marker on chart
+        const gammaMarker = cG.append('line')
+            .attr('y1', 0).attr('y2', ch).attr('stroke', palette.yellow).attr('stroke-width', 2).attr('stroke-dasharray', '4,3');
+        const gammaMarkerDot = cG.append('circle').attr('r', 5).attr('fill', palette.yellow);
+
+        function drawGammaTree(gamma) {
+            const { g: grad, h: hess } = computeGH_classification(data, preds);
+            const fullTree = XGBUtils.buildXGBTree(data, grad, hess, { maxDepth: 4, lambda: 1, gamma: 0, seed: 42 });
+            const prunedTree = XGBUtils.buildXGBTree(data, grad, hess, { maxDepth: 4, lambda: 1, gamma, seed: 42 });
+
+            const prunedIds = new Set();
+            function collectIds(node) {
+                if (!node) return;
+                prunedIds.add(node.id);
+                if (!node.isLeaf) { collectIds(node.left); collectIds(node.right); }
+            }
+            collectIds(prunedTree);
+
+            tG.selectAll('*').remove();
+
+            const nodes = [], links = [];
+            function traverse(node, x, y, dx) {
+                if (!node) return;
+                const isPruned = !prunedIds.has(node.id);
+                nodes.push({ ...node, px: x, py: y, isPruned });
+                if (!node.isLeaf) {
+                    const childDx = dx * 0.5;
+                    const childY = y + 65;
+                    links.push({ x1: x, y1: y, x2: x - dx, y2: childY, isPruned: !prunedIds.has(node.left?.id) });
+                    links.push({ x1: x, y1: y, x2: x + dx, y2: childY, isPruned: !prunedIds.has(node.right?.id) });
+                    traverse(node.left, x - dx, childY, childDx);
+                    traverse(node.right, x + dx, childY, childDx);
+                }
+            }
+            traverse(fullTree, 0, 25, Math.min(180, tW * 0.35));
+
+            tG.selectAll('.gl').data(links).enter().append('line').attr('class', 'gl')
+                .attr('x1', d => d.x1).attr('y1', d => d.y1).attr('x2', d => d.x2).attr('y2', d => d.y2)
+                .attr('stroke', d => d.isPruned ? palette.red : palette.border)
+                .attr('stroke-width', 1.5)
+                .attr('opacity', d => d.isPruned ? 0.25 : 0.6);
+
+            const ng = tG.selectAll('.gn').data(nodes).enter().append('g').attr('class', 'gn')
+                .attr('transform', d => `translate(${d.px},${d.py})`);
+
+            ng.append('circle').attr('r', d => d.isLeaf ? 12 : 16)
+                .attr('fill', d => d.isPruned ? 'rgba(255,82,82,0.15)' : (d.isLeaf ? palette.bgCard : palette.bgSec))
+                .attr('stroke', d => d.isPruned ? palette.red : (d.isLeaf ? palette.green : palette.yellow))
+                .attr('stroke-width', 2)
+                .attr('opacity', d => d.isPruned ? 0.35 : 1);
+
+            ng.filter(d => !d.isLeaf && !d.isPruned).append('text')
+                .attr('text-anchor', 'middle').attr('dy', '0.35em')
+                .attr('fill', palette.yellow).attr('font-size', 7).attr('font-family', 'var(--font-mono)')
+                .text(d => (d.splitFeature === 0 ? 'x' : 'y') + '<' + fmt(d.splitThreshold, 1));
+
+            ng.filter(d => d.isPruned && !d.isLeaf).append('text')
+                .attr('text-anchor', 'middle').attr('dy', '0.35em')
+                .attr('fill', palette.red).attr('font-size', 10).attr('font-weight', 700).text('x')
+                .attr('opacity', 0.6);
+
+            // Pruned flash animation
+            ng.filter(d => d.isPruned).select('circle')
+                .each(function() {
+                    gsap.fromTo(this, { opacity: 0.8 }, { opacity: 0.25, duration: 0.6, ease: 'power2.out' });
+                });
+
+            // Node count
+            const nc = XGBUtils.treeNodeCount(prunedTree);
+            document.getElementById('gamma-node-count').textContent = `节点数: ${nc}`;
+
+            // Chart marker
+            gammaMarker.attr('x1', gxScale(gamma)).attr('x2', gxScale(gamma));
+            const closest = nodeCountData.reduce((best, d) => Math.abs(d.gamma - gamma) < Math.abs(best.gamma - gamma) ? d : best);
+            gammaMarkerDot.attr('cx', gxScale(gamma)).attr('cy', gyScale(closest.nodes));
+        }
+
+        document.getElementById('gamma-slider').addEventListener('input', function() {
+            const gamma = parseFloat(this.value);
+            document.getElementById('gamma-slider-val').textContent = gamma.toFixed(2);
+            drawGammaTree(gamma);
+        });
+
+        // Initial draw
+        drawGammaTree(0);
+    })();
+
+    /* ================================================================
+       Section 5: 近似分裂算法
+    ================================================================ */
+    (function initApproxViz() {
+        const data1D = gen1DData(60, 200);
+        const n = data1D.length;
+        const mean = data1D.reduce((s, d) => s + d.target, 0) / n;
+        const preds = new Array(n).fill(mean);
+        const { g, h } = computeGH_regression(data1D, preds);
+
+        const xVals = data1D.map(d => d.x).sort((a, b) => a - b);
+        const xMin = xVals[0] - 0.3, xMax = xVals[xVals.length - 1] + 0.3;
+        const targetMin = d3.min(data1D, d => d.target) - 0.5;
+        const targetMax = d3.max(data1D, d => d.target) + 0.5;
+
+        function findExactBestSplit() {
+            let bestGain = -Infinity, bestThreshold = 0;
+            for (let i = 0; i < n - 1; i++) {
+                if (data1D[i].x === data1D[i + 1].x) continue;
+                const t = (data1D[i].x + data1D[i + 1].x) / 2;
+                const lG = [], lH = [], rG = [], rH = [];
+                for (let j = 0; j < n; j++) {
+                    if (data1D[j].x <= t) { lG.push(g[j]); lH.push(h[j]); }
+                    else { rG.push(g[j]); rH.push(h[j]); }
+                }
+                const gain = XGBUtils.computeSplitGain(lG, lH, rG, rH, 1, 0);
+                if (gain > bestGain) { bestGain = gain; bestThreshold = t; }
+            }
+            return { gain: bestGain, threshold: bestThreshold, nCandidates: n - 1 };
+        }
+
+        function findApproxBestSplit(nBuckets) {
+            // Quantile boundaries
+            const boundaries = [];
+            for (let i = 1; i < nBuckets; i++) {
+                const pct = i / nBuckets;
+                const idx = Math.floor(pct * (n - 1));
+                boundaries.push(xVals[idx]);
+            }
+            // Deduplicate
+            const unique = [...new Set(boundaries)];
+
+            let bestGain = -Infinity, bestThreshold = 0;
+            for (const t of unique) {
+                const lG = [], lH = [], rG = [], rH = [];
+                for (let j = 0; j < n; j++) {
+                    if (data1D[j].x <= t) { lG.push(g[j]); lH.push(h[j]); }
+                    else { rG.push(g[j]); rH.push(h[j]); }
+                }
+                const gain = XGBUtils.computeSplitGain(lG, lH, rG, rH, 1, 0);
+                if (gain > bestGain) { bestGain = gain; bestThreshold = t; }
+            }
+            return { gain: bestGain, threshold: bestThreshold, nCandidates: unique.length, boundaries: unique };
+        }
+
+        function drawSplitViz(containerId, data1D, splitResult, allCandidates, color, label) {
+            const div = document.getElementById(containerId);
+            div.innerHTML = '';
+            const W = div.clientWidth || 350;
+            const H = 300;
+            const svg = d3.select(div).append('svg')
+                .attr('width', '100%').attr('height', H).attr('viewBox', `0 0 ${W} ${H}`);
+            const m = { top: 20, right: 15, bottom: 30, left: 40 };
+            const w = W - m.left - m.right, hh = H - m.top - m.bottom;
+            const gP = svg.append('g').attr('transform', `translate(${m.left},${m.top})`);
+
+            const xs = d3.scaleLinear().domain([xMin, xMax]).range([0, w]);
+            const ys = d3.scaleLinear().domain([targetMin, targetMax]).range([hh, 0]);
+
+            gP.append('g').attr('transform', `translate(0,${hh})`).call(d3.axisBottom(xs).ticks(6))
+                .selectAll('text,line,path').attr('stroke', palette.muted).attr('fill', palette.muted);
+            gP.append('g').call(d3.axisLeft(ys).ticks(5))
+                .selectAll('text,line,path').attr('stroke', palette.muted).attr('fill', palette.muted);
+
+            // Points
+            gP.selectAll('.apt').data(data1D).enter().append('circle')
+                .attr('cx', d => xs(d.x)).attr('cy', d => ys(d.target)).attr('r', 3)
+                .attr('fill', palette.text).attr('opacity', 0.5);
+
+            // All candidate lines
+            if (allCandidates) {
+                allCandidates.forEach(t => {
+                    gP.append('line').attr('x1', xs(t)).attr('x2', xs(t))
+                        .attr('y1', 0).attr('y2', hh)
+                        .attr('stroke', color).attr('stroke-width', 0.5).attr('opacity', 0.3);
+                });
+            }
+
+            // Best split
+            gP.append('line')
+                .attr('x1', xs(splitResult.threshold)).attr('x2', xs(splitResult.threshold))
+                .attr('y1', 0).attr('y2', hh)
+                .attr('stroke', color).attr('stroke-width', 2.5).attr('opacity', 0.9);
+
+            gP.append('text').attr('x', xs(splitResult.threshold)).attr('y', -5)
+                .attr('text-anchor', 'middle').attr('fill', color).attr('font-size', 10).attr('font-weight', 600)
+                .text(`${label} = ${fmt(splitResult.threshold, 2)}`);
+
+            // Gain text
+            gP.append('text').attr('x', w - 5).attr('y', 15).attr('text-anchor', 'end')
+                .attr('fill', color).attr('font-size', 11)
+                .text(`增益: ${fmt(splitResult.gain, 4)}`);
+
+            gP.append('text').attr('x', w - 5).attr('y', 30).attr('text-anchor', 'end')
+                .attr('fill', palette.muted).attr('font-size', 10)
+                .text(`候选点: ${splitResult.nCandidates}`);
+        }
+
+        function drawComparisonBar(exact, approx) {
+            const div = document.getElementById('viz-approx-bar');
+            div.innerHTML = '';
+            const W = div.clientWidth || 450;
+            const H = 280;
+            const svg = d3.select(div).append('svg')
+                .attr('width', '100%').attr('height', H).attr('viewBox', `0 0 ${W} ${H}`);
+            const m = { top: 30, right: 20, bottom: 50, left: 100 };
+            const w = W - m.left - m.right, hh = H - m.top - m.bottom;
+            const gP = svg.append('g').attr('transform', `translate(${m.left},${m.top})`);
+
+            const barData = [
+                { label: '候选分裂点', exact: exact.nCandidates, approx: approx.nCandidates },
+                { label: '增益', exact: exact.gain, approx: approx.gain },
+            ];
+
+            // Candidate comparison
+            const maxCand = exact.nCandidates;
+            const yB = d3.scaleBand().domain(['精确算法', '近似算法']).range([0, hh * 0.4]).padding(0.3);
+            const xB = d3.scaleLinear().domain([0, maxCand]).range([0, w]);
+
+            gP.append('text').attr('x', 0).attr('y', -10).attr('fill', palette.text).attr('font-size', 12).attr('font-weight', 600).text('候选分裂点数量');
+
+            gP.append('rect').attr('x', 0).attr('y', yB('精确算法')).attr('width', xB(exact.nCandidates)).attr('height', yB.bandwidth())
+                .attr('fill', palette.blue).attr('rx', 3).attr('opacity', 0.8);
+            gP.append('text').attr('x', -5).attr('y', yB('精确算法') + yB.bandwidth() / 2).attr('dy', '0.35em')
+                .attr('text-anchor', 'end').attr('fill', palette.text).attr('font-size', 11).text('精确');
+            gP.append('text').attr('x', xB(exact.nCandidates) + 5).attr('y', yB('精确算法') + yB.bandwidth() / 2).attr('dy', '0.35em')
+                .attr('fill', palette.blue).attr('font-size', 11).attr('font-weight', 600).text(exact.nCandidates);
+
+            gP.append('rect').attr('x', 0).attr('y', yB('近似算法')).attr('width', xB(approx.nCandidates)).attr('height', yB.bandwidth())
+                .attr('fill', palette.orange).attr('rx', 3).attr('opacity', 0.8);
+            gP.append('text').attr('x', -5).attr('y', yB('近似算法') + yB.bandwidth() / 2).attr('dy', '0.35em')
+                .attr('text-anchor', 'end').attr('fill', palette.text).attr('font-size', 11).text('近似');
+            gP.append('text').attr('x', xB(approx.nCandidates) + 5).attr('y', yB('近似算法') + yB.bandwidth() / 2).attr('dy', '0.35em')
+                .attr('fill', palette.orange).attr('font-size', 11).attr('font-weight', 600).text(approx.nCandidates);
+
+            // Speed bar (simulated relative time)
+            const speedOff = hh * 0.55;
+            gP.append('text').attr('x', 0).attr('y', speedOff - 10).attr('fill', palette.text).attr('font-size', 12).attr('font-weight', 600).text('相对计算时间');
+
+            const yS = d3.scaleBand().domain(['精确', '近似']).range([speedOff, hh]).padding(0.3);
+            const exactTime = exact.nCandidates;
+            const approxTime = approx.nCandidates;
+            const xS = d3.scaleLinear().domain([0, exactTime]).range([0, w]);
+
+            gP.append('rect').attr('x', 0).attr('y', yS('精确')).attr('width', xS(exactTime)).attr('height', yS.bandwidth())
+                .attr('fill', palette.blue).attr('rx', 3).attr('opacity', 0.6);
+            gP.append('text').attr('x', -5).attr('y', yS('精确') + yS.bandwidth() / 2).attr('dy', '0.35em')
+                .attr('text-anchor', 'end').attr('fill', palette.text).attr('font-size', 11).text('精确');
+            gP.append('text').attr('x', xS(exactTime) + 5).attr('y', yS('精确') + yS.bandwidth() / 2).attr('dy', '0.35em')
+                .attr('fill', palette.blue).attr('font-size', 10).text(`${exactTime} 次比较`);
+
+            gP.append('rect').attr('x', 0).attr('y', yS('近似')).attr('width', xS(approxTime)).attr('height', yS.bandwidth())
+                .attr('fill', palette.orange).attr('rx', 3).attr('opacity', 0.6);
+            gP.append('text').attr('x', -5).attr('y', yS('近似') + yS.bandwidth() / 2).attr('dy', '0.35em')
+                .attr('text-anchor', 'end').attr('fill', palette.text).attr('font-size', 11).text('近似');
+            gP.append('text').attr('x', xS(approxTime) + 5).attr('y', yS('近似') + yS.bandwidth() / 2).attr('dy', '0.35em')
+                .attr('fill', palette.orange).attr('font-size', 10).text(`${approxTime} 次比较`);
+
+            // Speedup annotation
+            if (approxTime > 0) {
+                const speedup = (exactTime / approxTime).toFixed(1);
+                gP.append('text').attr('x', w).attr('y', hh + 25).attr('text-anchor', 'end')
+                    .attr('fill', palette.green).attr('font-size', 13).attr('font-weight', 700)
+                    .text(`加速 ${speedup}x`);
+            }
+        }
+
+        function runComparison() {
+            const nBuckets = parseInt(document.getElementById('approx-buckets').value);
+            const exact = findExactBestSplit();
+            const approx = findApproxBestSplit(nBuckets);
+
+            // All exact candidates
+            const exactCands = [];
+            for (let i = 0; i < n - 1; i++) {
+                if (data1D[i].x !== data1D[i + 1].x) {
+                    exactCands.push((data1D[i].x + data1D[i + 1].x) / 2);
+                }
+            }
+
+            drawSplitViz('viz-approx-exact', data1D, exact, exactCands, palette.blue, '精确');
+            drawSplitViz('viz-approx-approx', data1D, approx, approx.boundaries, palette.orange, '近似');
+            drawComparisonBar(exact, approx);
+
+            // Metrics
+            document.getElementById('approx-exact-gain').textContent = fmt(exact.gain, 4);
+            document.getElementById('approx-approx-gain').textContent = fmt(approx.gain, 4);
+            const accuracy = exact.gain > 0 ? ((approx.gain / exact.gain) * 100).toFixed(1) + '%' : '—';
+            document.getElementById('approx-accuracy').textContent = accuracy;
+            const reduction = ((1 - approx.nCandidates / exact.nCandidates) * 100).toFixed(0) + '%';
+            document.getElementById('approx-reduction').textContent = reduction;
+        }
+
+        document.getElementById('approx-buckets').addEventListener('input', function() {
+            document.getElementById('approx-buckets-val').textContent = this.value;
+        });
+        document.getElementById('approx-run-btn').addEventListener('click', runComparison);
+
+        // Initial run
+        runComparison();
+    })();
+
+})();
+</script>
+</body>
+</html>

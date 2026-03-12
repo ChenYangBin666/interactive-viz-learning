@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GNN 交互式可视化学习</title>
+    <link rel="stylesheet" href="shared/styles/common.css">
+    <link rel="stylesheet" href="shared/styles/components.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+SC:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <style>
+        body { overflow-x: hidden; }
+
+        /* ===== Hero ===== */
+        .hero {
+            text-align: center;
+            padding: calc(var(--header-height) + 2rem) 2rem 3rem;
+            position: relative;
+        }
+        .hero h1 {
+            font-size: 2.8rem;
+            margin-bottom: 0.5rem;
+            background: linear-gradient(135deg, #16c79a, #4fc3f7);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .hero .subtitle {
+            font-size: 1.1rem;
+            color: var(--text-secondary);
+            max-width: 600px;
+            margin: 0 auto 2rem;
+        }
+        .hero .tags {
+            display: flex;
+            justify-content: center;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+
+        /* ===== Background Graph Animation ===== */
+        .bg-canvas {
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            pointer-events: none;
+            z-index: -1;
+            opacity: 0.15;
+        }
+
+        /* ===== Metro Roadmap ===== */
+        .roadmap {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 2rem;
+            position: relative;
+        }
+        .roadmap-title {
+            text-align: center;
+            margin-bottom: 2.5rem;
+        }
+
+        .metro-line {
+            position: relative;
+            padding-left: 60px;
+        }
+
+        /* The vertical rail */
+        .metro-line::before {
+            content: '';
+            position: absolute;
+            left: 27px;
+            top: 0;
+            bottom: 0;
+            width: 4px;
+            background: linear-gradient(to bottom, #16c79a, #4fc3f7, #b388ff, #ffab40);
+            border-radius: 2px;
+        }
+
+        .station {
+            position: relative;
+            margin-bottom: 1rem;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        .station:hover {
+            transform: translateX(6px);
+        }
+
+        /* Station dot */
+        .station-dot {
+            position: absolute;
+            left: -41px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            border: 3px solid var(--accent-green);
+            background: var(--bg-primary);
+            z-index: 2;
+            transition: all 0.3s;
+        }
+        .station:hover .station-dot {
+            background: var(--accent-green);
+            box-shadow: 0 0 12px rgba(22, 199, 154, 0.5);
+        }
+        .station.locked .station-dot {
+            border-color: var(--text-muted);
+            opacity: 0.5;
+        }
+
+        /* Phase colors */
+        .station[data-phase="foundation"] .station-dot { border-color: #16c79a; }
+        .station[data-phase="core"] .station-dot { border-color: #4fc3f7; }
+        .station[data-phase="variants"] .station-dot { border-color: #b388ff; }
+        .station[data-phase="applied"] .station-dot { border-color: #ffab40; }
+
+        .station-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1.2rem 1.5rem;
+            transition: all 0.3s;
+        }
+        .station:hover .station-card {
+            border-color: var(--accent-green);
+            box-shadow: var(--shadow-glow);
+        }
+        .station-header {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            margin-bottom: 0.4rem;
+        }
+        .station-num {
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            min-width: 2.5rem;
+        }
+        .station-name {
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+        .station-desc {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            margin: 0;
+            padding-left: 3.25rem;
+        }
+        .station-keywords {
+            display: flex;
+            gap: 0.4rem;
+            flex-wrap: wrap;
+            padding-left: 3.25rem;
+            margin-top: 0.5rem;
+        }
+        .station-keywords span {
+            font-size: 0.7rem;
+            padding: 0.1rem 0.4rem;
+            background: rgba(22, 199, 154, 0.08);
+            border-radius: 4px;
+            color: var(--text-muted);
+        }
+
+        /* Phase separators */
+        .phase-label {
+            position: relative;
+            padding: 0.5rem 0 0.5rem 0;
+            margin-bottom: 0.5rem;
+            margin-top: 1rem;
+        }
+        .phase-label span {
+            font-size: 0.75rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            padding: 0.2rem 0.8rem;
+            border-radius: 4px;
+        }
+        .phase-label.foundation span { color: #16c79a; background: rgba(22,199,154,0.1); }
+        .phase-label.core span { color: #4fc3f7; background: rgba(79,195,247,0.1); }
+        .phase-label.variants span { color: #b388ff; background: rgba(179,136,255,0.1); }
+        .phase-label.applied span { color: #ffab40; background: rgba(255,171,64,0.1); }
+
+        /* ===== Protocol Warning ===== */
+        .protocol-warning {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.9);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+        }
+        .protocol-warning .inner {
+            background: var(--bg-secondary);
+            border: 1px solid var(--accent-orange);
+            border-radius: var(--radius-lg);
+            padding: 2rem 3rem;
+            max-width: 500px;
+            text-align: center;
+        }
+        .protocol-warning h2 { color: var(--accent-orange); }
+        .protocol-warning code {
+            display: block;
+            margin: 1rem 0;
+            padding: 0.75rem;
+            background: var(--bg-primary);
+            border-radius: var(--radius-sm);
+            font-size: 0.9rem;
+        }
+
+        /* ===== Footer ===== */
+        .footer {
+            text-align: center;
+            padding: 3rem 2rem;
+            color: var(--text-muted);
+            font-size: 0.8rem;
+        }
+    </style>
+</head>
+<body>
+
+<!-- Top Navigation -->
+<nav class="top-nav">
+    <div class="nav-left">
+        <a href="../index.html" class="nav-home" title="算法总览">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+                <path d="M3 12l9-8 9 8"/>
+                <path d="M5 10v9a1 1 0 001 1h4v-5h4v5h4a1 1 0 001-1v-9"/>
+            </svg>
+        </a>
+        <span class="nav-sep">›</span>
+        <a href="index.html" class="logo">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="3"/><circle cx="5" cy="5" r="2"/><circle cx="19" cy="5" r="2"/>
+                <circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/>
+                <line x1="7" y1="6.5" x2="10" y2="10"/><line x1="17" y1="6.5" x2="14" y2="10"/>
+                <line x1="7" y1="17.5" x2="10" y2="14"/><line x1="17" y1="17.5" x2="14" y2="14"/>
+            </svg>
+            GNN 学习
+        </a>
+    </div>
+</nav>
+
+<!-- Protocol Warning -->
+<div id="protocolWarning" class="protocol-warning hidden">
+    <div class="inner">
+        <h2>请使用本地服务器</h2>
+        <p>直接打开 HTML 文件（file:// 协议）会导致跨域问题。请使用以下方式启动：</p>
+        <code>python -m http.server 8080</code>
+        <p class="text-sm text-muted">或使用 VS Code 的 Live Server 插件</p>
+        <button class="btn btn-primary mt-2" onclick="document.getElementById('protocolWarning').classList.add('hidden')">
+            我知道了，继续浏览
+        </button>
+    </div>
+</div>
+
+<!-- Background Canvas -->
+<canvas id="bgCanvas" class="bg-canvas"></canvas>
+
+<!-- Hero Section -->
+<div class="hero">
+    <h1>GNN 交互式可视化学习</h1>
+    <p class="subtitle">
+        通过交互式可视化，彻底理解图神经网络的每一个概念 —— 从图数据到消息传递，从 GCN 到 GAT
+    </p>
+    <div class="tags">
+        <span class="badge badge-green">交互式</span>
+        <span class="badge badge-blue">可视化</span>
+        <span class="badge badge-purple">逐步动画</span>
+        <span class="badge badge-orange">全中文</span>
+    </div>
+</div>
+
+<!-- Roadmap -->
+<div class="roadmap">
+    <div class="roadmap-title">
+        <h2>学习路线图</h2>
+        <p class="text-sm text-muted">按顺序学习效果最佳，也可跳转到感兴趣的模块</p>
+    </div>
+
+    <div class="metro-line">
+        <!-- Phase: Foundation -->
+        <div class="phase-label foundation"><span>基础阶段</span></div>
+
+        <div class="station" data-id="01" data-phase="foundation" onclick="goTo('01-graph-basics/')">
+            <div class="station-dot"></div>
+            <div class="station-card">
+                <div class="station-header">
+                    <span class="station-num">01</span>
+                    <span class="station-name">图数据基础</span>
+                </div>
+                <p class="station-desc">学习图的基本概念，动手构建图，理解邻接矩阵与特征矩阵</p>
+                <div class="station-keywords">
+                    <span>节点/边</span><span>邻接矩阵</span><span>特征矩阵</span><span>度矩阵</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="station" data-id="02" data-phase="foundation" onclick="goTo('02-why-graph/')">
+            <div class="station-dot"></div>
+            <div class="station-card">
+                <div class="station-header">
+                    <span class="station-num">02</span>
+                    <span class="station-name">为什么需要 GNN</span>
+                </div>
+                <p class="station-desc">理解传统方法处理图数据的困难，以及 GNN 的动机</p>
+                <div class="station-keywords">
+                    <span>排列不变性</span><span>CNN局限</span><span>消息传递预览</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Phase: Core -->
+        <div class="phase-label core"><span>核心机制</span></div>
+
+        <div class="station" data-id="03" data-phase="core" onclick="goTo('03-message-passing/')">
+            <div class="station-dot"></div>
+            <div class="station-card">
+                <div class="station-header">
+                    <span class="station-num">03</span>
+                    <span class="station-name">消息传递机制</span>
+                </div>
+                <p class="station-desc">GNN 的核心原理：消息构建、传递、聚合、更新的完整流程</p>
+                <div class="station-keywords">
+                    <span>消息传递</span><span>邻居聚合</span><span>感受野</span><span>矩阵视角</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="station" data-id="04" data-phase="core" onclick="goTo('04-gcn/')">
+            <div class="station-dot"></div>
+            <div class="station-card">
+                <div class="station-header">
+                    <span class="station-num">04</span>
+                    <span class="station-name">图卷积网络 GCN</span>
+                </div>
+                <p class="station-desc">消息传递的经典实现：归一化、频谱直觉、完整前向传播</p>
+                <div class="station-keywords">
+                    <span>归一化</span><span>频谱</span><span>过平滑</span><span>自环</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Phase: Variants -->
+        <div class="phase-label variants"><span>进阶变体</span></div>
+
+        <div class="station" data-id="05" data-phase="variants" onclick="goTo('05-gat/')">
+            <div class="station-dot"></div>
+            <div class="station-card">
+                <div class="station-header">
+                    <span class="station-num">05</span>
+                    <span class="station-name">图注意力网络 GAT</span>
+                </div>
+                <p class="station-desc">可学习的注意力权重，多头注意力机制</p>
+                <div class="station-keywords">
+                    <span>注意力分数</span><span>多头注意力</span><span>GCN对比</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="station" data-id="06" data-phase="variants" onclick="goTo('06-graphsage/')">
+            <div class="station-dot"></div>
+            <div class="station-card">
+                <div class="station-header">
+                    <span class="station-num">06</span>
+                    <span class="station-name">GraphSAGE</span>
+                </div>
+                <p class="station-desc">邻居采样与聚合，归纳学习能力</p>
+                <div class="station-keywords">
+                    <span>邻居采样</span><span>聚合器</span><span>归纳学习</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Phase: Applied -->
+        <div class="phase-label applied"><span>应用实战</span></div>
+
+        <div class="station" data-id="07" data-phase="applied" onclick="goTo('07-training/')">
+            <div class="station-dot"></div>
+            <div class="station-card">
+                <div class="station-header">
+                    <span class="station-num">07</span>
+                    <span class="station-name">训练过程</span>
+                </div>
+                <p class="station-desc">半监督学习、前向传播、反向传播、过平滑问题</p>
+                <div class="station-keywords">
+                    <span>半监督</span><span>loss曲线</span><span>梯度</span><span>过平滑</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="station" data-id="08" data-phase="applied" onclick="goTo('08-tasks/')">
+            <div class="station-dot"></div>
+            <div class="station-card">
+                <div class="station-header">
+                    <span class="station-num">08</span>
+                    <span class="station-name">下游任务</span>
+                </div>
+                <p class="station-desc">节点分类、链路预测、图分类，不同 Readout 方式</p>
+                <div class="station-keywords">
+                    <span>节点分类</span><span>链路预测</span><span>图分类</span><span>Readout</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="station" data-id="09" data-phase="applied" onclick="goTo('09-playground/')">
+            <div class="station-dot"></div>
+            <div class="station-card">
+                <div class="station-header">
+                    <span class="station-num">09</span>
+                    <span class="station-name">GNN 游乐场</span>
+                </div>
+                <p class="station-desc">自由实验：选数据集、配模型、调参数、看结果</p>
+                <div class="station-keywords">
+                    <span>GCN/GAT/SAGE</span><span>超参数</span><span>对比实验</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Footer -->
+<div class="footer">
+    <p>GNN 交互式可视化学习 | 纯前端实现 · 无服务器依赖 · 全中文</p>
+</div>
+
+<script>
+// Protocol check
+if (window.location.protocol === 'file:') {
+    document.getElementById('protocolWarning').classList.remove('hidden');
+}
+
+// Navigation
+function goTo(path) {
+    window.location.href = path + 'index.html';
+}
+
+// Background animation — floating graph nodes
+(function() {
+    const canvas = document.getElementById('bgCanvas');
+    const ctx = canvas.getContext('2d');
+    let w, h;
+    const nodes = [];
+    const NODE_COUNT = 30;
+    const MAX_DIST = 150;
+
+    function resize() {
+        w = canvas.width = window.innerWidth;
+        h = canvas.height = window.innerHeight;
+    }
+    resize();
+    window.addEventListener('resize', resize);
+
+    for (let i = 0; i < NODE_COUNT; i++) {
+        nodes.push({
+            x: Math.random() * w,
+            y: Math.random() * h,
+            vx: (Math.random() - 0.5) * 0.5,
+            vy: (Math.random() - 0.5) * 0.5,
+            r: 2 + Math.random() * 3,
+        });
+    }
+
+    function draw() {
+        ctx.clearRect(0, 0, w, h);
+
+        // Edges
+        ctx.strokeStyle = 'rgba(22, 199, 154, 0.3)';
+        ctx.lineWidth = 1;
+        for (let i = 0; i < nodes.length; i++) {
+            for (let j = i + 1; j < nodes.length; j++) {
+                const dx = nodes[i].x - nodes[j].x;
+                const dy = nodes[i].y - nodes[j].y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist < MAX_DIST) {
+                    ctx.globalAlpha = 1 - dist / MAX_DIST;
+                    ctx.beginPath();
+                    ctx.moveTo(nodes[i].x, nodes[i].y);
+                    ctx.lineTo(nodes[j].x, nodes[j].y);
+                    ctx.stroke();
+                }
+            }
+        }
+
+        // Nodes
+        ctx.globalAlpha = 1;
+        for (const n of nodes) {
+            ctx.fillStyle = '#16c79a';
+            ctx.beginPath();
+            ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2);
+            ctx.fill();
+
+            n.x += n.vx;
+            n.y += n.vy;
+            if (n.x < 0 || n.x > w) n.vx *= -1;
+            if (n.y < 0 || n.y > h) n.vy *= -1;
+        }
+
+        requestAnimationFrame(draw);
+    }
+    draw();
+})();
+</script>
+</body>
+</html>

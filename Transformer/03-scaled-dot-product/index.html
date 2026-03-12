@@ -1,0 +1,1264 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>模块03 — 缩放点积注意力 | Transformer 学习</title>
+
+    <!-- Shared Styles -->
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+
+    <!-- KaTeX -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+
+    <style>
+        /* === Module-specific styles === */
+        .page-header {
+            text-align: center;
+            margin-bottom: 2.5rem;
+            padding: 2rem 0 1.5rem;
+        }
+        .page-header h1 {
+            font-size: 2.2rem;
+            background: linear-gradient(135deg, #16c79a 0%, #4fc3f7 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .page-header .subtitle {
+            color: var(--text-secondary);
+            font-size: 1.05rem;
+            margin-top: 0.5rem;
+        }
+
+        /* Matrix flow layout */
+        .matrix-flow {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 1rem;
+            justify-content: center;
+            padding: 1rem;
+        }
+        .matrix-flow .operator {
+            font-size: 1.8rem;
+            color: var(--accent-green);
+            font-weight: 700;
+            line-height: 1;
+        }
+        .matrix-block {
+            display: inline-flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .matrix-block .mat-label {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            margin-bottom: 0.3rem;
+            font-family: var(--font-mono);
+        }
+        .matrix-block .mat-dims {
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            margin-top: 0.2rem;
+        }
+
+        /* Section cards */
+        .module-section {
+            margin-bottom: 3rem;
+            scroll-margin-top: calc(var(--header-height) + 1rem);
+        }
+        .module-section > .card {
+            padding: 2rem;
+        }
+
+        /* Explanation text */
+        .explain {
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+            line-height: 1.8;
+            margin-bottom: 1rem;
+        }
+        .explain strong {
+            color: var(--accent-green);
+        }
+
+        /* Step indicator in section 5 */
+        .pipeline-steps {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.4rem;
+            margin-bottom: 1.5rem;
+        }
+        .pipeline-step {
+            padding: 0.35rem 0.7rem;
+            border-radius: var(--radius-sm);
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            background: rgba(42, 42, 74, 0.4);
+            border: 1px solid transparent;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .pipeline-step.active {
+            color: var(--accent-green);
+            border-color: var(--accent-green);
+            background: rgba(22, 199, 154, 0.12);
+        }
+        .pipeline-step.done {
+            color: var(--text-secondary);
+            background: rgba(22, 199, 154, 0.06);
+        }
+
+        /* Scaling demo bars */
+        .bar-chart {
+            display: flex;
+            align-items: flex-end;
+            gap: 3px;
+            height: 120px;
+            padding: 0 0.5rem;
+        }
+        .bar-chart .bar {
+            flex: 1;
+            min-width: 20px;
+            max-width: 50px;
+            background: var(--accent-green);
+            border-radius: 3px 3px 0 0;
+            transition: height 0.4s ease;
+            position: relative;
+        }
+        .bar-chart .bar .bar-val {
+            position: absolute;
+            top: -18px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 0.65rem;
+            color: var(--text-muted);
+            font-family: var(--font-mono);
+            white-space: nowrap;
+        }
+        .bar-chart .bar .bar-label {
+            position: absolute;
+            bottom: -18px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 0.65rem;
+            color: var(--text-secondary);
+            white-space: nowrap;
+        }
+
+        /* Compare grid for scaling */
+        .scaling-compare {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5rem;
+            margin: 1.5rem 0;
+        }
+        @media (max-width: 768px) {
+            .scaling-compare { grid-template-columns: 1fr; }
+        }
+        .scaling-card {
+            background: rgba(42, 42, 74, 0.25);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1.2rem;
+        }
+        .scaling-card h4 {
+            margin-bottom: 0.75rem;
+        }
+        .scaling-card.bad h4 { color: var(--accent-red); }
+        .scaling-card.good h4 { color: var(--accent-green); }
+
+        /* Hover tooltip for matrix cells */
+        .cell-tooltip {
+            position: fixed;
+            padding: 0.4rem 0.7rem;
+            background: rgba(15, 52, 96, 0.95);
+            border: 1px solid var(--accent-green);
+            border-radius: var(--radius-sm);
+            color: var(--text-primary);
+            font-family: var(--font-mono);
+            font-size: 0.78rem;
+            pointer-events: none;
+            z-index: 500;
+            display: none;
+            white-space: nowrap;
+        }
+
+        /* Section 5 pipeline viz */
+        .pipeline-viz {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.8rem;
+            align-items: flex-start;
+            justify-content: center;
+            margin: 1rem 0;
+        }
+        .pipeline-viz .matrix-block {
+            opacity: 0.3;
+            transition: opacity 0.5s, transform 0.5s;
+            transform: scale(0.95);
+        }
+        .pipeline-viz .matrix-block.visible {
+            opacity: 1;
+            transform: scale(1);
+        }
+        .pipeline-viz .arrow {
+            font-size: 1.5rem;
+            color: var(--text-muted);
+            align-self: center;
+            opacity: 0.3;
+            transition: opacity 0.5s;
+        }
+        .pipeline-viz .arrow.visible {
+            opacity: 1;
+            color: var(--accent-green);
+        }
+
+        /* formula display block */
+        .formula-block {
+            background: rgba(42, 42, 74, 0.3);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1rem 1.5rem;
+            margin: 1rem 0;
+            text-align: center;
+        }
+
+        /* Section anchor links */
+        .section-anchor {
+            color: var(--text-muted);
+            text-decoration: none;
+            margin-left: 0.5rem;
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+        .section-title:hover .section-anchor {
+            opacity: 1;
+        }
+
+        /* Interactive input cells */
+        .editable-cell input {
+            width: 100%;
+            background: transparent;
+            border: none;
+            color: var(--text-primary);
+            font-family: var(--font-mono);
+            font-size: 0.78rem;
+            text-align: center;
+            outline: none;
+        }
+        .editable-cell input:focus {
+            background: rgba(22, 199, 154, 0.1);
+        }
+    </style>
+</head>
+<body>
+
+<div class="cell-tooltip" id="cellTooltip"></div>
+
+<div class="page-container">
+    <!-- Header -->
+    <div class="page-header">
+        <h1>模块 03: 缩放点积注意力</h1>
+        <p class="subtitle">Scaled Dot-Product Attention -- Transformer 最核心的计算单元</p>
+        <div class="formula-block mt-2">
+            $$\text{Attention}(Q,K,V) = \text{softmax}\!\left(\frac{QK^T}{\sqrt{d_k}}\right)V$$
+        </div>
+    </div>
+
+    <!-- ========== Section 1: Linear Projection ========== -->
+    <div class="module-section" id="sec1">
+        <div class="section-title">
+            <div class="icon">1</div>
+            <h2>线性投影: X &rarr; Q, K, V</h2>
+        </div>
+        <div class="card">
+            <div class="explain">
+                <p>输入序列 <strong>"我 喜欢 深度 学习"</strong> 由 4 个 token 组成，每个 token 被嵌入为 8 维向量，形成输入矩阵 <strong>X</strong>（4&times;8）。</p>
+                <p>通过三个可学习的权重矩阵 $W_Q, W_K, W_V$（均为 8&times;8），将 X 分别投影为查询 <strong>Q</strong>、键 <strong>K</strong>、值 <strong>V</strong>：</p>
+            </div>
+            <div class="formula-block">
+                $Q = XW_Q, \quad K = XW_K, \quad V = XW_V$
+            </div>
+            <div class="explain">
+                <p>每个投影赋予相同的输入不同的"角色"：<strong>Q</strong> 表示"我在寻找什么"，<strong>K</strong> 表示"我能提供什么"，<strong>V</strong> 表示"我实际携带的信息"。</p>
+            </div>
+
+            <div id="sec1Controls" style="margin-bottom:1rem;"></div>
+
+            <div class="matrix-flow" id="sec1Viz">
+                <!-- Populated by JS -->
+            </div>
+
+            <div id="sec1Status" class="info-box success" style="display:none;">
+                <p id="sec1StatusText"></p>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========== Section 2: QK^T ========== -->
+    <div class="module-section" id="sec2">
+        <div class="section-title">
+            <div class="icon">2</div>
+            <h2>QK<sup>T</sup> 计算 -- 相似度矩阵</h2>
+        </div>
+        <div class="card">
+            <div class="explain">
+                <p>将查询矩阵 <strong>Q</strong> 与键矩阵的转置 <strong>K<sup>T</sup></strong> 相乘，得到 <strong>原始注意力分数矩阵</strong>（4&times;4）。每个元素 $s_{ij}$ 表示第 $i$ 个 token 对第 $j$ 个 token 的"关注程度"。</p>
+            </div>
+            <div class="formula-block">
+                $\text{Scores} = QK^T$
+            </div>
+            <div class="explain">
+                <p>矩阵乘法的本质：Q 的第 $i$ 行与 K<sup>T</sup> 的第 $j$ 列做<strong>点积</strong>，向量越相似 &rarr; 点积越大 &rarr; 注意力越高。</p>
+            </div>
+
+            <div id="sec2Controls" style="margin-bottom:1rem;"></div>
+
+            <div class="matrix-flow" id="sec2Viz"></div>
+
+            <div id="sec2Status" class="info-box" style="display:none;">
+                <p id="sec2StatusText"></p>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========== Section 3: Scaling ========== -->
+    <div class="module-section" id="sec3">
+        <div class="section-title">
+            <div class="icon">3</div>
+            <h2>缩放 -- 为什么除以 &radic;d<sub>k</sub></h2>
+        </div>
+        <div class="card">
+            <div class="explain">
+                <p>当维度 $d_k$ 较大时，点积的值也会变大。大的输入送入 softmax 会使输出<strong>极端化</strong>（接近 one-hot），导致梯度消失、训练困难。</p>
+                <p>除以 $\sqrt{d_k}$ 将方差稳定在 1 附近，让 softmax 工作在<strong>梯度充足</strong>的区域。</p>
+            </div>
+            <div class="formula-block">
+                $\text{Scaled} = \frac{QK^T}{\sqrt{d_k}}$
+            </div>
+
+            <div class="slider-group" style="max-width: 400px; margin: 1.5rem 0;">
+                <label for="dkSlider">d_k 维度:</label>
+                <input type="range" id="dkSlider" min="1" max="512" value="8" step="1">
+                <span class="slider-value" id="dkValue">8</span>
+            </div>
+
+            <div class="scaling-compare">
+                <div class="scaling-card bad">
+                    <h4>未缩放 softmax</h4>
+                    <p class="text-sm text-muted" id="unscaledInfo">原始分数直接送入 softmax</p>
+                    <div class="bar-chart" id="unscaledBars"></div>
+                    <p class="text-sm text-muted mt-1" id="unscaledEntropy"></p>
+                </div>
+                <div class="scaling-card good">
+                    <h4>缩放后 softmax</h4>
+                    <p class="text-sm text-muted" id="scaledInfo">分数除以 &radic;d_k 后送入 softmax</p>
+                    <div class="bar-chart" id="scaledBars"></div>
+                    <p class="text-sm text-muted mt-1" id="scaledEntropy"></p>
+                </div>
+            </div>
+
+            <div class="info-box success">
+                <p><strong>直觉：</strong>缩放使得 softmax 的输出分布更加平滑、均匀，每个位置都能获得梯度信号，模型训练更稳定。</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========== Section 4: Softmax ========== -->
+    <div class="module-section" id="sec4">
+        <div class="section-title">
+            <div class="icon">4</div>
+            <h2>Softmax -- 归一化为概率</h2>
+        </div>
+        <div class="card">
+            <div class="explain">
+                <p>对缩放后的分数矩阵<strong>逐行</strong>应用 softmax，将每行转换为概率分布（非负，行和为 1）。这就是<strong>注意力权重</strong>。</p>
+            </div>
+            <div class="formula-block">
+                $\alpha_{ij} = \frac{\exp(s_{ij})}{\sum_k \exp(s_{ik})}$
+            </div>
+            <div class="explain">
+                <p>每一行代表一个 token 的注意力分布：它"看向"其他 token 的权重总和为 1。</p>
+            </div>
+
+            <div id="sec4Controls" style="margin-bottom:1rem;"></div>
+
+            <div class="matrix-flow" id="sec4Viz"></div>
+
+            <div id="sec4Status" class="info-box" style="display:none;">
+                <p id="sec4StatusText"></p>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========== Section 5: Full Pipeline ========== -->
+    <div class="module-section" id="sec5">
+        <div class="section-title">
+            <div class="icon">5</div>
+            <h2>完整流程 -- 加权求和得到输出</h2>
+        </div>
+        <div class="card">
+            <div class="explain">
+                <p>最后一步：用注意力权重对<strong>V</strong>（值）矩阵做加权求和，输出矩阵每一行都是 V 中各行的加权组合。</p>
+            </div>
+            <div class="formula-block">
+                $$\text{Attention}(Q,K,V) = \text{softmax}\!\left(\frac{QK^T}{\sqrt{d_k}}\right)V$$
+            </div>
+
+            <div class="pipeline-steps" id="pipelineSteps"></div>
+
+            <div id="sec5Controls" style="margin-bottom:1rem;"></div>
+
+            <div class="pipeline-viz" id="sec5Viz"></div>
+
+            <div id="sec5Status" class="info-box" style="display:none;">
+                <p id="sec5StatusText"></p>
+            </div>
+
+            <div class="explain mt-2">
+                <h4>交互实验</h4>
+                <p>修改输入矩阵 X 的值，观察所有下游矩阵如何实时变化：</p>
+            </div>
+            <div style="overflow-x: auto;">
+                <table class="matrix-table" id="editableX">
+                    <thead><tr><th></th></tr></thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+            <button class="btn btn-sm mt-1" id="resetXBtn">重置输入</button>
+            <button class="btn btn-sm btn-primary mt-1" id="recomputeBtn" style="margin-left:0.5rem;">重新计算全部</button>
+        </div>
+    </div>
+</div>
+
+<!-- ========== Scripts ========== -->
+<script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+
+<script src="../shared/scripts/transformer-utils.js"></script>
+<script src="../shared/scripts/animation-controller.js"></script>
+<script src="../shared/scripts/matrix-renderer.js"></script>
+<script src="../shared/scripts/nav.js"></script>
+<script src="../shared/scripts/katex-init.js"></script>
+
+<script>
+// ============================================================
+//  Global Data — Fixed-seed matrices for reproducibility
+// ============================================================
+const TOKENS = ['我', '喜欢', '深度', '学习'];
+const SEQ_LEN = 4;
+const D_MODEL = 8;
+
+// Input embedding matrix X (4x8)
+let X = TransformerUtils.randomMatrix(SEQ_LEN, D_MODEL, 100, 0.6);
+
+// Weight matrices (8x8 each), different seeds
+const W_Q = TransformerUtils.randomMatrix(D_MODEL, D_MODEL, 200, 0.4);
+const W_K = TransformerUtils.randomMatrix(D_MODEL, D_MODEL, 300, 0.4);
+const W_V = TransformerUtils.randomMatrix(D_MODEL, D_MODEL, 400, 0.4);
+
+// Original X for reset
+const X_ORIGINAL = X.map(r => [...r]);
+
+// Computed matrices (will be populated)
+let Q, K, V, KT, rawScores, scaledScores, attnWeights, attnOutput;
+
+function recomputeAll() {
+    Q = TransformerUtils.matmul(X, W_Q);
+    K = TransformerUtils.matmul(X, W_K);
+    V = TransformerUtils.matmul(X, W_V);
+    KT = TransformerUtils.transpose(K);
+    rawScores = TransformerUtils.matmul(Q, KT);
+    scaledScores = TransformerUtils.scale(rawScores, 1 / Math.sqrt(D_MODEL));
+    attnWeights = TransformerUtils.softmaxRows(scaledScores);
+    attnOutput = TransformerUtils.matmul(attnWeights, V);
+}
+recomputeAll();
+
+// Dimension labels
+const tokLabels = TOKENS;
+const dimLabels = Array.from({ length: D_MODEL }, (_, i) => 'd' + i);
+
+// ============================================================
+//  Utility: show tooltip on heatmap hover
+// ============================================================
+const tooltip = document.getElementById('cellTooltip');
+
+function showTooltip(evt, text) {
+    tooltip.style.display = 'block';
+    tooltip.textContent = text;
+    tooltip.style.left = (evt.clientX + 12) + 'px';
+    tooltip.style.top = (evt.clientY - 32) + 'px';
+}
+function hideTooltip() {
+    tooltip.style.display = 'none';
+}
+
+// ============================================================
+//  Helper: create a MatrixRenderer inside a matrix-block
+// ============================================================
+function createMatrixBlock(container, data, title, rowL, colL, opts = {}) {
+    const block = document.createElement('div');
+    block.className = 'matrix-block';
+
+    const label = document.createElement('div');
+    label.className = 'mat-label';
+    label.textContent = title;
+    block.appendChild(label);
+
+    const matDiv = document.createElement('div');
+    block.appendChild(matDiv);
+
+    const dims = document.createElement('div');
+    dims.className = 'mat-dims';
+    dims.textContent = `(${data.length}×${data[0].length})`;
+    block.appendChild(dims);
+
+    container.appendChild(block);
+
+    const cellSize = opts.cellSize || (data[0].length > 6 ? 34 : 40);
+    const renderer = new MatrixRenderer({
+        container: matDiv,
+        data: data,
+        rowLabels: rowL,
+        colLabels: colL,
+        cellSize: cellSize,
+        showValues: opts.showValues !== false,
+        colorScale: opts.colorScale || undefined,
+        onCellHover: (r, c) => {
+            const val = data[r][c];
+            const rLabel = rowL ? rowL[r] : r;
+            const cLabel = colL ? colL[c] : c;
+            showTooltip(
+                window._lastMouseEvt || { clientX: 0, clientY: 0 },
+                `${title}[${rLabel}][${cLabel}] = ${val.toFixed(4)}`
+            );
+        },
+    });
+
+    // Track mouse for tooltip
+    matDiv.addEventListener('mousemove', e => { window._lastMouseEvt = e; });
+    matDiv.addEventListener('mouseleave', hideTooltip);
+
+    return { block, renderer, matDiv };
+}
+
+function addOperator(container, symbol) {
+    const op = document.createElement('div');
+    op.className = 'operator';
+    op.textContent = symbol;
+    container.appendChild(op);
+    return op;
+}
+
+// ============================================================
+//  SECTION 1: Linear Projection X → Q, K, V
+// ============================================================
+(function initSection1() {
+    const viz = document.getElementById('sec1Viz');
+    const statusBox = document.getElementById('sec1Status');
+    const statusText = document.getElementById('sec1StatusText');
+
+    // Renderers (created lazily per step)
+    let rX, rWQ, rWK, rWV, rQ, rK, rV;
+
+    function clearViz() {
+        viz.innerHTML = '';
+        rX = rWQ = rWK = rWV = rQ = rK = rV = null;
+        statusBox.style.display = 'none';
+    }
+
+    function showStatus(msg) {
+        statusBox.style.display = 'block';
+        statusText.textContent = msg;
+    }
+
+    const steps = [
+        {
+            name: '显示输入矩阵 X',
+            duration: 1000,
+            action: (i, instant) => {
+                clearViz();
+                const r = createMatrixBlock(viz, X, 'X (输入)', tokLabels, dimLabels, { cellSize: 34 });
+                rX = r.renderer;
+                if (!instant) {
+                    gsap.from(r.block, { opacity: 0, y: 20, duration: 0.6 });
+                }
+                showStatus('输入矩阵 X: 4 个 token 的 8 维嵌入向量');
+            }
+        },
+        {
+            name: '投影: Q = X × W_Q',
+            duration: 1200,
+            action: (i, instant) => {
+                clearViz();
+                rX = createMatrixBlock(viz, X, 'X', tokLabels, dimLabels, { cellSize: 30 }).renderer;
+                addOperator(viz, '×');
+                rWQ = createMatrixBlock(viz, W_Q, 'W_Q', dimLabels, dimLabels, { cellSize: 30 }).renderer;
+                addOperator(viz, '=');
+                const rr = createMatrixBlock(viz, Q, 'Q (查询)', tokLabels, dimLabels, { cellSize: 30 });
+                rQ = rr.renderer;
+                if (!instant) {
+                    gsap.from(rr.block, { opacity: 0, scale: 0.9, duration: 0.7, ease: 'back.out(1.4)' });
+                }
+                showStatus('Q = X × W_Q  --  查询矩阵，表示"每个 token 在找什么"');
+            }
+        },
+        {
+            name: '投影: K = X × W_K',
+            duration: 1200,
+            action: (i, instant) => {
+                clearViz();
+                rX = createMatrixBlock(viz, X, 'X', tokLabels, dimLabels, { cellSize: 30 }).renderer;
+                addOperator(viz, '×');
+                rWK = createMatrixBlock(viz, W_K, 'W_K', dimLabels, dimLabels, { cellSize: 30 }).renderer;
+                addOperator(viz, '=');
+                const rr = createMatrixBlock(viz, K, 'K (键)', tokLabels, dimLabels, { cellSize: 30 });
+                rK = rr.renderer;
+                if (!instant) {
+                    gsap.from(rr.block, { opacity: 0, scale: 0.9, duration: 0.7, ease: 'back.out(1.4)' });
+                }
+                showStatus('K = X × W_K  --  键矩阵，表示"每个 token 能提供什么"');
+            }
+        },
+        {
+            name: '投影: V = X × W_V',
+            duration: 1200,
+            action: (i, instant) => {
+                clearViz();
+                rX = createMatrixBlock(viz, X, 'X', tokLabels, dimLabels, { cellSize: 30 }).renderer;
+                addOperator(viz, '×');
+                rWV = createMatrixBlock(viz, W_V, 'W_V', dimLabels, dimLabels, { cellSize: 30 }).renderer;
+                addOperator(viz, '=');
+                const rr = createMatrixBlock(viz, V, 'V (值)', tokLabels, dimLabels, { cellSize: 30 });
+                rV = rr.renderer;
+                if (!instant) {
+                    gsap.from(rr.block, { opacity: 0, scale: 0.9, duration: 0.7, ease: 'back.out(1.4)' });
+                }
+                showStatus('V = X × W_V  --  值矩阵，携带实际要传递的信息');
+            }
+        },
+        {
+            name: '总览: Q, K, V',
+            duration: 1000,
+            action: (i, instant) => {
+                clearViz();
+                const rr1 = createMatrixBlock(viz, Q, 'Q (查询)', tokLabels, dimLabels, { cellSize: 30 });
+                const rr2 = createMatrixBlock(viz, K, 'K (键)', tokLabels, dimLabels, { cellSize: 30 });
+                const rr3 = createMatrixBlock(viz, V, 'V (值)', tokLabels, dimLabels, { cellSize: 30 });
+                if (!instant) {
+                    gsap.from([rr1.block, rr2.block, rr3.block], {
+                        opacity: 0, y: 15, stagger: 0.15, duration: 0.5
+                    });
+                }
+                showStatus('三组投影完成！Q、K、V 形状均为 (4×8)，但编码了不同的语义角色。');
+            }
+        }
+    ];
+
+    new AnimationController({
+        container: document.getElementById('sec1Controls'),
+        steps: steps,
+        defaultDuration: 1000,
+    });
+})();
+
+// ============================================================
+//  SECTION 2: QK^T — Similarity Scores
+// ============================================================
+(function initSection2() {
+    const viz = document.getElementById('sec2Viz');
+    const statusBox = document.getElementById('sec2Status');
+    const statusText = document.getElementById('sec2StatusText');
+
+    function clearViz() {
+        viz.innerHTML = '';
+        statusBox.style.display = 'none';
+    }
+    function showStatus(msg) {
+        statusBox.style.display = 'block';
+        statusText.textContent = msg;
+    }
+
+    // Steps: animate row-by-row multiplication
+    const steps = [];
+
+    // Step 0: show Q and K^T
+    steps.push({
+        name: '显示 Q 和 K^T',
+        duration: 1000,
+        action: (i, instant) => {
+            clearViz();
+            createMatrixBlock(viz, Q, 'Q', tokLabels, dimLabels, { cellSize: 30 });
+            addOperator(viz, '×');
+            createMatrixBlock(viz, KT, 'K^T', dimLabels, tokLabels, { cellSize: 30 });
+            addOperator(viz, '=');
+            // Empty score placeholder
+            const placeholder = TransformerUtils.zeros(SEQ_LEN, SEQ_LEN);
+            createMatrixBlock(viz, placeholder, 'Scores', tokLabels, tokLabels, { cellSize: 44 });
+            showStatus('准备计算 Scores = Q × K^T  (4×8) × (8×4) → (4×4)');
+        }
+    });
+
+    // Steps 1-4: compute row by row
+    for (let row = 0; row < SEQ_LEN; row++) {
+        steps.push({
+            name: `计算第 ${row} 行: "${TOKENS[row]}"`,
+            duration: 1200,
+            action: (i, instant) => {
+                clearViz();
+                // Q with row highlighted
+                const qr = createMatrixBlock(viz, Q, 'Q', tokLabels, dimLabels, { cellSize: 30 });
+                qr.renderer.highlightRow(row, 'rgba(22,199,154,0.6)');
+
+                addOperator(viz, '×');
+
+                // K^T — highlight all columns (they're all used)
+                const ktr = createMatrixBlock(viz, KT, 'K^T', dimLabels, tokLabels, { cellSize: 30 });
+
+                addOperator(viz, '=');
+
+                // Partial scores: rows up to current filled in
+                const partial = TransformerUtils.zeros(SEQ_LEN, SEQ_LEN);
+                for (let r = 0; r <= row; r++) {
+                    for (let c = 0; c < SEQ_LEN; c++) {
+                        partial[r][c] = rawScores[r][c];
+                    }
+                }
+                const sr = createMatrixBlock(viz, partial, 'Scores', tokLabels, tokLabels, { cellSize: 44 });
+                sr.renderer.highlightRow(row, '#16c79a');
+
+                if (!instant) {
+                    gsap.from(sr.block, { opacity: 0.6, duration: 0.5 });
+                }
+
+                const vals = rawScores[row].map(v => v.toFixed(2)).join(', ');
+                showStatus(`"${TOKENS[row]}" 对 [${TOKENS.join(', ')}] 的原始注意力分数: [${vals}]`);
+            }
+        });
+    }
+
+    // Final step: full scores
+    steps.push({
+        name: '完整 Scores 矩阵',
+        duration: 1000,
+        action: (i, instant) => {
+            clearViz();
+            createMatrixBlock(viz, Q, 'Q', tokLabels, dimLabels, { cellSize: 30 });
+            addOperator(viz, '×');
+            createMatrixBlock(viz, KT, 'K^T', dimLabels, tokLabels, { cellSize: 30 });
+            addOperator(viz, '=');
+            const sr = createMatrixBlock(viz, rawScores, 'Scores', tokLabels, tokLabels, { cellSize: 44 });
+            if (!instant) {
+                gsap.from(sr.block, { scale: 1.05, duration: 0.5, ease: 'back.out(1.5)' });
+            }
+            showStatus('原始注意力分数计算完成！值越大 → 两个 token 越"相关"。接下来需要缩放。');
+        }
+    });
+
+    new AnimationController({
+        container: document.getElementById('sec2Controls'),
+        steps: steps,
+        defaultDuration: 1000,
+    });
+})();
+
+// ============================================================
+//  SECTION 3: Scaling Interactive Demo
+// ============================================================
+(function initSection3() {
+    const slider = document.getElementById('dkSlider');
+    const dkDisplay = document.getElementById('dkValue');
+    const unscaledBars = document.getElementById('unscaledBars');
+    const scaledBars = document.getElementById('scaledBars');
+    const unscaledInfo = document.getElementById('unscaledInfo');
+    const scaledInfo = document.getElementById('scaledInfo');
+    const unscaledEntropy = document.getElementById('unscaledEntropy');
+    const scaledEntropy = document.getElementById('scaledEntropy');
+
+    // Use the first row of rawScores as base, scale by sqrt(dk/8) to simulate
+    const baseScores = rawScores[0].slice();
+
+    function entropy(probs) {
+        let h = 0;
+        for (const p of probs) {
+            if (p > 1e-10) h -= p * Math.log2(p);
+        }
+        return h;
+    }
+
+    function updateScalingDemo() {
+        const dk = parseInt(slider.value);
+        dkDisplay.textContent = dk;
+
+        // Simulate scores at this dk: scale base scores by sqrt(dk/8)
+        const factor = Math.sqrt(dk / 8);
+        const scores = baseScores.map(s => s * factor);
+        const scaledS = scores.map(s => s / Math.sqrt(dk));
+
+        const unscaledProbs = TransformerUtils.softmax(scores);
+        const scaledProbs = TransformerUtils.softmax(scaledS);
+
+        const maxUnscaled = Math.max(...unscaledProbs);
+        const maxScaled = Math.max(...scaledProbs);
+
+        // Render unscaled bars
+        unscaledBars.innerHTML = '';
+        for (let i = 0; i < unscaledProbs.length; i++) {
+            const bar = document.createElement('div');
+            bar.className = 'bar';
+            const h = Math.max(2, (unscaledProbs[i] / Math.max(maxUnscaled, 0.01)) * 100);
+            bar.style.height = h + 'px';
+            bar.style.background = unscaledProbs[i] > 0.8 ? 'var(--accent-red)' :
+                                   unscaledProbs[i] > 0.4 ? 'var(--accent-orange)' : 'var(--accent-green)';
+            bar.innerHTML = `<span class="bar-val">${unscaledProbs[i].toFixed(3)}</span>
+                             <span class="bar-label">${TOKENS[i]}</span>`;
+            unscaledBars.appendChild(bar);
+        }
+
+        // Render scaled bars
+        scaledBars.innerHTML = '';
+        for (let i = 0; i < scaledProbs.length; i++) {
+            const bar = document.createElement('div');
+            bar.className = 'bar';
+            const h = Math.max(2, (scaledProbs[i] / Math.max(maxScaled, 0.01)) * 100);
+            bar.style.height = h + 'px';
+            bar.style.background = 'var(--accent-green)';
+            bar.innerHTML = `<span class="bar-val">${scaledProbs[i].toFixed(3)}</span>
+                             <span class="bar-label">${TOKENS[i]}</span>`;
+            scaledBars.appendChild(bar);
+        }
+
+        const eUnscaled = entropy(unscaledProbs);
+        const eScaled = entropy(scaledProbs);
+        const maxEntropy = Math.log2(SEQ_LEN);
+
+        unscaledInfo.textContent = `d_k = ${dk}, 分数量级 ~ ${(Math.sqrt(dk) * 0.4).toFixed(1)}`;
+        scaledInfo.textContent = `除以 √${dk} = ${Math.sqrt(dk).toFixed(2)} 后的 softmax`;
+        unscaledEntropy.textContent = `熵: ${eUnscaled.toFixed(3)} / ${maxEntropy.toFixed(2)} (${(eUnscaled/maxEntropy*100).toFixed(0)}% 均匀)`;
+        scaledEntropy.textContent = `熵: ${eScaled.toFixed(3)} / ${maxEntropy.toFixed(2)} (${(eScaled/maxEntropy*100).toFixed(0)}% 均匀)`;
+    }
+
+    slider.addEventListener('input', updateScalingDemo);
+    updateScalingDemo();
+})();
+
+// ============================================================
+//  SECTION 4: Softmax Row-by-Row Animation
+// ============================================================
+(function initSection4() {
+    const viz = document.getElementById('sec4Viz');
+    const statusBox = document.getElementById('sec4Status');
+    const statusText = document.getElementById('sec4StatusText');
+
+    function clearViz() {
+        viz.innerHTML = '';
+        statusBox.style.display = 'none';
+    }
+    function showStatus(msg) {
+        statusBox.style.display = 'block';
+        statusText.textContent = msg;
+    }
+
+    // Color scale: probability 0..1 mapped to green intensity
+    function probColor(v) {
+        const t = Math.max(0, Math.min(1, v));
+        return `rgba(22, 199, 154, ${0.08 + t * 0.85})`;
+    }
+
+    const steps = [];
+
+    // Step 0: show scaled scores
+    steps.push({
+        name: '缩放后的分数矩阵',
+        duration: 1000,
+        action: (i, instant) => {
+            clearViz();
+            createMatrixBlock(viz, scaledScores, 'Scaled Scores', tokLabels, tokLabels, { cellSize: 52 });
+            showStatus('这是缩放后的注意力分数矩阵，接下来对每行做 softmax。');
+        }
+    });
+
+    // Steps 1-4: softmax per row with exp breakdown
+    for (let row = 0; row < SEQ_LEN; row++) {
+        steps.push({
+            name: `Softmax 第 ${row} 行: "${TOKENS[row]}"`,
+            duration: 1500,
+            action: (i, instant) => {
+                clearViz();
+
+                // Left: scaled scores with row highlight
+                const sr = createMatrixBlock(viz, scaledScores, 'Scaled', tokLabels, tokLabels, { cellSize: 44 });
+                sr.renderer.highlightRow(row, '#4fc3f7');
+
+                addOperator(viz, '→');
+
+                // Middle: exp values for this row
+                const rowScores = scaledScores[row];
+                const maxS = Math.max(...rowScores);
+                const exps = rowScores.map(s => Math.exp(s - maxS));
+                const expSum = exps.reduce((a, b) => a + b, 0);
+
+                const expBlock = document.createElement('div');
+                expBlock.className = 'matrix-block';
+                expBlock.innerHTML = `<div class="mat-label">exp(scores)</div>`;
+                const expList = document.createElement('div');
+                expList.style.cssText = 'font-family:var(--font-mono);font-size:0.78rem;color:var(--text-secondary);text-align:left;padding:0.4rem;background:rgba(42,42,74,0.3);border-radius:6px;';
+                for (let c = 0; c < SEQ_LEN; c++) {
+                    const line = document.createElement('div');
+                    line.style.padding = '0.15rem 0.3rem';
+                    line.innerHTML = `<span style="color:var(--accent-blue)">${TOKENS[c]}</span>: exp(${rowScores[c].toFixed(3)}) = <span style="color:var(--accent-green)">${exps[c].toFixed(4)}</span>`;
+                    expList.appendChild(line);
+                }
+                const sumLine = document.createElement('div');
+                sumLine.style.cssText = 'padding:0.3rem 0.3rem 0.15rem;border-top:1px solid var(--border-color);margin-top:0.2rem;';
+                sumLine.innerHTML = `sum = <span style="color:var(--accent-orange)">${expSum.toFixed(4)}</span>`;
+                expList.appendChild(sumLine);
+                expBlock.appendChild(expList);
+                viz.appendChild(expBlock);
+
+                addOperator(viz, '→');
+
+                // Right: partial attention weights
+                const partial = TransformerUtils.zeros(SEQ_LEN, SEQ_LEN);
+                for (let r = 0; r <= row; r++) {
+                    for (let c = 0; c < SEQ_LEN; c++) {
+                        partial[r][c] = attnWeights[r][c];
+                    }
+                }
+                const wr = createMatrixBlock(viz, partial, '注意力权重', tokLabels, tokLabels, {
+                    cellSize: 52,
+                    colorScale: probColor,
+                });
+                wr.renderer.highlightRow(row, '#16c79a');
+
+                const probs = attnWeights[row].map(v => v.toFixed(4)).join(', ');
+                const rowSum = attnWeights[row].reduce((a, b) => a + b, 0);
+                showStatus(`"${TOKENS[row]}" 的注意力分布: [${probs}]  (行和 = ${rowSum.toFixed(4)})`);
+            }
+        });
+    }
+
+    // Final: full attention heatmap
+    steps.push({
+        name: '完整注意力权重矩阵',
+        duration: 1000,
+        action: (i, instant) => {
+            clearViz();
+            const wr = createMatrixBlock(viz, attnWeights, '注意力权重 (Attention Weights)', tokLabels, tokLabels, {
+                cellSize: 60,
+                colorScale: probColor,
+            });
+            if (!instant) {
+                gsap.from(wr.block, { scale: 0.9, opacity: 0.5, duration: 0.6, ease: 'back.out(1.4)' });
+            }
+
+            // Show row sums
+            let sumInfo = '行和验证: ';
+            for (let r = 0; r < SEQ_LEN; r++) {
+                const s = attnWeights[r].reduce((a, b) => a + b, 0);
+                sumInfo += `${TOKENS[r]}=${s.toFixed(4)}  `;
+            }
+            showStatus(sumInfo + ' (每行均为 1，是有效的概率分布)');
+        }
+    });
+
+    new AnimationController({
+        container: document.getElementById('sec4Controls'),
+        steps: steps,
+        defaultDuration: 1200,
+    });
+})();
+
+// ============================================================
+//  SECTION 5: Full Pipeline with Animation
+// ============================================================
+(function initSection5() {
+    const viz = document.getElementById('sec5Viz');
+    const statusBox = document.getElementById('sec5Status');
+    const statusText = document.getElementById('sec5StatusText');
+    const stepsContainer = document.getElementById('pipelineSteps');
+
+    // Pipeline step names
+    const pipeNames = ['X (输入)', 'Q,K,V (投影)', 'QK^T (分数)', '÷√d_k (缩放)', 'Softmax (权重)', '×V (输出)'];
+
+    // Render step indicators
+    pipeNames.forEach((name, i) => {
+        const el = document.createElement('div');
+        el.className = 'pipeline-step';
+        el.textContent = name;
+        el.dataset.step = i;
+        el.addEventListener('click', () => {
+            if (sec5Controller) sec5Controller.goTo(i);
+        });
+        stepsContainer.appendChild(el);
+    });
+
+    function clearViz() {
+        viz.innerHTML = '';
+        statusBox.style.display = 'none';
+    }
+    function showStatus(msg) {
+        statusBox.style.display = 'block';
+        statusText.textContent = msg;
+    }
+    function updatePipelineSteps(currentIdx) {
+        const stepEls = stepsContainer.querySelectorAll('.pipeline-step');
+        stepEls.forEach((el, i) => {
+            el.classList.remove('active', 'done');
+            if (i === currentIdx) el.classList.add('active');
+            else if (i < currentIdx) el.classList.add('done');
+        });
+    }
+
+    function probColor(v) {
+        const t = Math.max(0, Math.min(1, v));
+        return `rgba(22, 199, 154, ${0.08 + t * 0.85})`;
+    }
+
+    const steps = [
+        {
+            name: 'X (输入)',
+            duration: 1200,
+            action: (i, instant) => {
+                clearViz();
+                updatePipelineSteps(0);
+                const r = createMatrixBlock(viz, X, 'X (输入)', tokLabels, dimLabels, { cellSize: 30 });
+                r.block.classList.add('visible');
+                if (!instant) gsap.from(r.block, { opacity: 0, y: 20, duration: 0.6 });
+                showStatus('第 1 步: 输入矩阵 X -- 4 个 token 的 8 维嵌入。');
+            }
+        },
+        {
+            name: 'Q,K,V (投影)',
+            duration: 1500,
+            action: (i, instant) => {
+                clearViz();
+                updatePipelineSteps(1);
+
+                const rX = createMatrixBlock(viz, X, 'X', tokLabels, dimLabels, { cellSize: 26 });
+                rX.block.classList.add('visible');
+
+                const a1 = document.createElement('div');
+                a1.className = 'arrow visible';
+                a1.textContent = '→';
+                viz.appendChild(a1);
+
+                const rQ = createMatrixBlock(viz, Q, 'Q', tokLabels, dimLabels, { cellSize: 26 });
+                rQ.block.classList.add('visible');
+                const rK = createMatrixBlock(viz, K, 'K', tokLabels, dimLabels, { cellSize: 26 });
+                rK.block.classList.add('visible');
+                const rV = createMatrixBlock(viz, V, 'V', tokLabels, dimLabels, { cellSize: 26 });
+                rV.block.classList.add('visible');
+
+                if (!instant) {
+                    gsap.from([rQ.block, rK.block, rV.block], {
+                        opacity: 0, x: -15, stagger: 0.12, duration: 0.5
+                    });
+                }
+                showStatus('第 2 步: 线性投影得到 Q, K, V (各 4×8)。');
+            }
+        },
+        {
+            name: 'QK^T (分数)',
+            duration: 1200,
+            action: (i, instant) => {
+                clearViz();
+                updatePipelineSteps(2);
+
+                const rQ = createMatrixBlock(viz, Q, 'Q', tokLabels, dimLabels, { cellSize: 26 });
+                rQ.block.classList.add('visible');
+
+                addOperator(viz, '×');
+
+                const rKT = createMatrixBlock(viz, KT, 'K^T', dimLabels, tokLabels, { cellSize: 26 });
+                rKT.block.classList.add('visible');
+
+                addOperator(viz, '=');
+
+                const rS = createMatrixBlock(viz, rawScores, 'Scores', tokLabels, tokLabels, { cellSize: 44 });
+                rS.block.classList.add('visible');
+
+                if (!instant) {
+                    gsap.from(rS.block, { opacity: 0, scale: 0.9, duration: 0.6 });
+                }
+                showStatus('第 3 步: Q × K^T → 原始注意力分数 (4×4)。');
+            }
+        },
+        {
+            name: '÷√d_k (缩放)',
+            duration: 1200,
+            action: (i, instant) => {
+                clearViz();
+                updatePipelineSteps(3);
+
+                const rR = createMatrixBlock(viz, rawScores, 'Raw Scores', tokLabels, tokLabels, { cellSize: 44 });
+                rR.block.classList.add('visible');
+
+                addOperator(viz, '÷');
+
+                const sqrtBlock = document.createElement('div');
+                sqrtBlock.className = 'matrix-block visible';
+                sqrtBlock.innerHTML = `<div style="font-size:1.3rem;color:var(--accent-orange);font-family:var(--font-mono);padding:0.5rem 1rem;background:rgba(255,171,64,0.1);border-radius:8px;">√${D_MODEL} = ${Math.sqrt(D_MODEL).toFixed(2)}</div>`;
+                viz.appendChild(sqrtBlock);
+
+                addOperator(viz, '=');
+
+                const rSc = createMatrixBlock(viz, scaledScores, 'Scaled', tokLabels, tokLabels, { cellSize: 44 });
+                rSc.block.classList.add('visible');
+
+                if (!instant) {
+                    gsap.from(rSc.block, { opacity: 0, scale: 0.9, duration: 0.6 });
+                }
+                showStatus(`第 4 步: 除以 √d_k = √${D_MODEL} ≈ ${Math.sqrt(D_MODEL).toFixed(2)}，防止 softmax 饱和。`);
+            }
+        },
+        {
+            name: 'Softmax (权重)',
+            duration: 1200,
+            action: (i, instant) => {
+                clearViz();
+                updatePipelineSteps(4);
+
+                const rSc = createMatrixBlock(viz, scaledScores, 'Scaled', tokLabels, tokLabels, { cellSize: 40 });
+                rSc.block.classList.add('visible');
+
+                const a = document.createElement('div');
+                a.className = 'arrow visible';
+                a.innerHTML = '<span style="font-size:0.85rem;color:var(--accent-purple);">softmax<br>→</span>';
+                viz.appendChild(a);
+
+                const rW = createMatrixBlock(viz, attnWeights, '注意力权重', tokLabels, tokLabels, {
+                    cellSize: 52,
+                    colorScale: probColor,
+                });
+                rW.block.classList.add('visible');
+
+                if (!instant) {
+                    gsap.from(rW.block, { opacity: 0, scale: 0.9, duration: 0.6 });
+                }
+                showStatus('第 5 步: 逐行 softmax → 注意力权重 (每行和为 1)。');
+            }
+        },
+        {
+            name: '×V (输出)',
+            duration: 1500,
+            action: (i, instant) => {
+                clearViz();
+                updatePipelineSteps(5);
+
+                const rW = createMatrixBlock(viz, attnWeights, '权重', tokLabels, tokLabels, {
+                    cellSize: 40,
+                    colorScale: probColor,
+                });
+                rW.block.classList.add('visible');
+
+                addOperator(viz, '×');
+
+                const rV = createMatrixBlock(viz, V, 'V', tokLabels, dimLabels, { cellSize: 28 });
+                rV.block.classList.add('visible');
+
+                addOperator(viz, '=');
+
+                const rOut = createMatrixBlock(viz, attnOutput, 'Output', tokLabels, dimLabels, { cellSize: 30 });
+                rOut.block.classList.add('visible');
+
+                if (!instant) {
+                    gsap.from(rOut.block, { opacity: 0, scale: 0.95, duration: 0.7, ease: 'back.out(1.5)' });
+                }
+                showStatus('第 6 步: 注意力权重 × V → 输出。每个 token 的输出是 V 中所有行的加权组合，权重由注意力决定。');
+            }
+        }
+    ];
+
+    const sec5Controller = new AnimationController({
+        container: document.getElementById('sec5Controls'),
+        steps: steps,
+        defaultDuration: 1200,
+        onStepChange: (idx) => {
+            updatePipelineSteps(idx);
+        }
+    });
+
+    // ---- Editable X table ----
+    const editTable = document.getElementById('editableX');
+
+    function renderEditableX() {
+        const thead = editTable.querySelector('thead tr');
+        thead.innerHTML = '<th></th>';
+        for (let j = 0; j < D_MODEL; j++) {
+            const th = document.createElement('th');
+            th.textContent = 'd' + j;
+            thead.appendChild(th);
+        }
+
+        const tbody = editTable.querySelector('tbody');
+        tbody.innerHTML = '';
+        for (let i = 0; i < SEQ_LEN; i++) {
+            const tr = document.createElement('tr');
+            const label = document.createElement('th');
+            label.textContent = TOKENS[i];
+            tr.appendChild(label);
+            for (let j = 0; j < D_MODEL; j++) {
+                const td = document.createElement('td');
+                td.className = 'editable-cell';
+                td.style.background = TransformerUtils.valueToColor(X[i][j], -0.8, 0.8);
+                const input = document.createElement('input');
+                input.type = 'text';
+                input.value = X[i][j].toFixed(3);
+                input.dataset.row = i;
+                input.dataset.col = j;
+                input.addEventListener('change', onXChange);
+                input.addEventListener('focus', function() { this.select(); });
+                td.appendChild(input);
+                tr.appendChild(td);
+            }
+            tbody.appendChild(tr);
+        }
+    }
+
+    function onXChange(e) {
+        const r = parseInt(e.target.dataset.row);
+        const c = parseInt(e.target.dataset.col);
+        const val = parseFloat(e.target.value);
+        if (!isNaN(val)) {
+            X[r][c] = val;
+            e.target.parentElement.style.background = TransformerUtils.valueToColor(val, -0.8, 0.8);
+        }
+    }
+
+    document.getElementById('resetXBtn').addEventListener('click', () => {
+        X = X_ORIGINAL.map(r => [...r]);
+        recomputeAll();
+        renderEditableX();
+    });
+
+    document.getElementById('recomputeBtn').addEventListener('click', () => {
+        recomputeAll();
+        // Reset section 5 controller and replay last step or first step
+        if (sec5Controller.currentStep >= 0) {
+            sec5Controller.goTo(sec5Controller.currentStep);
+        }
+        renderEditableX();
+    });
+
+    renderEditableX();
+})();
+
+// ============================================================
+//  Smooth-scroll section links & KaTeX re-render
+// ============================================================
+document.addEventListener('DOMContentLoaded', () => {
+    // Re-render math after dynamic content
+    setTimeout(() => {
+        if (typeof renderMath === 'function') renderMath(document.body);
+    }, 200);
+});
+</script>
+</body>
+</html>

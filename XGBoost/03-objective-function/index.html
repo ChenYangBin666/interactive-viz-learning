@@ -1,0 +1,1101 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>XGBoost 目标函数 — 交互式可视化</title>
+
+    <!-- KaTeX -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+
+    <!-- D3.js -->
+    <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+
+    <!-- GSAP -->
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.2/dist/gsap.min.js"></script>
+
+    <!-- Shared styles -->
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+
+    <style>
+        .formula-box {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1.2rem 1.5rem;
+            margin: 1rem 0;
+            text-align: center;
+            overflow-x: auto;
+        }
+        .formula-box.highlight {
+            border-color: var(--accent-green);
+            box-shadow: 0 0 15px rgba(22, 199, 154, 0.15);
+        }
+        .formula-step {
+            opacity: 0.3;
+            transition: opacity 0.5s, transform 0.5s;
+            transform: translateY(8px);
+            margin: 0.6rem 0;
+        }
+        .formula-step.active {
+            opacity: 1;
+            transform: translateY(0);
+        }
+        .formula-step.done {
+            opacity: 0.7;
+            transform: translateY(0);
+        }
+        .step-desc {
+            font-size: 0.85rem;
+            color: var(--accent-yellow);
+            margin-bottom: 0.3rem;
+            font-weight: 600;
+        }
+        .new-term {
+            color: var(--accent-green);
+        }
+        .controls-row {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 1rem;
+            margin: 1rem 0;
+        }
+        .svg-container {
+            width: 100%;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+        }
+        .svg-container svg {
+            display: block;
+            width: 100%;
+            height: auto;
+        }
+        .stat-box {
+            display: inline-flex;
+            flex-direction: column;
+            align-items: center;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            padding: 0.5rem 1rem;
+            min-width: 100px;
+        }
+        .stat-box .stat-label {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+        }
+        .stat-box .stat-value {
+            font-family: var(--font-mono);
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: var(--accent-green);
+        }
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            margin: 0.5rem 0;
+        }
+        .data-table th, .data-table td {
+            padding: 0.4rem 0.6rem;
+            text-align: center;
+            border: 1px solid var(--border-color);
+        }
+        .data-table th {
+            background: var(--bg-card);
+            color: var(--accent-green);
+            font-weight: 600;
+        }
+        .data-table td {
+            background: var(--bg-secondary);
+        }
+        .bar-positive { fill: var(--accent-green); }
+        .bar-negative { fill: var(--accent-red); }
+        .drag-hint {
+            font-size: 0.78rem;
+            color: var(--text-muted);
+            font-style: italic;
+            margin-top: 0.3rem;
+        }
+        .gain-positive { color: var(--accent-green); font-weight: 700; }
+        .gain-negative { color: var(--accent-red); font-weight: 700; }
+        .node-box {
+            fill: var(--bg-card);
+            stroke: var(--border-color);
+            stroke-width: 2;
+            rx: 8;
+        }
+        .node-box.left { stroke: var(--accent-blue); }
+        .node-box.right { stroke: var(--accent-orange); }
+        .node-box.parent { stroke: var(--accent-purple); }
+        .section-intro {
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+            margin-bottom: 1rem;
+            line-height: 1.8;
+        }
+        .breadcrumb {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            margin-bottom: 0.5rem;
+        }
+        .breadcrumb a {
+            color: var(--accent-blue);
+        }
+    </style>
+</head>
+<body>
+
+<div class="page-container">
+    <div class="breadcrumb">
+        <a href="../index.html">XGBoost</a> / 模块 03
+    </div>
+    <h1>XGBoost 目标函数</h1>
+    <p>深入理解 XGBoost 如何通过泰勒展开构建目标函数，并推导出最优叶子权重与分裂增益公式。</p>
+
+    <!-- ===== Section 1: 泰勒展开直觉 ===== -->
+    <div class="section" id="sec-taylor">
+        <div class="section-title">
+            <div class="icon">1</div>
+            <h2>泰勒展开直觉</h2>
+        </div>
+        <div class="split-layout">
+            <div class="text-panel">
+                <p class="section-intro">
+                    泰勒展开允许我们用多项式来近似任意可微函数。在点 $x_0$ 处，一阶近似（切线）给出方向，
+                    二阶近似（抛物线）进一步捕捉曲率信息。XGBoost 正是利用二阶展开来近似损失函数。
+                </p>
+                <div class="formula-box">
+                    $$f(x_0+\Delta x) \approx f(x_0) + f'(x_0)\Delta x + \frac{1}{2}f''(x_0)\Delta x^2$$
+                </div>
+                <div class="info-box">
+                    <p><strong>梯度</strong> = 一阶导数 $f'(x)$：告诉我们函数的变化方向和速率</p>
+                    <p><strong>Hessian</strong> = 二阶导数 $f''(x)$：告诉我们函数的曲率（弯曲程度）</p>
+                </div>
+                <div class="controls-row">
+                    <div class="slider-group" style="flex:1">
+                        <label>展开点 $x_0$：</label>
+                        <input type="range" id="taylor-x0" min="-3" max="3" step="0.1" value="0">
+                        <span class="slider-value" id="taylor-x0-val">0.0</span>
+                    </div>
+                </div>
+                <div class="legend">
+                    <div class="legend-item"><div class="swatch" style="background:#ffd740"></div>原函数 $f(x)$</div>
+                    <div class="legend-item"><div class="swatch" style="background:#4fc3f7"></div>一阶近似（切线）</div>
+                    <div class="legend-item"><div class="swatch" style="background:#16c79a"></div>二阶近似（抛物线）</div>
+                </div>
+            </div>
+            <div class="viz-panel">
+                <div class="svg-container" id="taylor-viz"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== Section 2: 目标函数推导 ===== -->
+    <div class="section" id="sec-derivation">
+        <div class="section-title">
+            <div class="icon">2</div>
+            <h2>XGBoost 目标函数推导</h2>
+        </div>
+        <p class="section-intro">
+            XGBoost 的核心创新在于对目标函数进行二阶泰勒展开，使得优化过程更高效且可推导出解析解。
+            下面逐步构建完整的目标函数。
+        </p>
+        <div id="derivation-controls" style="margin-bottom:1rem;"></div>
+        <div id="derivation-steps">
+            <div class="formula-step" id="deriv-step-0">
+                <div class="step-desc">起点：目标函数 = 损失 + 正则化</div>
+                <div class="formula-box" id="deriv-formula-0"></div>
+            </div>
+            <div class="formula-step" id="deriv-step-1">
+                <div class="step-desc">第一步：在第 $t$ 轮添加新树 $f_t$</div>
+                <div class="formula-box" id="deriv-formula-1"></div>
+            </div>
+            <div class="formula-step" id="deriv-step-2">
+                <div class="step-desc">第二步：对损失函数做二阶泰勒展开</div>
+                <div class="formula-box" id="deriv-formula-2"></div>
+            </div>
+            <div class="formula-step" id="deriv-step-3">
+                <div class="step-desc">第三步：移除常数项（与 $f_t$ 无关的项）</div>
+                <div class="formula-box" id="deriv-formula-3"></div>
+            </div>
+            <div class="formula-step" id="deriv-step-4">
+                <div class="step-desc">第四步：定义 $g_i = \partial_{\hat{y}^{(t-1)}} L(y_i, \hat{y}_i^{(t-1)})$，$h_i = \partial^2_{\hat{y}^{(t-1)}} L(y_i, \hat{y}_i^{(t-1)})$</div>
+                <div class="formula-box highlight" id="deriv-formula-4"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== Section 3: 梯度与 Hessian ===== -->
+    <div class="section" id="sec-grad-hess">
+        <div class="section-title">
+            <div class="icon">3</div>
+            <h2>梯度 $g_i$ 与 Hessian $h_i$</h2>
+        </div>
+        <div class="split-layout">
+            <div class="text-panel">
+                <p class="section-intro">
+                    不同的损失函数产生不同的梯度和 Hessian。$|g_i|$ 越大，说明该样本当前预测偏差越大，需要更多修正。
+                    $h_i$ 反映了对该样本预测调整的"置信度"。
+                </p>
+                <div class="controls-row">
+                    <div class="btn-group" id="loss-toggle">
+                        <button class="btn active" data-loss="mse">MSE（回归）</button>
+                        <button class="btn" data-loss="logloss">Log Loss（分类）</button>
+                    </div>
+                </div>
+                <div id="gh-formulas">
+                    <div class="formula-box" id="gh-formula-display"></div>
+                </div>
+                <div id="gh-table-container" style="max-height: 320px; overflow-y: auto;"></div>
+                <div class="info-box success" style="margin-top:0.75rem">
+                    <p>红色条 = 负值（预测偏高），绿色条 = 正值（预测偏低）。条越长，需要的修正越大。</p>
+                </div>
+            </div>
+            <div class="viz-panel">
+                <div class="svg-container" id="gh-viz"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== Section 4: 最优叶子权重 ===== -->
+    <div class="section" id="sec-leaf-weight">
+        <div class="section-title">
+            <div class="icon">4</div>
+            <h2>最优叶子权重</h2>
+        </div>
+        <div class="split-layout">
+            <div class="text-panel">
+                <p class="section-intro">
+                    对于落入某个叶子节点的样本集合，最优叶子权重可以解析求解。
+                    正则化参数 $\lambda$ 越大，叶子权重越趋向零（收缩效果）。
+                </p>
+                <div class="formula-box">
+                    $$w^* = -\frac{\sum_{i \in I_j} g_i}{\sum_{i \in I_j} h_i + \lambda}$$
+                </div>
+                <div class="controls-row">
+                    <div class="slider-group" style="flex:1">
+                        <label>$\lambda$：</label>
+                        <input type="range" id="leaf-lambda" min="0" max="10" step="0.1" value="1">
+                        <span class="slider-value" id="leaf-lambda-val">1.0</span>
+                    </div>
+                </div>
+                <div class="controls-row" id="leaf-stats"></div>
+                <p class="drag-hint">点击下方图中的数据点，将其移入/移出叶子节点，观察最优权重的变化。</p>
+            </div>
+            <div class="viz-panel">
+                <div class="svg-container" id="leaf-viz"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== Section 5: 从目标函数到分裂增益 ===== -->
+    <div class="section" id="sec-split-gain">
+        <div class="section-title">
+            <div class="icon">5</div>
+            <h2>从目标函数到分裂增益</h2>
+        </div>
+        <p class="section-intro">
+            分裂增益衡量一次分裂能带来多少目标函数的改进。只有当增益大于 $\gamma$（复杂度代价）时，分裂才值得进行。
+        </p>
+        <div class="formula-box">
+            $$\text{Gain} = \frac{1}{2}\left[\frac{G_L^2}{H_L+\lambda} + \frac{G_R^2}{H_R+\lambda} - \frac{(G_L+G_R)^2}{H_L+H_R+\lambda}\right] - \gamma$$
+        </div>
+        <div class="controls-row">
+            <div class="slider-group" style="flex:1">
+                <label>$\lambda$：</label>
+                <input type="range" id="gain-lambda" min="0" max="10" step="0.1" value="1">
+                <span class="slider-value" id="gain-lambda-val">1.0</span>
+            </div>
+            <div class="slider-group" style="flex:1">
+                <label>$\gamma$：</label>
+                <input type="range" id="gain-gamma" min="0" max="5" step="0.1" value="0">
+                <span class="slider-value" id="gain-gamma-val">0.0</span>
+            </div>
+        </div>
+        <div class="controls-row" id="gain-stats"></div>
+        <div class="svg-container" id="gain-viz" style="min-height:500px;"></div>
+        <p class="drag-hint">拖动分裂阈值线（蓝色虚线）来查看不同分裂位置的增益变化。</p>
+    </div>
+</div>
+
+<!-- Shared scripts -->
+<script src="../shared/scripts/xgb-utils.js"></script>
+<script src="../shared/scripts/animation-controller.js"></script>
+<script src="../shared/scripts/matrix-renderer.js"></script>
+<script src="../shared/scripts/nav.js"></script>
+<script src="../shared/scripts/katex-init.js"></script>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+
+    // ================================================================
+    // Section 1: Taylor Expansion Visualization
+    // ================================================================
+    (function initTaylor() {
+        const container = document.getElementById('taylor-viz');
+        const W = 600, H = 400;
+        const margin = { top: 20, right: 20, bottom: 40, left: 50 };
+        const w = W - margin.left - margin.right;
+        const h = H - margin.top - margin.bottom;
+
+        const svg = d3.select(container).append('svg')
+            .attr('viewBox', `0 0 ${W} ${H}`)
+            .attr('preserveAspectRatio', 'xMidYMid meet');
+
+        const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+
+        // The function to approximate
+        const fn = x => Math.sin(x) * 1.5 + 0.3 * x * x - 0.5;
+        const fnPrime = x => 1.5 * Math.cos(x) + 0.6 * x;
+        const fnPrime2 = x => -1.5 * Math.sin(x) + 0.6;
+
+        const xScale = d3.scaleLinear().domain([-4, 4]).range([0, w]);
+        const yScale = d3.scaleLinear().domain([-5, 8]).range([h, 0]);
+
+        // Axes
+        g.append('g').attr('transform', `translate(0,${h})`)
+            .call(d3.axisBottom(xScale).ticks(8))
+            .attr('color', '#6c6c7c');
+        g.append('g')
+            .call(d3.axisLeft(yScale).ticks(6))
+            .attr('color', '#6c6c7c');
+
+        // Grid
+        g.append('g').selectAll('line').data(yScale.ticks(6)).enter()
+            .append('line')
+            .attr('x1', 0).attr('x2', w)
+            .attr('y1', d => yScale(d)).attr('y2', d => yScale(d))
+            .attr('stroke', '#2a2a4a').attr('stroke-dasharray', '3,3');
+
+        // Generate line data
+        const lineGen = d3.line().x(d => xScale(d[0])).y(d => yScale(d[1]));
+        const xRange = d3.range(-4, 4.05, 0.05);
+
+        // Original function
+        const fnPath = g.append('path')
+            .datum(xRange.map(x => [x, fn(x)]))
+            .attr('d', lineGen)
+            .attr('fill', 'none').attr('stroke', '#ffd740').attr('stroke-width', 2.5);
+
+        // First order approximation
+        const order1Path = g.append('path')
+            .attr('fill', 'none').attr('stroke', '#4fc3f7')
+            .attr('stroke-width', 2).attr('stroke-dasharray', '6,4');
+
+        // Second order approximation
+        const order2Path = g.append('path')
+            .attr('fill', 'none').attr('stroke', '#16c79a')
+            .attr('stroke-width', 2).attr('stroke-dasharray', '4,3');
+
+        // Expansion point marker
+        const pointG = g.append('g');
+        const pointCircle = pointG.append('circle')
+            .attr('r', 7).attr('fill', '#ffd740').attr('stroke', '#1a1a2e').attr('stroke-width', 2);
+        const pointLine = pointG.append('line')
+            .attr('stroke', '#ffd740').attr('stroke-width', 1).attr('stroke-dasharray', '3,3')
+            .attr('opacity', 0.5);
+
+        // Labels
+        const labelX0 = g.append('text')
+            .attr('fill', '#ffd740').attr('font-size', 13).attr('font-weight', 700)
+            .attr('text-anchor', 'middle');
+
+        function update(x0) {
+            const y0 = fn(x0), fp = fnPrime(x0), fpp = fnPrime2(x0);
+
+            // First order: y = y0 + fp*(x-x0)
+            const order1Data = xRange.map(x => {
+                const dx = x - x0;
+                return [x, y0 + fp * dx];
+            });
+            order1Path.datum(order1Data).attr('d', lineGen);
+
+            // Second order: y = y0 + fp*(x-x0) + 0.5*fpp*(x-x0)^2
+            const order2Data = xRange.map(x => {
+                const dx = x - x0;
+                return [x, y0 + fp * dx + 0.5 * fpp * dx * dx];
+            });
+            order2Path.datum(order2Data).attr('d', lineGen);
+
+            // Point
+            pointCircle.attr('cx', xScale(x0)).attr('cy', yScale(y0));
+            pointLine.attr('x1', xScale(x0)).attr('y1', yScale(y0))
+                .attr('x2', xScale(x0)).attr('y2', h);
+
+            labelX0.attr('x', xScale(x0)).attr('y', h + 32)
+                .text(`x₀ = ${x0.toFixed(1)}`);
+        }
+
+        const slider = document.getElementById('taylor-x0');
+        const valDisplay = document.getElementById('taylor-x0-val');
+        slider.addEventListener('input', () => {
+            const v = parseFloat(slider.value);
+            valDisplay.textContent = v.toFixed(1);
+            update(v);
+        });
+        update(0);
+    })();
+
+    // ================================================================
+    // Section 2: Objective Function Derivation
+    // ================================================================
+    (function initDerivation() {
+        const formulas = [
+            String.raw`\text{Obj}^{(t)} = \sum_{i=1}^{n} L(y_i,\, \hat{y}_i^{(t)}) + \sum_{k=1}^{t} \Omega(f_k)`,
+            String.raw`\text{Obj}^{(t)} = \sum_{i=1}^{n} L\!\left(y_i,\, \hat{y}_i^{(t-1)} + \color{#16c79a}{f_t(x_i)}\right) + \Omega(\color{#16c79a}{f_t}) + \text{const}`,
+            String.raw`\text{Obj}^{(t)} \approx \sum_{i=1}^{n} \left[ L(y_i,\hat{y}_i^{(t-1)}) + \color{#4fc3f7}{\partial_{\hat{y}} L} \cdot f_t(x_i) + \frac{1}{2}\color{#ffab40}{\partial^2_{\hat{y}} L} \cdot f_t^2(x_i) \right] + \Omega(f_t) + \text{const}`,
+            String.raw`\tilde{\mathcal{L}}^{(t)} = \sum_{i=1}^{n} \left[ \color{#4fc3f7}{\partial_{\hat{y}} L} \cdot f_t(x_i) + \frac{1}{2}\color{#ffab40}{\partial^2_{\hat{y}} L} \cdot f_t^2(x_i) \right] + \Omega(f_t)`,
+            String.raw`\boxed{\tilde{\mathcal{L}}^{(t)} = \sum_{i=1}^{n} \left[ \color{#4fc3f7}{g_i}\, f_t(x_i) + \frac{1}{2}\color{#ffab40}{h_i}\, f_t^2(x_i) \right] + \Omega(f_t)}`,
+        ];
+
+        // Render KaTeX into formula boxes
+        formulas.forEach((tex, i) => {
+            const el = document.getElementById(`deriv-formula-${i}`);
+            katex.render(tex, el, { displayMode: true, throwOnError: false, trust: true });
+        });
+
+        const controller = new AnimationController({
+            container: document.getElementById('derivation-controls'),
+            defaultDuration: 1200,
+            steps: formulas.map((_, i) => ({
+                name: `步骤 ${i}`,
+                duration: 1200,
+                action: (stepIdx, instant) => {
+                    for (let j = 0; j <= 4; j++) {
+                        const el = document.getElementById(`deriv-step-${j}`);
+                        if (j < stepIdx) {
+                            el.classList.remove('active');
+                            el.classList.add('done');
+                        } else if (j === stepIdx) {
+                            el.classList.add('active');
+                            el.classList.remove('done');
+                            if (!instant) {
+                                gsap.fromTo(el, { opacity: 0.3, y: 8 }, { opacity: 1, y: 0, duration: 0.5 });
+                            }
+                        } else {
+                            el.classList.remove('active', 'done');
+                        }
+                    }
+                }
+            })),
+        });
+    })();
+
+    // ================================================================
+    // Section 3: Gradient and Hessian Visualization
+    // ================================================================
+    (function initGradHess() {
+        const rng = XGBUtils.seededRandom(123);
+        const nPts = 10;
+
+        // Generate data: regression targets and current predictions
+        const data = [];
+        for (let i = 0; i < nPts; i++) {
+            const y = rng() * 6 - 3;
+            const pred = y + (rng() - 0.5) * 4; // noisy predictions
+            const label = y > 0 ? 1 : 0;
+            const prob = XGBUtils.sigmoid(pred);
+            data.push({ idx: i, y: parseFloat(y.toFixed(2)), pred: parseFloat(pred.toFixed(2)), label, prob: parseFloat(prob.toFixed(3)) });
+        }
+
+        let currentLoss = 'mse';
+
+        function getGH() {
+            if (currentLoss === 'mse') {
+                return data.map(d => ({
+                    g: parseFloat((d.pred - d.y).toFixed(3)),
+                    h: 1
+                }));
+            } else {
+                return data.map(d => ({
+                    g: parseFloat((d.prob - d.label).toFixed(3)),
+                    h: parseFloat((d.prob * (1 - d.prob)).toFixed(3))
+                }));
+            }
+        }
+
+        // Formula display
+        function updateFormula() {
+            const el = document.getElementById('gh-formula-display');
+            if (currentLoss === 'mse') {
+                katex.render(String.raw`\text{MSE: } g_i = \hat{y}_i - y_i, \quad h_i = 1`, el, { displayMode: true, throwOnError: false });
+            } else {
+                katex.render(String.raw`\text{Log Loss: } g_i = p_i - y_i, \quad h_i = p_i(1 - p_i)`, el, { displayMode: true, throwOnError: false });
+            }
+        }
+
+        // Table
+        function updateTable() {
+            const gh = getGH();
+            const container = document.getElementById('gh-table-container');
+            let html = '<table class="data-table"><thead><tr><th>$i$</th>';
+            if (currentLoss === 'mse') {
+                html += '<th>$y_i$</th><th>$\\hat{y}_i$</th>';
+            } else {
+                html += '<th>$y_i$</th><th>$p_i$</th>';
+            }
+            html += '<th>$g_i$</th><th>$h_i$</th></tr></thead><tbody>';
+            data.forEach((d, i) => {
+                const gColor = gh[i].g > 0 ? 'var(--accent-red)' : 'var(--accent-green)';
+                html += `<tr>
+                    <td>${i}</td>
+                    <td>${currentLoss === 'mse' ? d.y : d.label}</td>
+                    <td>${currentLoss === 'mse' ? d.pred : d.prob}</td>
+                    <td style="color:${gColor}">${gh[i].g.toFixed(3)}</td>
+                    <td>${gh[i].h.toFixed(3)}</td>
+                </tr>`;
+            });
+            html += '</tbody></table>';
+            container.innerHTML = html;
+            renderMath(container);
+        }
+
+        // D3 bar chart visualization
+        const vizContainer = document.getElementById('gh-viz');
+        const W = 600, H = 450;
+        const margin = { top: 30, right: 30, bottom: 60, left: 50 };
+        const w = W - margin.left - margin.right;
+        const h = H - margin.top - margin.bottom;
+
+        const svg = d3.select(vizContainer).append('svg')
+            .attr('viewBox', `0 0 ${W} ${H}`)
+            .attr('preserveAspectRatio', 'xMidYMid meet');
+
+        const gMain = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+
+        const xBand = d3.scaleBand().domain(d3.range(nPts)).range([0, w]).padding(0.25);
+        const yScaleG = d3.scaleLinear().range([h / 2, 0]);
+        const yScaleGBottom = d3.scaleLinear().range([h / 2, h]);
+
+        // sub-bands for g and h within each band
+        const subBand = d3.scaleBand().domain(['g', 'h']).range([0, xBand.bandwidth()]).padding(0.1);
+
+        const xAxis = gMain.append('g').attr('transform', `translate(0,${h})`);
+        const yAxisG = gMain.append('g');
+        const zeroLine = gMain.append('line')
+            .attr('x1', 0).attr('x2', w)
+            .attr('y1', h / 2).attr('y2', h / 2)
+            .attr('stroke', '#6c6c7c').attr('stroke-dasharray', '4,3');
+
+        // Bars group
+        const barsG = gMain.append('g');
+
+        // Labels
+        gMain.append('text').attr('x', w / 2).attr('y', h + 45)
+            .attr('text-anchor', 'middle').attr('fill', '#a8a8b8').attr('font-size', 12)
+            .text('样本索引 i');
+        gMain.append('text').attr('x', -15).attr('y', h / 4)
+            .attr('text-anchor', 'middle').attr('fill', '#4fc3f7').attr('font-size', 11)
+            .attr('transform', `rotate(-90, -35, ${h / 4})`).text('值');
+
+        // Legend in SVG
+        const legendG = svg.append('g').attr('transform', `translate(${margin.left + 10}, 10)`);
+        [{label: 'gᵢ (梯度)', color: '#4fc3f7'}, {label: 'hᵢ (Hessian)', color: '#ffab40'}].forEach((item, i) => {
+            legendG.append('rect').attr('x', i * 130).attr('y', 0).attr('width', 12).attr('height', 12)
+                .attr('fill', item.color).attr('rx', 2);
+            legendG.append('text').attr('x', i * 130 + 16).attr('y', 10)
+                .attr('fill', '#a8a8b8').attr('font-size', 11).text(item.label);
+        });
+
+        function updateViz() {
+            const gh = getGH();
+            const maxAbsG = Math.max(0.1, d3.max(gh, d => Math.abs(d.g)));
+            const maxH = Math.max(0.1, d3.max(gh, d => d.h));
+            const maxVal = Math.max(maxAbsG, maxH) * 1.1;
+
+            const yScale = d3.scaleLinear().domain([-maxVal, maxVal]).range([h, 0]);
+
+            xAxis.call(d3.axisBottom(xBand).tickFormat(i => i)).attr('color', '#6c6c7c');
+            yAxisG.call(d3.axisLeft(yScale).ticks(6)).attr('color', '#6c6c7c');
+            zeroLine.attr('y1', yScale(0)).attr('y2', yScale(0));
+
+            const bars = barsG.selectAll('.bar-group').data(gh);
+            const enter = bars.enter().append('g').attr('class', 'bar-group');
+
+            // g bar
+            enter.append('rect').attr('class', 'g-bar');
+            // h bar
+            enter.append('rect').attr('class', 'h-bar');
+
+            const merged = enter.merge(bars);
+
+            merged.select('.g-bar')
+                .transition().duration(500)
+                .attr('x', (d, i) => xBand(i) + subBand('g'))
+                .attr('width', subBand.bandwidth())
+                .attr('y', d => d.g >= 0 ? yScale(d.g) : yScale(0))
+                .attr('height', d => Math.abs(yScale(d.g) - yScale(0)))
+                .attr('fill', '#4fc3f7')
+                .attr('rx', 2);
+
+            merged.select('.h-bar')
+                .transition().duration(500)
+                .attr('x', (d, i) => xBand(i) + subBand('h'))
+                .attr('width', subBand.bandwidth())
+                .attr('y', d => yScale(d.h))
+                .attr('height', d => Math.abs(yScale(d.h) - yScale(0)))
+                .attr('fill', '#ffab40')
+                .attr('rx', 2);
+
+            bars.exit().remove();
+        }
+
+        // Toggle buttons
+        document.querySelectorAll('#loss-toggle .btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('#loss-toggle .btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                currentLoss = btn.dataset.loss;
+                updateFormula();
+                updateTable();
+                updateViz();
+            });
+        });
+
+        updateFormula();
+        updateTable();
+        updateViz();
+    })();
+
+    // ================================================================
+    // Section 4: Optimal Leaf Weight
+    // ================================================================
+    (function initLeafWeight() {
+        const rng = XGBUtils.seededRandom(456);
+        const nPts = 12;
+
+        const points = [];
+        for (let i = 0; i < nPts; i++) {
+            const g = (rng() - 0.5) * 4;
+            const h = 0.3 + rng() * 1.7;
+            points.push({
+                idx: i,
+                g: parseFloat(g.toFixed(2)),
+                h: parseFloat(h.toFixed(2)),
+                inLeaf: i < 8 // first 8 in leaf by default
+            });
+        }
+
+        const W = 600, H = 420;
+        const margin = { top: 30, right: 30, bottom: 50, left: 50 };
+        const w = W - margin.left - margin.right;
+        const h = H - margin.top - margin.bottom;
+
+        const svg = d3.select('#leaf-viz').append('svg')
+            .attr('viewBox', `0 0 ${W} ${H}`)
+            .attr('preserveAspectRatio', 'xMidYMid meet');
+
+        const gMain = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+
+        // Two zones: leaf (left) and outside (right)
+        const leafZoneW = w * 0.6;
+        const outZoneX = leafZoneW + 30;
+        const outZoneW = w - outZoneX;
+
+        // Leaf zone background
+        gMain.append('rect')
+            .attr('x', 0).attr('y', 0)
+            .attr('width', leafZoneW).attr('height', h)
+            .attr('fill', 'rgba(22, 199, 154, 0.05)')
+            .attr('stroke', 'var(--accent-green)').attr('stroke-width', 1.5)
+            .attr('stroke-dasharray', '6,4').attr('rx', 8);
+        gMain.append('text')
+            .attr('x', leafZoneW / 2).attr('y', -8)
+            .attr('text-anchor', 'middle').attr('fill', '#16c79a').attr('font-size', 13).attr('font-weight', 700)
+            .text('叶子节点');
+
+        // Outside zone
+        gMain.append('rect')
+            .attr('x', outZoneX).attr('y', 0)
+            .attr('width', outZoneW).attr('height', h)
+            .attr('fill', 'rgba(108, 108, 124, 0.05)')
+            .attr('stroke', '#6c6c7c').attr('stroke-width', 1)
+            .attr('stroke-dasharray', '4,4').attr('rx', 8);
+        gMain.append('text')
+            .attr('x', outZoneX + outZoneW / 2).attr('y', -8)
+            .attr('text-anchor', 'middle').attr('fill', '#6c6c7c').attr('font-size', 12)
+            .text('节点外');
+
+        // Weight display line
+        const weightLine = gMain.append('line')
+            .attr('x1', 0).attr('x2', leafZoneW)
+            .attr('stroke', '#ffd740').attr('stroke-width', 2.5);
+        const weightLabel = gMain.append('text')
+            .attr('fill', '#ffd740').attr('font-size', 13).attr('font-weight', 700)
+            .attr('text-anchor', 'start');
+
+        // Point circles
+        const circlesG = gMain.append('g');
+
+        function layoutPoints() {
+            const leafPts = points.filter(p => p.inLeaf);
+            const outPts = points.filter(p => !p.inLeaf);
+
+            // Layout leaf points in a grid
+            const cols = 4;
+            leafPts.forEach((p, i) => {
+                const col = i % cols;
+                const row = Math.floor(i / cols);
+                p.cx = 30 + col * (leafZoneW - 60) / (cols - 1);
+                p.cy = 50 + row * 55;
+            });
+
+            const outCols = 2;
+            outPts.forEach((p, i) => {
+                const col = i % outCols;
+                const row = Math.floor(i / outCols);
+                p.cx = outZoneX + 25 + col * (outZoneW - 50) / Math.max(1, outCols - 1);
+                p.cy = 50 + row * 55;
+            });
+        }
+
+        function computeWeight() {
+            const lambda = parseFloat(document.getElementById('leaf-lambda').value);
+            const leafPts = points.filter(p => p.inLeaf);
+            if (leafPts.length === 0) return { w: 0, sumG: 0, sumH: 0, lambda };
+            const sumG = leafPts.reduce((s, p) => s + p.g, 0);
+            const sumH = leafPts.reduce((s, p) => s + p.h, 0);
+            const wStar = -sumG / (sumH + lambda);
+            return { w: wStar, sumG, sumH, lambda };
+        }
+
+        function update() {
+            layoutPoints();
+            const result = computeWeight();
+
+            // Update stats
+            const statsEl = document.getElementById('leaf-stats');
+            statsEl.innerHTML = `
+                <div class="stat-box"><span class="stat-label">$\\sum g_i$</span><span class="stat-value" style="color:${result.sumG >= 0 ? 'var(--accent-red)' : 'var(--accent-green)'}">${result.sumG.toFixed(2)}</span></div>
+                <div class="stat-box"><span class="stat-label">$\\sum h_i + \\lambda$</span><span class="stat-value">${(result.sumH + result.lambda).toFixed(2)}</span></div>
+                <div class="stat-box"><span class="stat-label">$w^*$</span><span class="stat-value" style="color:#ffd740">${result.w.toFixed(3)}</span></div>
+            `;
+            renderMath(statsEl);
+
+            // Weight line position (map w to y)
+            const wScale = d3.scaleLinear().domain([-3, 3]).range([h - 20, 20]);
+            const wy = XGBUtils.clamp(wScale(result.w), 20, h - 20);
+            weightLine.transition().duration(400).attr('y1', wy).attr('y2', wy);
+            weightLabel.transition().duration(400)
+                .attr('x', leafZoneW + 3).attr('y', wy - 6)
+                .text(`w* = ${result.w.toFixed(3)}`);
+
+            // Circles
+            const circles = circlesG.selectAll('.pt').data(points, d => d.idx);
+
+            const enter = circles.enter().append('g').attr('class', 'pt').style('cursor', 'pointer');
+            enter.append('circle').attr('r', 18)
+                .attr('stroke-width', 2);
+            enter.append('text')
+                .attr('text-anchor', 'middle').attr('dy', -2)
+                .attr('font-size', 9).attr('font-family', 'JetBrains Mono, monospace')
+                .attr('fill', '#e8e8e8').attr('pointer-events', 'none');
+            enter.append('text')
+                .attr('class', 'pt-h-label')
+                .attr('text-anchor', 'middle').attr('dy', 10)
+                .attr('font-size', 8).attr('font-family', 'JetBrains Mono, monospace')
+                .attr('fill', '#a8a8b8').attr('pointer-events', 'none');
+
+            const merged = enter.merge(circles);
+            merged.transition().duration(400)
+                .attr('transform', d => `translate(${d.cx},${d.cy})`);
+            merged.select('circle')
+                .attr('fill', d => d.g > 0 ? 'rgba(255,82,82,0.3)' : 'rgba(22,199,154,0.3)')
+                .attr('stroke', d => d.inLeaf ? (d.g > 0 ? '#ff5252' : '#16c79a') : '#6c6c7c');
+            merged.select('text').text(d => `g=${d.g.toFixed(1)}`);
+            merged.select('.pt-h-label').text(d => `h=${d.h.toFixed(1)}`);
+
+            // Click to toggle
+            merged.on('click', function(event, d) {
+                d.inLeaf = !d.inLeaf;
+                update();
+            });
+
+            circles.exit().remove();
+        }
+
+        document.getElementById('leaf-lambda').addEventListener('input', function() {
+            document.getElementById('leaf-lambda-val').textContent = parseFloat(this.value).toFixed(1);
+            update();
+        });
+
+        update();
+    })();
+
+    // ================================================================
+    // Section 5: Split Gain Visualization
+    // ================================================================
+    (function initSplitGain() {
+        const rng = XGBUtils.seededRandom(789);
+        const nPts = 16;
+
+        const points = [];
+        for (let i = 0; i < nPts; i++) {
+            const x = (i / (nPts - 1)) * 10 - 5;
+            const g = Math.sin(x * 0.8) * 2 + (rng() - 0.5) * 1.5;
+            const h = 0.5 + rng() * 1.5;
+            points.push({ x: parseFloat(x.toFixed(2)), g: parseFloat(g.toFixed(3)), h: parseFloat(h.toFixed(3)) });
+        }
+        points.sort((a, b) => a.x - b.x);
+
+        let splitThreshold = 0;
+
+        const container = document.getElementById('gain-viz');
+        const W = 900, H = 500;
+        const margin = { top: 40, right: 30, bottom: 60, left: 60 };
+        const w = W - margin.left - margin.right;
+        const h = H - margin.top - margin.bottom;
+
+        const svg = d3.select(container).append('svg')
+            .attr('viewBox', `0 0 ${W} ${H}`)
+            .attr('preserveAspectRatio', 'xMidYMid meet');
+
+        const gMain = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+
+        const xScale = d3.scaleLinear().domain([points[0].x - 0.5, points[nPts - 1].x + 0.5]).range([0, w]);
+        const yScaleTop = d3.scaleLinear().range([h * 0.45, 0]);
+        const yScaleBot = d3.scaleLinear().range([h * 0.45, h * 0.03]);
+
+        // Top section: scatter of points colored by side
+        const topG = gMain.append('g');
+        // Bottom section: tree node diagram
+        const botG = gMain.append('g').attr('transform', `translate(0, ${h * 0.55})`);
+
+        // Axis
+        const xAxisG = gMain.append('g').attr('transform', `translate(0,${h * 0.48})`);
+
+        // Grid lines
+        gMain.append('g').selectAll('line').data(d3.range(points[0].x - 0.5, points[nPts - 1].x + 1, 1)).enter()
+            .append('line')
+            .attr('x1', d => xScale(d)).attr('x2', d => xScale(d))
+            .attr('y1', 0).attr('y2', h * 0.48)
+            .attr('stroke', '#2a2a4a').attr('stroke-dasharray', '2,3');
+
+        // Split line (draggable)
+        const splitLine = gMain.append('line')
+            .attr('y1', 0).attr('y2', h * 0.48)
+            .attr('stroke', '#4fc3f7').attr('stroke-width', 3)
+            .attr('stroke-dasharray', '8,4')
+            .style('cursor', 'ew-resize');
+
+        const splitLabel = gMain.append('text')
+            .attr('y', -10).attr('text-anchor', 'middle')
+            .attr('fill', '#4fc3f7').attr('font-size', 12).attr('font-weight', 700);
+
+        // Points
+        const pointsG = gMain.append('g');
+
+        // Bars for g values
+        const barsG = gMain.append('g');
+
+        // Node diagram elements
+        const parentNode = botG.append('g');
+        const leftNode = botG.append('g');
+        const rightNode = botG.append('g');
+        const edgeL = botG.append('line').attr('stroke', '#4fc3f7').attr('stroke-width', 1.5);
+        const edgeR = botG.append('line').attr('stroke', '#ffab40').attr('stroke-width', 1.5);
+
+        function drawNode(g, x, y, w, h, cls, lines) {
+            g.selectAll('*').remove();
+            g.append('rect')
+                .attr('x', x - w / 2).attr('y', y - h / 2)
+                .attr('width', w).attr('height', h)
+                .attr('class', `node-box ${cls}`);
+            lines.forEach((line, i) => {
+                g.append('text')
+                    .attr('x', x).attr('y', y - h / 2 + 18 + i * 16)
+                    .attr('text-anchor', 'middle')
+                    .attr('fill', line.color || '#e8e8e8')
+                    .attr('font-size', line.size || 11)
+                    .attr('font-family', 'JetBrains Mono, monospace')
+                    .attr('font-weight', line.bold ? 700 : 400)
+                    .text(line.text);
+            });
+        }
+
+        // Gain line chart at bottom
+        const gainLineG = gMain.append('g').attr('transform', `translate(0, ${h * 0.55})`);
+        const gainH = h * 0.4;
+        const yScaleGain = d3.scaleLinear().range([gainH, 0]);
+        const gainAxisY = gainLineG.append('g');
+        const gainPath = gainLineG.append('path')
+            .attr('fill', 'none').attr('stroke', '#16c79a').attr('stroke-width', 2);
+        const gainZeroLine = gainLineG.append('line')
+            .attr('x1', 0).attr('x2', w)
+            .attr('stroke', '#6c6c7c').attr('stroke-dasharray', '4,3');
+        const gainDot = gainLineG.append('circle')
+            .attr('r', 6).attr('fill', '#16c79a').attr('stroke', '#1a1a2e').attr('stroke-width', 2);
+        gainLineG.append('text')
+            .attr('x', w / 2).attr('y', gainH + 35)
+            .attr('text-anchor', 'middle').attr('fill', '#a8a8b8').attr('font-size', 12)
+            .text('分裂阈值');
+        gainLineG.append('text')
+            .attr('x', -10).attr('y', gainH / 2)
+            .attr('text-anchor', 'middle').attr('fill', '#16c79a').attr('font-size', 11)
+            .attr('transform', `rotate(-90, -45, ${gainH / 2})`).text('Gain');
+
+        // Gain marker for current split
+        const gainLabel = gainLineG.append('text')
+            .attr('fill', '#16c79a').attr('font-size', 12).attr('font-weight', 700)
+            .attr('text-anchor', 'start');
+
+        function computeGainAtThreshold(threshold) {
+            const lambda = parseFloat(document.getElementById('gain-lambda').value);
+            const gamma = parseFloat(document.getElementById('gain-gamma').value);
+
+            const left = points.filter(p => p.x <= threshold);
+            const right = points.filter(p => p.x > threshold);
+
+            if (left.length === 0 || right.length === 0) return { gain: -gamma, GL: 0, HL: 0, GR: 0, HR: 0 };
+
+            const GL = left.reduce((s, p) => s + p.g, 0);
+            const HL = left.reduce((s, p) => s + p.h, 0);
+            const GR = right.reduce((s, p) => s + p.g, 0);
+            const HR = right.reduce((s, p) => s + p.h, 0);
+
+            const gain = 0.5 * (GL * GL / (HL + lambda) + GR * GR / (HR + lambda)
+                - (GL + GR) * (GL + GR) / (HL + HR + lambda)) - gamma;
+
+            return { gain, GL, HL, GR, HR, nL: left.length, nR: right.length };
+        }
+
+        function update() {
+            const lambda = parseFloat(document.getElementById('gain-lambda').value);
+            const gamma = parseFloat(document.getElementById('gain-gamma').value);
+
+            // Compute gain curve
+            const thresholds = [];
+            for (let i = 0; i < points.length - 1; i++) {
+                thresholds.push((points[i].x + points[i + 1].x) / 2);
+            }
+            const gainData = thresholds.map(t => ({ t, ...computeGainAtThreshold(t) }));
+            const maxAbsGain = Math.max(0.5, d3.max(gainData, d => Math.abs(d.gain)));
+
+            yScaleGain.domain([-maxAbsGain * 1.2, maxAbsGain * 1.2]);
+
+            // Axes
+            xAxisG.call(d3.axisBottom(xScale).ticks(8)).attr('color', '#6c6c7c');
+            gainAxisY.call(d3.axisLeft(yScaleGain).ticks(5)).attr('color', '#6c6c7c');
+
+            // Zero line
+            gainZeroLine.attr('y1', yScaleGain(0)).attr('y2', yScaleGain(0));
+
+            // Gain path
+            const lineGen = d3.line()
+                .x(d => xScale(d.t))
+                .y(d => yScaleGain(d.gain))
+                .curve(d3.curveMonotoneX);
+            gainPath.datum(gainData).attr('d', lineGen);
+
+            // Current split
+            const result = computeGainAtThreshold(splitThreshold);
+            const sx = xScale(splitThreshold);
+
+            splitLine.attr('x1', sx).attr('x2', sx);
+            splitLabel.attr('x', sx).text(`阈值 = ${splitThreshold.toFixed(1)}`);
+
+            // Gain dot
+            gainDot.attr('cx', sx).attr('cy', yScaleGain(result.gain));
+            gainLabel.attr('x', sx + 10).attr('y', yScaleGain(result.gain) - 5)
+                .text(`Gain = ${result.gain.toFixed(3)}`)
+                .attr('fill', result.gain > 0 ? '#16c79a' : '#ff5252');
+
+            // Color fill under gain curve
+            gainPath.attr('stroke', result.gain > 0 ? '#16c79a' : '#ff5252');
+
+            // Stats
+            const statsEl = document.getElementById('gain-stats');
+            const gainClass = result.gain > 0 ? 'gain-positive' : 'gain-negative';
+            statsEl.innerHTML = `
+                <div class="stat-box"><span class="stat-label">$G_L$</span><span class="stat-value" style="color:#4fc3f7">${(result.GL || 0).toFixed(2)}</span></div>
+                <div class="stat-box"><span class="stat-label">$H_L$</span><span class="stat-value" style="color:#4fc3f7">${(result.HL || 0).toFixed(2)}</span></div>
+                <div class="stat-box"><span class="stat-label">$G_R$</span><span class="stat-value" style="color:#ffab40">${(result.GR || 0).toFixed(2)}</span></div>
+                <div class="stat-box"><span class="stat-label">$H_R$</span><span class="stat-value" style="color:#ffab40">${(result.HR || 0).toFixed(2)}</span></div>
+                <div class="stat-box"><span class="stat-label">Gain</span><span class="stat-value ${gainClass}">${(result.gain || 0).toFixed(3)}</span></div>
+            `;
+            renderMath(statsEl);
+
+            // Points in top area
+            const maxAbsG = Math.max(0.5, d3.max(points, p => Math.abs(p.g)));
+            const barYScale = d3.scaleLinear().domain([-maxAbsG * 1.1, maxAbsG * 1.1]).range([h * 0.45, 0]);
+
+            // Zero line for bars
+            gMain.selectAll('.bar-zero').remove();
+            gMain.append('line').attr('class', 'bar-zero')
+                .attr('x1', 0).attr('x2', w)
+                .attr('y1', barYScale(0)).attr('y2', barYScale(0))
+                .attr('stroke', '#6c6c7c').attr('stroke-dasharray', '3,3');
+
+            // Data bars
+            const barW = Math.min(20, w / nPts * 0.6);
+            const bars = barsG.selectAll('.gbar').data(points);
+            const bEnter = bars.enter().append('rect').attr('class', 'gbar');
+            bEnter.merge(bars)
+                .transition().duration(300)
+                .attr('x', d => xScale(d.x) - barW / 2)
+                .attr('width', barW)
+                .attr('y', d => d.g >= 0 ? barYScale(d.g) : barYScale(0))
+                .attr('height', d => Math.abs(barYScale(d.g) - barYScale(0)))
+                .attr('fill', d => d.x <= splitThreshold ? 'rgba(79,195,247,0.6)' : 'rgba(255,171,64,0.6)')
+                .attr('rx', 2);
+            bars.exit().remove();
+
+            // Points on top
+            const pts = pointsG.selectAll('.pt-circ').data(points);
+            const pEnter = pts.enter().append('circle').attr('class', 'pt-circ').attr('r', 5);
+            pEnter.merge(pts)
+                .transition().duration(300)
+                .attr('cx', d => xScale(d.x))
+                .attr('cy', d => barYScale(d.g))
+                .attr('fill', d => d.x <= splitThreshold ? '#4fc3f7' : '#ffab40')
+                .attr('stroke', '#1a1a2e').attr('stroke-width', 1.5);
+            pts.exit().remove();
+        }
+
+        // Drag behavior on split line
+        const drag = d3.drag()
+            .on('drag', function(event) {
+                const mx = event.x - margin.left;
+                const newThresh = xScale.invert(mx);
+                splitThreshold = XGBUtils.clamp(newThresh, points[0].x + 0.01, points[nPts - 1].x - 0.01);
+                update();
+            });
+        splitLine.call(drag);
+
+        // Also allow clicking on the top chart area to set threshold
+        svg.on('click', function(event) {
+            const [mx] = d3.pointer(event);
+            const newThresh = xScale.invert(mx - margin.left);
+            if (newThresh >= points[0].x && newThresh <= points[nPts - 1].x) {
+                splitThreshold = newThresh;
+                update();
+            }
+        });
+
+        // Slider listeners
+        document.getElementById('gain-lambda').addEventListener('input', function() {
+            document.getElementById('gain-lambda-val').textContent = parseFloat(this.value).toFixed(1);
+            update();
+        });
+        document.getElementById('gain-gamma').addEventListener('input', function() {
+            document.getElementById('gain-gamma-val').textContent = parseFloat(this.value).toFixed(1);
+            update();
+        });
+
+        update();
+    })();
+
+    // Re-render KaTeX for any dynamically inserted $...$ content
+    setTimeout(() => renderMath(document.body), 200);
+});
+</script>
+</body>
+</html>

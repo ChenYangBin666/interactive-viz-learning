@@ -1,0 +1,1314 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>投票机制 — 随机森林可视化</title>
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.2/gsap.min.js"></script>
+    <style>
+        .scatter-point { cursor: pointer; transition: r 0.15s; }
+        .scatter-point:hover { filter: brightness(1.3); }
+        .scatter-point.selected { stroke: #fff; stroke-width: 2.5; }
+        .tree-vote-card { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 0.5rem 0.7rem; text-align: center; min-width: 72px; opacity: 0; transform: translateY(14px); }
+        .tree-vote-card .tree-label { font-size: 0.68rem; color: var(--text-muted); margin-bottom: 0.25rem; }
+        .tree-vote-card .vote-circle { width: 30px; height: 30px; border-radius: 50%; margin: 0.25rem auto; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 0.78rem; box-shadow: 0 2px 8px rgba(0,0,0,0.25); }
+        .tree-vote-card .vote-proba { font-size: 0.6rem; color: var(--text-muted); margin-top: 0.2rem; font-family: var(--font-mono); }
+        .tally-bar { display: flex; align-items: center; gap: 0.5rem; margin: 0.35rem 0; }
+        .tally-bar .bar-track { flex: 1; height: 24px; background: rgba(42,42,74,0.5); border-radius: 5px; overflow: hidden; }
+        .tally-bar .bar-fill { height: 100%; border-radius: 5px; transition: width 0.5s var(--anim-ease); display: flex; align-items: center; justify-content: flex-end; padding-right: 8px; font-size: 0.72rem; font-weight: 700; min-width: 0; color: #1a1a2e; }
+        .tally-bar .class-label { font-size: 0.82rem; min-width: 32px; font-weight: 600; }
+        .path-node text { fill: var(--text-secondary); font-size: 0.62rem; }
+        .path-node.active rect { stroke: var(--accent-green); stroke-width: 2; }
+        .path-node.active text { fill: var(--text-primary); font-weight: 600; }
+        .path-link { stroke: var(--border-color); stroke-width: 1.5; fill: none; }
+        .path-link.active { stroke: var(--accent-orange); stroke-width: 2.5; }
+        .path-link-label { font-size: 0.55rem; fill: var(--text-muted); }
+        .oob-cell { width: 46px; height: 36px; display: flex; align-items: center; justify-content: center; font-family: var(--font-mono); font-size: 0.73rem; border-radius: 4px; transition: all 0.3s; }
+        .oob-cell.in-bag { background: rgba(22,199,154,0.15); color: var(--accent-green); }
+        .oob-cell.oob { background: rgba(255,171,64,0.12); color: var(--accent-orange); }
+        .oob-cell.header-cell { background: var(--bg-card); color: var(--accent-green); font-weight: 600; }
+        .oob-row { display: flex; align-items: center; gap: 2px; margin-bottom: 2px; }
+        .oob-row.highlight-row { background: rgba(22,199,154,0.05); border-radius: 4px; }
+        .oob-row-label { min-width: 38px; font-family: var(--font-mono); font-size: 0.7rem; color: var(--text-muted); text-align: right; padding-right: 6px; }
+        .oob-result { min-width: 56px; padding-left: 8px; font-size: 0.73rem; }
+        .oob-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.75rem; margin-top: 1rem; }
+        .oob-stat-card { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 0.6rem; text-align: center; }
+        .oob-stat-card .stat-val { font-size: 1.4rem; font-weight: 700; font-family: var(--font-mono); }
+        .oob-stat-card .stat-label { font-size: 0.7rem; color: var(--text-muted); margin-top: 0.2rem; }
+        .confidence-tooltip { position: absolute; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 0.5rem 0.75rem; font-size: 0.78rem; pointer-events: none; z-index: 50; opacity: 0; transition: opacity 0.15s; white-space: nowrap; box-shadow: var(--shadow); }
+        .controls-row { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem; }
+        .result-badge { display: inline-block; padding: 0.3rem 0.9rem; border-radius: 9999px; font-weight: 700; font-size: 0.9rem; }
+        .formula-box { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 1rem 1.2rem; margin: 1rem 0; }
+        .tree-paths-container { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
+        .tree-path-card { background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 1rem; transition: border-color 0.3s; }
+        .tree-path-card:hover { border-color: var(--accent-green); }
+        .tree-path-card .card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.5rem; }
+        .tree-path-card .prediction-tag { font-family: var(--font-mono); font-size: 0.75rem; padding: 0.15rem 0.5rem; border-radius: 9999px; font-weight: 600; }
+        .speed-control { display: flex; align-items: center; gap: 0.5rem; font-size: 0.8rem; color: var(--text-muted); }
+        .speed-control select { background: var(--bg-card); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: var(--radius-sm); padding: 0.2rem 0.4rem; font-size: 0.8rem; font-family: inherit; }
+        @media (max-width: 900px) { .tree-paths-container { grid-template-columns: 1fr; } .oob-stats { grid-template-columns: 1fr 1fr; } }
+    </style>
+</head>
+<body>
+<div class="page-container">
+    <div class="page-header" style="margin-bottom: 2rem;">
+        <div class="breadcrumb" style="font-size:0.85rem; color:var(--text-muted); margin-bottom:0.5rem;">
+            <a href="../index.html">随机森林</a> / 模块 07
+        </div>
+        <h1>投票机制</h1>
+        <p>理解随机森林如何汇聚多棵树的预测：多数投票、概率聚合、路径追踪与置信度分析。</p>
+    </div>
+
+    <!-- ==================== Section 1: 多数投票 ==================== -->
+    <div class="section" id="sec-majority">
+        <div class="section-title"><div class="icon">1</div><h2>多数投票</h2></div>
+        <div class="split-layout">
+            <div class="text-panel">
+                <p>随机森林中每棵树独立做出预测，最终结果由<strong>多数投票</strong>决定——哪个类别获得最多票数，即为最终预测。</p>
+                <div class="formula-box" id="formula-majority"></div>
+                <p class="mt-1">点击散点图中的数据点，观察 7 棵树逐一投票的过程。</p>
+                <div class="info-box success mt-2">
+                    <p>7 棵树投票时，即使 3 棵树犯错，只要 4 棵正确，集成结果仍然正确——这就是"群体智慧"的力量。</p>
+                </div>
+                <h4 class="mt-2">投票计数</h4>
+                <div id="tally-board" class="mt-1"></div>
+                <div id="vote-result" class="mt-2 text-center" style="min-height:44px;"></div>
+            </div>
+            <div class="viz-panel">
+                <div class="viz-area" id="viz-majority" style="min-height:440px; position:relative;">
+                    <svg id="svg-scatter-vote"></svg>
+                    <div id="tree-votes-row" style="display:flex; gap:0.5rem; justify-content:center; flex-wrap:wrap; padding:0.6rem 1rem; position:absolute; bottom:6px; left:0; right:0;"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== Section 2: 概率聚合 ==================== -->
+    <div class="section" id="sec-proba">
+        <div class="section-title"><div class="icon">2</div><h2>概率聚合</h2></div>
+        <div class="split-layout">
+            <div class="text-panel">
+                <p>除了硬投票（每棵树只投一票），每棵树还可以输出各类别的<strong>概率分布</strong>。将所有树的概率取平均，得到更平滑、校准更好的预测概率。</p>
+                <div class="formula-box" id="formula-soft"></div>
+                <div class="controls-row mt-2">
+                    <div class="btn-group">
+                        <button class="btn btn-sm active" data-mode="hard" onclick="setVoteMode('hard')">硬投票</button>
+                        <button class="btn btn-sm" data-mode="soft" onclick="setVoteMode('soft')">软投票</button>
+                    </div>
+                </div>
+                <div id="proba-comparison" class="mt-1"></div>
+                <div class="info-box mt-2">
+                    <p>软投票利用了概率信息——当某棵树"非常确信"（概率接近1.0）时，它对最终结果的贡献更大。在大多数场景下，软投票比硬投票更准确。</p>
+                </div>
+                <div class="info-box warning mt-1">
+                    <p>关键区别：硬投票中每棵树的权重相等（一树一票）；软投票中"确信度高"的树实际影响更大。</p>
+                </div>
+            </div>
+            <div class="viz-panel">
+                <div class="viz-area" id="viz-proba" style="min-height:440px;">
+                    <svg id="svg-proba"></svg>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== Section 3: 预测路径追踪 ==================== -->
+    <div class="section" id="sec-path">
+        <div class="section-title"><div class="icon">3</div><h2>预测路径追踪</h2></div>
+        <p style="margin-bottom:0.75rem;">点击散点图中的数据点后，3 棵树同时从根节点到叶节点执行决策路径。每个内部节点显示特征比较条件，橙色路径标示数据的实际流动方向。不同的树可能到达不同的叶节点，产生不同的预测。</p>
+        <div class="controls-row">
+            <button class="btn btn-primary btn-sm" onclick="animatePaths()">重新播放动画</button>
+            <div class="speed-control">
+                <label>速度：</label>
+                <select id="path-speed" onchange="window._pathSpeed=+this.value">
+                    <option value="1">1x</option>
+                    <option value="0.5" selected>0.5x（慢）</option>
+                    <option value="2">2x（快）</option>
+                </select>
+            </div>
+            <span id="path-point-info" class="text-sm text-muted"></span>
+        </div>
+        <div class="tree-paths-container mt-1" id="tree-paths">
+            <div class="tree-path-card" style="display:flex;align-items:center;justify-content:center;min-height:260px;">
+                <p class="text-muted text-sm">请先在上方散点图中点击一个数据点</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== Section 4: OOB 估计详解 ==================== -->
+    <div class="section" id="sec-oob">
+        <div class="section-title"><div class="icon">4</div><h2>OOB 估计详解</h2></div>
+        <div class="split-layout">
+            <div class="text-panel">
+                <p>每棵树使用 Bootstrap 抽样训练，约 <strong>36.8%</strong> 的数据未被抽到（Out-of-Bag）。这些 OOB 样本可以用来评估该树的泛化能力，无需额外划分测试集。</p>
+                <div class="formula-box" id="formula-oob"></div>
+                <p class="text-sm text-muted mt-1">矩阵中：<span style="color:var(--accent-green)">绿色 = 袋内（训练用）</span>，<span style="color:var(--accent-orange)">橙色 = OOB（可评估）</span>。对每行的 OOB 预测取多数投票，即为该样本的 OOB 预测。</p>
+                <div class="controls-row mt-2">
+                    <button class="btn btn-primary btn-sm" onclick="animateOOB()">逐行填充动画</button>
+                    <button class="btn btn-sm" onclick="resetOOB()">重置</button>
+                </div>
+                <div id="oob-accuracy" class="mt-1" style="min-height:32px;"></div>
+                <div id="oob-stats-container"></div>
+                <div class="info-box success mt-2">
+                    <p>OOB 准确率是随机森林内置的交叉验证指标——训练完成后即可获得，无需手动划分验证集，非常高效。</p>
+                </div>
+            </div>
+            <div class="viz-panel">
+                <div class="viz-area" id="viz-oob" style="min-height:460px; overflow:auto; padding:1rem;">
+                    <div id="oob-matrix"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== Section 5: 置信度与边界 ==================== -->
+    <div class="section" id="sec-confidence">
+        <div class="section-title"><div class="icon">5</div><h2>置信度与边界</h2></div>
+        <div class="split-layout">
+            <div class="text-panel">
+                <p>预测置信度通过投票比例体现：远离决策边界处置信度高（接近 100%），边界附近置信度低（接近 50%）。颜色饱和度反映置信度强弱。</p>
+                <div class="slider-group mt-2">
+                    <label>树的数量：</label>
+                    <input type="range" id="conf-tree-slider" min="1" max="51" step="2" value="7">
+                    <span class="slider-value" id="conf-tree-val">7</span>
+                </div>
+                <p class="text-sm text-muted mt-1" id="conf-desc">当前使用 7 棵树。拖动滑块观察树数量对置信度分布的影响。</p>
+                <div class="info-box mt-2">
+                    <p>增加树的数量使置信度过渡更锐利——决策边界更清晰、更稳定。这是随机森林的核心优势之一。</p>
+                </div>
+                <div class="legend mt-2">
+                    <div class="legend-item"><div class="swatch" style="background:#16c79a;"></div>高置信度 (类别 A)</div>
+                    <div class="legend-item"><div class="swatch" style="background:#ff5252;"></div>高置信度 (类别 B)</div>
+                    <div class="legend-item"><div class="swatch" style="background:#555;"></div>低置信度 (边界区域)</div>
+                </div>
+                <div class="formula-box mt-2" id="formula-conf"></div>
+            </div>
+            <div class="viz-panel">
+                <div class="viz-area" id="viz-confidence" style="min-height:440px; position:relative;">
+                    <svg id="svg-confidence"></svg>
+                    <div class="confidence-tooltip" id="conf-tooltip"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="../shared/scripts/rf-utils.js"></script>
+<script>
+/* ================================================================
+   07 - 投票机制  |  Interactive Visualization
+   All logic inline — uses D3 v7 for SVG, GSAP for animation
+   ================================================================ */
+
+// ---- Global constants & colors ----
+const COLORS = {
+    classA: '#16c79a',
+    classB: '#ff5252',
+    classAlt: '#4fc3f7',
+    orange: '#ffab40',
+    purple: '#b388ff'
+};
+const N_TREES = 7;
+const DATA = RFUtils.generateClassificationData(120, 77, 0.35);
+
+// ---- Path animation speed (default 0.5x = slower) ----
+window._pathSpeed = 0.5;
+
+// ================================================================
+// Core ML: Build simple decision trees & forest
+// ================================================================
+function buildForest(nTrees, seed) {
+    const r = RFUtils.seededRandom(seed);
+    const trees = [];
+    for (let t = 0; t < nTrees; t++) {
+        const bag = [];
+        const bagIdxSet = new Set();
+        for (let i = 0; i < DATA.length; i++) {
+            const idx = Math.floor(r() * DATA.length);
+            bag.push(DATA[idx]);
+            bagIdxSet.add(idx);
+        }
+        const tree = buildSimpleTree(bag, 0, 5, r);
+        trees.push({ tree, bagIndices: bagIdxSet });
+    }
+    return trees;
+}
+
+function buildSimpleTree(data, depth, maxDepth, r) {
+    const counts = [0, 0];
+    data.forEach(d => counts[d.label]++);
+    const total = counts[0] + counts[1];
+    if (total === 0) {
+        return { leaf: true, prediction: 0, proba: [0.5, 0.5], count: 0 };
+    }
+    if (depth >= maxDepth || counts[0] === 0 || counts[1] === 0 || data.length < 4) {
+        return {
+            leaf: true,
+            prediction: counts[1] > counts[0] ? 1 : 0,
+            proba: [counts[0] / total, counts[1] / total],
+            count: total
+        };
+    }
+    // Random feature selection + best threshold search
+    const feat = r() < 0.5 ? 'x' : 'y';
+    const vals = data.map(d => d[feat]).sort((a, b) => a - b);
+    let bestGain = -1, bestThr = vals[Math.floor(vals.length / 2)];
+
+    for (let tries = 0; tries < 10; tries++) {
+        const idx = Math.floor(r() * (vals.length - 1));
+        const thr = (vals[idx] + vals[idx + 1]) / 2;
+        const left = data.filter(d => d[feat] <= thr);
+        const right = data.filter(d => d[feat] > thr);
+        if (left.length === 0 || right.length === 0) continue;
+        const cL = [0, 0], cR = [0, 0];
+        left.forEach(d => cL[d.label]++);
+        right.forEach(d => cR[d.label]++);
+        const parentGini = RFUtils.gini(counts);
+        const gain = parentGini
+            - (left.length / data.length) * RFUtils.gini(cL)
+            - (right.length / data.length) * RFUtils.gini(cR);
+        if (gain > bestGain) {
+            bestGain = gain;
+            bestThr = thr;
+        }
+    }
+
+    const left = data.filter(d => d[feat] <= bestThr);
+    const right = data.filter(d => d[feat] > bestThr);
+    if (left.length === 0 || right.length === 0) {
+        return {
+            leaf: true,
+            prediction: counts[1] > counts[0] ? 1 : 0,
+            proba: [counts[0] / total, counts[1] / total],
+            count: total
+        };
+    }
+    return {
+        leaf: false,
+        feature: feat,
+        threshold: bestThr,
+        left: buildSimpleTree(left, depth + 1, maxDepth, r),
+        right: buildSimpleTree(right, depth + 1, maxDepth, r)
+    };
+}
+
+function predictTree(tree, point) {
+    if (tree.leaf) return { prediction: tree.prediction, proba: tree.proba };
+    const val = point[tree.feature];
+    if (val <= tree.threshold) {
+        return predictTree(tree.left, point);
+    } else {
+        return predictTree(tree.right, point);
+    }
+}
+
+function tracePath(tree, point) {
+    const path = [];
+    let node = tree;
+    while (!node.leaf) {
+        const val = point[node.feature];
+        const goLeft = val <= node.threshold;
+        path.push({
+            feature: node.feature,
+            threshold: node.threshold,
+            value: val,
+            goLeft: goLeft
+        });
+        node = goLeft ? node.left : node.right;
+    }
+    path.push({
+        leaf: true,
+        prediction: node.prediction,
+        proba: node.proba
+    });
+    return path;
+}
+
+function countTreeDepth(tree) {
+    if (tree.leaf) return 0;
+    return 1 + Math.max(countTreeDepth(tree.left), countTreeDepth(tree.right));
+}
+
+// Build the primary forest
+const forest = buildForest(N_TREES, 42);
+
+// ---- Shared scales ----
+const xExtent = d3.extent(DATA, d => d.x);
+const yExtent = d3.extent(DATA, d => d.y);
+const xPad = (xExtent[1] - xExtent[0]) * 0.08;
+const yPad = (yExtent[1] - yExtent[0]) * 0.08;
+
+// ================================================================
+// Section 1: Majority Vote — Scatter + Animated Voting
+// ================================================================
+(function initMajorityVote() {
+    const container = document.getElementById('viz-majority');
+    const w = container.clientWidth;
+    const h = 360;
+    const svg = d3.select('#svg-scatter-vote').attr('width', w).attr('height', h);
+    const margin = { top: 15, right: 15, bottom: 30, left: 38 };
+    const iw = w - margin.left - margin.right;
+    const ih = h - margin.top - margin.bottom;
+
+    const xS = d3.scaleLinear()
+        .domain([xExtent[0] - xPad, xExtent[1] + xPad])
+        .range([0, iw]);
+    const yS = d3.scaleLinear()
+        .domain([yExtent[0] - yPad, yExtent[1] + yPad])
+        .range([ih, 0]);
+
+    const g = svg.append('g')
+        .attr('transform', `translate(${margin.left},${margin.top})`);
+
+    // Axes
+    g.append('g').attr('transform', `translate(0,${ih})`)
+        .call(d3.axisBottom(xS).ticks(6))
+        .selectAll('text').style('fill', 'var(--text-muted)').style('font-size', '0.7rem');
+    g.append('g')
+        .call(d3.axisLeft(yS).ticks(6))
+        .selectAll('text').style('fill', 'var(--text-muted)').style('font-size', '0.7rem');
+    g.selectAll('.domain, .tick line').attr('stroke', 'var(--border-color)');
+
+    // Axis labels
+    g.append('text').attr('x', iw / 2).attr('y', ih + 28)
+        .attr('text-anchor', 'middle').style('fill', 'var(--text-muted)').style('font-size', '0.7rem')
+        .text('特征 x');
+    g.append('text').attr('x', -ih / 2).attr('y', -28)
+        .attr('transform', 'rotate(-90)')
+        .attr('text-anchor', 'middle').style('fill', 'var(--text-muted)').style('font-size', '0.7rem')
+        .text('特征 y');
+
+    // Data points
+    g.selectAll('.dot').data(DATA).join('circle')
+        .attr('class', 'scatter-point')
+        .attr('cx', d => xS(d.x))
+        .attr('cy', d => yS(d.y))
+        .attr('r', 4)
+        .attr('fill', d => d.label === 1 ? COLORS.classA : COLORS.classB)
+        .attr('opacity', 0.65)
+        .on('click', function(ev, d) { runVoting(d, this); });
+
+    // KaTeX formula
+    katex.render(
+        String.raw`\hat{y} = \underset{c}{\text{argmax}} \sum_{t=1}^{T} \mathbb{1}[h_t(\mathbf{x}) = c]`,
+        document.getElementById('formula-majority'),
+        { displayMode: true }
+    );
+
+    window._majorityScatter = { svg, g, xS, yS, iw, ih };
+})();
+
+let votingAnim = null;
+
+function runVoting(point, el) {
+    // Kill any running animation
+    if (votingAnim) { votingAnim.kill(); }
+
+    // Highlight selected point
+    d3.selectAll('.scatter-point').classed('selected', false).attr('r', 4).attr('opacity', 0.65);
+    d3.select(el).classed('selected', true).attr('r', 8).attr('opacity', 1);
+
+    const votesDiv = document.getElementById('tree-votes-row');
+    votesDiv.innerHTML = '';
+    const tallyDiv = document.getElementById('tally-board');
+    const resultDiv = document.getElementById('vote-result');
+    resultDiv.innerHTML = '';
+
+    // Compute all predictions
+    const votes = forest.map((f, i) => {
+        const res = predictTree(f.tree, point);
+        return {
+            tree: i,
+            prediction: res.prediction,
+            proba: res.proba
+        };
+    });
+
+    // Create vote cards with probability info
+    votes.forEach((v, i) => {
+        const card = document.createElement('div');
+        card.className = 'tree-vote-card';
+        const predLabel = v.prediction === 1 ? 'A' : 'B';
+        const predColor = v.prediction === 1 ? COLORS.classA : COLORS.classB;
+        const confidence = Math.max(v.proba[0], v.proba[1]);
+        card.innerHTML = `
+            <div class="tree-label">树 ${i + 1}</div>
+            <div class="vote-circle" style="background:${predColor}; color:#1a1a2e;">
+                ${predLabel}
+            </div>
+            <div class="vote-proba">${(confidence * 100).toFixed(0)}%</div>
+        `;
+        votesDiv.appendChild(card);
+    });
+
+    // Animate votes one by one with GSAP
+    const tl = gsap.timeline();
+    votingAnim = tl;
+    const cards = votesDiv.querySelectorAll('.tree-vote-card');
+    const tallies = [0, 0];
+
+    cards.forEach((card, i) => {
+        tl.to(card, {
+            opacity: 1,
+            y: 0,
+            duration: 0.3,
+            ease: 'back.out(1.7)'
+        }, i * 0.22);
+
+        tl.call(() => {
+            tallies[votes[i].prediction]++;
+            renderTally(tallyDiv, tallies, N_TREES);
+        }, null, i * 0.22 + 0.15);
+    });
+
+    // Show final result
+    tl.call(() => {
+        const winner = tallies[1] > tallies[0] ? 1 : 0;
+        const winnerLabel = winner === 1 ? 'A' : 'B';
+        const winnerColor = winner === 1 ? COLORS.classA : COLORS.classB;
+        const winCount = Math.max(tallies[0], tallies[1]);
+        const correct = winner === point.label;
+        resultDiv.innerHTML = `
+            <span class="result-badge" style="background:${winnerColor}; color:#1a1a2e;">
+                最终预测：${winnerLabel}（${winCount}/${N_TREES} 票）
+            </span>
+            <span style="margin-left:0.5rem; font-size:0.85rem; color:${correct ? COLORS.classA : COLORS.classB}">
+                ${correct ? '预测正确' : '预测错误（真实：' + (point.label === 1 ? 'A' : 'B') + '）'}
+            </span>
+        `;
+        gsap.from(resultDiv.firstChild, {
+            scale: 0.5, opacity: 0, duration: 0.4, ease: 'back.out(2)'
+        });
+    }, null, '+=0.25');
+
+    // Feed downstream sections
+    window._currentPoint = point;
+    window._currentVotes = votes;
+    renderProba(votes, point);
+    renderPaths(point);
+}
+
+function renderTally(container, tallies, total) {
+    container.innerHTML = [
+        { label: 'B', count: tallies[0], color: COLORS.classB },
+        { label: 'A', count: tallies[1], color: COLORS.classA }
+    ].map(t => `
+        <div class="tally-bar">
+            <span class="class-label" style="color:${t.color}">${t.label}</span>
+            <div class="bar-track">
+                <div class="bar-fill" style="width:${(t.count / total) * 100}%; background:${t.color};">
+                    ${t.count > 0 ? t.count : ''}
+                </div>
+            </div>
+        </div>
+    `).join('');
+}
+
+// ================================================================
+// Section 2: Probability Aggregation
+// ================================================================
+let currentVoteMode = 'hard';
+
+function setVoteMode(mode) {
+    currentVoteMode = mode;
+    document.querySelectorAll('[data-mode]').forEach(b => {
+        b.classList.toggle('active', b.dataset.mode === mode);
+    });
+    if (window._currentVotes) {
+        renderProba(window._currentVotes, window._currentPoint);
+    }
+}
+
+// Soft voting formula
+katex.render(
+    String.raw`\hat{p}(c \mid \mathbf{x}) = \frac{1}{T}\sum_{t=1}^{T} p_t(c \mid \mathbf{x}), \quad \hat{y} = \underset{c}{\text{argmax}}\;\hat{p}(c \mid \mathbf{x})`,
+    document.getElementById('formula-soft'),
+    { displayMode: true }
+);
+
+function renderProba(votes, point) {
+    const container = document.getElementById('viz-proba');
+    const w = container.clientWidth;
+    const h = 420;
+    const svg = d3.select('#svg-proba').attr('width', w).attr('height', h);
+    svg.selectAll('*').remove();
+
+    const margin = { top: 20, right: 30, bottom: 40, left: 65 };
+    const iw = w - margin.left - margin.right;
+    const ih = h - margin.top - margin.bottom;
+    const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+
+    // Build domain labels
+    const labels = votes.map((_, i) => `树 ${i + 1}`).concat(['平均']);
+    const yScale = d3.scaleBand().domain(labels).range([0, ih]).padding(0.2);
+    const xScale = d3.scaleLinear().domain([0, 1]).range([0, iw]);
+    const barH = yScale.bandwidth();
+
+    // Axes
+    g.append('g').call(d3.axisLeft(yScale))
+        .selectAll('text').style('fill', 'var(--text-secondary)').style('font-size', '0.75rem');
+    g.append('g').attr('transform', `translate(0,${ih})`)
+        .call(d3.axisBottom(xScale).ticks(5).tickFormat(d3.format('.0%')))
+        .selectAll('text').style('fill', 'var(--text-muted)').style('font-size', '0.7rem');
+    g.selectAll('.domain, .tick line').attr('stroke', 'var(--border-color)');
+
+    // 50% reference line
+    g.append('line')
+        .attr('x1', xScale(0.5)).attr('x2', xScale(0.5))
+        .attr('y1', 0).attr('y2', ih)
+        .attr('stroke', 'var(--border-color)')
+        .attr('stroke-dasharray', '4,4')
+        .attr('opacity', 0.5);
+    g.append('text').attr('x', xScale(0.5)).attr('y', -6)
+        .attr('text-anchor', 'middle')
+        .style('fill', 'var(--text-muted)').style('font-size', '0.6rem')
+        .text('50%');
+
+    // Per-tree probability bars
+    votes.forEach((v, i) => {
+        const yPos = yScale(`树 ${i + 1}`);
+
+        // Class B bar (left part)
+        g.append('rect')
+            .attr('x', 0).attr('y', yPos)
+            .attr('width', 0).attr('height', barH)
+            .attr('fill', COLORS.classB).attr('rx', 3).attr('opacity', 0.85)
+            .transition().delay(i * 100).duration(450)
+            .attr('width', xScale(v.proba[0]));
+
+        // Class A bar (right part)
+        g.append('rect')
+            .attr('x', xScale(v.proba[0])).attr('y', yPos)
+            .attr('width', 0).attr('height', barH)
+            .attr('fill', COLORS.classA).attr('rx', 3).attr('opacity', 0.85)
+            .transition().delay(i * 100).duration(450)
+            .attr('width', xScale(v.proba[1]));
+
+        // Percentage labels inside bars
+        if (v.proba[0] > 0.12) {
+            g.append('text')
+                .attr('x', xScale(v.proba[0] / 2)).attr('y', yPos + barH / 2)
+                .attr('dy', '0.35em').attr('text-anchor', 'middle')
+                .attr('fill', '#1a1a2e').style('font-size', '0.63rem').style('font-weight', '700')
+                .text((v.proba[0] * 100).toFixed(0) + '%');
+        }
+        if (v.proba[1] > 0.12) {
+            g.append('text')
+                .attr('x', xScale(v.proba[0]) + xScale(v.proba[1]) / 2).attr('y', yPos + barH / 2)
+                .attr('dy', '0.35em').attr('text-anchor', 'middle')
+                .attr('fill', '#1a1a2e').style('font-size', '0.63rem').style('font-weight', '700')
+                .text((v.proba[1] * 100).toFixed(0) + '%');
+        }
+
+        // Hard vote indicator (border highlight on winning class)
+        if (currentVoteMode === 'hard') {
+            const predX = v.prediction === 0 ? 0 : xScale(v.proba[0]);
+            const predW = v.prediction === 0 ? xScale(v.proba[0]) : xScale(v.proba[1]);
+            g.append('rect')
+                .attr('x', predX).attr('y', yPos - 1)
+                .attr('width', predW).attr('height', barH + 2)
+                .attr('fill', 'none').attr('stroke', '#fff').attr('stroke-width', 1.5)
+                .attr('rx', 4).attr('opacity', 0)
+                .transition().delay(i * 100 + 300).duration(300).attr('opacity', 0.6);
+        }
+    });
+
+    // Average row
+    const avgProba = [
+        d3.mean(votes, v => v.proba[0]),
+        d3.mean(votes, v => v.proba[1])
+    ];
+    const yAvg = yScale('平均');
+    const avgDelay = N_TREES * 100 + 200;
+
+    // Highlight background for average row
+    g.append('rect')
+        .attr('x', -margin.left).attr('y', yAvg - 5)
+        .attr('width', iw + margin.left + margin.right)
+        .attr('height', barH + 10)
+        .attr('fill', 'rgba(22,199,154,0.06)').attr('rx', 4);
+
+    g.append('rect')
+        .attr('x', 0).attr('y', yAvg)
+        .attr('width', 0).attr('height', barH)
+        .attr('fill', COLORS.classB).attr('rx', 3)
+        .transition().delay(avgDelay).duration(550)
+        .attr('width', xScale(avgProba[0]));
+
+    g.append('rect')
+        .attr('x', xScale(avgProba[0])).attr('y', yAvg)
+        .attr('width', 0).attr('height', barH)
+        .attr('fill', COLORS.classA).attr('rx', 3)
+        .transition().delay(avgDelay).duration(550)
+        .attr('width', xScale(avgProba[1]));
+
+    // Average labels (delayed)
+    setTimeout(() => {
+        g.append('text')
+            .attr('x', xScale(avgProba[0] / 2)).attr('y', yAvg + barH / 2)
+            .attr('dy', '0.35em').attr('text-anchor', 'middle')
+            .attr('fill', '#1a1a2e').style('font-size', '0.7rem').style('font-weight', '700')
+            .text((avgProba[0] * 100).toFixed(1) + '%');
+        g.append('text')
+            .attr('x', xScale(avgProba[0]) + xScale(avgProba[1]) / 2)
+            .attr('y', yAvg + barH / 2)
+            .attr('dy', '0.35em').attr('text-anchor', 'middle')
+            .attr('fill', '#1a1a2e').style('font-size', '0.7rem').style('font-weight', '700')
+            .text((avgProba[1] * 100).toFixed(1) + '%');
+    }, avgDelay + 600);
+
+    // Comparison panel
+    updateProbaComparison(votes, avgProba);
+}
+
+function updateProbaComparison(votes, avgProba) {
+    const comp = document.getElementById('proba-comparison');
+    const hardVoteCount = [0, 0];
+    votes.forEach(v => hardVoteCount[v.prediction]++);
+    const hardResult = hardVoteCount[1] > hardVoteCount[0] ? 1 : 0;
+    const softResult = avgProba[1] > avgProba[0] ? 1 : 0;
+
+    if (currentVoteMode === 'hard') {
+        const hl = hardResult === 1 ? 'A' : 'B';
+        comp.innerHTML = `<p>硬投票结果：<strong style="color:${hardResult === 1 ? COLORS.classA : COLORS.classB}">${hl}</strong>（${hardVoteCount[hardResult]}/${N_TREES} 票）</p>`;
+    } else {
+        const sl = softResult === 1 ? 'A' : 'B';
+        const maxP = Math.max(avgProba[0], avgProba[1]);
+        const differ = hardResult !== softResult;
+        comp.innerHTML = `
+            <p>软投票结果：<strong style="color:${softResult === 1 ? COLORS.classA : COLORS.classB}">${sl}</strong>（平均概率 ${(maxP * 100).toFixed(1)}%）</p>
+            <p class="text-sm text-muted">
+                硬投票：${hardResult === 1 ? 'A' : 'B'} | 软投票：${sl}
+                ${differ ? '<span style="color:var(--accent-orange);font-weight:600"> — 结果不同!</span>' : ''}
+            </p>
+        `;
+    }
+}
+
+// ================================================================
+// Section 3: Prediction Path Tracing
+// ================================================================
+function renderPaths(point) {
+    const container = document.getElementById('tree-paths');
+    container.innerHTML = '';
+    document.getElementById('path-point-info').textContent =
+        `当前点: (${point.x.toFixed(2)}, ${point.y.toFixed(2)})  真实标签: ${point.label === 1 ? 'A' : 'B'}`;
+
+    // Show paths for first 3 trees
+    for (let t = 0; t < 3; t++) {
+        const pred = predictTree(forest[t].tree, point);
+        const predLabel = pred.prediction === 1 ? 'A' : 'B';
+        const predColor = pred.prediction === 1 ? COLORS.classA : COLORS.classB;
+        const correct = pred.prediction === point.label;
+
+        const card = document.createElement('div');
+        card.className = 'tree-path-card';
+        card.innerHTML = `
+            <div class="card-header">
+                <span class="badge badge-green">树 ${t + 1}</span>
+                <span class="prediction-tag" style="background:${predColor}20; color:${predColor};">
+                    预测: ${predLabel} ${correct ? '' : '(错)'}
+                </span>
+            </div>
+            <svg id="path-svg-${t}" width="100%" height="280"></svg>
+        `;
+        container.appendChild(card);
+    }
+
+    // Draw after DOM update
+    requestAnimationFrame(() => {
+        for (let t = 0; t < 3; t++) {
+            drawTreePath(t, forest[t].tree, point);
+        }
+    });
+}
+
+function drawTreePath(treeIdx, tree, point) {
+    const svgEl = document.getElementById(`path-svg-${treeIdx}`);
+    if (!svgEl) return;
+    const w = svgEl.clientWidth || 260;
+    const h = 280;
+    svgEl.setAttribute('width', w);
+    svgEl.setAttribute('height', h);
+    const svg = d3.select(svgEl);
+    svg.selectAll('*').remove();
+
+    // Layout tree nodes in x/y positions
+    const nodes = [];
+    const links = [];
+    const maxDepth = countTreeDepth(tree);
+    const vertStep = Math.min(50, (h - 40) / (maxDepth + 1));
+
+    function layoutNode(node, depth, xMin, xMax) {
+        const x = (xMin + xMax) / 2;
+        const y = depth * vertStep + 22;
+        const id = nodes.length;
+        nodes.push({ id, node, x, y, depth });
+        if (!node.leaf) {
+            const leftId = nodes.length;
+            layoutNode(node.left, depth + 1, xMin, x);
+            links.push({ source: id, target: leftId, side: 'left' });
+            const rightId = nodes.length;
+            layoutNode(node.right, depth + 1, x, xMax);
+            links.push({ source: id, target: rightId, side: 'right' });
+        }
+        return id;
+    }
+    layoutNode(tree, 0, 8, w - 8);
+
+    // Trace the active path for this data point
+    const activePath = [];
+    let cur = tree, curId = 0;
+    while (!cur.leaf) {
+        activePath.push(curId);
+        const val = point[cur.feature];
+        const goLeft = val <= cur.threshold;
+        const link = links.find(l => l.source === curId && l.side === (goLeft ? 'left' : 'right'));
+        if (link) {
+            curId = link.target;
+            cur = goLeft ? cur.left : cur.right;
+        } else {
+            break;
+        }
+    }
+    activePath.push(curId);
+
+    const activeNodeSet = new Set(activePath);
+    const activeLinkKeys = new Set();
+    for (let i = 0; i < activePath.length - 1; i++) {
+        activeLinkKeys.add(`${activePath[i]}-${activePath[i + 1]}`);
+    }
+
+    const g = svg.append('g');
+
+    // Draw all links
+    links.forEach(l => {
+        const s = nodes[l.source], t = nodes[l.target];
+        const key = `${l.source}-${l.target}`;
+        const isActive = activeLinkKeys.has(key);
+
+        g.append('line')
+            .attr('x1', s.x).attr('y1', s.y + 11)
+            .attr('x2', t.x).attr('y2', t.y - 11)
+            .attr('class', 'path-link' + (isActive ? ' active' : ''))
+            .style('opacity', isActive ? 0 : 0.25);
+
+        // Branch label (left/right)
+        const mx = (s.x + t.x) / 2;
+        const my = (s.y + t.y) / 2;
+        if (!s.node.leaf) {
+            g.append('text')
+                .attr('class', 'path-link-label')
+                .attr('x', mx + (l.side === 'left' ? -6 : 6))
+                .attr('y', my)
+                .attr('text-anchor', l.side === 'left' ? 'end' : 'start')
+                .style('opacity', isActive ? 0 : 0.3)
+                .text(l.side === 'left' ? 'Y' : 'N');
+        }
+    });
+
+    // Draw all nodes
+    nodes.forEach(n => {
+        const isActive = activeNodeSet.has(n.id);
+        const initOpacity = isActive ? 0 : 0.2;
+        const ng = g.append('g')
+            .attr('transform', `translate(${n.x},${n.y})`)
+            .attr('class', 'path-node' + (isActive ? ' active' : ''))
+            .style('opacity', initOpacity);
+
+        if (n.node.leaf) {
+            const color = n.node.prediction === 1 ? COLORS.classA : COLORS.classB;
+            ng.append('circle').attr('r', 13)
+                .attr('fill', color).attr('opacity', 0.25);
+            ng.append('circle').attr('r', 9)
+                .attr('fill', color).attr('opacity', 0.5);
+            ng.append('text')
+                .attr('dy', '0.35em').attr('text-anchor', 'middle')
+                .text(n.node.prediction === 1 ? 'A' : 'B')
+                .style('font-weight', '700').style('font-size', '0.72rem')
+                .style('fill', '#fff');
+        } else {
+            const rw = 56, rh = 22;
+            ng.append('rect')
+                .attr('x', -rw / 2).attr('y', -rh / 2)
+                .attr('width', rw).attr('height', rh).attr('rx', 5)
+                .attr('fill', 'var(--bg-card)')
+                .attr('stroke', isActive ? 'var(--accent-green)' : 'var(--border-color)')
+                .attr('stroke-width', isActive ? 1.5 : 1);
+            ng.append('text')
+                .attr('dy', '0.35em').attr('text-anchor', 'middle')
+                .style('font-size', '0.58rem')
+                .text(`${n.node.feature} <= ${n.node.threshold.toFixed(1)}`);
+        }
+    });
+
+    // Animate active path with GSAP
+    const speed = window._pathSpeed || 0.5;
+    const baseDur = 0.35 / speed;
+    const baseGap = 0.4 / speed;
+
+    if (window._pathTimelines === undefined) window._pathTimelines = [];
+    const tl = gsap.timeline({ delay: treeIdx * 0.15 / speed });
+    window._pathTimelines.push(tl);
+
+    // Animate links first (stagger)
+    const activeLinks = g.selectAll('.path-link.active').nodes();
+    activeLinks.forEach((linkEl, i) => {
+        tl.to(linkEl, { opacity: 1, duration: baseDur * 0.7 }, i * baseGap);
+    });
+    // Animate corresponding labels
+    const activeLabels = g.selectAll('.path-link-label').nodes();
+
+    // Animate nodes
+    activePath.forEach((nId, step) => {
+        const nodeEls = g.selectAll('.path-node').nodes();
+        if (nodeEls[nId]) {
+            tl.to(nodeEls[nId], { opacity: 1, duration: baseDur }, step * baseGap + 0.05);
+        }
+    });
+}
+
+function animatePaths() {
+    if (window._pathTimelines) {
+        window._pathTimelines.forEach(t => t.kill());
+    }
+    window._pathTimelines = [];
+    if (window._currentPoint) {
+        renderPaths(window._currentPoint);
+    }
+}
+
+// ================================================================
+// Section 4: OOB Estimation
+// ================================================================
+const OOB_ROWS = 15;
+const OOB_COLS = 7;
+let oobData = [];
+
+(function initOOB() {
+    // OOB formula
+    katex.render(
+        String.raw`\text{OOB Acc} = \frac{1}{n}\sum_{i=1}^{n} \mathbb{1}\!\Big[\underset{c}{\text{mode}}\{h_t(\mathbf{x}_i) : i \notin B_t\} = y_i\Big]`,
+        document.getElementById('formula-oob'),
+        { displayMode: true }
+    );
+
+    oobData = DATA.slice(0, OOB_ROWS);
+
+    // Build OOB membership matrix
+    const matrix = [];
+    for (let i = 0; i < OOB_ROWS; i++) {
+        const row = [];
+        const dataIdx = DATA.indexOf(oobData[i]);
+        for (let t = 0; t < OOB_COLS; t++) {
+            const inBag = forest[t].bagIndices.has(dataIdx);
+            const pred = predictTree(forest[t].tree, oobData[i]);
+            row.push({
+                inBag: inBag,
+                prediction: pred.prediction,
+                proba: pred.proba
+            });
+        }
+        matrix.push(row);
+    }
+    window._oobMatrix = matrix;
+    renderOOBMatrix(false);
+})();
+
+function renderOOBMatrix(animated) {
+    const container = document.getElementById('oob-matrix');
+    container.innerHTML = '';
+    const matrix = window._oobMatrix;
+
+    // Header row
+    let headerHtml = '<div class="oob-row" style="margin-bottom:4px;">';
+    headerHtml += '<div class="oob-row-label" style="font-weight:600;color:var(--text-secondary);">样本</div>';
+    for (let t = 0; t < OOB_COLS; t++) {
+        headerHtml += `<div class="oob-cell header-cell">T${t + 1}</div>`;
+    }
+    headerHtml += '<div class="oob-result" style="font-weight:600;color:var(--accent-orange);">OOB</div>';
+    headerHtml += '<div class="oob-result" style="font-weight:600;color:var(--text-muted);">真实</div>';
+    headerHtml += '<div class="oob-result" style="font-weight:600;color:var(--text-muted);min-width:30px;text-align:center;">?</div>';
+    headerHtml += '</div>';
+    container.innerHTML = headerHtml;
+
+    for (let i = 0; i < OOB_ROWS; i++) {
+        const row = document.createElement('div');
+        row.className = 'oob-row';
+        row.dataset.row = i;
+        if (animated) row.style.opacity = '0';
+
+        let html = `<div class="oob-row-label">x<sub>${i + 1}</sub></div>`;
+        const oobPreds = [];
+
+        for (let t = 0; t < OOB_COLS; t++) {
+            const cell = matrix[i][t];
+            if (cell.inBag) {
+                html += `<div class="oob-cell in-bag">袋内</div>`;
+            } else {
+                const predLabel = cell.prediction === 1 ? 'A' : 'B';
+                oobPreds.push(cell.prediction);
+                html += `<div class="oob-cell oob">${predLabel}</div>`;
+            }
+        }
+
+        // Aggregate OOB predictions
+        if (oobPreds.length > 0) {
+            const counts = [0, 0];
+            oobPreds.forEach(p => counts[p]++);
+            const oobPred = counts[1] >= counts[0] ? 1 : 0;
+            const oobLabel = oobPred === 1 ? 'A' : 'B';
+            const trueLabel = oobData[i].label === 1 ? 'A' : 'B';
+            const correct = oobPred === oobData[i].label;
+
+            html += `<div class="oob-result" style="color:${oobPred === 1 ? COLORS.classA : COLORS.classB};font-weight:600;">${oobLabel}</div>`;
+            html += `<div class="oob-result" style="color:${oobData[i].label === 1 ? COLORS.classA : COLORS.classB}">${trueLabel}</div>`;
+            html += `<div class="oob-result" style="min-width:30px;text-align:center;color:${correct ? COLORS.classA : COLORS.classB};font-weight:700;">${correct ? 'O' : 'X'}</div>`;
+        } else {
+            const trueLabel = oobData[i].label === 1 ? 'A' : 'B';
+            html += `<div class="oob-result text-muted">—</div>`;
+            html += `<div class="oob-result text-muted">${trueLabel}</div>`;
+            html += `<div class="oob-result text-muted" style="min-width:30px;text-align:center;">—</div>`;
+        }
+
+        row.innerHTML = html;
+        container.appendChild(row);
+    }
+}
+
+function computeOOBAccuracy() {
+    const matrix = window._oobMatrix;
+    let correct = 0, total = 0;
+    for (let r = 0; r < OOB_ROWS; r++) {
+        const oobPreds = [];
+        for (let t = 0; t < OOB_COLS; t++) {
+            if (!matrix[r][t].inBag) {
+                oobPreds.push(matrix[r][t].prediction);
+            }
+        }
+        if (oobPreds.length > 0) {
+            const counts = [0, 0];
+            oobPreds.forEach(p => counts[p]++);
+            const pred = counts[1] >= counts[0] ? 1 : 0;
+            if (pred === oobData[r].label) correct++;
+            total++;
+        }
+    }
+    return { correct, total, accuracy: total > 0 ? correct / total : 0 };
+}
+
+function animateOOB() {
+    renderOOBMatrix(true);
+    const rows = document.querySelectorAll('#oob-matrix .oob-row[data-row]');
+    const tl = gsap.timeline();
+    let runCorrect = 0, runTotal = 0;
+
+    rows.forEach((row, i) => {
+        tl.to(row, {
+            opacity: 1,
+            duration: 0.22,
+            ease: 'power2.out'
+        }, i * 0.16);
+
+        tl.call(() => {
+            // Calculate running accuracy up to row i
+            const matrix = window._oobMatrix;
+            const oobPreds = [];
+            for (let t = 0; t < OOB_COLS; t++) {
+                if (!matrix[i][t].inBag) {
+                    oobPreds.push(matrix[i][t].prediction);
+                }
+            }
+            if (oobPreds.length > 0) {
+                const counts = [0, 0];
+                oobPreds.forEach(p => counts[p]++);
+                const pred = counts[1] >= counts[0] ? 1 : 0;
+                if (pred === oobData[i].label) runCorrect++;
+                runTotal++;
+            }
+            // Highlight current row
+            rows.forEach((r, j) => r.classList.toggle('highlight-row', j === i));
+        }, null, i * 0.16 + 0.1);
+    });
+
+    // Final: show accuracy
+    tl.call(() => {
+        const { correct, total, accuracy } = computeOOBAccuracy();
+        const accEl = document.getElementById('oob-accuracy');
+        accEl.innerHTML = `
+            <div class="result-badge" style="background:var(--accent-green);color:#1a1a2e;">
+                OOB 准确率：${(accuracy * 100).toFixed(1)}%（${correct}/${total} 正确）
+            </div>
+        `;
+        gsap.from('#oob-accuracy .result-badge', {
+            scale: 0.7, opacity: 0, duration: 0.4, ease: 'back.out(2)'
+        });
+
+        // Show stats cards
+        const oobCount = (() => {
+            let c = 0;
+            for (let i = 0; i < OOB_ROWS; i++)
+                for (let t = 0; t < OOB_COLS; t++)
+                    if (!window._oobMatrix[i][t].inBag) c++;
+            return c;
+        })();
+        const inBagCount = OOB_ROWS * OOB_COLS - oobCount;
+        const oobRate = (oobCount / (OOB_ROWS * OOB_COLS) * 100).toFixed(1);
+
+        document.getElementById('oob-stats-container').innerHTML = `
+            <div class="oob-stats">
+                <div class="oob-stat-card">
+                    <div class="stat-val" style="color:var(--accent-green);">${inBagCount}</div>
+                    <div class="stat-label">袋内单元</div>
+                </div>
+                <div class="oob-stat-card">
+                    <div class="stat-val" style="color:var(--accent-orange);">${oobCount}</div>
+                    <div class="stat-label">OOB 单元</div>
+                </div>
+                <div class="oob-stat-card">
+                    <div class="stat-val" style="color:var(--accent-blue);">${oobRate}%</div>
+                    <div class="stat-label">OOB 比例</div>
+                </div>
+            </div>
+        `;
+        gsap.from('.oob-stat-card', {
+            y: 10, opacity: 0, duration: 0.3, stagger: 0.1, ease: 'power2.out'
+        });
+
+        // Clear row highlight
+        rows.forEach(r => r.classList.remove('highlight-row'));
+    }, null, '+=0.3');
+}
+
+function resetOOB() {
+    document.getElementById('oob-accuracy').innerHTML = '';
+    document.getElementById('oob-stats-container').innerHTML = '';
+    renderOOBMatrix(false);
+}
+
+// ================================================================
+// Section 5: Confidence & Boundary Heatmap
+// ================================================================
+katex.render(
+    String.raw`\text{Confidence}(\mathbf{x}) = \max_c \hat{p}(c \mid \mathbf{x}) = \max_c \frac{1}{T}\sum_{t=1}^{T} p_t(c \mid \mathbf{x})`,
+    document.getElementById('formula-conf'),
+    { displayMode: true }
+);
+
+(function initConfidence() {
+    const container = document.getElementById('viz-confidence');
+    const w = container.clientWidth;
+    const h = 420;
+    const svg = d3.select('#svg-confidence').attr('width', w).attr('height', h);
+    const margin = { top: 15, right: 15, bottom: 30, left: 38 };
+    const iw = w - margin.left - margin.right;
+    const ih = h - margin.top - margin.bottom;
+
+    const xS = d3.scaleLinear()
+        .domain([xExtent[0] - xPad, xExtent[1] + xPad])
+        .range([0, iw]);
+    const yS = d3.scaleLinear()
+        .domain([yExtent[0] - yPad, yExtent[1] + yPad])
+        .range([ih, 0]);
+
+    window._confState = { svg, w, h, margin, iw, ih, xS, yS };
+
+    const slider = document.getElementById('conf-tree-slider');
+    const valSpan = document.getElementById('conf-tree-val');
+    const descSpan = document.getElementById('conf-desc');
+
+    slider.addEventListener('input', () => {
+        const n = +slider.value;
+        valSpan.textContent = n;
+        descSpan.textContent = `当前使用 ${n} 棵树。拖动滑块观察树数量对置信度分布的影响。`;
+        renderConfidence(n);
+    });
+
+    renderConfidence(7);
+})();
+
+function renderConfidence(nTrees) {
+    const { svg, w, h, margin, iw, ih, xS, yS } = window._confState;
+    svg.selectAll('*').remove();
+    const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+
+    // Build a forest with given number of trees
+    const confForest = buildForest(nTrees, 42);
+
+    // Rasterize confidence heatmap to canvas, then embed in SVG
+    const pixelStep = 3;
+    const gridW = Math.ceil(iw / pixelStep);
+    const gridH = Math.ceil(ih / pixelStep);
+    const canvas = document.createElement('canvas');
+    canvas.width = gridW;
+    canvas.height = gridH;
+    const ctx = canvas.getContext('2d');
+    const imgData = ctx.createImageData(gridW, gridH);
+
+    for (let gx = 0; gx < gridW; gx++) {
+        for (let gy = 0; gy < gridH; gy++) {
+            const px = xS.invert(gx * pixelStep);
+            const py = yS.invert(gy * pixelStep);
+            const pt = { x: px, y: py };
+
+            let sumA = 0;
+            for (let t = 0; t < nTrees; t++) {
+                const res = predictTree(confForest[t].tree, pt);
+                sumA += res.proba[1];
+            }
+            const probA = sumA / nTrees;
+            const confidence = Math.abs(probA - 0.5) * 2; // 0..1
+
+            const idx = (gy * gridW + gx) * 4;
+            if (probA >= 0.5) {
+                // Class A territory (green)
+                imgData.data[idx]     = Math.round(22 + (1 - confidence) * 30);
+                imgData.data[idx + 1] = Math.round(199 * confidence + 60 * (1 - confidence));
+                imgData.data[idx + 2] = Math.round(154 * confidence + 60 * (1 - confidence));
+            } else {
+                // Class B territory (red)
+                imgData.data[idx]     = Math.round(255 * confidence + 70 * (1 - confidence));
+                imgData.data[idx + 1] = Math.round(82 * confidence + 60 * (1 - confidence));
+                imgData.data[idx + 2] = Math.round(82 * confidence + 60 * (1 - confidence));
+            }
+            imgData.data[idx + 3] = Math.round(35 + confidence * 170);
+        }
+    }
+    ctx.putImageData(imgData, 0, 0);
+
+    // Embed as image
+    g.append('image')
+        .attr('href', canvas.toDataURL())
+        .attr('x', 0).attr('y', 0)
+        .attr('width', iw).attr('height', ih)
+        .style('image-rendering', 'pixelated');
+
+    // Data points overlay
+    g.selectAll('.conf-dot').data(DATA).join('circle')
+        .attr('class', 'conf-dot')
+        .attr('cx', d => xS(d.x))
+        .attr('cy', d => yS(d.y))
+        .attr('r', 3)
+        .attr('fill', d => d.label === 1 ? COLORS.classA : COLORS.classB)
+        .attr('stroke', '#1a1a2e')
+        .attr('stroke-width', 0.8)
+        .attr('opacity', 0.85);
+
+    // Axes
+    g.append('g').attr('transform', `translate(0,${ih})`)
+        .call(d3.axisBottom(xS).ticks(6))
+        .selectAll('text').style('fill', 'var(--text-muted)').style('font-size', '0.7rem');
+    g.append('g')
+        .call(d3.axisLeft(yS).ticks(6))
+        .selectAll('text').style('fill', 'var(--text-muted)').style('font-size', '0.7rem');
+    g.selectAll('.domain, .tick line').attr('stroke', 'var(--border-color)');
+
+    // Axis labels
+    g.append('text').attr('x', iw / 2).attr('y', ih + 28)
+        .attr('text-anchor', 'middle')
+        .style('fill', 'var(--text-muted)').style('font-size', '0.7rem')
+        .text('特征 x');
+    g.append('text').attr('x', -ih / 2).attr('y', -28)
+        .attr('transform', 'rotate(-90)')
+        .attr('text-anchor', 'middle')
+        .style('fill', 'var(--text-muted)').style('font-size', '0.7rem')
+        .text('特征 y');
+
+    // Tree count annotation
+    g.append('text').attr('x', iw - 4).attr('y', 14)
+        .attr('text-anchor', 'end')
+        .style('fill', 'var(--accent-green)').style('font-size', '0.8rem').style('font-weight', '700')
+        .text(`T = ${nTrees}`);
+
+    // Interactive tooltip overlay
+    const tooltip = document.getElementById('conf-tooltip');
+    const overlay = g.append('rect')
+        .attr('width', iw).attr('height', ih)
+        .attr('fill', 'transparent')
+        .style('cursor', 'crosshair');
+
+    overlay.on('mousemove', function(ev) {
+        const [mx, my] = d3.pointer(ev);
+        const px = xS.invert(mx), py = yS.invert(my);
+        const pt = { x: px, y: py };
+
+        let sumA = 0;
+        for (let t = 0; t < confForest.length; t++) {
+            sumA += predictTree(confForest[t].tree, pt).proba[1];
+        }
+        const probA = sumA / confForest.length;
+        const conf = Math.max(probA, 1 - probA);
+
+        tooltip.style.opacity = '1';
+        tooltip.style.left = (mx + margin.left + 12) + 'px';
+        tooltip.style.top = (my + margin.top - 10) + 'px';
+        tooltip.innerHTML = `
+            类别A: <strong style="color:${COLORS.classA}">${(probA * 100).toFixed(1)}%</strong><br>
+            类别B: <strong style="color:${COLORS.classB}">${((1 - probA) * 100).toFixed(1)}%</strong><br>
+            置信度: <strong>${(conf * 100).toFixed(1)}%</strong>
+        `;
+    }).on('mouseleave', () => {
+        tooltip.style.opacity = '0';
+    });
+}
+
+// ================================================================
+// Initialization: auto-select a boundary point on load
+// ================================================================
+window.addEventListener('DOMContentLoaded', () => {
+    // Render any remaining KaTeX
+    renderMathInElement(document.body, {
+        delimiters: [
+            { left: '$$', right: '$$', display: true },
+            { left: '$', right: '$', display: false }
+        ]
+    });
+
+    // Auto-click a point near the decision boundary for interesting results
+    setTimeout(() => {
+        const target = DATA.find(d =>
+            Math.abs(d.y - (0.5 * d.x + Math.sin(d.x) * 1.5)) < 1.2
+        ) || DATA[10];
+        const idx = DATA.indexOf(target);
+        const dots = d3.selectAll('#svg-scatter-vote .scatter-point');
+        const dot = dots.filter((_, i) => i === idx);
+        if (dot.node()) {
+            runVoting(target, dot.node());
+        }
+    }, 350);
+});
+
+// ================================================================
+// Window resize handler — redraw confidence heatmap
+// ================================================================
+let resizeTimer = null;
+window.addEventListener('resize', () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+        const container = document.getElementById('viz-confidence');
+        const w = container.clientWidth;
+        const h = 420;
+        const margin = { top: 15, right: 15, bottom: 30, left: 38 };
+        window._confState.w = w;
+        window._confState.h = h;
+        window._confState.iw = w - margin.left - margin.right;
+        window._confState.ih = h - margin.top - margin.bottom;
+        window._confState.xS.range([0, window._confState.iw]);
+        window._confState.yS.range([window._confState.ih, 0]);
+        d3.select('#svg-confidence').attr('width', w).attr('height', h);
+        renderConfidence(+document.getElementById('conf-tree-slider').value);
+    }, 250);
+});
+</script>
+<script src="animation-controller.js" defer></script>
+<script src="matrix-renderer.js" defer></script>
+<script src="nav.js" defer></script>
+<script src="katex-init.js" defer></script>
+</body>
+</html>

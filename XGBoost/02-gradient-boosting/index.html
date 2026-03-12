@@ -1,0 +1,1003 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>梯度提升原理 — XGBoost 可视化</title>
+    <!-- KaTeX -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+    <!-- D3.js -->
+    <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+    <!-- GSAP -->
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.2/dist/gsap.min.js"></script>
+    <!-- Shared styles -->
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+    <style>
+        .breadcrumb {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            margin-bottom: 0.5rem;
+        }
+        .breadcrumb a { color: var(--accent-blue); }
+        .section-desc {
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+            margin-bottom: 1.2rem;
+            max-width: 800px;
+        }
+        .dual-panel {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5rem;
+            margin-top: 1rem;
+        }
+        @media (max-width: 900px) {
+            .dual-panel { grid-template-columns: 1fr; }
+        }
+        .panel-label {
+            font-size: 0.8rem;
+            color: var(--accent-yellow);
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        .viz-box {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1rem;
+            position: relative;
+        }
+        .viz-box svg { display: block; width: 100%; }
+        .controls-row {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            flex-wrap: wrap;
+            margin: 1rem 0;
+        }
+        .formula-box {
+            background: rgba(255, 215, 64, 0.05);
+            border: 1px solid rgba(255, 215, 64, 0.2);
+            border-radius: var(--radius-sm);
+            padding: 0.75rem 1rem;
+            margin: 0.75rem 0;
+        }
+        .tooltip-box {
+            position: absolute;
+            background: var(--bg-card);
+            border: 1px solid var(--accent-green);
+            border-radius: var(--radius-sm);
+            padding: 0.5rem 0.75rem;
+            font-size: 0.8rem;
+            pointer-events: none;
+            z-index: 50;
+            color: var(--text-primary);
+            white-space: nowrap;
+            display: none;
+        }
+        .highlight-text { color: var(--accent-yellow); font-weight: 600; }
+        .metric-badge {
+            display: inline-block;
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            padding: 0.2rem 0.6rem;
+            border-radius: var(--radius-sm);
+            background: rgba(22, 199, 154, 0.1);
+            color: var(--accent-green);
+        }
+        .round-info {
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            color: var(--accent-blue);
+            margin: 0.5rem 0;
+        }
+        .compare-label {
+            text-align: center;
+            font-weight: 600;
+            font-size: 0.95rem;
+            margin-bottom: 0.5rem;
+        }
+        .compare-label.aggressive { color: var(--accent-red); }
+        .compare-label.conservative { color: var(--accent-green); }
+    </style>
+</head>
+<body>
+<div class="page-container">
+    <div class="breadcrumb">
+        <a href="../index.html">XGBoost</a> / 模块 02
+    </div>
+    <h1>梯度提升原理</h1>
+    <p class="section-desc">
+        梯度提升的核心思想是在<strong>函数空间</strong>中做梯度下降：每一轮不是更新参数，而是添加一棵新树来修正上一轮的预测误差。
+        本模块通过交互式可视化，带你理解残差、负梯度、逐轮拟合和学习率的作用。
+    </p>
+
+    <!-- ==================== Section 1: 函数空间中的梯度下降 ==================== -->
+    <div class="section" id="sec-func-space">
+        <div class="section-title">
+            <div class="icon">1</div>
+            <h2>函数空间中的梯度下降</h2>
+        </div>
+        <p class="section-desc">
+            传统梯度下降在<span class="highlight-text">参数空间</span>中更新权重 $\theta$；
+            梯度提升则在<span class="highlight-text">函数空间</span>中更新预测函数 $F(x)$，每一轮加上一棵新树。
+        </p>
+        <div class="formula-box">
+            $$F_m(x) = F_{m-1}(x) + \eta \cdot h_m(x), \quad h_m \approx -\nabla_{F} L\big(y, F_{m-1}(x)\big)$$
+        </div>
+        <div class="dual-panel">
+            <div>
+                <div class="panel-label">参数空间梯度下降</div>
+                <div class="viz-box" id="viz-param-gd"></div>
+                <p style="font-size:0.82rem;color:var(--text-muted);margin-top:0.5rem;">
+                    更新权重 $\theta$，沿等高线移动到损失最低点
+                </p>
+            </div>
+            <div>
+                <div class="panel-label">函数空间梯度下降（梯度提升）</div>
+                <div class="viz-box" id="viz-func-gd"></div>
+                <p style="font-size:0.82rem;color:var(--text-muted);margin-top:0.5rem;">
+                    每轮加一棵树 $h_m(x)$，预测逐步逼近真实函数
+                </p>
+            </div>
+        </div>
+        <div class="controls-row">
+            <button class="btn btn-primary" id="btn-gd-animate">播放动画</button>
+            <button class="btn" id="btn-gd-reset">重置</button>
+        </div>
+    </div>
+
+    <!-- ==================== Section 2: 残差 = 负梯度 ==================== -->
+    <div class="section" id="sec-residuals">
+        <div class="section-title">
+            <div class="icon">2</div>
+            <h2>残差 = 负梯度</h2>
+        </div>
+        <p class="section-desc">
+            对于 MSE 损失 $L = \frac{1}{2}(y_i - F(x_i))^2$，负梯度正好等于残差：
+        </p>
+        <div class="formula-box">
+            $$-\frac{\partial L}{\partial F(x_i)} = y_i - F(x_i) = \text{残差}$$
+        </div>
+        <p class="section-desc">
+            悬停在数据点上，查看该点的真实值、预测值、残差和负梯度——它们是一样的！
+        </p>
+        <div class="viz-box" id="viz-residuals" style="min-height:380px;"></div>
+        <div class="tooltip-box" id="tooltip-residuals"></div>
+        <div class="controls-row">
+            <div class="slider-group">
+                <label>预测偏移:</label>
+                <input type="range" id="slider-pred-offset" min="-3" max="3" step="0.1" value="0" style="width:180px;">
+                <span class="slider-value" id="val-pred-offset">0.0</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== Section 3: 逐轮拟合动画 ==================== -->
+    <div class="section" id="sec-rounds">
+        <div class="section-title">
+            <div class="icon">3</div>
+            <h2>逐轮拟合动画</h2>
+        </div>
+        <p class="section-desc">
+            从初始常数预测（均值）开始，每轮计算梯度（残差） → 拟合一棵树 → 更新预测。
+            观察预测曲线如何逐步逼近数据，以及损失如何下降。
+        </p>
+        <div class="controls-row">
+            <div id="anim-controller-container"></div>
+        </div>
+        <div class="controls-row">
+            <div class="slider-group">
+                <label>学习率 η:</label>
+                <input type="range" id="slider-lr-rounds" min="0.1" max="1.0" step="0.1" value="0.3" style="width:160px;">
+                <span class="slider-value" id="val-lr-rounds">0.3</span>
+            </div>
+            <span class="round-info" id="round-info">轮次: 0 / 6</span>
+            <span class="metric-badge" id="round-loss">MSE: —</span>
+        </div>
+        <div class="dual-panel">
+            <div>
+                <div class="panel-label">数据 + 预测曲线</div>
+                <div class="viz-box" id="viz-rounds-pred" style="min-height:340px;"></div>
+            </div>
+            <div>
+                <div class="panel-label">当前轮残差 / 梯度</div>
+                <div class="viz-box" id="viz-rounds-resid" style="min-height:340px;"></div>
+            </div>
+        </div>
+        <div style="margin-top:1rem;">
+            <div class="panel-label">损失曲线</div>
+            <div class="viz-box" id="viz-loss-curve" style="min-height:200px;"></div>
+        </div>
+    </div>
+
+    <!-- ==================== Section 4: 学习率的作用 ==================== -->
+    <div class="section" id="sec-learning-rate">
+        <div class="section-title">
+            <div class="icon">4</div>
+            <h2>学习率的作用</h2>
+        </div>
+        <p class="section-desc">
+            学习率 $\eta$ 控制每棵树的贡献大小。$\eta=1.0$ 激进但易过拟合；$\eta=0.1$ 保守但更平滑。
+            对比同样数据、同样轮数下两种学习率的效果。
+        </p>
+        <div class="controls-row">
+            <div class="slider-group">
+                <label>对比轮数:</label>
+                <input type="range" id="slider-compare-rounds" min="1" max="20" step="1" value="10" style="width:180px;">
+                <span class="slider-value" id="val-compare-rounds">10</span>
+            </div>
+            <button class="btn btn-primary" id="btn-compare-run">运行对比</button>
+        </div>
+        <div class="dual-panel">
+            <div>
+                <div class="compare-label aggressive">η = 1.0（激进）</div>
+                <div class="viz-box" id="viz-lr-high" style="min-height:280px;"></div>
+            </div>
+            <div>
+                <div class="compare-label conservative">η = 0.1（保守）</div>
+                <div class="viz-box" id="viz-lr-low" style="min-height:280px;"></div>
+            </div>
+        </div>
+        <div style="margin-top:1rem;">
+            <div class="panel-label">训练损失对比</div>
+            <div class="viz-box" id="viz-lr-loss" style="min-height:220px;"></div>
+        </div>
+    </div>
+
+    <!-- ==================== Section 5: 分类的梯度提升 ==================== -->
+    <div class="section" id="sec-classification">
+        <div class="section-title">
+            <div class="icon">5</div>
+            <h2>分类的梯度提升</h2>
+        </div>
+        <p class="section-desc">
+            分类任务使用对数损失（log loss）。梯度变为 $g_i = p_i - y_i$（概率与标签之差），
+            不再是简单的残差，但思路完全一致：每轮拟合负梯度方向。
+        </p>
+        <div class="formula-box">
+            $$L = -\sum [y_i \ln p_i + (1-y_i)\ln(1-p_i)], \quad g_i = p_i - y_i, \quad h_i = p_i(1-p_i)$$
+        </div>
+        <div class="controls-row">
+            <div class="slider-group">
+                <label>分类轮数:</label>
+                <input type="range" id="slider-cls-rounds" min="1" max="15" step="1" value="6" style="width:160px;">
+                <span class="slider-value" id="val-cls-rounds">6</span>
+            </div>
+            <button class="btn btn-primary" id="btn-cls-run">运行</button>
+            <span class="metric-badge" id="cls-accuracy">准确率: —</span>
+        </div>
+        <div class="dual-panel">
+            <div>
+                <div class="panel-label">决策边界 + 概率热力图</div>
+                <div class="viz-box" id="viz-cls-boundary" style="min-height:360px;"></div>
+            </div>
+            <div>
+                <div class="panel-label">梯度分布（本轮 $g_i = p_i - y_i$）</div>
+                <div class="viz-box" id="viz-cls-gradients" style="min-height:360px;"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="info-box success" style="margin-top:2rem;">
+        <p><strong>小结：</strong>梯度提升通过在函数空间做梯度下降，逐轮拟合负梯度（回归中即残差），
+        以学习率控制步长。分类时梯度形式不同，但核心思想一致。下一模块我们将深入 XGBoost 的目标函数设计。</p>
+    </div>
+</div>
+
+<!-- Shared scripts -->
+<script src="../shared/scripts/xgb-utils.js"></script>
+<script src="../shared/scripts/animation-controller.js"></script>
+<script src="../shared/scripts/matrix-renderer.js"></script>
+<script src="../shared/scripts/nav.js"></script>
+<script src="../shared/scripts/katex-init.js"></script>
+
+<script>
+// ============================================================
+// 全局工具
+// ============================================================
+const { generateRegressionData, generateClassificationData, trainXGBoost, predictXGBoost,
+        mseLoss, mseGradient, mseHessian, logLossGradient, logLossHessian, logLoss,
+        sigmoid, buildXGBTree, predictXGBTree, computeLeafWeight, seededRandom,
+        classColor, lerp, clamp } = XGBUtils;
+
+const ACCENT = '#ffd740';
+const GREEN = '#16c79a';
+const BLUE = '#4fc3f7';
+const RED = '#ff5252';
+const PURPLE = '#b388ff';
+const ORANGE = '#ffab40';
+
+function makeSVG(container, w, h, margin) {
+    const svg = d3.select(container).html('').append('svg')
+        .attr('viewBox', `0 0 ${w} ${h}`)
+        .attr('preserveAspectRatio', 'xMidYMid meet');
+    const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+    const iw = w - margin.left - margin.right;
+    const ih = h - margin.top - margin.bottom;
+    return { svg, g, iw, ih };
+}
+
+// ============================================================
+// Section 1: 函数空间中的梯度下降
+// ============================================================
+(function initSection1() {
+    const W = 460, H = 320, M = { top: 30, right: 25, bottom: 40, left: 45 };
+
+    // --- 参数空间 GD: 2D loss landscape ---
+    function drawParamGD(steps) {
+        const { g, iw, ih } = makeSVG('#viz-param-gd', W, H, M);
+
+        const xS = d3.scaleLinear().domain([-3, 3]).range([0, iw]);
+        const yS = d3.scaleLinear().domain([-3, 3]).range([ih, 0]);
+
+        // Loss: f(a,b) = (a-1)^2 + 3*(b-0.5)^2
+        const loss = (a, b) => (a - 1) ** 2 + 3 * (b - 0.5) ** 2;
+        const levels = [0.5, 1, 2, 4, 7, 11, 16];
+        const contourData = [];
+        const res = 80;
+        for (let i = 0; i <= res; i++) {
+            for (let j = 0; j <= res; j++) {
+                const a = -3 + 6 * i / res;
+                const b = -3 + 6 * j / res;
+                contourData.push(loss(a, b));
+            }
+        }
+        const contours = d3.contours().size([res + 1, res + 1]).thresholds(levels)(contourData);
+        const colorScale = d3.scaleSequential(d3.interpolateViridis).domain([20, 0]);
+
+        const pathGen = d3.geoPath(d3.geoTransform({
+            point: function(x, y) {
+                this.stream.point(xS(-3 + 6 * x / res), yS(-3 + 6 * y / res));
+            }
+        }));
+
+        g.selectAll('path.contour').data(contours).enter().append('path')
+            .attr('d', pathGen).attr('fill', d => colorScale(d.value))
+            .attr('stroke', 'rgba(255,255,255,0.15)').attr('stroke-width', 0.5);
+
+        // Optimal point
+        g.append('circle').attr('cx', xS(1)).attr('cy', yS(0.5)).attr('r', 5)
+            .attr('fill', ACCENT).attr('stroke', '#fff').attr('stroke-width', 1.5);
+        g.append('text').attr('x', xS(1) + 10).attr('y', yS(0.5) + 4)
+            .text('最优 θ*').attr('fill', ACCENT).attr('font-size', 11);
+
+        // GD path
+        const gdPath = [{ a: -2.5, b: -2 }];
+        const lr = 0.15;
+        for (let i = 0; i < 15; i++) {
+            const prev = gdPath[gdPath.length - 1];
+            const ga = 2 * (prev.a - 1);
+            const gb = 6 * (prev.b - 0.5);
+            gdPath.push({ a: prev.a - lr * ga, b: prev.b - lr * gb });
+        }
+
+        const n = Math.min(steps, gdPath.length);
+        if (n > 1) {
+            g.append('path')
+                .datum(gdPath.slice(0, n))
+                .attr('d', d3.line().x(d => xS(d.a)).y(d => yS(d.b)))
+                .attr('fill', 'none').attr('stroke', RED).attr('stroke-width', 2)
+                .attr('stroke-dasharray', '4,3');
+        }
+        for (let i = 0; i < n; i++) {
+            g.append('circle').attr('cx', xS(gdPath[i].a)).attr('cy', yS(gdPath[i].b))
+                .attr('r', i === 0 ? 5 : 3.5)
+                .attr('fill', i === 0 ? RED : ORANGE).attr('opacity', 0.9);
+        }
+
+        // Axes labels
+        g.append('text').attr('x', iw / 2).attr('y', ih + 32).attr('text-anchor', 'middle')
+            .attr('fill', '#a8a8b8').attr('font-size', 12).text('θ₁');
+        g.append('text').attr('x', -30).attr('y', ih / 2).attr('text-anchor', 'middle')
+            .attr('fill', '#a8a8b8').attr('font-size', 12)
+            .attr('transform', `rotate(-90, -30, ${ih / 2})`).text('θ₂');
+    }
+
+    // --- 函数空间 GD ---
+    const regData = generateRegressionData(40, 77, 0.4);
+    regData.sort((a, b) => a.x - b.x);
+    const trueFunc = x => Math.sin(x) * 2 + x * 0.3;
+
+    function drawFuncGD(steps) {
+        const { g, iw, ih } = makeSVG('#viz-func-gd', W, H, M);
+        const xs = regData.map(d => d.x);
+        const xS = d3.scaleLinear().domain([d3.min(xs) - 0.5, d3.max(xs) + 0.5]).range([0, iw]);
+        const yS = d3.scaleLinear().domain([-5, 5]).range([ih, 0]);
+
+        // Axes
+        g.append('g').attr('transform', `translate(0,${ih})`).call(d3.axisBottom(xS).ticks(6))
+            .selectAll('text,line,path').attr('stroke', '#555').attr('fill', '#888');
+        g.append('g').call(d3.axisLeft(yS).ticks(5))
+            .selectAll('text,line,path').attr('stroke', '#555').attr('fill', '#888');
+
+        // True function
+        const trueLine = d3.line().x(d => xS(d.x)).y(d => yS(trueFunc(d.x))).curve(d3.curveBasis);
+        const fineX = d3.range(d3.min(xs) - 0.3, d3.max(xs) + 0.3, 0.1).map(x => ({ x }));
+        g.append('path').datum(fineX).attr('d', trueLine)
+            .attr('fill', 'none').attr('stroke', '#555').attr('stroke-width', 1.5)
+            .attr('stroke-dasharray', '6,4');
+
+        // Data points
+        g.selectAll('circle.data').data(regData).enter().append('circle')
+            .attr('cx', d => xS(d.x)).attr('cy', d => yS(d.target))
+            .attr('r', 3.5).attr('fill', BLUE).attr('opacity', 0.6);
+
+        // Build boosting model incrementally
+        if (steps > 0) {
+            const model = trainXGBoost(regData, {
+                nRounds: steps, learningRate: 0.3, maxDepth: 3, isRegression: true
+            });
+            const predLine = fineX.map(p => {
+                const pred = predictXGBoost(model, p);
+                return { x: p.x, y: pred.prediction };
+            });
+            const line = d3.line().x(d => xS(d.x)).y(d => yS(d.y)).curve(d3.curveBasis);
+            g.append('path').datum(predLine).attr('d', line)
+                .attr('fill', 'none').attr('stroke', GREEN).attr('stroke-width', 2.5);
+
+            g.append('text').attr('x', iw - 5).attr('y', 15).attr('text-anchor', 'end')
+                .attr('fill', GREEN).attr('font-size', 11).attr('font-weight', 600)
+                .text(`+${steps} 棵树`);
+        }
+
+        // Legend
+        g.append('text').attr('x', 5).attr('y', 15).attr('fill', '#888').attr('font-size', 10)
+            .text('虚线=真实函数');
+    }
+
+    let animStep = 0;
+    const maxSteps = 10;
+    drawParamGD(0);
+    drawFuncGD(0);
+
+    let animId = null;
+    document.getElementById('btn-gd-animate').addEventListener('click', () => {
+        animStep = 0;
+        if (animId) clearInterval(animId);
+        animId = setInterval(() => {
+            animStep++;
+            drawParamGD(animStep);
+            drawFuncGD(animStep);
+            if (animStep >= maxSteps) clearInterval(animId);
+        }, 600);
+    });
+    document.getElementById('btn-gd-reset').addEventListener('click', () => {
+        if (animId) clearInterval(animId);
+        animStep = 0;
+        drawParamGD(0);
+        drawFuncGD(0);
+    });
+})();
+
+// ============================================================
+// Section 2: 残差 = 负梯度
+// ============================================================
+(function initSection2() {
+    const W = 700, H = 380, M = { top: 25, right: 30, bottom: 40, left: 50 };
+    const data = generateRegressionData(30, 55, 0.4);
+    data.sort((a, b) => a.x - b.x);
+    const yVals = data.map(d => d.target);
+    const meanY = yVals.reduce((a, b) => a + b, 0) / yVals.length;
+
+    function drawResiduals(offset) {
+        const predVal = meanY + offset;
+        const { svg, g, iw, ih } = makeSVG('#viz-residuals', W, H, M);
+        const xs = data.map(d => d.x);
+        const xS = d3.scaleLinear().domain([d3.min(xs) - 0.5, d3.max(xs) + 0.5]).range([0, iw]);
+        const yS = d3.scaleLinear().domain([-6, 6]).range([ih, 0]);
+
+        g.append('g').attr('transform', `translate(0,${ih})`).call(d3.axisBottom(xS).ticks(8))
+            .selectAll('text,line,path').attr('stroke', '#555').attr('fill', '#888');
+        g.append('g').call(d3.axisLeft(yS).ticks(6))
+            .selectAll('text,line,path').attr('stroke', '#555').attr('fill', '#888');
+
+        // Prediction line
+        g.append('line').attr('x1', 0).attr('x2', iw)
+            .attr('y1', yS(predVal)).attr('y2', yS(predVal))
+            .attr('stroke', ACCENT).attr('stroke-width', 2).attr('stroke-dasharray', '6,3');
+        g.append('text').attr('x', iw - 5).attr('y', yS(predVal) - 8)
+            .attr('text-anchor', 'end').attr('fill', ACCENT).attr('font-size', 11)
+            .text(`F(x) = ${predVal.toFixed(2)}`);
+
+        // Residual arrows + data points
+        data.forEach((d, i) => {
+            const residual = d.target - predVal;
+            const color = residual > 0 ? GREEN : RED;
+            // Arrow (residual)
+            g.append('line')
+                .attr('x1', xS(d.x)).attr('x2', xS(d.x))
+                .attr('y1', yS(predVal)).attr('y2', yS(d.target))
+                .attr('stroke', color).attr('stroke-width', 1.5).attr('opacity', 0.6);
+            // Point
+            g.append('circle').attr('cx', xS(d.x)).attr('cy', yS(d.target))
+                .attr('r', 5).attr('fill', BLUE).attr('stroke', '#fff').attr('stroke-width', 1)
+                .attr('cursor', 'pointer')
+                .on('mouseenter', function(event) {
+                    d3.select(this).attr('r', 8).attr('stroke', ACCENT).attr('stroke-width', 2);
+                    const tip = document.getElementById('tooltip-residuals');
+                    tip.style.display = 'block';
+                    tip.innerHTML = `
+                        <div>x = ${d.x.toFixed(2)}</div>
+                        <div>真实值 y = ${d.target.toFixed(3)}</div>
+                        <div>预测值 F(x) = ${predVal.toFixed(3)}</div>
+                        <div style="color:${GREEN}">残差 = ${residual.toFixed(3)}</div>
+                        <div style="color:${ACCENT}">负梯度 = ${residual.toFixed(3)}</div>
+                        <div style="color:${PURPLE};font-size:0.75rem">二者相等!</div>
+                    `;
+                    const box = document.getElementById('viz-residuals').getBoundingClientRect();
+                    tip.style.left = (event.clientX - box.left + 15) + 'px';
+                    tip.style.top = (event.clientY - box.top - 10) + 'px';
+                })
+                .on('mouseleave', function() {
+                    d3.select(this).attr('r', 5).attr('stroke', '#fff').attr('stroke-width', 1);
+                    document.getElementById('tooltip-residuals').style.display = 'none';
+                });
+        });
+
+        // MSE
+        const mse = data.reduce((s, d) => s + (d.target - predVal) ** 2, 0) / data.length;
+        g.append('text').attr('x', 5).attr('y', 15).attr('fill', '#a8a8b8').attr('font-size', 11)
+            .text(`MSE = ${mse.toFixed(3)}`);
+
+        // Legend
+        g.append('circle').attr('cx', iw - 160).attr('cy', ih + 30).attr('r', 4).attr('fill', BLUE);
+        g.append('text').attr('x', iw - 152).attr('y', ih + 34).attr('fill', '#888').attr('font-size', 10).text('数据点');
+        g.append('line').attr('x1', iw - 90).attr('x2', iw - 70).attr('y1', ih + 30).attr('y2', ih + 30)
+            .attr('stroke', ACCENT).attr('stroke-width', 2).attr('stroke-dasharray', '4,2');
+        g.append('text').attr('x', iw - 65).attr('y', ih + 34).attr('fill', '#888').attr('font-size', 10).text('预测');
+    }
+
+    drawResiduals(0);
+    const slider = document.getElementById('slider-pred-offset');
+    const valLabel = document.getElementById('val-pred-offset');
+    slider.addEventListener('input', () => {
+        const v = parseFloat(slider.value);
+        valLabel.textContent = v.toFixed(1);
+        drawResiduals(v);
+    });
+})();
+
+// ============================================================
+// Section 3: 逐轮拟合动画
+// ============================================================
+(function initSection3() {
+    const W = 520, H = 340, M = { top: 20, right: 25, bottom: 35, left: 45 };
+    const LW = 700, LH = 200, LM = { top: 15, right: 25, bottom: 30, left: 55 };
+    const data = generateRegressionData(40, 88, 0.4);
+    data.sort((a, b) => a.x - b.x);
+    const yArr = data.map(d => d.target);
+    const meanY = yArr.reduce((a, b) => a + b, 0) / yArr.length;
+    const maxRounds = 6;
+
+    let currentLR = 0.3;
+    let roundStates = []; // Will store predictions at each round
+
+    function buildRoundStates(lr) {
+        const states = [];
+        const n = data.length;
+        let rawPred = new Array(n).fill(meanY);
+        const loss0 = mseLoss(yArr, rawPred);
+        states.push({
+            round: 0,
+            predictions: [...rawPred],
+            residuals: yArr.map((y, i) => y - rawPred[i]),
+            loss: loss0,
+            tree: null
+        });
+
+        for (let r = 0; r < maxRounds; r++) {
+            const grad = mseGradient(yArr, rawPred);
+            const hess = mseHessian(yArr, rawPred);
+            const negGrad = grad.map(g => -g); // residuals
+            const tree = buildXGBTree(data, grad, hess, { maxDepth: 3, lambda: 1, gamma: 0, seed: 88 + r * 17 });
+
+            const newPred = [...rawPred];
+            for (let i = 0; i < n; i++) {
+                const { weight } = predictXGBTree(tree, data[i]);
+                newPred[i] += lr * weight;
+            }
+            rawPred = newPred;
+            const loss = mseLoss(yArr, rawPred);
+            states.push({
+                round: r + 1,
+                predictions: [...rawPred],
+                residuals: yArr.map((y, i) => y - rawPred[i]),
+                loss,
+                tree
+            });
+        }
+        return states;
+    }
+
+    function drawPrediction(stateIdx) {
+        const state = roundStates[stateIdx] || roundStates[0];
+        const { g, iw, ih } = makeSVG('#viz-rounds-pred', W, H, M);
+        const xs = data.map(d => d.x);
+        const xS = d3.scaleLinear().domain([d3.min(xs) - 0.5, d3.max(xs) + 0.5]).range([0, iw]);
+        const yS = d3.scaleLinear().domain([-5, 5]).range([ih, 0]);
+
+        g.append('g').attr('transform', `translate(0,${ih})`).call(d3.axisBottom(xS).ticks(6))
+            .selectAll('text,line,path').attr('stroke', '#555').attr('fill', '#888');
+        g.append('g').call(d3.axisLeft(yS).ticks(5))
+            .selectAll('text,line,path').attr('stroke', '#555').attr('fill', '#888');
+
+        // Data points
+        g.selectAll('circle.d').data(data).enter().append('circle')
+            .attr('cx', d => xS(d.x)).attr('cy', d => yS(d.target))
+            .attr('r', 3.5).attr('fill', BLUE).attr('opacity', 0.5);
+
+        // Prediction curve (from state)
+        const predPoints = data.map((d, i) => ({ x: d.x, y: state.predictions[i] }));
+        const line = d3.line().x(d => xS(d.x)).y(d => yS(d.y)).curve(d3.curveBasis);
+        g.append('path').datum(predPoints).attr('d', line)
+            .attr('fill', 'none').attr('stroke', GREEN).attr('stroke-width', 2.5);
+
+        g.append('text').attr('x', iw - 5).attr('y', 15).attr('text-anchor', 'end')
+            .attr('fill', GREEN).attr('font-size', 12).attr('font-weight', 600)
+            .text(`轮次 ${state.round}`);
+    }
+
+    function drawResiduals(stateIdx) {
+        const state = roundStates[stateIdx] || roundStates[0];
+        const { g, iw, ih } = makeSVG('#viz-rounds-resid', W, H, M);
+        const xs = data.map(d => d.x);
+        const xS = d3.scaleLinear().domain([d3.min(xs) - 0.5, d3.max(xs) + 0.5]).range([0, iw]);
+        const maxR = 4;
+        const yS = d3.scaleLinear().domain([-maxR, maxR]).range([ih, 0]);
+
+        g.append('g').attr('transform', `translate(0,${ih})`).call(d3.axisBottom(xS).ticks(6))
+            .selectAll('text,line,path').attr('stroke', '#555').attr('fill', '#888');
+        g.append('g').call(d3.axisLeft(yS).ticks(5))
+            .selectAll('text,line,path').attr('stroke', '#555').attr('fill', '#888');
+
+        // Zero line
+        g.append('line').attr('x1', 0).attr('x2', iw)
+            .attr('y1', yS(0)).attr('y2', yS(0))
+            .attr('stroke', '#444').attr('stroke-width', 1).attr('stroke-dasharray', '4,3');
+
+        // Residuals as stems
+        data.forEach((d, i) => {
+            const r = state.residuals[i];
+            const color = r > 0 ? GREEN : RED;
+            g.append('line').attr('x1', xS(d.x)).attr('x2', xS(d.x))
+                .attr('y1', yS(0)).attr('y2', yS(clamp(r, -maxR, maxR)))
+                .attr('stroke', color).attr('stroke-width', 2).attr('opacity', 0.7);
+            g.append('circle').attr('cx', xS(d.x)).attr('cy', yS(clamp(r, -maxR, maxR)))
+                .attr('r', 3).attr('fill', color);
+        });
+
+        g.append('text').attr('x', 5).attr('y', 15).attr('fill', '#a8a8b8').attr('font-size', 11)
+            .text('残差 = 负梯度');
+    }
+
+    function drawLossCurve(upToIdx) {
+        const { g, iw, ih } = makeSVG('#viz-loss-curve', LW, LH, LM);
+        const losses = roundStates.slice(0, upToIdx + 1).map(s => s.loss);
+        const xS = d3.scaleLinear().domain([0, maxRounds]).range([0, iw]);
+        const yS = d3.scaleLinear().domain([0, d3.max(losses) * 1.1 || 1]).range([ih, 0]);
+
+        g.append('g').attr('transform', `translate(0,${ih})`).call(d3.axisBottom(xS).ticks(maxRounds))
+            .selectAll('text,line,path').attr('stroke', '#555').attr('fill', '#888');
+        g.append('g').call(d3.axisLeft(yS).ticks(4))
+            .selectAll('text,line,path').attr('stroke', '#555').attr('fill', '#888');
+
+        // Line
+        const line = d3.line().x((d, i) => xS(i)).y(d => yS(d));
+        g.append('path').datum(losses).attr('d', line)
+            .attr('fill', 'none').attr('stroke', ACCENT).attr('stroke-width', 2.5);
+
+        // Dots
+        losses.forEach((l, i) => {
+            g.append('circle').attr('cx', xS(i)).attr('cy', yS(l))
+                .attr('r', 4).attr('fill', ACCENT).attr('stroke', '#1a1a2e').attr('stroke-width', 1.5);
+        });
+
+        g.append('text').attr('x', iw / 2).attr('y', ih + 26).attr('text-anchor', 'middle')
+            .attr('fill', '#888').attr('font-size', 11).text('轮次');
+        g.append('text').attr('x', -40).attr('y', ih / 2).attr('text-anchor', 'middle')
+            .attr('fill', '#888').attr('font-size', 11)
+            .attr('transform', `rotate(-90, -40, ${ih / 2})`).text('MSE');
+    }
+
+    function refreshAll(lr) {
+        currentLR = lr;
+        roundStates = buildRoundStates(lr);
+        drawPrediction(0);
+        drawResiduals(0);
+        drawLossCurve(0);
+        document.getElementById('round-info').textContent = `轮次: 0 / ${maxRounds}`;
+        document.getElementById('round-loss').textContent = `MSE: ${roundStates[0].loss.toFixed(4)}`;
+    }
+
+    roundStates = buildRoundStates(currentLR);
+
+    // AnimationController
+    const steps = [];
+    for (let i = 0; i <= maxRounds; i++) {
+        steps.push({
+            name: `轮次 ${i}`,
+            duration: 900,
+            action: (idx, instant) => {
+                drawPrediction(i);
+                drawResiduals(i);
+                drawLossCurve(i);
+                document.getElementById('round-info').textContent = `轮次: ${i} / ${maxRounds}`;
+                document.getElementById('round-loss').textContent = `MSE: ${roundStates[i].loss.toFixed(4)}`;
+            }
+        });
+    }
+
+    const animCtrl = new AnimationController({
+        container: document.getElementById('anim-controller-container'),
+        steps,
+        defaultDuration: 900
+    });
+
+    // LR slider
+    const lrSlider = document.getElementById('slider-lr-rounds');
+    const lrVal = document.getElementById('val-lr-rounds');
+    lrSlider.addEventListener('input', () => {
+        const v = parseFloat(lrSlider.value);
+        lrVal.textContent = v.toFixed(1);
+        currentLR = v;
+        roundStates = buildRoundStates(v);
+        // Rebuild steps
+        const newSteps = [];
+        for (let i = 0; i <= maxRounds; i++) {
+            const idx = i;
+            newSteps.push({
+                name: `轮次 ${idx}`,
+                duration: 900,
+                action: () => {
+                    drawPrediction(idx);
+                    drawResiduals(idx);
+                    drawLossCurve(idx);
+                    document.getElementById('round-info').textContent = `轮次: ${idx} / ${maxRounds}`;
+                    document.getElementById('round-loss').textContent = `MSE: ${roundStates[idx].loss.toFixed(4)}`;
+                }
+            });
+        }
+        animCtrl.setSteps(newSteps);
+        drawPrediction(0);
+        drawResiduals(0);
+        drawLossCurve(0);
+        document.getElementById('round-info').textContent = `轮次: 0 / ${maxRounds}`;
+        document.getElementById('round-loss').textContent = `MSE: ${roundStates[0].loss.toFixed(4)}`;
+    });
+
+    // Initial draw
+    drawPrediction(0);
+    drawResiduals(0);
+    drawLossCurve(0);
+    document.getElementById('round-loss').textContent = `MSE: ${roundStates[0].loss.toFixed(4)}`;
+})();
+
+// ============================================================
+// Section 4: 学习率对比
+// ============================================================
+(function initSection4() {
+    const W = 520, H = 280, M = { top: 20, right: 25, bottom: 35, left: 45 };
+    const LW = 700, LH = 220, LM = { top: 15, right: 25, bottom: 35, left: 55 };
+    const data = generateRegressionData(40, 99, 0.4);
+    data.sort((a, b) => a.x - b.x);
+
+    function drawFit(container, model, label, color) {
+        const { g, iw, ih } = makeSVG(container, W, H, M);
+        const xs = data.map(d => d.x);
+        const xS = d3.scaleLinear().domain([d3.min(xs) - 0.5, d3.max(xs) + 0.5]).range([0, iw]);
+        const yS = d3.scaleLinear().domain([-5, 5]).range([ih, 0]);
+
+        g.append('g').attr('transform', `translate(0,${ih})`).call(d3.axisBottom(xS).ticks(6))
+            .selectAll('text,line,path').attr('stroke', '#555').attr('fill', '#888');
+        g.append('g').call(d3.axisLeft(yS).ticks(5))
+            .selectAll('text,line,path').attr('stroke', '#555').attr('fill', '#888');
+
+        g.selectAll('circle.d').data(data).enter().append('circle')
+            .attr('cx', d => xS(d.x)).attr('cy', d => yS(d.target))
+            .attr('r', 3).attr('fill', BLUE).attr('opacity', 0.4);
+
+        const fineX = d3.range(d3.min(xs) - 0.3, d3.max(xs) + 0.3, 0.15).map(x => ({ x }));
+        const predPoints = fineX.map(p => {
+            const pred = predictXGBoost(model, p);
+            return { x: p.x, y: pred.prediction };
+        });
+        const line = d3.line().x(d => xS(d.x)).y(d => yS(clamp(d.y, -5, 5))).curve(d3.curveBasis);
+        g.append('path').datum(predPoints).attr('d', line)
+            .attr('fill', 'none').attr('stroke', color).attr('stroke-width', 2.5);
+    }
+
+    function drawLossCompare(lossHigh, lossLow, nRounds) {
+        const { g, iw, ih } = makeSVG('#viz-lr-loss', LW, LH, LM);
+        const maxLoss = Math.max(d3.max(lossHigh), d3.max(lossLow), 0.1);
+        const xS = d3.scaleLinear().domain([1, nRounds]).range([0, iw]);
+        const yS = d3.scaleLinear().domain([0, maxLoss * 1.1]).range([ih, 0]);
+
+        g.append('g').attr('transform', `translate(0,${ih})`).call(d3.axisBottom(xS).ticks(Math.min(nRounds, 10)))
+            .selectAll('text,line,path').attr('stroke', '#555').attr('fill', '#888');
+        g.append('g').call(d3.axisLeft(yS).ticks(5))
+            .selectAll('text,line,path').attr('stroke', '#555').attr('fill', '#888');
+
+        const lineGen = d3.line().x((d, i) => xS(i + 1)).y(d => yS(d));
+
+        g.append('path').datum(lossHigh).attr('d', lineGen)
+            .attr('fill', 'none').attr('stroke', RED).attr('stroke-width', 2);
+        g.append('path').datum(lossLow).attr('d', lineGen)
+            .attr('fill', 'none').attr('stroke', GREEN).attr('stroke-width', 2);
+
+        // Legend
+        g.append('line').attr('x1', iw - 180).attr('x2', iw - 160).attr('y1', 10).attr('y2', 10)
+            .attr('stroke', RED).attr('stroke-width', 2);
+        g.append('text').attr('x', iw - 155).attr('y', 14).attr('fill', RED).attr('font-size', 11).text('η=1.0');
+        g.append('line').attr('x1', iw - 100).attr('x2', iw - 80).attr('y1', 10).attr('y2', 10)
+            .attr('stroke', GREEN).attr('stroke-width', 2);
+        g.append('text').attr('x', iw - 75).attr('y', 14).attr('fill', GREEN).attr('font-size', 11).text('η=0.1');
+
+        g.append('text').attr('x', iw / 2).attr('y', ih + 28).attr('text-anchor', 'middle')
+            .attr('fill', '#888').attr('font-size', 11).text('轮次');
+        g.append('text').attr('x', -40).attr('y', ih / 2).attr('text-anchor', 'middle')
+            .attr('fill', '#888').attr('font-size', 11)
+            .attr('transform', `rotate(-90, -40, ${ih / 2})`).text('MSE');
+    }
+
+    function runCompare() {
+        const nRounds = parseInt(document.getElementById('slider-compare-rounds').value);
+        const modelHigh = trainXGBoost(data, { nRounds, learningRate: 1.0, maxDepth: 3, isRegression: true, seed: 99 });
+        const modelLow = trainXGBoost(data, { nRounds, learningRate: 0.1, maxDepth: 3, isRegression: true, seed: 99 });
+        drawFit('#viz-lr-high', modelHigh, 'η=1.0', RED);
+        drawFit('#viz-lr-low', modelLow, 'η=0.1', GREEN);
+        drawLossCompare(modelHigh.lossHistory, modelLow.lossHistory, nRounds);
+    }
+
+    document.getElementById('btn-compare-run').addEventListener('click', runCompare);
+    const roundsSlider = document.getElementById('slider-compare-rounds');
+    const roundsVal = document.getElementById('val-compare-rounds');
+    roundsSlider.addEventListener('input', () => {
+        roundsVal.textContent = roundsSlider.value;
+    });
+
+    runCompare();
+})();
+
+// ============================================================
+// Section 5: 分类的梯度提升
+// ============================================================
+(function initSection5() {
+    const W = 460, H = 360, M = { top: 20, right: 20, bottom: 35, left: 40 };
+    const clsData = generateClassificationData(80, 42, 0.3);
+
+    function drawBoundary(nRounds) {
+        const model = trainXGBoost(clsData, {
+            nRounds,
+            learningRate: 0.3,
+            maxDepth: 3,
+            isRegression: false,
+            seed: 42
+        });
+
+        // Accuracy
+        let correct = 0;
+        clsData.forEach(d => {
+            const pred = predictXGBoost(model, d);
+            if (pred.prediction === d.label) correct++;
+        });
+        document.getElementById('cls-accuracy').textContent =
+            `准确率: ${(correct / clsData.length * 100).toFixed(1)}%`;
+
+        // Decision boundary with probability heatmap
+        const { g, iw, ih } = makeSVG('#viz-cls-boundary', W, H, M);
+        const xS = d3.scaleLinear().domain([-5.5, 5.5]).range([0, iw]);
+        const yS = d3.scaleLinear().domain([-5.5, 5.5]).range([ih, 0]);
+
+        // Heatmap
+        const res = 40;
+        const cellW = iw / res;
+        const cellH = ih / res;
+        for (let i = 0; i < res; i++) {
+            for (let j = 0; j < res; j++) {
+                const px = -5.5 + 11 * (i + 0.5) / res;
+                const py = -5.5 + 11 * (j + 0.5) / res;
+                const pred = predictXGBoost(model, { x: px, y: py });
+                const prob = pred.probability || 0.5;
+                const r = Math.round(255 * (1 - prob) * 0.7);
+                const b = Math.round(255 * prob * 0.7);
+                g.append('rect')
+                    .attr('x', i * cellW).attr('y', (res - 1 - j) * cellH)
+                    .attr('width', cellW + 0.5).attr('height', cellH + 0.5)
+                    .attr('fill', `rgb(${r}, ${Math.round(40 + 50 * Math.min(prob, 1 - prob) * 2)}, ${b})`)
+                    .attr('opacity', 0.5);
+            }
+        }
+
+        // Axes
+        g.append('g').attr('transform', `translate(0,${ih})`).call(d3.axisBottom(xS).ticks(6))
+            .selectAll('text,line,path').attr('stroke', '#555').attr('fill', '#888');
+        g.append('g').call(d3.axisLeft(yS).ticks(6))
+            .selectAll('text,line,path').attr('stroke', '#555').attr('fill', '#888');
+
+        // Data points
+        g.selectAll('circle.cls').data(clsData).enter().append('circle')
+            .attr('cx', d => xS(d.x)).attr('cy', d => yS(d.y))
+            .attr('r', 4)
+            .attr('fill', d => d.label === 1 ? BLUE : RED)
+            .attr('stroke', '#fff').attr('stroke-width', 0.8).attr('opacity', 0.85);
+
+        // Legend
+        g.append('circle').attr('cx', 10).attr('cy', ih - 10).attr('r', 4).attr('fill', BLUE);
+        g.append('text').attr('x', 18).attr('y', ih - 6).attr('fill', '#888').attr('font-size', 10).text('类别 1');
+        g.append('circle').attr('cx', 70).attr('cy', ih - 10).attr('r', 4).attr('fill', RED);
+        g.append('text').attr('x', 78).attr('y', ih - 6).attr('fill', '#888').attr('font-size', 10).text('类别 0');
+
+        // --- Gradients panel ---
+        drawGradients(model, nRounds);
+    }
+
+    function drawGradients(model, nRounds) {
+        const { g, iw, ih } = makeSVG('#viz-cls-gradients', W, H, M);
+        const xS = d3.scaleLinear().domain([-5.5, 5.5]).range([0, iw]);
+        const yS = d3.scaleLinear().domain([-5.5, 5.5]).range([ih, 0]);
+
+        g.append('g').attr('transform', `translate(0,${ih})`).call(d3.axisBottom(xS).ticks(6))
+            .selectAll('text,line,path').attr('stroke', '#555').attr('fill', '#888');
+        g.append('g').call(d3.axisLeft(yS).ticks(6))
+            .selectAll('text,line,path').attr('stroke', '#555').attr('fill', '#888');
+
+        // Compute current gradients
+        const rawPreds = clsData.map(d => {
+            const pred = predictXGBoost(model, d);
+            return pred.raw;
+        });
+        const labels = clsData.map(d => d.label);
+        const grads = labels.map((yi, i) => sigmoid(rawPreds[i]) - yi);
+
+        // Gradient magnitude as color
+        const maxAbsGrad = d3.max(grads.map(Math.abs)) || 1;
+        const colorScale = d => {
+            const t = d / maxAbsGrad;
+            if (t > 0) return d3.interpolateRgb('#1a1a2e', RED)(Math.abs(t));
+            return d3.interpolateRgb('#1a1a2e', GREEN)(Math.abs(t));
+        };
+
+        clsData.forEach((d, i) => {
+            const grad = grads[i];
+            const absGrad = Math.abs(grad);
+            g.append('circle')
+                .attr('cx', xS(d.x)).attr('cy', yS(d.y))
+                .attr('r', 3 + absGrad / maxAbsGrad * 8)
+                .attr('fill', colorScale(grad))
+                .attr('stroke', grad > 0 ? RED : GREEN)
+                .attr('stroke-width', 1)
+                .attr('opacity', 0.75);
+        });
+
+        // Zero line reference
+        g.append('text').attr('x', 5).attr('y', 15).attr('fill', '#a8a8b8').attr('font-size', 11)
+            .text('圆大=梯度大，红=过预测，绿=欠预测');
+
+        // Gradient legend
+        g.append('circle').attr('cx', iw - 100).attr('cy', ih - 10).attr('r', 5).attr('fill', RED).attr('opacity', 0.6);
+        g.append('text').attr('x', iw - 90).attr('y', ih - 6).attr('fill', '#888').attr('font-size', 10).text('g>0');
+        g.append('circle').attr('cx', iw - 50).attr('cy', ih - 10).attr('r', 5).attr('fill', GREEN).attr('opacity', 0.6);
+        g.append('text').attr('x', iw - 40).attr('y', ih - 6).attr('fill', '#888').attr('font-size', 10).text('g<0');
+    }
+
+    document.getElementById('btn-cls-run').addEventListener('click', () => {
+        const nRounds = parseInt(document.getElementById('slider-cls-rounds').value);
+        drawBoundary(nRounds);
+    });
+    const clsSlider = document.getElementById('slider-cls-rounds');
+    const clsVal = document.getElementById('val-cls-rounds');
+    clsSlider.addEventListener('input', () => {
+        clsVal.textContent = clsSlider.value;
+    });
+
+    drawBoundary(6);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,652 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>随机森林 交互式可视化学习</title>
+    <link rel="stylesheet" href="shared/styles/common.css">
+    <link rel="stylesheet" href="shared/styles/components.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+SC:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <style>
+        body { overflow-x: hidden; }
+
+        /* ===== Hero ===== */
+        .hero {
+            text-align: center;
+            padding: calc(var(--header-height) + 2rem) 2rem 3rem;
+            position: relative;
+        }
+        .hero h1 {
+            font-size: 2.8rem;
+            margin-bottom: 0.5rem;
+            background: linear-gradient(135deg, #ffab40, #ff6e40, #ffab40);
+            background-size: 200% 200%;
+            animation: heroGradient 6s ease infinite;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        @keyframes heroGradient {
+            0%, 100% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+        }
+        .hero .subtitle {
+            font-size: 1.1rem;
+            color: var(--text-secondary);
+            max-width: 640px;
+            margin: 0 auto 2rem;
+        }
+        .hero .tags {
+            display: flex;
+            justify-content: center;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+
+        /* ===== Floating Tree/Leaf Background ===== */
+        .bg-floats {
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            pointer-events: none;
+            z-index: -1;
+            overflow: hidden;
+        }
+        .bg-float-item {
+            position: absolute;
+            font-size: 24px;
+            opacity: 0;
+            animation: floatUp linear infinite;
+        }
+        @keyframes floatUp {
+            0% {
+                opacity: 0;
+                transform: translateY(100vh) rotate(0deg);
+            }
+            10% {
+                opacity: 0.15;
+            }
+            90% {
+                opacity: 0.15;
+            }
+            100% {
+                opacity: 0;
+                transform: translateY(-10vh) rotate(360deg);
+            }
+        }
+
+        /* ===== Forest Diagram (decorative) ===== */
+        .forest-diagram {
+            max-width: 900px;
+            margin: 0 auto 2rem;
+            padding: 0 2rem;
+            display: flex;
+            justify-content: center;
+            gap: 0.3rem;
+            flex-wrap: wrap;
+        }
+        .forest-block {
+            padding: 0.35rem 0.7rem;
+            border-radius: var(--radius-sm);
+            font-size: 0.7rem;
+            font-weight: 600;
+            border: 1px solid;
+            opacity: 0.6;
+            transition: opacity 0.3s, transform 0.3s;
+        }
+        .forest-block:hover {
+            opacity: 1;
+            transform: translateY(-2px);
+        }
+        .forest-block.tree { color: #ffab40; border-color: rgba(255,171,64,0.3); background: rgba(255,171,64,0.06); }
+        .forest-block.ensemble { color: #ff6e40; border-color: rgba(255,110,64,0.3); background: rgba(255,110,64,0.06); }
+        .forest-block.analysis { color: #ffd740; border-color: rgba(255,215,64,0.3); background: rgba(255,215,64,0.06); }
+        .forest-arrow {
+            display: flex;
+            align-items: center;
+            color: var(--text-muted);
+            font-size: 0.8rem;
+            opacity: 0.4;
+        }
+
+        /* ===== Metro Roadmap ===== */
+        .roadmap {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 2rem;
+            position: relative;
+        }
+        .roadmap-title {
+            text-align: center;
+            margin-bottom: 2.5rem;
+        }
+
+        .metro-line {
+            position: relative;
+            padding-left: 60px;
+        }
+
+        /* Vertical rail with Random Forest themed gradient */
+        .metro-line::before {
+            content: '';
+            position: absolute;
+            left: 27px;
+            top: 0;
+            bottom: 0;
+            width: 4px;
+            background: linear-gradient(
+                to bottom,
+                #ffab40 0%,
+                #ffab40 33%,
+                #ff6e40 33%,
+                #ff6e40 66%,
+                #ffd740 66%,
+                #ffd740 100%
+            );
+            border-radius: 2px;
+        }
+
+        /* Branch decoration along the rail */
+        .metro-line::after {
+            content: '';
+            position: absolute;
+            left: 22px;
+            top: 0;
+            bottom: 0;
+            width: 14px;
+            background: repeating-linear-gradient(
+                to bottom,
+                transparent 0px,
+                transparent 56px,
+                rgba(255, 171, 64, 0.08) 56px,
+                rgba(255, 171, 64, 0.08) 60px
+            );
+            pointer-events: none;
+        }
+
+        .station {
+            position: relative;
+            margin-bottom: 1rem;
+            cursor: pointer;
+            transition: transform 0.25s var(--anim-ease);
+        }
+        .station:hover {
+            transform: translateX(6px);
+        }
+
+        /* Station dot — leaf shape via border-radius */
+        .station-dot {
+            position: absolute;
+            left: -41px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            border: 3px solid #ffab40;
+            background: var(--bg-primary);
+            z-index: 2;
+            transition: all 0.3s;
+        }
+        .station:hover .station-dot {
+            background: #ffab40;
+            box-shadow: 0 0 14px rgba(255, 171, 64, 0.5);
+        }
+
+        /* Phase colors for station dots */
+        .station[data-phase="tree-basics"] .station-dot { border-color: #ffab40; }
+        .station[data-phase="tree-basics"]:hover .station-dot {
+            background: #ffab40;
+            box-shadow: 0 0 14px rgba(255, 171, 64, 0.5);
+        }
+
+        .station[data-phase="ensemble"] .station-dot { border-color: #ff6e40; }
+        .station[data-phase="ensemble"]:hover .station-dot {
+            background: #ff6e40;
+            box-shadow: 0 0 14px rgba(255, 110, 64, 0.5);
+        }
+
+        .station[data-phase="analysis"] .station-dot { border-color: #ffd740; }
+        .station[data-phase="analysis"]:hover .station-dot {
+            background: #ffd740;
+            box-shadow: 0 0 14px rgba(255, 215, 64, 0.5);
+        }
+
+        .station-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1.2rem 1.5rem;
+            transition: all 0.3s;
+            position: relative;
+            overflow: hidden;
+        }
+        /* Subtle accent decoration on card hover */
+        .station-card::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 2px;
+            background: linear-gradient(90deg, transparent, #ffab40, transparent);
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+        .station:hover .station-card::before {
+            opacity: 1;
+        }
+        .station[data-phase="tree-basics"]:hover .station-card {
+            border-color: #ffab40;
+            box-shadow: 0 0 20px rgba(255, 171, 64, 0.15);
+        }
+        .station[data-phase="ensemble"]:hover .station-card {
+            border-color: #ff6e40;
+            box-shadow: 0 0 20px rgba(255, 110, 64, 0.15);
+        }
+        .station[data-phase="analysis"]:hover .station-card {
+            border-color: #ffd740;
+            box-shadow: 0 0 20px rgba(255, 215, 64, 0.15);
+        }
+
+        .station-header {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            margin-bottom: 0.4rem;
+        }
+        .station-num {
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            min-width: 2.5rem;
+        }
+        .station-name {
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+        .station-desc {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            margin: 0;
+            padding-left: 3.25rem;
+        }
+        .station-keywords {
+            display: flex;
+            gap: 0.4rem;
+            flex-wrap: wrap;
+            padding-left: 3.25rem;
+            margin-top: 0.5rem;
+        }
+        .station-keywords span {
+            font-size: 0.7rem;
+            padding: 0.1rem 0.4rem;
+            background: rgba(255, 171, 64, 0.08);
+            border-radius: 4px;
+            color: var(--text-muted);
+        }
+        .station[data-phase="ensemble"] .station-keywords span {
+            background: rgba(255, 110, 64, 0.08);
+        }
+        .station[data-phase="analysis"] .station-keywords span {
+            background: rgba(255, 215, 64, 0.08);
+        }
+
+        /* Phase separators */
+        .phase-label {
+            position: relative;
+            padding: 0.5rem 0 0.5rem 0;
+            margin-bottom: 0.5rem;
+            margin-top: 1rem;
+        }
+        .phase-label span {
+            font-size: 0.75rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            padding: 0.2rem 0.8rem;
+            border-radius: 4px;
+        }
+        .phase-label.tree-basics span { color: #ffab40; background: rgba(255,171,64,0.1); }
+        .phase-label.ensemble span { color: #ff6e40; background: rgba(255,110,64,0.1); }
+        .phase-label.analysis span { color: #ffd740; background: rgba(255,215,64,0.1); }
+
+        /* ===== Protocol Warning ===== */
+        .protocol-warning {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.9);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+        }
+        .protocol-warning .inner {
+            background: var(--bg-secondary);
+            border: 1px solid var(--accent-orange);
+            border-radius: var(--radius-lg);
+            padding: 2rem 3rem;
+            max-width: 500px;
+            text-align: center;
+        }
+        .protocol-warning h2 { color: var(--accent-orange); }
+        .protocol-warning code {
+            display: block;
+            margin: 1rem 0;
+            padding: 0.75rem;
+            background: var(--bg-primary);
+            border-radius: var(--radius-sm);
+            font-size: 0.9rem;
+        }
+
+        /* ===== Footer ===== */
+        .footer {
+            text-align: center;
+            padding: 3rem 2rem;
+            color: var(--text-muted);
+            font-size: 0.8rem;
+        }
+        .footer a {
+            color: #ffab40;
+        }
+
+        /* ===== Responsive ===== */
+        @media (max-width: 768px) {
+            .hero h1 { font-size: 2rem; }
+            .hero .subtitle { font-size: 0.95rem; }
+            .roadmap { padding: 1rem; }
+            .metro-line { padding-left: 50px; }
+            .station-dot { left: -35px; width: 18px; height: 18px; }
+            .station-desc { padding-left: 2.5rem; }
+            .station-keywords { padding-left: 2.5rem; }
+            .forest-diagram { display: none; }
+        }
+    </style>
+</head>
+<body>
+
+<!-- Top Navigation -->
+<nav class="top-nav">
+    <div class="nav-left">
+        <a href="../index.html" class="nav-home" title="算法总览">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+                <path d="M3 12l9-8 9 8"/>
+                <path d="M5 10v9a1 1 0 001 1h4v-5h4v5h4a1 1 0 001-1v-9"/>
+            </svg>
+        </a>
+        <span class="nav-sep">›</span>
+        <a href="index.html" class="logo">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 3c-3 0-5 3-5 6 0 2 1 4 3 5h4c2-1 3-3 3-5 0-3-2-6-5-6z"/>
+                <path d="M10 14v5a2 2 0 002 2v0a2 2 0 002-2v-5"/>
+                <path d="M8 9c-2 0-3 2-3 4s1 3 2 4"/>
+                <path d="M16 9c2 0 3 2 3 4s-1 3-2 4"/>
+            </svg>
+            随机森林
+        </a>
+    </div>
+</nav>
+
+<!-- Protocol Warning -->
+<div id="protocolWarning" class="protocol-warning hidden">
+    <div class="inner">
+        <h2>请使用本地服务器</h2>
+        <p>直接打开 HTML 文件（file:// 协议）会导致跨域问题。请使用以下方式启动：</p>
+        <code>python -m http.server 8080</code>
+        <p class="text-sm text-muted">或使用 VS Code 的 Live Server 插件</p>
+        <button class="btn btn-primary mt-2" onclick="document.getElementById('protocolWarning').classList.add('hidden')">
+            我知道了，继续浏览
+        </button>
+    </div>
+</div>
+
+<!-- Floating Tree/Leaf Background -->
+<div id="bgFloats" class="bg-floats"></div>
+
+<!-- Hero Section -->
+<div class="hero">
+    <h1>随机森林 交互式可视化学习</h1>
+    <p class="subtitle">
+        通过交互式可视化，彻底理解随机森林的每一个概念 ——
+        从决策树基础到集成学习，从 Bagging 到特征重要性分析
+    </p>
+    <div class="tags">
+        <span class="badge badge-orange">交互式</span>
+        <span class="badge badge-orange">可视化</span>
+        <span class="badge badge-orange">逐步动画</span>
+        <span class="badge badge-orange">全中文</span>
+    </div>
+</div>
+
+<!-- Forest Overview (decorative mini-diagram) -->
+<div class="forest-diagram">
+    <div class="forest-block tree">决策树</div>
+    <div class="forest-arrow">&rarr;</div>
+    <div class="forest-block tree">分裂准则</div>
+    <div class="forest-arrow">&rarr;</div>
+    <div class="forest-block tree">树构建</div>
+    <div class="forest-arrow">&rarr;</div>
+    <div class="forest-block ensemble">Bagging</div>
+    <div class="forest-arrow">&rarr;</div>
+    <div class="forest-block ensemble">随机子空间</div>
+    <div class="forest-arrow">&rarr;</div>
+    <div class="forest-block ensemble">随机森林</div>
+    <div class="forest-arrow">&rarr;</div>
+    <div class="forest-block analysis">投票 & 分析</div>
+</div>
+
+<!-- Roadmap -->
+<div class="roadmap">
+    <div class="roadmap-title">
+        <h2>学习路线图</h2>
+        <p class="text-sm text-muted">按顺序学习效果最佳，也可跳转到感兴趣的模块</p>
+    </div>
+
+    <div class="metro-line">
+        <!-- Phase 1: 决策树基础 -->
+        <div class="phase-label tree-basics"><span>决策树基础</span></div>
+
+        <div class="station" data-id="01" data-phase="tree-basics" onclick="goTo('01-decision-tree/')">
+            <div class="station-dot"></div>
+            <div class="station-card">
+                <div class="station-header">
+                    <span class="station-num">01</span>
+                    <span class="station-name">决策树基础</span>
+                </div>
+                <p class="station-desc">从分类问题出发，理解树形结构的决策过程</p>
+                <div class="station-keywords">
+                    <span>分类问题</span><span>树形结构</span><span>决策边界</span><span>节点/叶子</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="station" data-id="02" data-phase="tree-basics" onclick="goTo('02-splitting/')">
+            <div class="station-dot"></div>
+            <div class="station-card">
+                <div class="station-header">
+                    <span class="station-num">02</span>
+                    <span class="station-name">分裂准则</span>
+                </div>
+                <p class="station-desc">信息增益、基尼不纯度、信息熵的直观对比</p>
+                <div class="station-keywords">
+                    <span>信息增益</span><span>基尼不纯度</span><span>信息熵</span><span>准则对比</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="station" data-id="03" data-phase="tree-basics" onclick="goTo('03-tree-building/')">
+            <div class="station-dot"></div>
+            <div class="station-card">
+                <div class="station-header">
+                    <span class="station-num">03</span>
+                    <span class="station-name">树的构建</span>
+                </div>
+                <p class="station-desc">递归分裂、停止条件、剪枝策略</p>
+                <div class="station-keywords">
+                    <span>递归分裂</span><span>停止条件</span><span>预剪枝</span><span>后剪枝</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Phase 2: 集成学习 -->
+        <div class="phase-label ensemble"><span>集成学习</span></div>
+
+        <div class="station" data-id="04" data-phase="ensemble" onclick="goTo('04-bagging/')">
+            <div class="station-dot"></div>
+            <div class="station-card">
+                <div class="station-header">
+                    <span class="station-num">04</span>
+                    <span class="station-name">Bagging</span>
+                </div>
+                <p class="station-desc">自助采样与集成思想，降低方差</p>
+                <div class="station-keywords">
+                    <span>自助采样</span><span>Bootstrap</span><span>方差降低</span><span>集成思想</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="station" data-id="05" data-phase="ensemble" onclick="goTo('05-random-subspace/')">
+            <div class="station-dot"></div>
+            <div class="station-card">
+                <div class="station-header">
+                    <span class="station-num">05</span>
+                    <span class="station-name">随机子空间</span>
+                </div>
+                <p class="station-desc">随机特征选择，增加树的多样性</p>
+                <div class="station-keywords">
+                    <span>特征采样</span><span>多样性</span><span>去相关</span><span>子空间</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="station" data-id="06" data-phase="ensemble" onclick="goTo('06-random-forest/')">
+            <div class="station-dot"></div>
+            <div class="station-card">
+                <div class="station-header">
+                    <span class="station-num">06</span>
+                    <span class="station-name">随机森林</span>
+                </div>
+                <p class="station-desc">完整算法组装：Bagging + 随机子空间</p>
+                <div class="station-keywords">
+                    <span>完整算法</span><span>Bagging</span><span>随机子空间</span><span>并行训练</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Phase 3: 应用与分析 -->
+        <div class="phase-label analysis"><span>应用与分析</span></div>
+
+        <div class="station" data-id="07" data-phase="analysis" onclick="goTo('07-voting/')">
+            <div class="station-dot"></div>
+            <div class="station-card">
+                <div class="station-header">
+                    <span class="station-num">07</span>
+                    <span class="station-name">投票机制</span>
+                </div>
+                <p class="station-desc">多数投票、概率聚合、OOB 估计</p>
+                <div class="station-keywords">
+                    <span>多数投票</span><span>概率聚合</span><span>OOB估计</span><span>泛化误差</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="station" data-id="08" data-phase="analysis" onclick="goTo('08-feature-importance/')">
+            <div class="station-dot"></div>
+            <div class="station-card">
+                <div class="station-header">
+                    <span class="station-num">08</span>
+                    <span class="station-name">特征重要性</span>
+                </div>
+                <p class="station-desc">基尼重要性与置换重要性</p>
+                <div class="station-keywords">
+                    <span>基尼重要性</span><span>置换重要性</span><span>特征排序</span><span>可解释性</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="station" data-id="09" data-phase="analysis" onclick="goTo('09-playground/')">
+            <div class="station-dot"></div>
+            <div class="station-card">
+                <div class="station-header">
+                    <span class="station-num">09</span>
+                    <span class="station-name">游乐场</span>
+                </div>
+                <p class="station-desc">自由实验，调参观察效果</p>
+                <div class="station-keywords">
+                    <span>树数量</span><span>最大深度</span><span>特征数</span><span>对比实验</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+</div>
+
+<!-- Footer -->
+<div class="footer">
+    <p>随机森林交互式可视化学习 | 纯前端实现 · 无服务器依赖 · 全中文</p>
+</div>
+
+<script>
+// ========== Protocol Check ==========
+if (window.location.protocol === 'file:') {
+    document.getElementById('protocolWarning').classList.remove('hidden');
+}
+
+// ========== Navigation ==========
+function goTo(path) {
+    window.location.href = path + 'index.html';
+}
+
+// ========== Background Animation: Floating Tree & Leaf Emoji ==========
+(function() {
+    var container = document.getElementById('bgFloats');
+    var emojis = [
+        '\uD83C\uDF33',  // Deciduous tree
+        '\uD83C\uDF32',  // Evergreen tree
+        '\uD83C\uDF42',  // Fallen leaf
+        '\uD83C\uDF43',  // Maple leaf
+        '\uD83C\uDF40',  // Four leaf clover
+        '\uD83C\uDF3F',  // Herb
+        '\uD83C\uDF3E',  // Rice / plant
+        '\uD83C\uDF44',  // Mushroom
+    ];
+
+    var ITEM_COUNT = 30;
+
+    function createFloat() {
+        var el = document.createElement('span');
+        el.className = 'bg-float-item';
+        el.textContent = emojis[Math.floor(Math.random() * emojis.length)];
+
+        // Random horizontal position
+        el.style.left = Math.random() * 100 + '%';
+
+        // Random size
+        var size = 16 + Math.random() * 24;
+        el.style.fontSize = size + 'px';
+
+        // Random duration and delay
+        var duration = 15 + Math.random() * 25;
+        var delay = Math.random() * 20;
+        el.style.animationDuration = duration + 's';
+        el.style.animationDelay = delay + 's';
+
+        // Slight horizontal sway via transform origin
+        el.style.animationTimingFunction = 'linear';
+
+        container.appendChild(el);
+
+        // Remove and recreate when animation ends to keep it going
+        el.addEventListener('animationiteration', function() {
+            el.style.left = Math.random() * 100 + '%';
+        });
+    }
+
+    for (var i = 0; i < ITEM_COUNT; i++) {
+        createFloat();
+    }
+})();
+</script>
+</body>
+</html>

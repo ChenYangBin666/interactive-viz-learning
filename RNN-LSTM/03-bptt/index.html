@@ -1,0 +1,1466 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Module 03: 时间反向传播 BPTT — RNN & LSTM 可视化</title>
+
+    <!-- Styles -->
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+
+    <!-- KaTeX -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+
+    <!-- D3.js -->
+    <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+
+    <!-- GSAP -->
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.2/dist/gsap.min.js"></script>
+
+    <style>
+        .module-hero {
+            text-align: center;
+            padding: 2.5rem 1rem 1.5rem;
+        }
+        .module-hero h1 {
+            font-size: 2.2rem;
+            background: linear-gradient(135deg, var(--accent-green), var(--accent-blue));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 0.5rem;
+        }
+        .module-hero .subtitle {
+            color: var(--text-muted);
+            font-size: 1rem;
+        }
+        .content-wrap {
+            max-width: 1100px;
+            margin: 0 auto;
+            padding: 0 1.5rem 4rem;
+        }
+        .section {
+            margin-bottom: 3rem;
+        }
+        .section-title {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            margin-bottom: 1.2rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 1px solid var(--border-color);
+        }
+        .section-title .num {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: var(--accent-green);
+            color: var(--bg-primary);
+            font-weight: 700;
+            font-size: 0.85rem;
+            flex-shrink: 0;
+        }
+        .viz-container {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1.5rem;
+            margin: 1rem 0;
+            overflow-x: auto;
+        }
+        .viz-container svg {
+            display: block;
+            margin: 0 auto;
+        }
+        .controls-row {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            flex-wrap: wrap;
+            margin: 1rem 0;
+        }
+        .slider-group {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .slider-group label {
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+            white-space: nowrap;
+        }
+        .slider-group input[type="range"] {
+            width: 160px;
+            accent-color: var(--accent-green);
+        }
+        .slider-group .val {
+            color: var(--accent-green);
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            min-width: 2rem;
+        }
+        .info-box {
+            background: rgba(22, 199, 154, 0.08);
+            border-left: 3px solid var(--accent-green);
+            padding: 0.8rem 1rem;
+            border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+            margin: 0.8rem 0;
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
+        .warn-box {
+            background: rgba(255, 82, 82, 0.08);
+            border-left: 3px solid var(--accent-red);
+            padding: 0.8rem 1rem;
+            border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+            margin: 0.8rem 0;
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
+        .formula-block {
+            background: rgba(15, 52, 96, 0.5);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            padding: 1rem 1.2rem;
+            margin: 1rem 0;
+            text-align: center;
+            overflow-x: auto;
+        }
+        .anim-controls {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.6rem 0;
+            flex-wrap: wrap;
+        }
+        .anim-controls .progress-bar {
+            flex: 1;
+            min-width: 100px;
+            height: 6px;
+            background: var(--bg-card);
+            border-radius: 3px;
+            cursor: pointer;
+            position: relative;
+            overflow: hidden;
+        }
+        .anim-controls .progress-bar .fill {
+            height: 100%;
+            background: var(--accent-green);
+            border-radius: 3px;
+            transition: width 0.3s;
+        }
+        .anim-controls .step-label {
+            color: var(--text-muted);
+            font-size: 0.8rem;
+            font-family: var(--font-mono);
+            min-width: 4rem;
+            text-align: right;
+        }
+        .legend {
+            display: flex;
+            gap: 1.2rem;
+            flex-wrap: wrap;
+            margin: 0.5rem 0;
+            font-size: 0.82rem;
+            color: var(--text-muted);
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 0.3rem;
+        }
+        .legend-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+        .two-col {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+        }
+        @media (max-width: 768px) {
+            .two-col { grid-template-columns: 1fr; }
+        }
+        .plot-container {
+            width: 100%;
+            min-height: 260px;
+        }
+        .tab-row {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+        }
+        .tab-btn {
+            padding: 0.4rem 1rem;
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            background: transparent;
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-size: 0.85rem;
+            transition: all 0.2s;
+        }
+        .tab-btn.active {
+            background: var(--accent-green);
+            color: var(--bg-primary);
+            border-color: var(--accent-green);
+            font-weight: 600;
+        }
+        .gradient-arrow {
+            transition: opacity 0.5s, stroke 0.5s;
+        }
+    </style>
+</head>
+<body>
+    <div class="module-hero">
+        <h1>时间反向传播 BPTT</h1>
+        <p class="subtitle">Backpropagation Through Time — 理解 RNN 如何学习时间序列中的模式</p>
+    </div>
+
+    <div class="content-wrap">
+
+        <!-- ===== Section 1: 从 BP 到 BPTT ===== -->
+        <div class="section" id="sec-bp-to-bptt">
+            <div class="section-title">
+                <span class="num">1</span>
+                <h2>从 BP 到 BPTT</h2>
+            </div>
+            <p>标准的反向传播算法（BP）在前馈网络中沿层传递梯度。当我们把 RNN 在时间轴上展开后，
+            它就变成了一个<strong>非常深的前馈网络</strong>，每一层对应一个时间步。
+            BPTT 就是在这种展开结构上执行 BP。</p>
+
+            <div class="formula-block">
+                <p style="margin-bottom:0.5rem;color:var(--text-muted);font-size:0.85rem;">每个时间步的损失与总损失：</p>
+                $$L_t = \ell(y_t, \hat{y}_t), \quad L = \sum_{t=1}^{T} L_t$$
+            </div>
+
+            <div class="info-box">
+                <strong>核心思想：</strong>RNN 在每个时间步共享同一组参数 $W_{hh}, W_{xh}, W_{hy}$，
+                但展开后梯度要沿整个时间链回传，这就是 BPTT 的本质。
+            </div>
+
+            <div class="viz-container" id="viz-bp-to-bptt">
+                <div id="bp-bptt-controls" class="anim-controls"></div>
+                <svg id="svg-bp-bptt" width="900" height="340"></svg>
+            </div>
+
+            <div class="legend">
+                <div class="legend-item"><div class="legend-dot" style="background:#4fc3f7"></div>前向传播</div>
+                <div class="legend-item"><div class="legend-dot" style="background:#ff5252"></div>梯度回传</div>
+                <div class="legend-item"><div class="legend-dot" style="background:#ffab40"></div>损失 $L_t$</div>
+            </div>
+        </div>
+
+        <!-- ===== Section 2: 链式法则在时间上的展开 ===== -->
+        <div class="section" id="sec-chain-rule">
+            <div class="section-title">
+                <span class="num">2</span>
+                <h2>链式法则在时间上的展开</h2>
+            </div>
+            <p>对 $W_{hh}$ 求梯度时，需要考虑它在<strong>每一个时间步</strong>的影响。
+            由于 $h_t$ 依赖 $h_{t-1}$，而 $h_{t-1}$ 又依赖 $h_{t-2}$……梯度通过链式法则层层传递。</p>
+
+            <div class="formula-block">
+                <p style="margin-bottom:0.5rem;color:var(--text-muted);font-size:0.85rem;">BPTT 的核心公式：</p>
+                $$\frac{\partial L}{\partial W_{hh}} = \sum_{t=1}^{T} \sum_{k=1}^{t} \frac{\partial L_t}{\partial h_t} \left(\prod_{j=k+1}^{t} \frac{\partial h_j}{\partial h_{j-1}}\right) \frac{\partial h_k}{\partial W_{hh}}$$
+            </div>
+
+            <div class="warn-box">
+                <strong>关键问题：</strong>$\prod_{j=k+1}^{t} \frac{\partial h_j}{\partial h_{j-1}}$ 是一连串雅可比矩阵的乘积。
+                当 $t - k$ 很大时，这个乘积可能<strong>指数爆炸</strong>或<strong>指数衰减</strong>。
+            </div>
+
+            <div class="viz-container" id="viz-chain-rule">
+                <div id="chain-rule-controls" class="anim-controls"></div>
+                <svg id="svg-chain-rule" width="900" height="360"></svg>
+            </div>
+
+            <div class="info-box">
+                每个 $\frac{\partial h_j}{\partial h_{j-1}}$ 实际上是一个<strong>雅可比矩阵</strong>：
+                $\text{diag}(1 - h_j^2) \cdot W_{hh}$，其中 $\text{diag}(1 - h_j^2)$ 来自 tanh 的导数。
+            </div>
+        </div>
+
+        <!-- ===== Section 3: 梯度流可视化 ===== -->
+        <div class="section" id="sec-gradient-flow">
+            <div class="section-title">
+                <span class="num">3</span>
+                <h2>梯度流可视化</h2>
+            </div>
+            <p>下面的交互式展开 RNN 展示梯度如何从损失函数逆向流回每个时间步。
+            颜色越亮表示梯度越大，越暗表示梯度越小。拖动滑块改变序列长度，观察梯度如何随距离变化。</p>
+
+            <div class="controls-row">
+                <div class="slider-group">
+                    <label>序列长度 T：</label>
+                    <input type="range" id="seq-len-slider" min="3" max="8" value="6" step="1">
+                    <span class="val" id="seq-len-val">6</span>
+                </div>
+                <div class="slider-group">
+                    <label>$W_{hh}$ 谱范数：</label>
+                    <input type="range" id="whh-scale-slider" min="0.3" max="2.0" value="0.9" step="0.1">
+                    <span class="val" id="whh-scale-val">0.9</span>
+                </div>
+                <button class="btn btn-sm" id="btn-animate-flow">播放梯度流动</button>
+            </div>
+
+            <div class="viz-container" id="viz-gradient-flow">
+                <svg id="svg-gradient-flow" width="900" height="380"></svg>
+            </div>
+
+            <div class="two-col">
+                <div class="viz-container">
+                    <h4 style="margin-bottom:0.5rem;">梯度大小随时间步距离变化</h4>
+                    <div id="plot-grad-magnitude" class="plot-container"></div>
+                </div>
+                <div class="viz-container">
+                    <h4 style="margin-bottom:0.5rem;">雅可比矩阵范数</h4>
+                    <div id="plot-jacobian-norm" class="plot-container"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== Section 4: 截断 BPTT ===== -->
+        <div class="section" id="sec-truncated">
+            <div class="section-title">
+                <span class="num">4</span>
+                <h2>截断 BPTT (Truncated BPTT)</h2>
+            </div>
+            <p>完整 BPTT 需要在整个序列上回传梯度，对于很长的序列（成百上千步）计算代价极高。
+            <strong>截断 BPTT</strong> 只回传 $K$ 步梯度，在计算效率和梯度精度之间取折中。</p>
+
+            <div class="formula-block">
+                <p style="margin-bottom:0.5rem;color:var(--text-muted);font-size:0.85rem;">截断 BPTT：只对最近 K 步回传梯度</p>
+                $$\frac{\partial L_t}{\partial W_{hh}} \approx \sum_{k=\max(1, t-K+1)}^{t} \frac{\partial L_t}{\partial h_t} \left(\prod_{j=k+1}^{t} \frac{\partial h_j}{\partial h_{j-1}}\right) \frac{\partial h_k}{\partial W_{hh}}$$
+            </div>
+
+            <div class="controls-row">
+                <div class="slider-group">
+                    <label>截断长度 K：</label>
+                    <input type="range" id="trunc-k-slider" min="1" max="8" value="3" step="1">
+                    <span class="val" id="trunc-k-val">3</span>
+                </div>
+                <div class="slider-group">
+                    <label>总序列长度 T：</label>
+                    <input type="range" id="trunc-t-slider" min="4" max="10" value="8" step="1">
+                    <span class="val" id="trunc-t-val">8</span>
+                </div>
+            </div>
+
+            <div class="viz-container" id="viz-truncated">
+                <svg id="svg-truncated" width="900" height="340"></svg>
+            </div>
+
+            <div class="two-col">
+                <div class="viz-container">
+                    <h4 style="margin-bottom:0.5rem;">计算量对比</h4>
+                    <div id="plot-compute-cost" class="plot-container"></div>
+                </div>
+                <div class="viz-container">
+                    <h4 style="margin-bottom:0.5rem;">梯度精度 vs 截断长度</h4>
+                    <div id="plot-trunc-accuracy" class="plot-container"></div>
+                </div>
+            </div>
+
+            <div class="info-box">
+                实际训练中，常见的截断长度 $K$ 在 20~50 之间。PyTorch 的 <code>detach()</code> 就是用来实现截断 BPTT 的。
+            </div>
+        </div>
+
+        <!-- ===== Section 5: BPTT 的局限性 ===== -->
+        <div class="section" id="sec-limitations">
+            <div class="section-title">
+                <span class="num">5</span>
+                <h2>BPTT 的局限性</h2>
+            </div>
+            <p>BPTT 最根本的问题在于<strong>梯度消失与梯度爆炸</strong>。当矩阵 $W_{hh}$ 连乘多次后，
+            梯度的范数要么指数衰减到接近零，要么指数增长到无穷大。</p>
+
+            <div class="formula-block">
+                <p style="margin-bottom:0.5rem;color:var(--text-muted);font-size:0.85rem;">连乘效应：</p>
+                $$\left\| \prod_{j=k+1}^{t} \frac{\partial h_j}{\partial h_{j-1}} \right\| \approx \|W_{hh}\|^{t-k}$$
+            </div>
+
+            <div class="controls-row">
+                <div class="tab-row">
+                    <button class="tab-btn active" data-mode="vanish" id="tab-vanish">梯度消失 ($\sigma < 1$)</button>
+                    <button class="tab-btn" data-mode="explode" id="tab-explode">梯度爆炸 ($\sigma > 1$)</button>
+                </div>
+                <div class="slider-group">
+                    <label>连乘次数 T：</label>
+                    <input type="range" id="limit-t-slider" min="2" max="30" value="15" step="1">
+                    <span class="val" id="limit-t-val">15</span>
+                </div>
+            </div>
+
+            <div class="viz-container" id="viz-limitations">
+                <svg id="svg-limitations" width="900" height="300"></svg>
+            </div>
+
+            <div class="warn-box">
+                <strong>梯度消失</strong>使得 RNN 难以学习长距离依赖（超过 10~20 步的模式几乎学不到）。
+                <strong>梯度爆炸</strong>则导致参数更新过大，训练不稳定甚至发散。
+                这正是 <strong>LSTM</strong> 和 <strong>GRU</strong> 被发明的动机——它们通过门控机制维持梯度稳定流动。
+            </div>
+
+            <div class="info-box">
+                下一模块我们将深入探讨梯度消失/爆炸问题的数学本质，以及缓解方法（梯度裁剪、正交初始化等）。
+            </div>
+
+        </div>
+
+    </div><!-- /content-wrap -->
+
+    <!-- Scripts -->
+    <script src="../shared/scripts/rnn-utils.js"></script>
+    <script src="../shared/scripts/animation-controller.js"></script>
+    <script src="../shared/scripts/matrix-renderer.js"></script>
+    <script src="../shared/scripts/nav.js"></script>
+    <script src="../shared/scripts/katex-init.js"></script>
+
+    <script>
+    /* ====================================================================
+     *  Module 03 — BPTT 可视化
+     *  全部逻辑内联
+     * ==================================================================== */
+    (function () {
+        'use strict';
+
+        const { tanh, randomMatrix, matMul, vecNorm, jacobianNorm, gradientFlowAnalysis,
+                rnnForward, randomVector, zerosVector, clamp, lerp, seededRandom } = RNNUtils;
+
+        /* ---------- 颜色/工具 ---------- */
+        const C = {
+            green: '#16c79a', blue: '#4fc3f7', red: '#ff5252',
+            orange: '#ffab40', purple: '#b388ff', muted: '#6c6c7c',
+            bg: '#1a1a2e', bgSec: '#16213e', card: '#0f3460',
+            text: '#e8e8e8', textSec: '#a8a8b8'
+        };
+
+        function gradColor(magnitude, maxMag) {
+            const t = clamp(magnitude / (maxMag || 1), 0, 1);
+            const r = Math.round(lerp(50, 255, t));
+            const g = Math.round(lerp(50, 80, t));
+            const b = Math.round(lerp(80, 80, t));
+            return `rgb(${r},${g},${b})`;
+        }
+
+        function gradOpacity(magnitude, maxMag) {
+            return clamp(0.15 + 0.85 * (magnitude / (maxMag || 1)), 0.15, 1);
+        }
+
+        /* =================================================================
+         *  Section 1: 从 BP 到 BPTT — 展开 RNN 动画
+         * ================================================================= */
+        (function initSection1() {
+            const svg = d3.select('#svg-bp-bptt');
+            const W = 900, H = 340;
+            const T = 5;
+            const xGap = 150, yH = 120, yOut = 40, yIn = 240;
+            const xStart = 70;
+
+            function nodeX(t) { return xStart + t * xGap; }
+
+            // 画展开的 RNN
+            const nodesH = [], nodesX = [], nodesY = [], nodesL = [];
+            for (let t = 0; t < T; t++) {
+                const x = nodeX(t);
+                nodesX.push({ x, y: yIn, label: `x_${t}` });
+                nodesH.push({ x, y: yH, label: `h_${t}` });
+                nodesY.push({ x, y: yOut, label: `\\hat{y}_${t}` });
+                nodesL.push({ x, y: yOut - 40, label: `L_${t}` });
+            }
+
+            // 连线组
+            const gLinks = svg.append('g').attr('class', 'links');
+            const gNodes = svg.append('g').attr('class', 'nodes');
+            const gGrads = svg.append('g').attr('class', 'grads');
+
+            // 前向链接：x->h
+            const forwardXH = [];
+            for (let t = 0; t < T; t++) {
+                forwardXH.push(gLinks.append('line')
+                    .attr('x1', nodesX[t].x).attr('y1', nodesX[t].y - 14)
+                    .attr('x2', nodesH[t].x).attr('y2', nodesH[t].y + 14)
+                    .attr('stroke', C.blue).attr('stroke-width', 2).attr('opacity', 0));
+            }
+
+            // 前向链接：h->h
+            const forwardHH = [];
+            for (let t = 0; t < T - 1; t++) {
+                forwardHH.push(gLinks.append('line')
+                    .attr('x1', nodesH[t].x + 16).attr('y1', nodesH[t].y)
+                    .attr('x2', nodesH[t + 1].x - 16).attr('y2', nodesH[t + 1].y)
+                    .attr('stroke', C.blue).attr('stroke-width', 2).attr('opacity', 0));
+            }
+
+            // 前向链接：h->y
+            const forwardHY = [];
+            for (let t = 0; t < T; t++) {
+                forwardHY.push(gLinks.append('line')
+                    .attr('x1', nodesH[t].x).attr('y1', nodesH[t].y - 14)
+                    .attr('x2', nodesY[t].x).attr('y2', nodesY[t].y + 14)
+                    .attr('stroke', C.blue).attr('stroke-width', 2).attr('opacity', 0));
+            }
+
+            // 梯度箭头：反向 h->h
+            const gradHH = [];
+            for (let t = T - 1; t > 0; t--) {
+                gradHH.push(gGrads.append('line')
+                    .attr('x1', nodesH[t].x - 16).attr('y1', nodesH[t].y + 4)
+                    .attr('x2', nodesH[t - 1].x + 16).attr('y2', nodesH[t - 1].y + 4)
+                    .attr('stroke', C.red).attr('stroke-width', 2.5)
+                    .attr('stroke-dasharray', '6 3').attr('opacity', 0)
+                    .attr('marker-end', 'none'));
+            }
+
+            // 梯度箭头：L->y->h
+            const gradLH = [];
+            for (let t = 0; t < T; t++) {
+                gradLH.push(gGrads.append('line')
+                    .attr('x1', nodesL[t].x).attr('y1', nodesL[t].y + 10)
+                    .attr('x2', nodesH[t].x).attr('y2', nodesH[t].y - 14)
+                    .attr('stroke', C.red).attr('stroke-width', 2)
+                    .attr('stroke-dasharray', '4 3').attr('opacity', 0));
+            }
+
+            // 节点：h
+            for (let t = 0; t < T; t++) {
+                gNodes.append('circle')
+                    .attr('cx', nodesH[t].x).attr('cy', nodesH[t].y).attr('r', 14)
+                    .attr('fill', C.bgSec).attr('stroke', C.green).attr('stroke-width', 2);
+                gNodes.append('text')
+                    .attr('x', nodesH[t].x).attr('y', nodesH[t].y + 4)
+                    .attr('text-anchor', 'middle').attr('fill', C.green)
+                    .attr('font-size', 11).attr('font-family', 'var(--font-mono)')
+                    .text('h' + t);
+            }
+            // 节点：x
+            for (let t = 0; t < T; t++) {
+                gNodes.append('rect')
+                    .attr('x', nodesX[t].x - 12).attr('y', nodesX[t].y - 12)
+                    .attr('width', 24).attr('height', 24).attr('rx', 4)
+                    .attr('fill', C.bgSec).attr('stroke', C.blue).attr('stroke-width', 1.5);
+                gNodes.append('text')
+                    .attr('x', nodesX[t].x).attr('y', nodesX[t].y + 4)
+                    .attr('text-anchor', 'middle').attr('fill', C.blue)
+                    .attr('font-size', 10).attr('font-family', 'var(--font-mono)')
+                    .text('x' + t);
+            }
+            // 节点：y_hat
+            for (let t = 0; t < T; t++) {
+                gNodes.append('circle')
+                    .attr('cx', nodesY[t].x).attr('cy', nodesY[t].y).attr('r', 10)
+                    .attr('fill', C.bgSec).attr('stroke', C.purple).attr('stroke-width', 1.5);
+                gNodes.append('text')
+                    .attr('x', nodesY[t].x).attr('y', nodesY[t].y + 3)
+                    .attr('text-anchor', 'middle').attr('fill', C.purple)
+                    .attr('font-size', 9).attr('font-family', 'var(--font-mono)')
+                    .text('y' + t);
+            }
+            // 节点：L
+            for (let t = 0; t < T; t++) {
+                gNodes.append('text')
+                    .attr('x', nodesL[t].x).attr('y', nodesL[t].y)
+                    .attr('text-anchor', 'middle').attr('fill', C.orange)
+                    .attr('font-size', 11).attr('font-weight', 600)
+                    .text('L' + t);
+            }
+
+            // Whh 标注
+            for (let t = 0; t < T - 1; t++) {
+                gLinks.append('text')
+                    .attr('x', (nodesH[t].x + nodesH[t + 1].x) / 2)
+                    .attr('y', nodesH[t].y - 20)
+                    .attr('text-anchor', 'middle').attr('fill', C.muted)
+                    .attr('font-size', 9).attr('font-family', 'var(--font-mono)')
+                    .attr('opacity', 0).attr('class', 'whh-label')
+                    .text('Whh');
+            }
+
+            // 描述文字
+            const descText = svg.append('text')
+                .attr('x', W / 2).attr('y', H - 15)
+                .attr('text-anchor', 'middle').attr('fill', C.textSec)
+                .attr('font-size', 13).text('');
+
+            // 动画步骤
+            const animSteps = [
+                { name: '展示前向传播 x→h', duration: 600, action: (i, instant) => {
+                    const dur = instant ? 0 : 400;
+                    forwardXH.forEach((l, t) => {
+                        gsap.to(l.node(), { opacity: 1, duration: dur / 1000, delay: t * 0.08 });
+                    });
+                    descText.text('步骤1: 输入 x_t 送入隐藏层，计算 h_t = tanh(W_xh·x_t + W_hh·h_{t-1} + b)');
+                }},
+                { name: '展示前向传播 h→h', duration: 600, action: (i, instant) => {
+                    const dur = instant ? 0 : 400;
+                    forwardHH.forEach((l, t) => {
+                        gsap.to(l.node(), { opacity: 1, duration: dur / 1000, delay: t * 0.1 });
+                    });
+                    svg.selectAll('.whh-label').transition().duration(dur).attr('opacity', 1);
+                    descText.text('步骤2: 隐藏状态 h_t 通过 W_hh 传递到下一个时间步');
+                }},
+                { name: '展示前向传播 h→y', duration: 600, action: (i, instant) => {
+                    const dur = instant ? 0 : 400;
+                    forwardHY.forEach((l, t) => {
+                        gsap.to(l.node(), { opacity: 1, duration: dur / 1000, delay: t * 0.08 });
+                    });
+                    descText.text('步骤3: 每个时间步产生输出 y_t，计算损失 L_t');
+                }},
+                { name: '梯度回传 L→h', duration: 800, action: (i, instant) => {
+                    const dur = instant ? 0 : 500;
+                    gradLH.forEach((l, t) => {
+                        gsap.to(l.node(), { opacity: 1, duration: dur / 1000, delay: (T - 1 - t) * 0.1 });
+                    });
+                    descText.text('步骤4: 从每个损失 L_t 开始回传梯度到 h_t');
+                }},
+                { name: '梯度沿时间回传', duration: 1000, action: (i, instant) => {
+                    const dur = instant ? 0 : 600;
+                    gradHH.forEach((l, idx) => {
+                        gsap.to(l.node(), { opacity: 1, duration: dur / 1000, delay: idx * 0.15 });
+                    });
+                    descText.text('步骤5: 梯度沿时间维度从右向左传播 —— 这就是 BPTT！');
+                }},
+            ];
+
+            new AnimationController({
+                container: document.getElementById('bp-bptt-controls'),
+                steps: animSteps,
+                defaultDuration: 800,
+            });
+        })();
+
+        /* =================================================================
+         *  Section 2: 链式法则展开
+         * ================================================================= */
+        (function initSection2() {
+            const svg = d3.select('#svg-chain-rule');
+            const W = 900, H = 360;
+            const T = 6;
+            const xGap = 130, yH = 180;
+            const xStart = 60;
+
+            function nx(t) { return xStart + t * xGap; }
+
+            // 隐藏节点
+            for (let t = 0; t < T; t++) {
+                svg.append('circle')
+                    .attr('cx', nx(t)).attr('cy', yH).attr('r', 18)
+                    .attr('fill', C.bgSec).attr('stroke', C.green).attr('stroke-width', 2);
+                svg.append('text')
+                    .attr('x', nx(t)).attr('y', yH + 5)
+                    .attr('text-anchor', 'middle').attr('fill', C.green)
+                    .attr('font-size', 13).attr('font-family', 'var(--font-mono)')
+                    .text('h' + t);
+            }
+
+            // h→h 箭头
+            for (let t = 0; t < T - 1; t++) {
+                svg.append('line')
+                    .attr('x1', nx(t) + 20).attr('y1', yH)
+                    .attr('x2', nx(t + 1) - 20).attr('y2', yH)
+                    .attr('stroke', C.blue).attr('stroke-width', 2)
+                    .attr('marker-end', 'url(#arrow-blue)');
+            }
+
+            // L_t 节点（只在最后一个上方）
+            const targetT = T - 1;
+            svg.append('text')
+                .attr('x', nx(targetT)).attr('y', yH - 60)
+                .attr('text-anchor', 'middle').attr('fill', C.orange)
+                .attr('font-size', 14).attr('font-weight', 600)
+                .text('L_t (t=' + targetT + ')');
+            svg.append('line')
+                .attr('x1', nx(targetT)).attr('y1', yH - 45)
+                .attr('x2', nx(targetT)).attr('y2', yH - 20)
+                .attr('stroke', C.orange).attr('stroke-width', 2);
+
+            // 箭头 marker
+            svg.append('defs').html(`
+                <marker id="arrow-blue" viewBox="0 0 10 10" refX="8" refY="5"
+                    markerWidth="6" markerHeight="6" orient="auto">
+                    <path d="M0,0 L10,5 L0,10 Z" fill="${C.blue}"/>
+                </marker>
+                <marker id="arrow-red" viewBox="0 0 10 10" refX="8" refY="5"
+                    markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                    <path d="M0,0 L10,5 L0,10 Z" fill="${C.red}"/>
+                </marker>
+            `);
+
+            // 梯度弧线（从 target 到各 k）
+            const gradArcs = [];
+            for (let k = targetT; k >= 0; k--) {
+                const arcHeight = 30 + (targetT - k) * 18;
+                const pathD = `M${nx(targetT)},${yH + 20} Q${(nx(targetT) + nx(k)) / 2},${yH + 20 + arcHeight} ${nx(k)},${yH + 20}`;
+                const arc = svg.append('path')
+                    .attr('d', pathD)
+                    .attr('fill', 'none')
+                    .attr('stroke', C.red)
+                    .attr('stroke-width', 2)
+                    .attr('stroke-dasharray', '5 3')
+                    .attr('opacity', 0);
+                gradArcs.push(arc);
+            }
+
+            // 雅可比乘积标注
+            const jacobLabels = [];
+            for (let k = targetT; k >= 0; k--) {
+                const steps = targetT - k;
+                let labelText = steps === 0 ? '∂L/∂h_t' : `∂h/∂h × ${steps} 次`;
+                const lbl = svg.append('text')
+                    .attr('x', nx(k)).attr('y', yH + 55 + (targetT - k) * 18)
+                    .attr('text-anchor', 'middle')
+                    .attr('fill', steps === 0 ? C.orange : C.red)
+                    .attr('font-size', 10).attr('font-family', 'var(--font-mono)')
+                    .attr('opacity', 0)
+                    .text(labelText);
+                jacobLabels.push(lbl);
+            }
+
+            const descText = svg.append('text')
+                .attr('x', W / 2).attr('y', H - 10)
+                .attr('text-anchor', 'middle').attr('fill', C.textSec)
+                .attr('font-size', 13).text('');
+
+            const animSteps = [];
+            for (let i = 0; i <= targetT; i++) {
+                const k = targetT - i;
+                animSteps.push({
+                    name: `梯度到 h_${k}`,
+                    duration: 700,
+                    action: (idx, instant) => {
+                        const dur = instant ? 0 : 500;
+                        gsap.to(gradArcs[i].node(), { opacity: 0.8, duration: dur / 1000 });
+                        gsap.to(jacobLabels[i].node(), { opacity: 1, duration: dur / 1000 });
+                        if (i === 0) {
+                            descText.text('从 L_t 直接对 h_t 求导，这是梯度的起点');
+                        } else {
+                            descText.text(`梯度传到 h_${k}：需要 ${i} 个雅可比矩阵的连乘 — 这就是梯度消失/爆炸的根源`);
+                        }
+                        // 高亮对应节点
+                        svg.selectAll('circle')
+                            .filter((_, ci) => ci === k)
+                            .transition().duration(dur)
+                            .attr('stroke', C.red).attr('stroke-width', 3);
+                    }
+                });
+            }
+
+            new AnimationController({
+                container: document.getElementById('chain-rule-controls'),
+                steps: animSteps,
+                defaultDuration: 700,
+            });
+        })();
+
+        /* =================================================================
+         *  Section 3: 梯度流可视化 — 交互式展开 RNN
+         * ================================================================= */
+        (function initSection3() {
+            const svgEl = document.getElementById('svg-gradient-flow');
+            const svg = d3.select(svgEl);
+            const W = 900, H = 380;
+            let T = 6;
+            let whhScale = 0.9;
+
+            const sliderLen = document.getElementById('seq-len-slider');
+            const sliderScale = document.getElementById('whh-scale-slider');
+            const valLen = document.getElementById('seq-len-val');
+            const valScale = document.getElementById('whh-scale-val');
+
+            function buildRNNData(seqLen, scale) {
+                const hiddenSize = 4;
+                const inputSize = 2;
+                const Wxh = randomMatrix(hiddenSize, inputSize, 0.5, 42);
+                const Whh = randomMatrix(hiddenSize, hiddenSize, scale, 99);
+                const bh = zerosVector(hiddenSize);
+                const rng = seededRandom(77);
+                const xs = Array.from({ length: seqLen }, () =>
+                    Array.from({ length: inputSize }, () => (rng() - 0.5) * 2));
+                const h0 = zerosVector(hiddenSize);
+                const fwd = rnnForward(xs, h0, Wxh, Whh, bh);
+                const analysis = gradientFlowAnalysis(Whh, fwd.steps);
+                return { fwd, analysis, Whh, seqLen };
+            }
+
+            function drawGradientFlow() {
+                svg.selectAll('*').remove();
+                const data = buildRNNData(T, whhScale);
+                const { fwd, analysis } = data;
+                const steps = fwd.steps;
+                const cumNorms = analysis.cumulativeNorms;
+                const maxCum = Math.max(...cumNorms, 0.01);
+
+                const xGap = Math.min(130, (W - 120) / T);
+                const xStart = 60;
+                const yH = 190, yIn = 310, yOut = 70;
+
+                function nx(t) { return xStart + t * xGap; }
+
+                // Defs
+                svg.append('defs').html(`
+                    <marker id="af-blue" viewBox="0 0 10 10" refX="8" refY="5"
+                        markerWidth="5" markerHeight="5" orient="auto">
+                        <path d="M0,0 L10,5 L0,10 Z" fill="${C.blue}"/>
+                    </marker>
+                    <marker id="af-red" viewBox="0 0 10 10" refX="2" refY="5"
+                        markerWidth="5" markerHeight="5" orient="auto">
+                        <path d="M10,0 L0,5 L10,10 Z" fill="${C.red}"/>
+                    </marker>
+                    <linearGradient id="grad-heat" x1="0%" y1="0%" x2="100%" y2="0%">
+                        <stop offset="0%" style="stop-color:${C.red};stop-opacity:0.2"/>
+                        <stop offset="100%" style="stop-color:${C.red};stop-opacity:1"/>
+                    </linearGradient>
+                `);
+
+                // 前向链接
+                for (let t = 0; t < T; t++) {
+                    // x -> h
+                    svg.append('line')
+                        .attr('x1', nx(t)).attr('y1', yIn - 14)
+                        .attr('x2', nx(t)).attr('y2', yH + 18)
+                        .attr('stroke', C.blue).attr('stroke-width', 1.5).attr('opacity', 0.4);
+                    // h -> out
+                    svg.append('line')
+                        .attr('x1', nx(t)).attr('y1', yH - 18)
+                        .attr('x2', nx(t)).attr('y2', yOut + 14)
+                        .attr('stroke', C.purple).attr('stroke-width', 1.5).attr('opacity', 0.4);
+                }
+                // h->h 前向
+                for (let t = 0; t < T - 1; t++) {
+                    svg.append('line')
+                        .attr('x1', nx(t) + 20).attr('y1', yH)
+                        .attr('x2', nx(t + 1) - 20).attr('y2', yH)
+                        .attr('stroke', C.blue).attr('stroke-width', 2).attr('opacity', 0.5)
+                        .attr('marker-end', 'url(#af-blue)');
+                }
+
+                // 梯度弧线 (反向)
+                const gradLines = [];
+                for (let t = T - 1; t > 0; t--) {
+                    const mag = cumNorms[t - 1] / maxCum;
+                    const line = svg.append('line')
+                        .attr('x1', nx(t) - 20).attr('y1', yH + 8)
+                        .attr('x2', nx(t - 1) + 20).attr('y2', yH + 8)
+                        .attr('stroke', C.red)
+                        .attr('stroke-width', 1.5 + mag * 3)
+                        .attr('opacity', 0)
+                        .attr('stroke-dasharray', '5 3')
+                        .attr('class', 'gradient-arrow');
+                    gradLines.push({ line, t });
+                }
+
+                // 节点
+                for (let t = 0; t < T; t++) {
+                    const mag = cumNorms[t] / maxCum;
+                    // h 节点 — 颜色反映梯度大小
+                    svg.append('circle')
+                        .attr('cx', nx(t)).attr('cy', yH).attr('r', 16)
+                        .attr('fill', `rgba(255,82,82,${0.1 + mag * 0.5})`)
+                        .attr('stroke', gradColor(cumNorms[t], maxCum))
+                        .attr('stroke-width', 2.5)
+                        .attr('class', 'h-node');
+                    svg.append('text')
+                        .attr('x', nx(t)).attr('y', yH + 4)
+                        .attr('text-anchor', 'middle').attr('fill', C.text)
+                        .attr('font-size', 11).attr('font-family', 'var(--font-mono)')
+                        .text('h' + t);
+                    // 梯度数值
+                    svg.append('text')
+                        .attr('x', nx(t)).attr('y', yH + 38)
+                        .attr('text-anchor', 'middle')
+                        .attr('fill', gradColor(cumNorms[t], maxCum))
+                        .attr('font-size', 9).attr('font-family', 'var(--font-mono)')
+                        .attr('class', 'grad-val')
+                        .text(cumNorms[t].toFixed(3));
+                    // x 节点
+                    svg.append('rect')
+                        .attr('x', nx(t) - 10).attr('y', yIn - 10)
+                        .attr('width', 20).attr('height', 20).attr('rx', 4)
+                        .attr('fill', C.bgSec).attr('stroke', C.blue).attr('stroke-width', 1.5);
+                    svg.append('text')
+                        .attr('x', nx(t)).attr('y', yIn + 4)
+                        .attr('text-anchor', 'middle').attr('fill', C.blue)
+                        .attr('font-size', 9).text('x' + t);
+                    // L 节点
+                    svg.append('text')
+                        .attr('x', nx(t)).attr('y', yOut)
+                        .attr('text-anchor', 'middle').attr('fill', C.orange)
+                        .attr('font-size', 11).attr('font-weight', 600).text('L' + t);
+                }
+
+                // 标题
+                svg.append('text')
+                    .attr('x', W / 2).attr('y', H - 10)
+                    .attr('text-anchor', 'middle').attr('fill', C.textSec).attr('font-size', 12)
+                    .text(`梯度累积范数 — Whh谱范数≈${whhScale.toFixed(1)}，颜色越亮=梯度越大`);
+
+                return { gradLines, cumNorms, maxCum };
+            }
+
+            let currentDrawn = drawGradientFlow();
+
+            // 播放梯度流动动画
+            document.getElementById('btn-animate-flow').addEventListener('click', () => {
+                currentDrawn = drawGradientFlow();
+                const { gradLines } = currentDrawn;
+                gradLines.forEach((item, i) => {
+                    gsap.fromTo(item.line.node(),
+                        { opacity: 0 },
+                        { opacity: 0.9, duration: 0.4, delay: i * 0.2 }
+                    );
+                });
+            });
+
+            sliderLen.addEventListener('input', () => {
+                T = +sliderLen.value;
+                valLen.textContent = T;
+                currentDrawn = drawGradientFlow();
+                drawGradMagnitudePlot();
+                drawJacobianNormPlot();
+            });
+            sliderScale.addEventListener('input', () => {
+                whhScale = +sliderScale.value;
+                valScale.textContent = whhScale.toFixed(1);
+                currentDrawn = drawGradientFlow();
+                drawGradMagnitudePlot();
+                drawJacobianNormPlot();
+            });
+
+            // === 梯度大小图 ===
+            function drawGradMagnitudePlot() {
+                const container = document.getElementById('plot-grad-magnitude');
+                container.innerHTML = '';
+                const data = buildRNNData(T, whhScale);
+                const cumNorms = data.analysis.cumulativeNorms;
+
+                const margin = { top: 20, right: 20, bottom: 40, left: 50 };
+                const width = container.clientWidth || 400;
+                const height = 220;
+                const innerW = width - margin.left - margin.right;
+                const innerH = height - margin.top - margin.bottom;
+
+                const svgP = d3.select(container).append('svg')
+                    .attr('width', width).attr('height', height);
+                const g = svgP.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+
+                const xScale = d3.scaleLinear().domain([0, T - 1]).range([0, innerW]);
+                const yScale = d3.scaleLinear().domain([0, Math.max(...cumNorms, 0.1) * 1.2]).range([innerH, 0]);
+
+                g.append('g').attr('transform', `translate(0,${innerH})`)
+                    .call(d3.axisBottom(xScale).ticks(T).tickFormat(d => 't=' + d))
+                    .selectAll('text').attr('fill', C.textSec).attr('font-size', 10);
+                g.selectAll('.domain, .tick line').attr('stroke', C.muted);
+
+                g.append('g')
+                    .call(d3.axisLeft(yScale).ticks(5).tickFormat(d3.format('.2f')))
+                    .selectAll('text').attr('fill', C.textSec).attr('font-size', 10);
+
+                const line = d3.line().x((d, i) => xScale(i)).y(d => yScale(d)).curve(d3.curveMonotoneX);
+                g.append('path').datum(cumNorms)
+                    .attr('fill', 'none').attr('stroke', C.red)
+                    .attr('stroke-width', 2.5).attr('d', line);
+                // 点
+                cumNorms.forEach((v, i) => {
+                    g.append('circle').attr('cx', xScale(i)).attr('cy', yScale(v))
+                        .attr('r', 4).attr('fill', C.red);
+                });
+
+                g.append('text').attr('x', innerW / 2).attr('y', innerH + 35)
+                    .attr('text-anchor', 'middle').attr('fill', C.muted).attr('font-size', 11)
+                    .text('时间步');
+                g.append('text').attr('x', -innerH / 2).attr('y', -35)
+                    .attr('text-anchor', 'middle').attr('fill', C.muted).attr('font-size', 11)
+                    .attr('transform', 'rotate(-90)').text('梯度累积范数');
+            }
+
+            // === 雅可比范数图 ===
+            function drawJacobianNormPlot() {
+                const container = document.getElementById('plot-jacobian-norm');
+                container.innerHTML = '';
+                const data = buildRNNData(T, whhScale);
+                const stepNorms = data.analysis.stepNorms;
+
+                const margin = { top: 20, right: 20, bottom: 40, left: 50 };
+                const width = container.clientWidth || 400;
+                const height = 220;
+                const innerW = width - margin.left - margin.right;
+                const innerH = height - margin.top - margin.bottom;
+
+                const svgP = d3.select(container).append('svg')
+                    .attr('width', width).attr('height', height);
+                const g = svgP.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+
+                const xScale = d3.scaleLinear().domain([0, T - 1]).range([0, innerW]);
+                const maxVal = Math.max(...stepNorms, 0.1) * 1.2;
+                const yScale = d3.scaleLinear().domain([0, maxVal]).range([innerH, 0]);
+
+                g.append('g').attr('transform', `translate(0,${innerH})`)
+                    .call(d3.axisBottom(xScale).ticks(T).tickFormat(d => 't=' + d))
+                    .selectAll('text').attr('fill', C.textSec).attr('font-size', 10);
+                g.selectAll('.domain, .tick line').attr('stroke', C.muted);
+
+                g.append('g')
+                    .call(d3.axisLeft(yScale).ticks(5).tickFormat(d3.format('.2f')))
+                    .selectAll('text').attr('fill', C.textSec).attr('font-size', 10);
+
+                // 参考线 y=1
+                g.append('line')
+                    .attr('x1', 0).attr('x2', innerW)
+                    .attr('y1', yScale(1)).attr('y2', yScale(1))
+                    .attr('stroke', C.orange).attr('stroke-dasharray', '4 3').attr('stroke-width', 1.5);
+                g.append('text').attr('x', innerW - 5).attr('y', yScale(1) - 5)
+                    .attr('text-anchor', 'end').attr('fill', C.orange).attr('font-size', 9).text('= 1 (稳定)');
+
+                // 柱状图
+                const barW = Math.max(8, innerW / T * 0.6);
+                stepNorms.forEach((v, i) => {
+                    const color = v > 1 ? C.red : (v < 0.5 ? C.purple : C.green);
+                    g.append('rect')
+                        .attr('x', xScale(i) - barW / 2).attr('y', yScale(v))
+                        .attr('width', barW).attr('height', innerH - yScale(v))
+                        .attr('fill', color).attr('opacity', 0.7).attr('rx', 2);
+                });
+
+                g.append('text').attr('x', innerW / 2).attr('y', innerH + 35)
+                    .attr('text-anchor', 'middle').attr('fill', C.muted).attr('font-size', 11).text('时间步');
+                g.append('text').attr('x', -innerH / 2).attr('y', -35)
+                    .attr('text-anchor', 'middle').attr('fill', C.muted).attr('font-size', 11)
+                    .attr('transform', 'rotate(-90)').text('雅可比范数');
+            }
+
+            drawGradMagnitudePlot();
+            drawJacobianNormPlot();
+        })();
+
+        /* =================================================================
+         *  Section 4: 截断 BPTT
+         * ================================================================= */
+        (function initSection4() {
+            const svg = d3.select('#svg-truncated');
+            const W = 900, H = 340;
+            let totalT = 8;
+            let truncK = 3;
+
+            const sliderK = document.getElementById('trunc-k-slider');
+            const sliderT = document.getElementById('trunc-t-slider');
+            const valK = document.getElementById('trunc-k-val');
+            const valT = document.getElementById('trunc-t-val');
+
+            function drawTruncated() {
+                svg.selectAll('*').remove();
+                const xGap = Math.min(100, (W - 80) / totalT);
+                const xStart = 50;
+                const yH = 160;
+
+                function nx(t) { return xStart + t * xGap; }
+
+                // Defs
+                svg.append('defs').html(`
+                    <marker id="at-green" viewBox="0 0 10 10" refX="8" refY="5"
+                        markerWidth="5" markerHeight="5" orient="auto">
+                        <path d="M0,0 L10,5 L0,10 Z" fill="${C.green}"/>
+                    </marker>
+                `);
+
+                // 前向链接 h->h
+                for (let t = 0; t < totalT - 1; t++) {
+                    svg.append('line')
+                        .attr('x1', nx(t) + 18).attr('y1', yH)
+                        .attr('x2', nx(t + 1) - 18).attr('y2', yH)
+                        .attr('stroke', C.blue).attr('stroke-width', 1.5).attr('opacity', 0.4)
+                        .attr('marker-end', 'url(#at-green)');
+                }
+
+                // h 节点
+                for (let t = 0; t < totalT; t++) {
+                    svg.append('circle')
+                        .attr('cx', nx(t)).attr('cy', yH).attr('r', 16)
+                        .attr('fill', C.bgSec)
+                        .attr('stroke', C.green).attr('stroke-width', 2);
+                    svg.append('text')
+                        .attr('x', nx(t)).attr('y', yH + 4)
+                        .attr('text-anchor', 'middle').attr('fill', C.green)
+                        .attr('font-size', 10).attr('font-family', 'var(--font-mono)')
+                        .text('h' + t);
+                    // L_t 上方
+                    svg.append('text')
+                        .attr('x', nx(t)).attr('y', yH - 50)
+                        .attr('text-anchor', 'middle').attr('fill', C.orange)
+                        .attr('font-size', 10).attr('font-weight', 600).text('L' + t);
+                    svg.append('line')
+                        .attr('x1', nx(t)).attr('y1', yH - 40)
+                        .attr('x2', nx(t)).attr('y2', yH - 18)
+                        .attr('stroke', C.orange).attr('stroke-width', 1.5).attr('opacity', 0.5);
+                }
+
+                // 对每个 t，画梯度回传范围
+                for (let t = 0; t < totalT; t++) {
+                    const kStart = Math.max(0, t - truncK + 1);
+                    // 高亮接收梯度的范围
+                    if (t > 0) {
+                        for (let k = t; k > kStart; k--) {
+                            const arcH = 15 + (t - k) * 8;
+                            svg.append('path')
+                                .attr('d', `M${nx(k)},${yH + 20} Q${(nx(k) + nx(k - 1)) / 2},${yH + 20 + arcH} ${nx(k - 1)},${yH + 20}`)
+                                .attr('fill', 'none')
+                                .attr('stroke', C.red)
+                                .attr('stroke-width', 1.5)
+                                .attr('stroke-dasharray', '4 2')
+                                .attr('opacity', 0.6);
+                        }
+                    }
+                    // 截断边界标记
+                    if (kStart > 0) {
+                        svg.append('line')
+                            .attr('x1', nx(kStart) - 8).attr('y1', yH - 25)
+                            .attr('x2', nx(kStart) - 8).attr('y2', yH + 55)
+                            .attr('stroke', C.orange).attr('stroke-width', 1.5)
+                            .attr('stroke-dasharray', '3 2').attr('opacity', 0.4);
+                    }
+                }
+
+                // 截断区域着色
+                for (let t = 0; t < totalT; t++) {
+                    const kStart = Math.max(0, t - truncK + 1);
+                    // 在截断范围内的节点加背景
+                    for (let k = kStart; k <= t; k++) {
+                        svg.append('circle')
+                            .attr('cx', nx(k)).attr('cy', yH).attr('r', 22)
+                            .attr('fill', 'none')
+                            .attr('stroke', C.red).attr('stroke-width', 1)
+                            .attr('opacity', 0.2 + 0.15 * (truncK - (t - k)));
+                    }
+                }
+
+                // 说明
+                svg.append('text')
+                    .attr('x', W / 2).attr('y', H - 15)
+                    .attr('text-anchor', 'middle').attr('fill', C.textSec).attr('font-size', 12)
+                    .text(`截断长度 K=${truncK}: 每个 L_t 只回传 ${truncK} 步梯度（红色虚线弧）`);
+
+                // 不接收梯度的区域
+                for (let t = truncK; t < totalT; t++) {
+                    const cutOff = t - truncK;
+                    for (let k = 0; k <= cutOff; k++) {
+                        svg.append('text')
+                            .attr('x', nx(k)).attr('y', yH + 60 + t * 2)
+                            .attr('text-anchor', 'middle').attr('fill', C.muted)
+                            .attr('font-size', 7).attr('opacity', 0.3)
+                            .text('✕');
+                    }
+                }
+            }
+
+            drawTruncated();
+
+            sliderK.addEventListener('input', () => {
+                truncK = +sliderK.value;
+                valK.textContent = truncK;
+                sliderK.max = totalT;
+                drawTruncated();
+                drawComputeCost();
+                drawTruncAccuracy();
+            });
+            sliderT.addEventListener('input', () => {
+                totalT = +sliderT.value;
+                valT.textContent = totalT;
+                sliderK.max = totalT;
+                if (truncK > totalT) {
+                    truncK = totalT;
+                    sliderK.value = truncK;
+                    valK.textContent = truncK;
+                }
+                drawTruncated();
+                drawComputeCost();
+                drawTruncAccuracy();
+            });
+
+            // === 计算量对比 ===
+            function drawComputeCost() {
+                const container = document.getElementById('plot-compute-cost');
+                container.innerHTML = '';
+                const margin = { top: 20, right: 20, bottom: 40, left: 60 };
+                const width = container.clientWidth || 400;
+                const height = 220;
+                const innerW = width - margin.left - margin.right;
+                const innerH = height - margin.top - margin.bottom;
+
+                const svgP = d3.select(container).append('svg')
+                    .attr('width', width).attr('height', height);
+                const g = svgP.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+
+                // 对每个可能的 K 值计算
+                const kValues = Array.from({ length: totalT }, (_, i) => i + 1);
+                const fullCost = totalT * (totalT + 1) / 2; // 完整 BPTT
+                const costs = kValues.map(k => {
+                    let cost = 0;
+                    for (let t = 0; t < totalT; t++) cost += Math.min(k, t + 1);
+                    return cost;
+                });
+
+                const xScale = d3.scaleBand().domain(kValues).range([0, innerW]).padding(0.3);
+                const yScale = d3.scaleLinear().domain([0, fullCost * 1.1]).range([innerH, 0]);
+
+                g.append('g').attr('transform', `translate(0,${innerH})`)
+                    .call(d3.axisBottom(xScale).tickFormat(d => 'K=' + d))
+                    .selectAll('text').attr('fill', C.textSec).attr('font-size', 9);
+                g.selectAll('.domain, .tick line').attr('stroke', C.muted);
+                g.append('g')
+                    .call(d3.axisLeft(yScale).ticks(5))
+                    .selectAll('text').attr('fill', C.textSec).attr('font-size', 9);
+
+                costs.forEach((cost, i) => {
+                    const k = kValues[i];
+                    const color = k === truncK ? C.green : (k === totalT ? C.orange : C.blue);
+                    const opacity = k === truncK ? 1 : 0.5;
+                    g.append('rect')
+                        .attr('x', xScale(k)).attr('y', yScale(cost))
+                        .attr('width', xScale.bandwidth()).attr('height', innerH - yScale(cost))
+                        .attr('fill', color).attr('opacity', opacity).attr('rx', 2);
+                });
+
+                g.append('text').attr('x', innerW / 2).attr('y', innerH + 35)
+                    .attr('text-anchor', 'middle').attr('fill', C.muted).attr('font-size', 11).text('截断长度 K');
+                g.append('text').attr('x', -innerH / 2).attr('y', -45)
+                    .attr('text-anchor', 'middle').attr('fill', C.muted).attr('font-size', 11)
+                    .attr('transform', 'rotate(-90)').text('梯度计算量(步数)');
+            }
+
+            // === 梯度精度 vs 截断长度 ===
+            function drawTruncAccuracy() {
+                const container = document.getElementById('plot-trunc-accuracy');
+                container.innerHTML = '';
+                const margin = { top: 20, right: 20, bottom: 40, left: 60 };
+                const width = container.clientWidth || 400;
+                const height = 220;
+                const innerW = width - margin.left - margin.right;
+                const innerH = height - margin.top - margin.bottom;
+
+                const svgP = d3.select(container).append('svg')
+                    .attr('width', width).attr('height', height);
+                const g = svgP.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+
+                const kValues = Array.from({ length: totalT }, (_, i) => i + 1);
+                // 模拟精度：假设梯度以指数衰减，截断 K 步捕获的比例
+                const accuracy = kValues.map(k => {
+                    const decay = 0.85;
+                    let captured = 0, total = 0;
+                    for (let d = 0; d < totalT; d++) {
+                        const w = Math.pow(decay, d);
+                        total += w;
+                        if (d < k) captured += w;
+                    }
+                    return captured / total;
+                });
+
+                const xScale = d3.scaleLinear().domain([1, totalT]).range([0, innerW]);
+                const yScale = d3.scaleLinear().domain([0, 1.05]).range([innerH, 0]);
+
+                g.append('g').attr('transform', `translate(0,${innerH})`)
+                    .call(d3.axisBottom(xScale).ticks(totalT).tickFormat(d => 'K=' + d))
+                    .selectAll('text').attr('fill', C.textSec).attr('font-size', 9);
+                g.selectAll('.domain, .tick line').attr('stroke', C.muted);
+                g.append('g')
+                    .call(d3.axisLeft(yScale).ticks(5).tickFormat(d3.format('.0%')))
+                    .selectAll('text').attr('fill', C.textSec).attr('font-size', 9);
+
+                // 区域填充
+                const area = d3.area()
+                    .x((d, i) => xScale(kValues[i]))
+                    .y0(innerH)
+                    .y1(d => yScale(d))
+                    .curve(d3.curveMonotoneX);
+                g.append('path').datum(accuracy)
+                    .attr('fill', `rgba(22,199,154,0.15)`)
+                    .attr('d', area);
+
+                const line = d3.line()
+                    .x((d, i) => xScale(kValues[i]))
+                    .y(d => yScale(d))
+                    .curve(d3.curveMonotoneX);
+                g.append('path').datum(accuracy)
+                    .attr('fill', 'none').attr('stroke', C.green)
+                    .attr('stroke-width', 2.5).attr('d', line);
+
+                // 当前K标记
+                const idx = truncK - 1;
+                if (idx >= 0 && idx < accuracy.length) {
+                    g.append('circle')
+                        .attr('cx', xScale(truncK)).attr('cy', yScale(accuracy[idx]))
+                        .attr('r', 6).attr('fill', C.green);
+                    g.append('text')
+                        .attr('x', xScale(truncK) + 10).attr('y', yScale(accuracy[idx]) - 8)
+                        .attr('fill', C.green).attr('font-size', 11).attr('font-weight', 600)
+                        .text((accuracy[idx] * 100).toFixed(1) + '%');
+                }
+
+                g.append('text').attr('x', innerW / 2).attr('y', innerH + 35)
+                    .attr('text-anchor', 'middle').attr('fill', C.muted).attr('font-size', 11).text('截断长度 K');
+                g.append('text').attr('x', -innerH / 2).attr('y', -45)
+                    .attr('text-anchor', 'middle').attr('fill', C.muted).attr('font-size', 11)
+                    .attr('transform', 'rotate(-90)').text('捕获的梯度比例');
+            }
+
+            drawComputeCost();
+            drawTruncAccuracy();
+        })();
+
+        /* =================================================================
+         *  Section 5: BPTT 的局限性 — 矩阵连乘演示
+         * ================================================================= */
+        (function initSection5() {
+            const svg = d3.select('#svg-limitations');
+            const W = 900, H = 300;
+            let mode = 'vanish'; // 'vanish' | 'explode'
+            let maxT = 15;
+
+            const sliderT = document.getElementById('limit-t-slider');
+            const valT = document.getElementById('limit-t-val');
+            const tabVanish = document.getElementById('tab-vanish');
+            const tabExplode = document.getElementById('tab-explode');
+
+            function computeMatPowerNorms(matScale, steps) {
+                const size = 3;
+                const M = randomMatrix(size, size, matScale, 123);
+                const norms = [1]; // identity
+                let current = M.map(r => [...r]);
+                for (let t = 1; t <= steps; t++) {
+                    // 计算 Frobenius norm
+                    let norm = 0;
+                    for (let i = 0; i < size; i++)
+                        for (let j = 0; j < size; j++)
+                            norm += current[i][j] * current[i][j];
+                    norms.push(Math.sqrt(norm));
+                    if (t < steps) {
+                        current = RNNUtils.matMul(current, M);
+                    }
+                }
+                return norms;
+            }
+
+            function drawLimitations() {
+                svg.selectAll('*').remove();
+
+                const scale = mode === 'vanish' ? 0.4 : 1.3;
+                const norms = computeMatPowerNorms(scale, maxT);
+
+                const margin = { top: 25, right: 30, bottom: 45, left: 70 };
+                const innerW = W - margin.left - margin.right;
+                const innerH = H - margin.top - margin.bottom;
+                const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+
+                const xScale = d3.scaleLinear().domain([0, maxT]).range([0, innerW]);
+                const maxNorm = Math.max(...norms, 1);
+                const useLog = maxNorm > 100;
+
+                let yScale;
+                if (useLog) {
+                    yScale = d3.scaleLog().domain([Math.max(0.001, Math.min(...norms.filter(n => n > 0))), maxNorm * 1.5]).range([innerH, 0]).clamp(true);
+                } else {
+                    yScale = d3.scaleLinear().domain([0, maxNorm * 1.1]).range([innerH, 0]);
+                }
+
+                // 轴
+                g.append('g').attr('transform', `translate(0,${innerH})`)
+                    .call(d3.axisBottom(xScale).ticks(Math.min(maxT, 15)).tickFormat(d => d))
+                    .selectAll('text').attr('fill', C.textSec).attr('font-size', 10);
+                g.selectAll('.domain, .tick line').attr('stroke', C.muted);
+
+                const yAxis = useLog ? d3.axisLeft(yScale).ticks(5, '.1e') : d3.axisLeft(yScale).ticks(6);
+                g.append('g').call(yAxis)
+                    .selectAll('text').attr('fill', C.textSec).attr('font-size', 9);
+
+                // 参考线 y=1
+                if (!useLog || (1 >= yScale.domain()[0] && 1 <= yScale.domain()[1])) {
+                    g.append('line')
+                        .attr('x1', 0).attr('x2', innerW)
+                        .attr('y1', yScale(1)).attr('y2', yScale(1))
+                        .attr('stroke', C.orange).attr('stroke-dasharray', '4 3');
+                    g.append('text').attr('x', innerW - 5).attr('y', yScale(1) - 5)
+                        .attr('text-anchor', 'end').attr('fill', C.orange).attr('font-size', 9)
+                        .text('norm = 1');
+                }
+
+                // 线
+                const color = mode === 'vanish' ? C.purple : C.red;
+                const validNorms = norms.map((n, i) => ({ t: i, norm: n })).filter(d => d.norm > 0);
+
+                const line = d3.line()
+                    .x(d => xScale(d.t))
+                    .y(d => yScale(Math.max(useLog ? yScale.domain()[0] : 0, d.norm)))
+                    .curve(d3.curveMonotoneX);
+
+                // 面积
+                const area = d3.area()
+                    .x(d => xScale(d.t))
+                    .y0(innerH)
+                    .y1(d => yScale(Math.max(useLog ? yScale.domain()[0] : 0, d.norm)))
+                    .curve(d3.curveMonotoneX);
+                g.append('path').datum(validNorms)
+                    .attr('fill', color).attr('opacity', 0.1).attr('d', area);
+
+                g.append('path').datum(validNorms)
+                    .attr('fill', 'none').attr('stroke', color)
+                    .attr('stroke-width', 2.5).attr('d', line);
+
+                validNorms.forEach(d => {
+                    g.append('circle')
+                        .attr('cx', xScale(d.t))
+                        .attr('cy', yScale(Math.max(useLog ? yScale.domain()[0] : 0, d.norm)))
+                        .attr('r', 3).attr('fill', color);
+                });
+
+                // 标签
+                g.append('text').attr('x', innerW / 2).attr('y', innerH + 38)
+                    .attr('text-anchor', 'middle').attr('fill', C.muted).attr('font-size', 12)
+                    .text('连乘次数 T');
+                g.append('text').attr('x', -innerH / 2).attr('y', -50)
+                    .attr('text-anchor', 'middle').attr('fill', C.muted).attr('font-size', 12)
+                    .attr('transform', 'rotate(-90)')
+                    .text(useLog ? '||W^T|| (对数尺度)' : '||W^T|| (矩阵范数)');
+
+                // 标题
+                const titleText = mode === 'vanish'
+                    ? `梯度消失: 谱范数 < 1 → 范数指数衰减到 0 (σ≈${scale})`
+                    : `梯度爆炸: 谱范数 > 1 → 范数指数增长到无穷 (σ≈${scale})`;
+                svg.append('text')
+                    .attr('x', W / 2).attr('y', 16)
+                    .attr('text-anchor', 'middle').attr('fill', color)
+                    .attr('font-size', 13).attr('font-weight', 600)
+                    .text(titleText);
+            }
+
+            drawLimitations();
+
+            tabVanish.addEventListener('click', () => {
+                mode = 'vanish';
+                tabVanish.classList.add('active');
+                tabExplode.classList.remove('active');
+                drawLimitations();
+            });
+            tabExplode.addEventListener('click', () => {
+                mode = 'explode';
+                tabExplode.classList.add('active');
+                tabVanish.classList.remove('active');
+                drawLimitations();
+            });
+            sliderT.addEventListener('input', () => {
+                maxT = +sliderT.value;
+                valT.textContent = maxT;
+                drawLimitations();
+            });
+        })();
+
+    })();
+    </script>
+</body>
+</html>

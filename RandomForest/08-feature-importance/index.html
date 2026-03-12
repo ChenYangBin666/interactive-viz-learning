@@ -1,0 +1,1370 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>特征重要性 — 随机森林可视化</title>
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+SC:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.2/dist/gsap.min.js"></script>
+    <style>
+        /* ===== Module-specific styles ===== */
+        .page-header {
+            margin-bottom: 2rem;
+        }
+        .breadcrumb {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            margin-bottom: 0.5rem;
+        }
+        .breadcrumb a {
+            color: var(--text-muted);
+            transition: color 0.2s;
+        }
+        .breadcrumb a:hover {
+            color: var(--accent-green);
+        }
+
+        .section {
+            margin-bottom: 3.5rem;
+        }
+        .section-title h2 {
+            margin-bottom: 0;
+        }
+
+        /* Data table */
+        .data-table-wrap {
+            overflow-x: auto;
+            border-radius: var(--radius-md);
+            border: 1px solid var(--border-color);
+            background: var(--bg-secondary);
+            margin: 1rem 0;
+        }
+        .data-table {
+            border-collapse: collapse;
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            width: 100%;
+        }
+        .data-table th, .data-table td {
+            padding: 0.5rem 0.75rem;
+            text-align: center;
+            border: 1px solid rgba(42,42,74,0.4);
+            white-space: nowrap;
+        }
+        .data-table th {
+            background: var(--bg-card);
+            color: var(--accent-green);
+            font-weight: 600;
+            position: sticky;
+            top: 0;
+        }
+        .data-table tr:nth-child(even) td {
+            background: rgba(22,33,62,0.3);
+        }
+        .data-table td.shuffled {
+            background: rgba(255,171,64,0.2) !important;
+            color: var(--accent-orange);
+        }
+
+        /* Bar charts */
+        .bar-label {
+            font-size: 0.75rem;
+            fill: var(--text-secondary);
+        }
+        .bar-value {
+            font-size: 0.7rem;
+            fill: var(--text-primary);
+            font-family: var(--font-mono);
+        }
+        .axis text {
+            font-size: 0.72rem;
+            fill: var(--text-secondary);
+        }
+        .axis line, .axis path {
+            stroke: var(--border-color);
+        }
+
+        /* Compare layout */
+        .compare-wrap {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5rem;
+        }
+        @media (max-width: 900px) {
+            .compare-wrap { grid-template-columns: 1fr; }
+        }
+
+        /* Feature toggle panel */
+        .feature-toggles {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.6rem;
+            margin: 1rem 0;
+        }
+        .feature-toggle {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.4rem 0.8rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 0.85rem;
+            user-select: none;
+        }
+        .feature-toggle.active {
+            border-color: var(--accent-green);
+            background: rgba(22,199,154,0.1);
+        }
+        .feature-toggle.active .dot {
+            background: var(--accent-green);
+        }
+        .feature-toggle .dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: var(--text-muted);
+            transition: background 0.2s;
+        }
+
+        /* Stat badges */
+        .stat-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1rem;
+            margin: 1rem 0;
+        }
+        .stat-badge {
+            padding: 0.5rem 1rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            text-align: center;
+        }
+        .stat-badge .label {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            margin-bottom: 0.2rem;
+        }
+        .stat-badge .value {
+            font-family: var(--font-mono);
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: var(--accent-green);
+        }
+
+        /* PDP line chart */
+        .pdp-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+        .pdp-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 0.75rem;
+        }
+        .pdp-card h4 {
+            font-size: 0.85rem;
+            margin-bottom: 0.5rem;
+            color: var(--text-secondary);
+        }
+
+        /* Node highlight during traversal */
+        .node-active {
+            stroke: var(--accent-orange) !important;
+            stroke-width: 3 !important;
+        }
+        .node-visited {
+            opacity: 0.5;
+        }
+
+        /* Shuffle animation helper */
+        @keyframes shufflePulse {
+            0% { background: rgba(255,171,64,0.05); }
+            50% { background: rgba(255,171,64,0.25); }
+            100% { background: rgba(255,171,64,0.05); }
+        }
+        .shuffle-flash {
+            animation: shufflePulse 0.4s ease 2;
+        }
+    </style>
+</head>
+<body>
+    <div class="page-container">
+        <div class="page-header">
+            <div class="breadcrumb"><a href="../index.html">随机森林</a> / 模块 08</div>
+            <h1>特征重要性</h1>
+            <p>哪些特征对预测贡献最大？如何量化每个特征的重要程度？</p>
+        </div>
+
+        <!-- ==================== Section 1 ==================== -->
+        <div class="section" id="sec-motivation">
+            <div class="section-title">
+                <div class="icon">?</div>
+                <h2>为什么关心特征重要性</h2>
+            </div>
+            <div class="split-layout">
+                <div class="text-panel">
+                    <p>假设你有一个包含 6 个特征的数据集，用来预测二分类标签。这些特征中，有些携带关键信息，有些则只是噪声。</p>
+                    <p>特征重要性（Feature Importance）回答的核心问题是：<strong style="color:var(--accent-green)">哪些特征对模型预测贡献最大？</strong></p>
+                    <p>了解特征重要性可以帮助你：</p>
+                    <ul style="color:var(--text-secondary); padding-left:1.2rem; margin-bottom:1rem;">
+                        <li>移除噪声特征，简化模型</li>
+                        <li>理解数据背后的因果关系</li>
+                        <li>向业务方解释模型决策</li>
+                        <li>发现数据泄漏问题</li>
+                    </ul>
+                    <div class="info-box">
+                        <p>下方表格展示了示例数据集的前 8 条记录。右侧的柱状图将在后续章节中被逐步填充——我们将用两种方法衡量每个特征的重要性。</p>
+                    </div>
+                </div>
+                <div class="viz-panel">
+                    <div class="data-table-wrap" id="sample-table-wrap"></div>
+                    <div class="viz-area" id="motivation-chart" style="min-height:280px; margin-top:1rem;">
+                        <span class="watermark">特征重要性概览</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ==================== Section 2 ==================== -->
+        <div class="section" id="sec-gini">
+            <div class="section-title">
+                <div class="icon">G</div>
+                <h2>基尼重要性 (MDI)</h2>
+            </div>
+            <div class="split-layout">
+                <div class="text-panel">
+                    <p><strong>Mean Decrease in Impurity (MDI)</strong>，也叫基尼重要性。核心思路：</p>
+                    <ol style="color:var(--text-secondary); padding-left:1.2rem; margin-bottom:1rem;">
+                        <li>遍历森林中每棵树的每个分裂节点</li>
+                        <li>计算该节点带来的基尼不纯度下降 $\Delta G$</li>
+                        <li>乘以该节点的样本数 $n_{\text{samples}}$ 作为权重</li>
+                        <li>按特征累加，最后归一化</li>
+                    </ol>
+                    <div class="info-box success">
+                        <p>$$\text{Importance}(f) = \frac{\sum_{\text{nodes splitting on } f} \Delta G \cdot n_{\text{samples}}}{\sum_{\text{all nodes}} \Delta G \cdot n_{\text{samples}}}$$</p>
+                    </div>
+                    <p>点击<strong>播放</strong>按钮，观看算法逐节点遍历，累加各特征的重要性得分。</p>
+                    <div id="gini-controls" style="margin-top:1rem;"></div>
+                    <div class="stat-row" id="gini-stats"></div>
+                </div>
+                <div class="viz-panel">
+                    <div class="viz-area" id="gini-tree-viz" style="min-height:320px;">
+                        <span class="watermark">树遍历动画</span>
+                    </div>
+                    <div class="viz-area" id="gini-bar-chart" style="min-height:260px; margin-top:1rem;">
+                        <span class="watermark">基尼重要性</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ==================== Section 3 ==================== -->
+        <div class="section" id="sec-permutation">
+            <div class="section-title">
+                <div class="icon">P</div>
+                <h2>置换重要性 (MDA)</h2>
+            </div>
+            <div class="split-layout">
+                <div class="text-panel">
+                    <p><strong>Mean Decrease in Accuracy (MDA)</strong>，即置换重要性。核心思路：</p>
+                    <ol style="color:var(--text-secondary); padding-left:1.2rem; margin-bottom:1rem;">
+                        <li>先用原始数据计算基准准确率</li>
+                        <li>对每个特征：随机打乱（置换）该列的值</li>
+                        <li>用打乱后的数据重新预测，计算准确率</li>
+                        <li>准确率下降越多，说明该特征越重要</li>
+                    </ol>
+                    <div class="info-box warning">
+                        <p>$$\text{Importance}(f) = \text{Acc}_{\text{baseline}} - \text{Acc}_{\text{permuted}(f)}$$</p>
+                    </div>
+                    <p>下方动画展示：选择一个特征 → 打乱该列 → 观察准确率变化。</p>
+                    <div style="margin:1rem 0;">
+                        <label style="font-size:0.85rem; color:var(--text-secondary);">选择要置换的特征：</label>
+                        <div class="btn-group" id="perm-feature-btns"></div>
+                    </div>
+                    <button class="btn btn-primary" id="perm-run-btn">执行置换</button>
+                    <div class="stat-row" id="perm-stats" style="margin-top:1rem;"></div>
+                </div>
+                <div class="viz-panel">
+                    <div class="data-table-wrap" id="perm-table-wrap" style="max-height:300px; overflow-y:auto;"></div>
+                    <div class="viz-area" id="perm-bar-chart" style="min-height:280px; margin-top:1rem;">
+                        <span class="watermark">置换重要性</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ==================== Section 4 ==================== -->
+        <div class="section" id="sec-compare">
+            <div class="section-title">
+                <div class="icon">VS</div>
+                <h2>重要性对比</h2>
+            </div>
+            <p>将两种方法的结果并排展示。颜色深浅反映排名差异：排名差越大，颜色越深。</p>
+            <div class="info-box warning" style="margin-bottom:1.5rem;">
+                <p><strong>注意：</strong>基尼重要性可能偏向高基数（取值种类多）的特征，因为这些特征更容易产生"好"的分裂。置换重要性则是模型无关的，更稳健，但计算开销更大。</p>
+            </div>
+            <div class="compare-wrap">
+                <div>
+                    <h3 style="text-align:center; margin-bottom:0.5rem; font-size:1rem;">
+                        <span class="badge badge-green">MDI</span> 基尼重要性
+                    </h3>
+                    <div class="viz-area" id="compare-gini" style="min-height:300px;">
+                        <span class="watermark">MDI</span>
+                    </div>
+                </div>
+                <div>
+                    <h3 style="text-align:center; margin-bottom:0.5rem; font-size:1rem;">
+                        <span class="badge badge-orange">MDA</span> 置换重要性
+                    </h3>
+                    <div class="viz-area" id="compare-perm" style="min-height:300px;">
+                        <span class="watermark">MDA</span>
+                    </div>
+                </div>
+            </div>
+            <div id="rank-diff-note" style="margin-top:1rem;"></div>
+        </div>
+
+        <!-- ==================== Section 5 ==================== -->
+        <div class="section" id="sec-interactive">
+            <div class="section-title">
+                <div class="icon">*</div>
+                <h2>交互式特征分析</h2>
+            </div>
+            <p>开启或关闭特征，重建随机森林，观察重要性和准确率如何变化。下方还展示每个重要特征的偏依赖效应。</p>
+            <div class="feature-toggles" id="feature-toggles"></div>
+            <div style="margin:1rem 0; display:flex; gap:0.75rem; align-items:center; flex-wrap:wrap;">
+                <button class="btn btn-primary" id="rebuild-btn">重建森林</button>
+                <div class="slider-group" style="max-width:280px;">
+                    <label>树数量</label>
+                    <input type="range" id="ntrees-slider" min="3" max="30" value="10">
+                    <span class="slider-value" id="ntrees-val">10</span>
+                </div>
+            </div>
+            <div class="stat-row" id="interactive-stats"></div>
+            <div class="compare-wrap" style="margin-top:1.5rem;">
+                <div>
+                    <h3 style="text-align:center; margin-bottom:0.5rem; font-size:1rem;">特征重要性 (MDI)</h3>
+                    <div class="viz-area" id="interactive-bar" style="min-height:280px;">
+                        <span class="watermark">当前模型</span>
+                    </div>
+                </div>
+                <div>
+                    <h3 style="text-align:center; margin-bottom:0.5rem; font-size:1rem;">单特征排除准确率对比</h3>
+                    <div class="viz-area" id="interactive-ablation" style="min-height:280px;">
+                        <span class="watermark">消融实验</span>
+                    </div>
+                </div>
+            </div>
+            <h3 style="margin-top:2rem; margin-bottom:0.5rem;">偏依赖效应 (Partial Dependence)</h3>
+            <p class="text-sm text-muted">固定其它特征取均值，仅变化单个特征，观察预测概率如何变化。</p>
+            <div class="pdp-grid" id="pdp-grid"></div>
+        </div>
+
+    </div><!-- /.page-container -->
+
+    <script src="../shared/scripts/rf-utils.js"></script>
+    <script src="../shared/scripts/animation-controller.js"></script>
+    <script src="../shared/scripts/matrix-renderer.js"></script>
+    <script src="../shared/scripts/nav.js"></script>
+    <script src="../shared/scripts/katex-init.js"></script>
+
+    <script>
+    /* ================================================================
+       08 - 特征重要性  全部逻辑
+       ================================================================ */
+    (function () {
+        'use strict';
+
+        // ---- 色板 ----
+        const COLORS = {
+            green: '#16c79a', orange: '#ffab40', blue: '#4fc3f7',
+            purple: '#b388ff', red: '#ff5252', pink: '#ff80ab',
+        };
+        const FEAT_COLORS = [COLORS.green, COLORS.orange, COLORS.blue, COLORS.purple, COLORS.red, COLORS.pink];
+
+        // ---- 特征名 ----
+        const FEATURE_NAMES = ['收入', '年龄', '信用评分', '消费频次', '噪声A', '噪声B'];
+        const N_FEATURES = 6;
+        const N_SAMPLES = 120;
+
+        // ---- 自定义数据生成（特征有不同重要性）----
+        function generateDataset(seed) {
+            const rng = RFUtils.seededRandom(seed);
+            const data = [];
+            for (let i = 0; i < N_SAMPLES; i++) {
+                const income  = rng() * 10 - 5;
+                const age     = rng() * 10 - 5;
+                const credit  = rng() * 10 - 5;
+                const freq    = rng() * 10 - 5;
+                const noiseA  = rng() * 10 - 5;
+                const noiseB  = rng() * 10 - 5;
+                const score = income * 0.45 + age * 0.3 + credit * 0.15 + freq * 0.08
+                              + noiseA * 0.01 + noiseB * 0.01 + (rng() - 0.5) * 1.5;
+                data.push({
+                    features: [income, age, credit, freq, noiseA, noiseB],
+                    label: score > 0 ? 1 : 0
+                });
+            }
+            return data;
+        }
+
+        const dataset = generateDataset(42);
+        let currentForest = null;
+        let activeFeatures = [true, true, true, true, true, true];
+
+        // ---- 构建子集数据（仅保留活跃特征）----
+        function buildSubsetData(data, active) {
+            const activeIdx = active.map((a, i) => a ? i : -1).filter(i => i >= 0);
+            return data.map(d => ({
+                features: activeIdx.map(i => d.features[i]),
+                label: d.label
+            }));
+        }
+
+        // ---- 准确率计算 ----
+        function forestAccuracy(forest, data) {
+            let correct = 0;
+            for (const d of data) {
+                const { prediction } = RFUtils.predictForest(forest, d);
+                if (prediction === d.label) correct++;
+            }
+            return correct / data.length;
+        }
+
+        // ---- 构建默认森林 ----
+        function buildDefaultForest() {
+            const subData = buildSubsetData(dataset, activeFeatures);
+            currentForest = RFUtils.buildForest(subData, {
+                nTrees: parseInt(document.getElementById('ntrees-slider')?.value || '10'),
+                maxDepth: 4, seed: 42
+            });
+            return currentForest;
+        }
+
+        buildDefaultForest();
+
+        /* ================================================================
+           Section 1 — 数据预览 + 动机
+           ================================================================ */
+        function renderSampleTable() {
+            const wrap = document.getElementById('sample-table-wrap');
+            let html = '<table class="data-table"><thead><tr><th>#</th>';
+            FEATURE_NAMES.forEach((n, i) => { html += `<th style="color:${FEAT_COLORS[i]}">${n}</th>`; });
+            html += '<th>标签</th></tr></thead><tbody>';
+            for (let i = 0; i < 8; i++) {
+                const d = dataset[i];
+                html += `<tr><td>${i + 1}</td>`;
+                d.features.forEach(v => { html += `<td>${v.toFixed(2)}</td>`; });
+                html += `<td style="color:${d.label === 1 ? COLORS.green : COLORS.red}; font-weight:700">${d.label}</td></tr>`;
+            }
+            html += '</tbody></table>';
+            wrap.innerHTML = html;
+        }
+
+        function renderMotivationChart() {
+            const container = document.getElementById('motivation-chart');
+            container.querySelector('svg')?.remove();
+            const rect = container.getBoundingClientRect();
+            const W = rect.width || 500, H = 260;
+            const margin = { top: 20, right: 20, bottom: 40, left: 80 };
+            const w = W - margin.left - margin.right;
+            const h = H - margin.top - margin.bottom;
+
+            const svg = d3.select(container).append('svg')
+                .attr('width', W).attr('height', H);
+            const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+
+            const y = d3.scaleBand().domain(FEATURE_NAMES).range([0, h]).padding(0.3);
+            const x = d3.scaleLinear().domain([0, 1]).range([0, w]);
+
+            g.append('g').call(d3.axisLeft(y)).attr('class', 'axis');
+            g.append('g').attr('transform', `translate(0,${h})`).call(d3.axisBottom(x).ticks(5).tickFormat(d3.format('.0%'))).attr('class', 'axis');
+
+            // placeholder bars with "?" labels
+            g.selectAll('.bar-placeholder')
+                .data(FEATURE_NAMES)
+                .enter().append('rect')
+                .attr('x', 0).attr('y', d => y(d))
+                .attr('width', w * 0.12)
+                .attr('height', y.bandwidth())
+                .attr('rx', 3)
+                .attr('fill', (d, i) => FEAT_COLORS[i])
+                .attr('opacity', 0.25);
+
+            g.selectAll('.q-label')
+                .data(FEATURE_NAMES)
+                .enter().append('text')
+                .attr('x', w * 0.14)
+                .attr('y', d => y(d) + y.bandwidth() / 2)
+                .attr('dy', '0.35em')
+                .attr('fill', 'var(--text-muted)')
+                .attr('font-size', '0.8rem')
+                .text('?');
+        }
+
+        renderSampleTable();
+        renderMotivationChart();
+
+        /* ================================================================
+           Section 2 — 基尼重要性 + 树遍历动画
+           ================================================================ */
+        const giniImportanceResult = RFUtils.giniImportance(currentForest);
+
+        // Collect traversal order for animation
+        function collectTraversalNodes(forest) {
+            const nodes = [];
+            const treeIdx = 0; // animate first tree
+            const tree = forest.trees[treeIdx].tree;
+            function dfs(node, depth) {
+                if (!node) return;
+                nodes.push({ ...node, depth });
+                if (!node.isLeaf) {
+                    dfs(node.left, depth + 1);
+                    dfs(node.right, depth + 1);
+                }
+            }
+            dfs(tree, 0);
+            return nodes;
+        }
+
+        function layoutTree(tree) {
+            const nodes = [];
+            let idx = 0;
+            function dfs(node, x, y, dx) {
+                if (!node) return;
+                const id = idx++;
+                const n = { id, x, y, node, children: [] };
+                nodes.push(n);
+                if (!node.isLeaf) {
+                    const leftId = nodes.length;
+                    dfs(node.left, x - dx, y + 1, dx * 0.5);
+                    n.children.push(leftId);
+                    const rightId = nodes.length;
+                    dfs(node.right, x + dx, y + 1, dx * 0.5);
+                    n.children.push(rightId);
+                }
+            }
+            dfs(tree, 0, 0, 2);
+            return nodes;
+        }
+
+        function renderGiniTreeViz(highlightIdx) {
+            const container = document.getElementById('gini-tree-viz');
+            container.querySelector('svg')?.remove();
+            const rect = container.getBoundingClientRect();
+            const W = rect.width || 500, H = 310;
+            const margin = { top: 20, right: 20, bottom: 20, left: 20 };
+
+            const svg = d3.select(container).append('svg')
+                .attr('width', W).attr('height', H);
+            const g = svg.append('g').attr('transform', `translate(${W / 2},${margin.top})`);
+
+            const tree = currentForest.trees[0].tree;
+            const nodes = layoutTree(tree);
+            const maxDepth = d3.max(nodes, d => d.y) || 1;
+            const scaleX = (W - margin.left - margin.right) / 5;
+            const scaleY = (H - margin.top - margin.bottom) / (maxDepth + 1);
+
+            // Edges
+            for (const n of nodes) {
+                for (const cid of n.children) {
+                    const c = nodes[cid];
+                    g.append('line')
+                        .attr('x1', n.x * scaleX).attr('y1', n.y * scaleY)
+                        .attr('x2', c.x * scaleX).attr('y2', c.y * scaleY)
+                        .attr('stroke', 'var(--border-color)').attr('stroke-width', 1.5);
+                }
+            }
+
+            // Nodes
+            const activeIdx = activeFeatures.map((a, i) => a ? i : -1).filter(i => i >= 0);
+            const nodeGs = g.selectAll('.tnode')
+                .data(nodes).enter().append('g')
+                .attr('class', 'tnode')
+                .attr('transform', d => `translate(${d.x * scaleX},${d.y * scaleY})`);
+
+            nodeGs.append('circle')
+                .attr('r', 16)
+                .attr('fill', d => {
+                    if (d.node.isLeaf) return 'var(--bg-card)';
+                    const fi = d.node.splitFeature;
+                    return FEAT_COLORS[activeIdx[fi] !== undefined ? activeIdx[fi] : fi] || COLORS.blue;
+                })
+                .attr('stroke', (d, i) => {
+                    if (highlightIdx !== undefined && i === highlightIdx) return COLORS.orange;
+                    return 'var(--border-color)';
+                })
+                .attr('stroke-width', (d, i) => (highlightIdx !== undefined && i === highlightIdx) ? 3 : 1.5)
+                .attr('opacity', (d, i) => {
+                    if (highlightIdx === undefined) return 0.9;
+                    return i <= highlightIdx ? 0.9 : 0.3;
+                });
+
+            nodeGs.append('text')
+                .attr('text-anchor', 'middle')
+                .attr('dy', '0.35em')
+                .attr('fill', 'var(--text-primary)')
+                .attr('font-size', '0.6rem')
+                .attr('font-family', 'var(--font-mono)')
+                .text(d => {
+                    if (d.node.isLeaf) return d.node.prediction;
+                    const fi = d.node.splitFeature;
+                    const name = FEATURE_NAMES[activeIdx[fi] !== undefined ? activeIdx[fi] : fi] || `F${fi}`;
+                    return name.slice(0, 2);
+                });
+        }
+
+        function renderGiniBarChart(importances, animated) {
+            const container = document.getElementById('gini-bar-chart');
+            container.querySelector('svg')?.remove();
+            const rect = container.getBoundingClientRect();
+            const W = rect.width || 500, H = 240;
+            const margin = { top: 15, right: 30, bottom: 35, left: 80 };
+            const w = W - margin.left - margin.right;
+            const h = H - margin.top - margin.bottom;
+
+            const activeIdx = activeFeatures.map((a, i) => a ? i : -1).filter(i => i >= 0);
+            const barData = activeIdx.map(fi => ({
+                name: FEATURE_NAMES[fi],
+                value: importances[activeIdx.indexOf(fi)] || 0,
+                color: FEAT_COLORS[fi]
+            })).sort((a, b) => b.value - a.value);
+
+            const svg = d3.select(container).append('svg').attr('width', W).attr('height', H);
+            const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+
+            const y = d3.scaleBand().domain(barData.map(d => d.name)).range([0, h]).padding(0.3);
+            const x = d3.scaleLinear().domain([0, d3.max(barData, d => d.value) || 0.5]).range([0, w]);
+
+            g.append('g').call(d3.axisLeft(y)).attr('class', 'axis');
+            g.append('g').attr('transform', `translate(0,${h})`).call(d3.axisBottom(x).ticks(5).tickFormat(d3.format('.0%'))).attr('class', 'axis');
+
+            const bars = g.selectAll('.gbar')
+                .data(barData).enter().append('rect')
+                .attr('x', 0).attr('y', d => y(d.name))
+                .attr('height', y.bandwidth())
+                .attr('rx', 3)
+                .attr('fill', d => d.color)
+                .attr('opacity', 0.85);
+
+            if (animated) {
+                bars.attr('width', 0)
+                    .transition().duration(600).delay((d, i) => i * 80)
+                    .attr('width', d => x(d.value));
+            } else {
+                bars.attr('width', d => x(d.value));
+            }
+
+            g.selectAll('.gval')
+                .data(barData).enter().append('text')
+                .attr('class', 'bar-value')
+                .attr('x', d => x(d.value) + 4)
+                .attr('y', d => y(d.name) + y.bandwidth() / 2)
+                .attr('dy', '0.35em')
+                .text(d => (d.value * 100).toFixed(1) + '%');
+        }
+
+        // Build Gini animation steps
+        function buildGiniSteps() {
+            const treeNodes = layoutTree(currentForest.trees[0].tree);
+            const activeIdx = activeFeatures.map((a, i) => a ? i : -1).filter(i => i >= 0);
+            const accumulator = {};
+            activeIdx.forEach((_, i) => { accumulator[i] = 0; });
+            let totalGain = 0;
+            const steps = [];
+
+            treeNodes.forEach((tn, idx) => {
+                if (!tn.node.isLeaf && tn.node.gain > 0) {
+                    steps.push({
+                        name: `节点 ${idx}: ${FEATURE_NAMES[activeIdx[tn.node.splitFeature]] || 'F' + tn.node.splitFeature}`,
+                        duration: 600,
+                        action: async (stepIdx, instant) => {
+                            const fi = tn.node.splitFeature;
+                            const gain = (tn.node.gain || 0) * tn.node.samples;
+                            accumulator[fi] += gain;
+                            totalGain += gain;
+                            renderGiniTreeViz(idx);
+                            // Normalize and render bar chart
+                            const normalized = {};
+                            for (const k of Object.keys(accumulator)) {
+                                normalized[k] = totalGain > 0 ? accumulator[k] / totalGain : 0;
+                            }
+                            renderGiniBarChart(Object.values(normalized), !instant);
+                        }
+                    });
+                }
+            });
+
+            return steps;
+        }
+
+        let giniAnim = null;
+        function initGiniAnimation() {
+            const controlsEl = document.getElementById('gini-controls');
+            const steps = buildGiniSteps();
+            giniAnim = new AnimationController({
+                container: controlsEl,
+                steps: steps,
+                defaultDuration: 600,
+                onComplete: () => {
+                    renderGiniStats();
+                }
+            });
+            renderGiniTreeViz();
+            // Render empty bar chart
+            const activeIdx = activeFeatures.map((a, i) => a ? i : -1).filter(i => i >= 0);
+            const zeros = {};
+            activeIdx.forEach((_, i) => { zeros[i] = 0; });
+            renderGiniBarChart(Object.values(zeros), false);
+        }
+
+        function renderGiniStats() {
+            const statsEl = document.getElementById('gini-stats');
+            const gi = RFUtils.giniImportance(currentForest);
+            const activeIdx = activeFeatures.map((a, i) => a ? i : -1).filter(i => i >= 0);
+            const sorted = Object.entries(gi).sort((a, b) => b[1] - a[1]);
+            const topFi = sorted[0] ? parseInt(sorted[0][0]) : 0;
+            const topName = FEATURE_NAMES[activeIdx[topFi] !== undefined ? activeIdx[topFi] : topFi] || `F${topFi}`;
+            const topVal = sorted[0] ? sorted[0][1] : 0;
+            statsEl.innerHTML = `
+                <div class="stat-badge">
+                    <div class="label">最重要特征</div>
+                    <div class="value" style="color:${FEAT_COLORS[activeIdx[topFi] || 0]}">${topName}</div>
+                </div>
+                <div class="stat-badge">
+                    <div class="label">重要性得分</div>
+                    <div class="value">${(topVal * 100).toFixed(1)}%</div>
+                </div>
+                <div class="stat-badge">
+                    <div class="label">树节点总数</div>
+                    <div class="value">${RFUtils.treeNodeCount(currentForest.trees[0].tree)}</div>
+                </div>
+            `;
+        }
+
+        initGiniAnimation();
+
+        /* ================================================================
+           Section 3 — 置换重要性
+           ================================================================ */
+        let selectedPermFeature = 0;
+        const permResults = {};
+
+        function renderPermFeatureButtons() {
+            const wrap = document.getElementById('perm-feature-btns');
+            const activeIdx = activeFeatures.map((a, i) => a ? i : -1).filter(i => i >= 0);
+            wrap.innerHTML = '';
+            activeIdx.forEach((fi, localIdx) => {
+                const btn = document.createElement('button');
+                btn.className = 'btn' + (localIdx === selectedPermFeature ? ' active' : '');
+                btn.textContent = FEATURE_NAMES[fi];
+                btn.style.borderColor = localIdx === selectedPermFeature ? FEAT_COLORS[fi] : '';
+                btn.addEventListener('click', () => {
+                    selectedPermFeature = localIdx;
+                    renderPermFeatureButtons();
+                });
+                wrap.appendChild(btn);
+            });
+        }
+
+        function renderPermTable(shuffledLocalIdx) {
+            const wrap = document.getElementById('perm-table-wrap');
+            const activeIdx = activeFeatures.map((a, i) => a ? i : -1).filter(i => i >= 0);
+            const subData = buildSubsetData(dataset, activeFeatures);
+            let html = '<table class="data-table"><thead><tr><th>#</th>';
+            activeIdx.forEach((fi, li) => {
+                const hl = (shuffledLocalIdx === li) ? ' style="background:rgba(255,171,64,0.2); color:var(--accent-orange);"' : '';
+                html += `<th${hl}>${FEATURE_NAMES[fi]}</th>`;
+            });
+            html += '<th>标签</th></tr></thead><tbody>';
+            const rows = Math.min(12, subData.length);
+            for (let i = 0; i < rows; i++) {
+                const d = subData[i];
+                html += `<tr><td>${i + 1}</td>`;
+                d.features.forEach((v, li) => {
+                    const cls = (shuffledLocalIdx === li) ? ' class="shuffled"' : '';
+                    html += `<td${cls}>${v.toFixed(2)}</td>`;
+                });
+                html += `<td style="color:${d.label === 1 ? COLORS.green : COLORS.red}; font-weight:700">${d.label}</td></tr>`;
+            }
+            html += '</tbody></table>';
+            wrap.innerHTML = html;
+        }
+
+        function computeAllPermImportance() {
+            const subData = buildSubsetData(dataset, activeFeatures);
+            const pi = RFUtils.permutationImportance(subData, currentForest, 3, 42);
+            return pi;
+        }
+
+        function renderPermBarChart(importances, highlightIdx) {
+            const container = document.getElementById('perm-bar-chart');
+            container.querySelector('svg')?.remove();
+            const rect = container.getBoundingClientRect();
+            const W = rect.width || 500, H = 260;
+            const margin = { top: 15, right: 30, bottom: 35, left: 80 };
+            const w = W - margin.left - margin.right;
+            const h = H - margin.top - margin.bottom;
+
+            const activeIdx = activeFeatures.map((a, i) => a ? i : -1).filter(i => i >= 0);
+            const barData = activeIdx.map((fi, li) => ({
+                name: FEATURE_NAMES[fi],
+                value: importances[li] || 0,
+                color: FEAT_COLORS[fi],
+                localIdx: li
+            })).sort((a, b) => b.value - a.value);
+
+            const maxVal = d3.max(barData, d => Math.abs(d.value)) || 0.1;
+            const svg = d3.select(container).append('svg').attr('width', W).attr('height', H);
+            const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+
+            const y = d3.scaleBand().domain(barData.map(d => d.name)).range([0, h]).padding(0.3);
+            const x = d3.scaleLinear().domain([Math.min(0, d3.min(barData, d => d.value)), maxVal]).range([0, w]);
+
+            g.append('g').call(d3.axisLeft(y)).attr('class', 'axis');
+            g.append('g').attr('transform', `translate(0,${h})`).call(d3.axisBottom(x).ticks(5).tickFormat(d3.format('.1%'))).attr('class', 'axis');
+
+            // Zero line
+            g.append('line')
+                .attr('x1', x(0)).attr('x2', x(0))
+                .attr('y1', 0).attr('y2', h)
+                .attr('stroke', 'var(--text-muted)').attr('stroke-dasharray', '3,3');
+
+            g.selectAll('.pbar')
+                .data(barData).enter().append('rect')
+                .attr('x', d => d.value >= 0 ? x(0) : x(d.value))
+                .attr('y', d => y(d.name))
+                .attr('width', 0)
+                .attr('height', y.bandwidth())
+                .attr('rx', 3)
+                .attr('fill', d => d.color)
+                .attr('opacity', d => (highlightIdx !== undefined && d.localIdx === highlightIdx) ? 1 : 0.7)
+                .attr('stroke', d => (highlightIdx !== undefined && d.localIdx === highlightIdx) ? COLORS.orange : 'none')
+                .attr('stroke-width', 2)
+                .transition().duration(500).delay((d, i) => i * 60)
+                .attr('width', d => Math.abs(x(d.value) - x(0)));
+
+            g.selectAll('.pval')
+                .data(barData).enter().append('text')
+                .attr('class', 'bar-value')
+                .attr('x', d => d.value >= 0 ? x(d.value) + 4 : x(d.value) - 4)
+                .attr('y', d => y(d.name) + y.bandwidth() / 2)
+                .attr('dy', '0.35em')
+                .attr('text-anchor', d => d.value >= 0 ? 'start' : 'end')
+                .text(d => (d.value * 100).toFixed(1) + '%');
+        }
+
+        function renderPermStats(baseAcc, permAcc, featureName) {
+            const statsEl = document.getElementById('perm-stats');
+            const drop = baseAcc - permAcc;
+            statsEl.innerHTML = `
+                <div class="stat-badge">
+                    <div class="label">基准准确率</div>
+                    <div class="value">${(baseAcc * 100).toFixed(1)}%</div>
+                </div>
+                <div class="stat-badge">
+                    <div class="label">置换后准确率</div>
+                    <div class="value" style="color:var(--accent-orange)">${(permAcc * 100).toFixed(1)}%</div>
+                </div>
+                <div class="stat-badge">
+                    <div class="label">准确率下降</div>
+                    <div class="value" style="color:${drop > 0.02 ? COLORS.red : 'var(--text-muted)'}">${(drop * 100).toFixed(1)}%</div>
+                </div>
+                <div class="stat-badge">
+                    <div class="label">被置换特征</div>
+                    <div class="value">${featureName}</div>
+                </div>
+            `;
+        }
+
+        function runPermutation() {
+            const activeIdx = activeFeatures.map((a, i) => a ? i : -1).filter(i => i >= 0);
+            const subData = buildSubsetData(dataset, activeFeatures);
+
+            // Baseline accuracy
+            const baseAcc = forestAccuracy(currentForest, subData);
+
+            // Shuffle selected feature
+            const rng = RFUtils.seededRandom(99);
+            const fi = selectedPermFeature;
+            const permuted = subData.map(d => {
+                const copy = { ...d, features: [...d.features] };
+                const swapIdx = Math.floor(rng() * subData.length);
+                copy.features[fi] = subData[swapIdx].features[fi];
+                return copy;
+            });
+
+            const permAcc = forestAccuracy(currentForest, permuted);
+            const featureName = FEATURE_NAMES[activeIdx[fi]];
+
+            // Flash the table column
+            renderPermTable(fi);
+            const cells = document.querySelectorAll('#perm-table-wrap .shuffled');
+            cells.forEach(c => { c.classList.add('shuffle-flash'); });
+
+            renderPermStats(baseAcc, permAcc, featureName);
+
+            // Also compute full importance and render bar chart
+            const fullPi = computeAllPermImportance();
+            renderPermBarChart(fullPi, fi);
+        }
+
+        renderPermFeatureButtons();
+        renderPermTable();
+
+        // Compute initial perm importance and show bar chart
+        const initPermImp = computeAllPermImportance();
+        renderPermBarChart(initPermImp);
+
+        document.getElementById('perm-run-btn').addEventListener('click', runPermutation);
+
+        /* ================================================================
+           Section 4 — 对比
+           ================================================================ */
+        function renderComparisonCharts() {
+            const activeIdx = activeFeatures.map((a, i) => a ? i : -1).filter(i => i >= 0);
+            const gi = RFUtils.giniImportance(currentForest);
+            const subData = buildSubsetData(dataset, activeFeatures);
+            const pi = RFUtils.permutationImportance(subData, currentForest, 3, 42);
+
+            // Rank each
+            const giniSorted = Object.entries(gi).sort((a, b) => b[1] - a[1]);
+            const permSorted = Object.entries(pi).sort((a, b) => b[1] - a[1]);
+            const giniRank = {};
+            const permRank = {};
+            giniSorted.forEach(([k], i) => { giniRank[k] = i; });
+            permSorted.forEach(([k], i) => { permRank[k] = i; });
+
+            function renderSideChart(containerId, importances, label, isGini) {
+                const container = document.getElementById(containerId);
+                container.querySelector('svg')?.remove();
+                const rect = container.getBoundingClientRect();
+                const W = rect.width || 400, H = 280;
+                const margin = { top: 15, right: 30, bottom: 35, left: 80 };
+                const w = W - margin.left - margin.right;
+                const h = H - margin.top - margin.bottom;
+
+                const barData = activeIdx.map((fi, li) => {
+                    const rankDiff = Math.abs((giniRank[li] || 0) - (permRank[li] || 0));
+                    return {
+                        name: FEATURE_NAMES[fi],
+                        value: importances[li] || 0,
+                        color: FEAT_COLORS[fi],
+                        rankDiff
+                    };
+                }).sort((a, b) => b.value - a.value);
+
+                const maxVal = d3.max(barData, d => Math.abs(d.value)) || 0.3;
+                const minVal = isGini ? 0 : Math.min(0, d3.min(barData, d => d.value));
+
+                const svg = d3.select(container).append('svg').attr('width', W).attr('height', H);
+                const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+
+                const y = d3.scaleBand().domain(barData.map(d => d.name)).range([0, h]).padding(0.3);
+                const x = d3.scaleLinear().domain([minVal, maxVal]).range([0, w]);
+
+                g.append('g').call(d3.axisLeft(y)).attr('class', 'axis');
+                g.append('g').attr('transform', `translate(0,${h})`)
+                    .call(d3.axisBottom(x).ticks(5).tickFormat(d3.format('.0%'))).attr('class', 'axis');
+
+                if (!isGini) {
+                    g.append('line')
+                        .attr('x1', x(0)).attr('x2', x(0))
+                        .attr('y1', 0).attr('y2', h)
+                        .attr('stroke', 'var(--text-muted)').attr('stroke-dasharray', '3,3');
+                }
+
+                g.selectAll('.cbar')
+                    .data(barData).enter().append('rect')
+                    .attr('x', d => isGini ? 0 : (d.value >= 0 ? x(0) : x(d.value)))
+                    .attr('y', d => y(d.name))
+                    .attr('height', y.bandwidth())
+                    .attr('rx', 3)
+                    .attr('fill', d => d.color)
+                    .attr('opacity', d => 0.5 + d.rankDiff * 0.15)
+                    .attr('stroke', d => d.rankDiff >= 2 ? COLORS.orange : 'none')
+                    .attr('stroke-width', 1.5)
+                    .attr('stroke-dasharray', d => d.rankDiff >= 2 ? '4,2' : 'none')
+                    .attr('width', 0)
+                    .transition().duration(600).delay((d, i) => i * 60)
+                    .attr('width', d => isGini ? x(d.value) : Math.abs(x(d.value) - x(0)));
+
+                g.selectAll('.cval')
+                    .data(barData).enter().append('text')
+                    .attr('class', 'bar-value')
+                    .attr('x', d => {
+                        if (isGini) return x(d.value) + 4;
+                        return d.value >= 0 ? x(d.value) + 4 : x(d.value) - 4;
+                    })
+                    .attr('y', d => y(d.name) + y.bandwidth() / 2)
+                    .attr('dy', '0.35em')
+                    .attr('text-anchor', d => (!isGini && d.value < 0) ? 'end' : 'start')
+                    .text(d => (d.value * 100).toFixed(1) + '%');
+
+                // Rank diff markers
+                g.selectAll('.rdiff')
+                    .data(barData.filter(d => d.rankDiff >= 2))
+                    .enter().append('text')
+                    .attr('x', w - 5)
+                    .attr('y', d => y(d.name) + y.bandwidth() / 2)
+                    .attr('dy', '0.35em')
+                    .attr('text-anchor', 'end')
+                    .attr('fill', COLORS.orange)
+                    .attr('font-size', '0.65rem')
+                    .text(d => `+${d.rankDiff}`);
+            }
+
+            renderSideChart('compare-gini', gi, 'MDI', true);
+            renderSideChart('compare-perm', pi, 'MDA', false);
+
+            // Rank diff notes
+            const noteEl = document.getElementById('rank-diff-note');
+            const diffFeatures = activeIdx.filter((fi, li) => {
+                return Math.abs((giniRank[li] || 0) - (permRank[li] || 0)) >= 2;
+            });
+            if (diffFeatures.length > 0) {
+                const names = diffFeatures.map(fi => FEATURE_NAMES[fi]).join('、');
+                noteEl.innerHTML = `<div class="info-box warning"><p>排名差异较大的特征：<strong>${names}</strong>。虚线边框标注了排名偏差 >= 2 的条目。这可能因基尼重要性偏向高基数特征导致。</p></div>`;
+            } else {
+                noteEl.innerHTML = `<div class="info-box success"><p>两种方法的排名基本一致，说明特征重要性结果较为稳健。</p></div>`;
+            }
+        }
+
+        renderComparisonCharts();
+
+        /* ================================================================
+           Section 5 — 交互式特征分析
+           ================================================================ */
+        function renderFeatureToggles() {
+            const wrap = document.getElementById('feature-toggles');
+            wrap.innerHTML = '';
+            FEATURE_NAMES.forEach((name, i) => {
+                const div = document.createElement('div');
+                div.className = 'feature-toggle' + (activeFeatures[i] ? ' active' : '');
+                div.innerHTML = `<div class="dot" style="background:${activeFeatures[i] ? FEAT_COLORS[i] : ''}"></div><span>${name}</span>`;
+                div.addEventListener('click', () => {
+                    // Need at least 2 features
+                    const count = activeFeatures.filter(Boolean).length;
+                    if (activeFeatures[i] && count <= 2) return;
+                    activeFeatures[i] = !activeFeatures[i];
+                    renderFeatureToggles();
+                });
+                wrap.appendChild(div);
+            });
+        }
+
+        function renderInteractiveStats() {
+            const subData = buildSubsetData(dataset, activeFeatures);
+            const acc = forestAccuracy(currentForest, subData);
+            const nFeat = activeFeatures.filter(Boolean).length;
+            const nTrees = currentForest.nTrees;
+            const statsEl = document.getElementById('interactive-stats');
+            statsEl.innerHTML = `
+                <div class="stat-badge">
+                    <div class="label">活跃特征</div>
+                    <div class="value">${nFeat} / ${N_FEATURES}</div>
+                </div>
+                <div class="stat-badge">
+                    <div class="label">树数量</div>
+                    <div class="value">${nTrees}</div>
+                </div>
+                <div class="stat-badge">
+                    <div class="label">训练准确率</div>
+                    <div class="value">${(acc * 100).toFixed(1)}%</div>
+                </div>
+                <div class="stat-badge">
+                    <div class="label">OOB 得分</div>
+                    <div class="value">${(RFUtils.oobScore(subData, currentForest) * 100).toFixed(1)}%</div>
+                </div>
+            `;
+        }
+
+        function renderInteractiveBarChart() {
+            const gi = RFUtils.giniImportance(currentForest);
+            const container = document.getElementById('interactive-bar');
+            container.querySelector('svg')?.remove();
+            const rect = container.getBoundingClientRect();
+            const W = rect.width || 400, H = 260;
+            const margin = { top: 15, right: 30, bottom: 35, left: 80 };
+            const w = W - margin.left - margin.right;
+            const h = H - margin.top - margin.bottom;
+
+            const activeIdx = activeFeatures.map((a, i) => a ? i : -1).filter(i => i >= 0);
+            const barData = activeIdx.map((fi, li) => ({
+                name: FEATURE_NAMES[fi],
+                value: gi[li] || 0,
+                color: FEAT_COLORS[fi]
+            })).sort((a, b) => b.value - a.value);
+
+            const svg = d3.select(container).append('svg').attr('width', W).attr('height', H);
+            const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+
+            const y = d3.scaleBand().domain(barData.map(d => d.name)).range([0, h]).padding(0.3);
+            const x = d3.scaleLinear().domain([0, d3.max(barData, d => d.value) || 0.5]).range([0, w]);
+
+            g.append('g').call(d3.axisLeft(y)).attr('class', 'axis');
+            g.append('g').attr('transform', `translate(0,${h})`).call(d3.axisBottom(x).ticks(5).tickFormat(d3.format('.0%'))).attr('class', 'axis');
+
+            g.selectAll('.ibar')
+                .data(barData).enter().append('rect')
+                .attr('x', 0).attr('y', d => y(d.name))
+                .attr('height', y.bandwidth()).attr('rx', 3)
+                .attr('fill', d => d.color).attr('opacity', 0.85)
+                .attr('width', 0)
+                .transition().duration(500).delay((d, i) => i * 60)
+                .attr('width', d => x(d.value));
+
+            g.selectAll('.ival')
+                .data(barData).enter().append('text')
+                .attr('class', 'bar-value')
+                .attr('x', d => x(d.value) + 4)
+                .attr('y', d => y(d.name) + y.bandwidth() / 2)
+                .attr('dy', '0.35em')
+                .text(d => (d.value * 100).toFixed(1) + '%');
+        }
+
+        function renderAblationChart() {
+            const container = document.getElementById('interactive-ablation');
+            container.querySelector('svg')?.remove();
+            const rect = container.getBoundingClientRect();
+            const W = rect.width || 400, H = 260;
+            const margin = { top: 15, right: 30, bottom: 35, left: 80 };
+            const w = W - margin.left - margin.right;
+            const h = H - margin.top - margin.bottom;
+
+            const activeIdx = activeFeatures.map((a, i) => a ? i : -1).filter(i => i >= 0);
+            const subData = buildSubsetData(dataset, activeFeatures);
+            const baseAcc = forestAccuracy(currentForest, subData);
+
+            // For each active feature, remove it and rebuild
+            const ablationData = activeIdx.map((fi, li) => {
+                const reduced = activeFeatures.map((a, j) => j === fi ? false : a);
+                if (reduced.filter(Boolean).length < 1) return { name: FEATURE_NAMES[fi], acc: baseAcc, drop: 0, color: FEAT_COLORS[fi] };
+                const redData = buildSubsetData(dataset, reduced);
+                const redForest = RFUtils.buildForest(redData, { nTrees: currentForest.nTrees, maxDepth: 4, seed: 42 });
+                const redAcc = forestAccuracy(redForest, redData);
+                return { name: FEATURE_NAMES[fi], acc: redAcc, drop: baseAcc - redAcc, color: FEAT_COLORS[fi] };
+            }).sort((a, b) => b.drop - a.drop);
+
+            const svg = d3.select(container).append('svg').attr('width', W).attr('height', H);
+            const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+
+            const y = d3.scaleBand().domain(ablationData.map(d => d.name)).range([0, h]).padding(0.3);
+            const maxDrop = d3.max(ablationData, d => Math.abs(d.drop)) || 0.1;
+            const x = d3.scaleLinear().domain([0, maxDrop]).range([0, w]);
+
+            g.append('g').call(d3.axisLeft(y)).attr('class', 'axis');
+            g.append('g').attr('transform', `translate(0,${h})`)
+                .call(d3.axisBottom(x).ticks(5).tickFormat(d3.format('.1%'))).attr('class', 'axis');
+
+            g.append('text')
+                .attr('x', w / 2).attr('y', h + 30)
+                .attr('text-anchor', 'middle')
+                .attr('fill', 'var(--text-muted)')
+                .attr('font-size', '0.7rem')
+                .text('移除后准确率下降');
+
+            g.selectAll('.abar')
+                .data(ablationData).enter().append('rect')
+                .attr('x', 0).attr('y', d => y(d.name))
+                .attr('height', y.bandwidth()).attr('rx', 3)
+                .attr('fill', d => d.color).attr('opacity', 0.8)
+                .attr('width', 0)
+                .transition().duration(500).delay((d, i) => i * 60)
+                .attr('width', d => x(Math.max(0, d.drop)));
+
+            g.selectAll('.aval')
+                .data(ablationData).enter().append('text')
+                .attr('class', 'bar-value')
+                .attr('x', d => x(Math.max(0, d.drop)) + 4)
+                .attr('y', d => y(d.name) + y.bandwidth() / 2)
+                .attr('dy', '0.35em')
+                .text(d => (d.drop > 0 ? '-' : '') + (Math.abs(d.drop) * 100).toFixed(1) + '%');
+        }
+
+        function renderPDPCharts() {
+            const grid = document.getElementById('pdp-grid');
+            grid.innerHTML = '';
+            const activeIdx = activeFeatures.map((a, i) => a ? i : -1).filter(i => i >= 0);
+            const subData = buildSubsetData(dataset, activeFeatures);
+
+            // Mean feature values for baseline
+            const means = activeIdx.map((_, li) => {
+                return d3.mean(subData, d => d.features[li]);
+            });
+
+            // Top 4 most important features by Gini
+            const gi = RFUtils.giniImportance(currentForest);
+            const sorted = Object.entries(gi).sort((a, b) => b[1] - a[1]);
+            const topFeatures = sorted.slice(0, Math.min(4, activeIdx.length));
+
+            topFeatures.forEach(([liStr]) => {
+                const li = parseInt(liStr);
+                const fi = activeIdx[li];
+                const name = FEATURE_NAMES[fi];
+
+                const card = document.createElement('div');
+                card.className = 'pdp-card';
+                card.innerHTML = `<h4 style="color:${FEAT_COLORS[fi]}">${name}</h4>`;
+                grid.appendChild(card);
+
+                // Compute PDP: vary this feature, hold others at mean
+                const featureVals = subData.map(d => d.features[li]).sort((a, b) => a - b);
+                const minV = featureVals[0];
+                const maxV = featureVals[featureVals.length - 1];
+                const steps = 30;
+                const pdpPoints = [];
+
+                for (let s = 0; s <= steps; s++) {
+                    const val = minV + (maxV - minV) * (s / steps);
+                    // Create synthetic point with means for other features
+                    const features = [...means];
+                    features[li] = val;
+                    const point = { features, label: 0 };
+                    const { votes } = RFUtils.predictForest(currentForest, point);
+                    const total = Object.values(votes).reduce((a, b) => a + b, 0);
+                    const prob1 = (votes[1] || 0) / total;
+                    pdpPoints.push({ x: val, y: prob1 });
+                }
+
+                // Draw line chart
+                const W = 260, H = 150;
+                const margin = { top: 10, right: 15, bottom: 30, left: 40 };
+                const w = W - margin.left - margin.right;
+                const h = H - margin.top - margin.bottom;
+
+                const svg = d3.select(card).append('svg').attr('width', W).attr('height', H);
+                const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+
+                const xScale = d3.scaleLinear().domain([minV, maxV]).range([0, w]);
+                const yScale = d3.scaleLinear().domain([0, 1]).range([h, 0]);
+
+                g.append('g').attr('transform', `translate(0,${h})`).call(d3.axisBottom(xScale).ticks(5).tickFormat(d3.format('.1f'))).attr('class', 'axis');
+                g.append('g').call(d3.axisLeft(yScale).ticks(4).tickFormat(d3.format('.0%'))).attr('class', 'axis');
+
+                // 0.5 reference line
+                g.append('line')
+                    .attr('x1', 0).attr('x2', w)
+                    .attr('y1', yScale(0.5)).attr('y2', yScale(0.5))
+                    .attr('stroke', 'var(--text-muted)').attr('stroke-dasharray', '3,3').attr('opacity', 0.4);
+
+                const line = d3.line()
+                    .x(d => xScale(d.x))
+                    .y(d => yScale(d.y))
+                    .curve(d3.curveMonotoneX);
+
+                // Area fill
+                const area = d3.area()
+                    .x(d => xScale(d.x))
+                    .y0(h)
+                    .y1(d => yScale(d.y))
+                    .curve(d3.curveMonotoneX);
+
+                g.append('path')
+                    .datum(pdpPoints)
+                    .attr('d', area)
+                    .attr('fill', FEAT_COLORS[fi])
+                    .attr('opacity', 0.1);
+
+                const path = g.append('path')
+                    .datum(pdpPoints)
+                    .attr('d', line)
+                    .attr('fill', 'none')
+                    .attr('stroke', FEAT_COLORS[fi])
+                    .attr('stroke-width', 2.5);
+
+                // Animate line drawing
+                const totalLen = path.node().getTotalLength();
+                path.attr('stroke-dasharray', totalLen)
+                    .attr('stroke-dashoffset', totalLen)
+                    .transition().duration(800).ease(d3.easeCubicOut)
+                    .attr('stroke-dashoffset', 0);
+
+                // Y axis label
+                g.append('text')
+                    .attr('x', -margin.left + 8).attr('y', -2)
+                    .attr('fill', 'var(--text-muted)')
+                    .attr('font-size', '0.6rem')
+                    .text('P(class=1)');
+            });
+        }
+
+        function rebuildAndRenderAll() {
+            buildDefaultForest();
+            renderInteractiveStats();
+            renderInteractiveBarChart();
+            renderAblationChart();
+            renderPDPCharts();
+
+            // Also update earlier sections
+            renderGiniStats();
+            renderComparisonCharts();
+
+            // Update permutation section
+            renderPermFeatureButtons();
+            renderPermTable();
+            const pi = computeAllPermImportance();
+            renderPermBarChart(pi);
+
+            // Reinitialize gini animation
+            initGiniAnimation();
+        }
+
+        renderFeatureToggles();
+        renderInteractiveStats();
+        renderInteractiveBarChart();
+        renderAblationChart();
+        renderPDPCharts();
+
+        // Slider
+        const ntreesSlider = document.getElementById('ntrees-slider');
+        const ntreesVal = document.getElementById('ntrees-val');
+        ntreesSlider.addEventListener('input', () => {
+            ntreesVal.textContent = ntreesSlider.value;
+        });
+
+        // Rebuild button
+        document.getElementById('rebuild-btn').addEventListener('click', () => {
+            renderFeatureToggles();
+            rebuildAndRenderAll();
+        });
+
+        /* ================================================================
+           Resize handler
+           ================================================================ */
+        let resizeTimer;
+        window.addEventListener('resize', () => {
+            clearTimeout(resizeTimer);
+            resizeTimer = setTimeout(() => {
+                renderMotivationChart();
+                renderGiniTreeViz();
+                const activeIdx = activeFeatures.map((a, i) => a ? i : -1).filter(i => i >= 0);
+                const gi = RFUtils.giniImportance(currentForest);
+                renderGiniBarChart(Object.values(gi), false);
+                const pi = computeAllPermImportance();
+                renderPermBarChart(pi);
+                renderComparisonCharts();
+                renderInteractiveBarChart();
+                renderAblationChart();
+                renderPDPCharts();
+            }, 300);
+        });
+
+    })();
+    </script>
+</body>
+</html>

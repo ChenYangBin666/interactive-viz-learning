@@ -1,0 +1,1093 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>05 - LSTM 门控机制 | RNN & LSTM 交互学习</title>
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
+    <style>
+        .module-container { max-width: 1100px; margin: 0 auto; padding: 2rem 1.5rem 4rem; }
+        .module-header { text-align: center; margin-bottom: 2.5rem; padding-top: 1rem; }
+        .module-header h1 { font-size: 2.2rem; background: linear-gradient(135deg, #4fc3f7, #16c79a); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .module-header .subtitle { color: var(--text-secondary); font-size: 1.05rem; margin-top: 0.5rem; }
+        .section { margin-bottom: 3rem; }
+        .section-title { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1.25rem; }
+        .section-title .num { width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 0.85rem; flex-shrink: 0; }
+        .section-title h2 { margin-bottom: 0; }
+        .gate-legend { display: flex; flex-wrap: wrap; gap: 1rem; margin: 1rem 0; }
+        .gate-legend-item { display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; color: var(--text-secondary); }
+        .gate-legend-item .dot { width: 14px; height: 14px; border-radius: 4px; }
+        .viz-svg-wrap { background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 1rem; overflow-x: auto; margin: 1rem 0; position: relative; }
+        .viz-svg-wrap svg { display: block; margin: 0 auto; }
+        .controls-row { display: flex; flex-wrap: wrap; align-items: center; gap: 1rem; margin: 1rem 0; }
+        .slider-wrap { flex: 1; min-width: 200px; }
+        .slider-wrap label { display: block; font-size: 0.82rem; color: var(--text-secondary); margin-bottom: 0.3rem; }
+        .slider-inline { display: flex; align-items: center; gap: 0.75rem; }
+        .slider-inline input[type="range"] { flex: 1; }
+        .slider-inline .val { font-family: var(--font-mono); font-size: 0.85rem; min-width: 3rem; text-align: center; }
+        .example-box { background: rgba(79,195,247,0.06); border: 1px solid rgba(79,195,247,0.15); border-radius: var(--radius-md); padding: 1rem 1.2rem; margin: 1rem 0; }
+        .example-box h4 { color: var(--accent-blue); margin-bottom: 0.5rem; font-size: 0.95rem; }
+        .example-box p { font-size: 0.88rem; margin-bottom: 0.4rem; }
+        .gate-val-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(60px, 1fr)); gap: 0.5rem; margin: 0.75rem 0; }
+        .gate-val-cell { text-align: center; padding: 0.4rem; border-radius: var(--radius-sm); font-family: var(--font-mono); font-size: 0.82rem; border: 1px solid var(--border-color); transition: all 0.4s; }
+        .equations-block { background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 1rem 1.5rem; margin: 1rem 0; overflow-x: auto; }
+        .equations-block .katex-display { margin: 0.6rem 0; }
+        .chart-container { width: 100%; min-height: 280px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 0.5rem; margin: 1rem 0; }
+        .data-flow-step { display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 0.75rem; margin: 0.3rem 0; border-radius: var(--radius-sm); font-size: 0.88rem; color: var(--text-secondary); border-left: 3px solid var(--border-color); transition: all 0.4s; }
+        .data-flow-step.active { background: rgba(22,199,154,0.08); color: var(--text-primary); }
+        .step-indicator { display: flex; justify-content: center; gap: 0.5rem; margin: 1rem 0; }
+        .step-dot { width: 28px; height: 28px; border-radius: 50%; border: 2px solid var(--border-color); display: flex; align-items: center; justify-content: center; font-size: 0.75rem; font-weight: 700; color: var(--text-muted); transition: all 0.3s; }
+        .step-dot.active { border-color: var(--accent-green); color: var(--accent-green); background: rgba(22,199,154,0.15); }
+        .step-dot.done { border-color: var(--accent-green); color: var(--bg-primary); background: var(--accent-green); }
+        .compare-wrap { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin: 1rem 0; }
+        @media (max-width: 768px) { .compare-wrap { grid-template-columns: 1fr; } }
+    </style>
+</head>
+<body>
+    <div class="module-container">
+        <header class="module-header">
+            <h1>LSTM 门控机制</h1>
+            <p class="subtitle">长短期记忆网络 — 通过精妙的门控设计解决长程依赖问题</p>
+        </header>
+
+        <!-- Section 1: LSTM 整体架构 -->
+        <section class="section" id="sec-architecture">
+            <div class="section-title">
+                <div class="num" style="background:rgba(79,195,247,0.2);color:#4fc3f7;">1</div>
+                <h2>LSTM 整体架构</h2>
+            </div>
+            <p>LSTM（长短期记忆）通过引入<strong>细胞状态</strong>（Cell State）和三个<strong>门控</strong>机制，让网络能够学习何时记住、何时遗忘、何时输出信息。细胞状态像一条"传送带"，信息可以几乎无损地流过整个序列。</p>
+            <div class="gate-legend">
+                <div class="gate-legend-item"><div class="dot" style="background:#ff5252"></div> 遗忘门 (Forget)</div>
+                <div class="gate-legend-item"><div class="dot" style="background:#4fc3f7"></div> 输入门 (Input)</div>
+                <div class="gate-legend-item"><div class="dot" style="background:#16c79a"></div> 候选值 (Candidate)</div>
+                <div class="gate-legend-item"><div class="dot" style="background:#ffab40"></div> 输出门 (Output)</div>
+            </div>
+            <div class="viz-svg-wrap" id="lstm-arch-viz" style="min-height:420px;"></div>
+            <div class="equations-block">
+                <p style="color:var(--accent-green);font-weight:600;margin-bottom:0.5rem;">核心公式</p>
+                <div>$$f_t = \sigma(W_f [h_{t-1}, x_t] + b_f) \quad \text{— 遗忘门}$$</div>
+                <div>$$i_t = \sigma(W_i [h_{t-1}, x_t] + b_i) \quad \text{— 输入门}$$</div>
+                <div>$$\tilde{C}_t = \tanh(W_C [h_{t-1}, x_t] + b_C) \quad \text{— 候选值}$$</div>
+                <div>$$o_t = \sigma(W_o [h_{t-1}, x_t] + b_o) \quad \text{— 输出门}$$</div>
+                <div>$$C_t = f_t \odot C_{t-1} + i_t \odot \tilde{C}_t \quad \text{— 细胞状态更新}$$</div>
+                <div>$$h_t = o_t \odot \tanh(C_t) \quad \text{— 隐藏状态输出}$$</div>
+            </div>
+        </section>
+
+        <!-- Section 2: 遗忘门 -->
+        <section class="section" id="sec-forget">
+            <div class="section-title">
+                <div class="num" style="background:rgba(255,82,82,0.2);color:#ff5252;">2</div>
+                <h2>遗忘门</h2>
+            </div>
+            <p>遗忘门决定细胞状态中哪些信息应该被丢弃。它查看 $h_{t-1}$ 和 $x_t$，为细胞状态中的每个值输出 0 到 1 之间的数字：<strong>0 表示完全遗忘，1 表示完全保留</strong>。</p>
+            <div class="equations-block">
+                <div>$$f_t = \sigma(W_f [h_{t-1}, x_t] + b_f)$$</div>
+            </div>
+            <div class="controls-row">
+                <div class="slider-wrap">
+                    <label>遗忘门值（统一控制）</label>
+                    <div class="slider-inline">
+                        <span style="font-size:0.8rem;color:#ff5252;">0 完全遗忘</span>
+                        <input type="range" id="forget-slider" min="0" max="100" value="80">
+                        <span style="font-size:0.8rem;color:#16c79a;">1 完全保留</span>
+                        <span class="val" id="forget-val" style="color:#ff5252;">0.80</span>
+                    </div>
+                </div>
+            </div>
+            <div class="viz-svg-wrap" id="forget-gate-viz" style="min-height:250px;"></div>
+            <p style="font-size:0.85rem;color:var(--text-muted);">上方展示细胞状态中的 4 个值如何被遗忘门逐元素相乘。拖动滑块观察遗忘效果。</p>
+            <div class="example-box">
+                <h4>语言模型示例</h4>
+                <p>假设模型在处理句子"<strong>小明</strong>喜欢猫。<strong>小红</strong>喜欢狗。<strong>____</strong>的宠物是..."</p>
+                <p>当遇到新主语"小红"时，遗忘门会将旧主语"小明"的相关信息从细胞状态中清除（$f_t \approx 0$），为新信息腾出空间。</p>
+                <div id="forget-example-viz" style="margin-top:0.75rem;"></div>
+            </div>
+        </section>
+
+        <!-- Section 3: 输入门与候选值 -->
+        <section class="section" id="sec-input">
+            <div class="section-title">
+                <div class="num" style="background:rgba(79,195,247,0.2);color:#4fc3f7;">3</div>
+                <h2>输入门与候选值</h2>
+            </div>
+            <p>输入门分两步工作：首先，<strong style="color:#4fc3f7;">输入门</strong> $i_t$ 决定哪些位置需要更新；然后，<strong style="color:#16c79a;">候选值</strong> $\tilde{C}_t$ 生成新的候选信息。两者逐元素相乘后加入细胞状态。</p>
+            <div class="equations-block">
+                <div>$$i_t = \sigma(W_i [h_{t-1}, x_t] + b_i) \quad \text{— 输入门（选择更新哪些位置）}$$</div>
+                <div>$$\tilde{C}_t = \tanh(W_C [h_{t-1}, x_t] + b_C) \quad \text{— 候选值（新信息）}$$</div>
+                <div>$$C_t = f_t \odot C_{t-1} + i_t \odot \tilde{C}_t \quad \text{— 完整的细胞状态更新}$$</div>
+            </div>
+            <div class="controls-row">
+                <div class="slider-wrap">
+                    <label>输入门值</label>
+                    <div class="slider-inline">
+                        <span style="font-size:0.8rem;color:var(--text-muted);">0 阻断</span>
+                        <input type="range" id="input-slider" min="0" max="100" value="70">
+                        <span style="font-size:0.8rem;color:var(--text-muted);">1 通过</span>
+                        <span class="val" id="input-val" style="color:#4fc3f7;">0.70</span>
+                    </div>
+                </div>
+            </div>
+            <div class="viz-svg-wrap" id="input-gate-viz" style="min-height:300px;"></div>
+            <p style="font-size:0.85rem;color:var(--text-muted);">左侧为候选值 $\tilde{C}_t$，中间为输入门 $i_t$ 的过滤，右侧为最终加入细胞状态的新信息。</p>
+        </section>
+
+        <!-- Section 4: 输出门 -->
+        <section class="section" id="sec-output">
+            <div class="section-title">
+                <div class="num" style="background:rgba(255,171,64,0.2);color:#ffab40;">4</div>
+                <h2>输出门</h2>
+            </div>
+            <p>输出门决定细胞状态的哪些部分成为当前的隐藏状态输出 $h_t$。细胞状态先通过 $\tanh$ 压缩到 [-1, 1]，再由输出门过滤。</p>
+            <div class="equations-block">
+                <div>$$o_t = \sigma(W_o [h_{t-1}, x_t] + b_o) \quad \text{— 输出门}$$</div>
+                <div>$$h_t = o_t \odot \tanh(C_t) \quad \text{— 隐藏状态}$$</div>
+            </div>
+            <div class="viz-svg-wrap" id="output-gate-viz" style="min-height:280px;"></div>
+            <p style="font-weight:600;color:var(--accent-orange);margin-top:1rem;">完整单步数据流</p>
+            <div id="data-flow-steps">
+                <div class="data-flow-step" data-step="0" style="border-left-color:#ff5252;">1. 遗忘门：决定丢弃旧信息 $f_t \odot C_{t-1}$</div>
+                <div class="data-flow-step" data-step="1" style="border-left-color:#4fc3f7;">2. 输入门：选择新信息通道 $i_t$</div>
+                <div class="data-flow-step" data-step="2" style="border-left-color:#16c79a;">3. 候选值：生成新信息 $\tilde{C}_t$</div>
+                <div class="data-flow-step" data-step="3" style="border-left-color:#b388ff;">4. 更新细胞状态 $C_t = f_t \odot C_{t-1} + i_t \odot \tilde{C}_t$</div>
+                <div class="data-flow-step" data-step="4" style="border-left-color:#ffab40;">5. 输出门 + 隐藏状态 $h_t = o_t \odot \tanh(C_t)$</div>
+            </div>
+            <div style="text-align:center;margin-top:0.75rem;">
+                <button class="btn btn-primary" id="btn-flow-animate">播放数据流动画</button>
+            </div>
+        </section>
+
+        <!-- Section 5: 完整前向传播 -->
+        <section class="section" id="sec-forward">
+            <div class="section-title">
+                <div class="num" style="background:rgba(22,199,154,0.2);color:#16c79a;">5</div>
+                <h2>完整前向传播</h2>
+            </div>
+            <p>在一个 6 步序列上运行完整的 LSTM 前向传播。观察每一时间步中所有门控如何协同工作，以及细胞状态和隐藏状态的动态变化。</p>
+            <div class="step-indicator" id="time-step-dots"></div>
+            <div id="forward-anim-controls" style="margin:1rem 0;"></div>
+            <div class="viz-svg-wrap" id="forward-viz" style="min-height:350px;"></div>
+            <div class="gate-val-grid" id="forward-gate-vals" style="display:none;"></div>
+            <p style="font-weight:600;color:var(--text-primary);margin-top:1.5rem;">门控值、细胞状态与隐藏状态随时间变化</p>
+            <div class="chart-container" id="forward-chart"></div>
+
+            <p style="font-weight:600;color:var(--text-primary);margin-top:2rem;">梯度流对比：LSTM vs 原始 RNN</p>
+            <p style="font-size:0.9rem;">LSTM 的细胞状态"高速公路"让梯度可以几乎无损地反向传播，有效缓解梯度消失问题。</p>
+            <div class="compare-wrap">
+                <div>
+                    <h4 style="color:var(--accent-red);text-align:center;">原始 RNN 梯度流</h4>
+                    <div class="chart-container" id="grad-rnn-chart" style="min-height:220px;"></div>
+                </div>
+                <div>
+                    <h4 style="color:var(--accent-green);text-align:center;">LSTM 梯度流</h4>
+                    <div class="chart-container" id="grad-lstm-chart" style="min-height:220px;"></div>
+                </div>
+            </div>
+            <div class="info-box success">
+                <p><strong>关键洞察：</strong>LSTM 的细胞状态更新为 $C_t = f_t \odot C_{t-1} + \ldots$，反向传播时梯度乘以 $f_t$（接近 1），而非 RNN 中梯度乘以 $W_{hh}$ 的特征值（可能远大于或远小于 1），因此梯度保持稳定。</p>
+            </div>
+        </section>
+    </div>
+
+    <script src="../shared/scripts/rnn-utils.js"></script>
+    <script src="../shared/scripts/animation-controller.js"></script>
+    <script src="../shared/scripts/matrix-renderer.js"></script>
+    <script src="../shared/scripts/nav.js"></script>
+    <script src="../shared/scripts/katex-init.js"></script>
+    <script>
+    (function() {
+        'use strict';
+
+        /* ======================================================================
+         *  常量与工具
+         * ====================================================================== */
+        const COLORS = {
+            forget: '#ff5252', input: '#4fc3f7', candidate: '#16c79a',
+            output: '#ffab40', cellState: '#b388ff', hidden: '#e8e8e8',
+            bg: '#16213e', border: '#2a2a4a', text: '#a8a8b8'
+        };
+        const HIDDEN = 4, INPUT = 3;
+        const params = RNNUtils.createLSTMParams(HIDDEN, INPUT, 42);
+
+        function fmt(v, d = 2) { return Number(v).toFixed(d); }
+        function colorBar(val, color, maxW = 60) {
+            const w = Math.abs(val) * maxW;
+            return `<span style="display:inline-block;width:${w}px;height:10px;background:${color};border-radius:2px;vertical-align:middle;opacity:${0.4 + Math.abs(val)*0.6};"></span>`;
+        }
+
+        /* ======================================================================
+         *  Section 1: LSTM 整体架构图
+         * ====================================================================== */
+        function drawArchitecture() {
+            const container = document.getElementById('lstm-arch-viz');
+            const W = 900, H = 420;
+            const svg = d3.select(container).append('svg')
+                .attr('viewBox', `0 0 ${W} ${H}`)
+                .attr('width', '100%').attr('height', H);
+
+            // Defs: arrowheads
+            const defs = svg.append('defs');
+            ['arrow-default','arrow-red','arrow-blue','arrow-green','arrow-orange','arrow-purple'].forEach((id, idx) => {
+                const colors = ['#a8a8b8','#ff5252','#4fc3f7','#16c79a','#ffab40','#b388ff'];
+                defs.append('marker').attr('id', id).attr('viewBox','0 0 10 6').attr('refX',10).attr('refY',3)
+                    .attr('markerWidth',8).attr('markerHeight',6).attr('orient','auto')
+                    .append('path').attr('d','M0,0 L10,3 L0,6 Z').attr('fill', colors[idx]);
+            });
+
+            // Cell state highway (top line)
+            const csY = 80;
+            svg.append('line').attr('x1',80).attr('y1',csY).attr('x2',820).attr('y2',csY)
+                .attr('stroke', COLORS.cellState).attr('stroke-width',3).attr('stroke-dasharray','8,4');
+            svg.append('text').attr('x',450).attr('y',csY-12).attr('text-anchor','middle')
+                .attr('fill', COLORS.cellState).attr('font-size',13).attr('font-weight',600)
+                .text('细胞状态 Ct（传送带）');
+            // Arrows on cell state line
+            svg.append('line').attr('x1',80).attr('y1',csY).attr('x2',180).attr('y2',csY)
+                .attr('stroke', COLORS.cellState).attr('stroke-width',2).attr('marker-end','url(#arrow-purple)');
+            svg.append('line').attr('x1',700).attr('y1',csY).attr('x2',820).attr('y2',csY)
+                .attr('stroke', COLORS.cellState).attr('stroke-width',2).attr('marker-end','url(#arrow-purple)');
+
+            // Gate positions
+            const gateY = 220, gateR = 36;
+            const gates = [
+                { x: 200, label: '遗忘门', sub: 'ft = σ(...)', color: COLORS.forget, sym: 'x' },
+                { x: 380, label: '输入门', sub: 'it = σ(...)', color: COLORS.input, sym: 'x' },
+                { x: 530, label: '候选值', sub: 'C̃t = tanh(...)', color: COLORS.candidate, sym: '+' },
+                { x: 710, label: '输出门', sub: 'ot = σ(...)', color: COLORS.output, sym: 'x' },
+            ];
+
+            gates.forEach(g => {
+                // Gate circle
+                svg.append('circle').attr('cx', g.x).attr('cy', gateY).attr('r', gateR)
+                    .attr('fill', 'none').attr('stroke', g.color).attr('stroke-width', 2.5);
+                svg.append('text').attr('x', g.x).attr('y', gateY + 5).attr('text-anchor','middle')
+                    .attr('fill', g.color).attr('font-size', 18).attr('font-weight', 700).text(g.sym);
+                // Label
+                svg.append('text').attr('x', g.x).attr('y', gateY + gateR + 20).attr('text-anchor','middle')
+                    .attr('fill', g.color).attr('font-size', 12).attr('font-weight', 600).text(g.label);
+                svg.append('text').attr('x', g.x).attr('y', gateY + gateR + 36).attr('text-anchor','middle')
+                    .attr('fill', COLORS.text).attr('font-size', 10).attr('font-family','var(--font-mono)').text(g.sub);
+            });
+
+            // Pointwise operations on cell state line
+            // Forget gate x on cell state
+            const fOpY = csY;
+            svg.append('circle').attr('cx', 200).attr('cy', fOpY).attr('r', 14)
+                .attr('fill', 'rgba(255,82,82,0.15)').attr('stroke', COLORS.forget).attr('stroke-width', 2);
+            svg.append('text').attr('x', 200).attr('y', fOpY + 5).attr('text-anchor','middle')
+                .attr('fill', COLORS.forget).attr('font-size', 14).attr('font-weight',700).text('x');
+            // Connection from forget gate to cell state op
+            svg.append('line').attr('x1',200).attr('y1',gateY - gateR).attr('x2',200).attr('y2',csY+16)
+                .attr('stroke', COLORS.forget).attr('stroke-width',1.5).attr('marker-end','url(#arrow-red)');
+
+            // Input + candidate addition on cell state
+            const addX = 460;
+            svg.append('circle').attr('cx', addX).attr('cy', fOpY).attr('r', 14)
+                .attr('fill', 'rgba(22,199,154,0.15)').attr('stroke', COLORS.candidate).attr('stroke-width', 2);
+            svg.append('text').attr('x', addX).attr('y', fOpY + 5).attr('text-anchor','middle')
+                .attr('fill', COLORS.candidate).attr('font-size', 16).attr('font-weight',700).text('+');
+
+            // Input gate -> multiply with candidate
+            const mulX = 460, mulY = 155;
+            svg.append('circle').attr('cx', mulX).attr('cy', mulY).attr('r', 12)
+                .attr('fill', 'rgba(79,195,247,0.1)').attr('stroke', COLORS.input).attr('stroke-width', 1.5);
+            svg.append('text').attr('x', mulX).attr('y', mulY + 4).attr('text-anchor','middle')
+                .attr('fill', COLORS.input).attr('font-size', 12).attr('font-weight',700).text('x');
+            // Input gate to mul
+            svg.append('line').attr('x1',380).attr('y1',gateY - gateR).attr('x2',mulX - 14).attr('y2',mulY)
+                .attr('stroke', COLORS.input).attr('stroke-width',1.2).attr('stroke-dasharray','4,2');
+            // Candidate to mul
+            svg.append('line').attr('x1',530).attr('y1',gateY - gateR).attr('x2',mulX + 14).attr('y2',mulY)
+                .attr('stroke', COLORS.candidate).attr('stroke-width',1.2).attr('stroke-dasharray','4,2');
+            // Mul to addition on cell state
+            svg.append('line').attr('x1',mulX).attr('y1',mulY - 12).attr('x2',addX).attr('y2',csY + 16)
+                .attr('stroke', COLORS.candidate).attr('stroke-width',1.5).attr('marker-end','url(#arrow-green)');
+
+            // Output gate -> tanh of cell state -> hidden state
+            const tanhX = 710, tanhY = csY;
+            svg.append('rect').attr('x', tanhX - 20).attr('y', tanhY - 12).attr('width', 40).attr('height', 24)
+                .attr('rx', 6).attr('fill', 'rgba(255,171,64,0.1)').attr('stroke', COLORS.output).attr('stroke-width', 1.5);
+            svg.append('text').attr('x', tanhX).attr('y', tanhY + 4).attr('text-anchor','middle')
+                .attr('fill', COLORS.output).attr('font-size', 10).attr('font-weight',600).text('tanh');
+
+            // Output gate to tanh multiply
+            const outMulY = 140;
+            svg.append('circle').attr('cx', 770).attr('cy', outMulY).attr('r', 12)
+                .attr('fill', 'rgba(255,171,64,0.1)').attr('stroke', COLORS.output).attr('stroke-width', 1.5);
+            svg.append('text').attr('x', 770).attr('y', outMulY + 4).attr('text-anchor','middle')
+                .attr('fill', COLORS.output).attr('font-size', 12).attr('font-weight',700).text('x');
+            svg.append('line').attr('x1',710).attr('y1',gateY - gateR).attr('x2',770).attr('y2',outMulY + 14)
+                .attr('stroke', COLORS.output).attr('stroke-width',1.2).attr('stroke-dasharray','4,2');
+            svg.append('line').attr('x1',730).attr('y1',csY).attr('x2',770 - 14).attr('y2',outMulY)
+                .attr('stroke', COLORS.output).attr('stroke-width',1.2).attr('stroke-dasharray','4,2');
+
+            // ht output arrow
+            svg.append('line').attr('x1',770).attr('y1',outMulY - 12).attr('x2',820).attr('y2',50)
+                .attr('stroke', COLORS.hidden).attr('stroke-width',1.5).attr('marker-end','url(#arrow-default)');
+            svg.append('text').attr('x',835).attr('y',50).attr('fill','#e8e8e8').attr('font-size',13).attr('font-weight',600).text('ht');
+
+            // Input labels at bottom
+            const bottomY = 350;
+            svg.append('text').attr('x',450).attr('y',bottomY).attr('text-anchor','middle')
+                .attr('fill','#e8e8e8').attr('font-size',13).attr('font-weight',600).text('[ht-1, xt]');
+            // Lines from bottom to each gate
+            gates.forEach(g => {
+                svg.append('line').attr('x1',g.x).attr('y1',bottomY - 15).attr('x2',g.x).attr('y2',gateY + gateR)
+                    .attr('stroke', COLORS.text).attr('stroke-width',1).attr('stroke-dasharray','3,3')
+                    .attr('marker-end','url(#arrow-default)').attr('opacity',0.5);
+            });
+
+            // C_{t-1} and C_t labels
+            svg.append('text').attr('x', 70).attr('y', csY + 4).attr('text-anchor','end')
+                .attr('fill', COLORS.cellState).attr('font-size', 13).attr('font-weight', 600).text('Ct-1');
+            svg.append('text').attr('x', 830).attr('y', csY + 4).attr('text-anchor','start')
+                .attr('fill', COLORS.cellState).attr('font-size', 13).attr('font-weight', 600).text('Ct');
+
+            // h_{t-1} input
+            svg.append('text').attr('x', 40).attr('y', bottomY).attr('text-anchor','middle')
+                .attr('fill','#e8e8e8').attr('font-size',11).text('ht-1');
+            svg.append('line').attr('x1',60).attr('y1',bottomY - 4).attr('x2',200).attr('y2',bottomY - 4)
+                .attr('stroke','#a8a8b8').attr('stroke-width',1).attr('stroke-dasharray','4,3');
+
+            // Conveyor belt metaphor annotation
+            svg.append('text').attr('x',450).attr('y',csY + 40).attr('text-anchor','middle')
+                .attr('fill','#6c6c7c').attr('font-size',10).attr('font-style','italic')
+                .text('信息沿细胞状态"传送带"流动，仅通过门控进行少量线性交互');
+        }
+
+        /* ======================================================================
+         *  Section 2: 遗忘门交互
+         * ====================================================================== */
+        const cellStateInit = [0.8, -0.5, 0.3, 0.9];
+
+        function drawForgetGate() {
+            const container = document.getElementById('forget-gate-viz');
+            const W = 700, H = 240;
+            const svg = d3.select(container).append('svg')
+                .attr('viewBox', `0 0 ${W} ${H}`)
+                .attr('width', '100%').attr('id','forget-svg');
+
+            updateForgetGate(0.8);
+        }
+
+        function updateForgetGate(fVal) {
+            const svg = d3.select('#forget-svg');
+            svg.selectAll('*').remove();
+            const W = 700, H = 240;
+            const n = 4;
+            const cellW = 80, gap = 30;
+            const startX = 60, midX = 320, endX = 530;
+            const y = 60;
+
+            // Title labels
+            svg.append('text').attr('x',startX + (n*cellW)/2 - 40).attr('y',30).attr('text-anchor','middle')
+                .attr('fill', COLORS.cellState).attr('font-size',12).attr('font-weight',600).text('Ct-1（旧细胞状态）');
+            svg.append('text').attr('x', midX + 20).attr('y',30).attr('text-anchor','middle')
+                .attr('fill', COLORS.forget).attr('font-size',12).attr('font-weight',600).text('ft（遗忘门）');
+            svg.append('text').attr('x', endX + (n*cellW)/2 - 40).attr('y',30).attr('text-anchor','middle')
+                .attr('fill','#e8e8e8').attr('font-size',12).attr('font-weight',600).text('ft ⊙ Ct-1（保留值）');
+
+            // Old cell state bars
+            cellStateInit.forEach((v, i) => {
+                const cx = startX + i * (cellW + 5);
+                const barH = Math.abs(v) * 80;
+                const barY = v >= 0 ? y + 80 - barH : y + 80;
+                svg.append('rect').attr('x', cx).attr('y', barY).attr('width', cellW - 10).attr('height', barH)
+                    .attr('fill', COLORS.cellState).attr('opacity', 0.7).attr('rx', 4);
+                svg.append('text').attr('x', cx + (cellW-10)/2).attr('y', y + 100)
+                    .attr('text-anchor','middle').attr('fill','#e8e8e8').attr('font-size',11)
+                    .attr('font-family','var(--font-mono)').text(fmt(v));
+            });
+
+            // Multiply symbol
+            svg.append('text').attr('x', midX - 20).attr('y', y + 50).attr('text-anchor','middle')
+                .attr('fill', COLORS.forget).attr('font-size', 24).attr('font-weight', 700).text('x');
+
+            // Forget gate values
+            cellStateInit.forEach((_, i) => {
+                const cx = midX + i * 35;
+                const radius = 14;
+                svg.append('circle').attr('cx', cx + 15).attr('cy', y + 50).attr('r', radius)
+                    .attr('fill', `rgba(255,82,82,${0.15 + fVal * 0.6})`).attr('stroke', COLORS.forget).attr('stroke-width', 1.5);
+                svg.append('text').attr('x', cx + 15).attr('y', y + 54).attr('text-anchor','middle')
+                    .attr('fill','#e8e8e8').attr('font-size', 10).attr('font-family','var(--font-mono)').text(fmt(fVal));
+            });
+
+            // Equals
+            svg.append('text').attr('x', endX - 25).attr('y', y + 50).attr('text-anchor','middle')
+                .attr('fill','#a8a8b8').attr('font-size', 20).attr('font-weight', 700).text('=');
+
+            // Result
+            cellStateInit.forEach((v, i) => {
+                const result = v * fVal;
+                const cx = endX + i * (cellW + 5);
+                const barH = Math.abs(result) * 80;
+                const barY = result >= 0 ? y + 80 - barH : y + 80;
+                const opacity = 0.3 + fVal * 0.5;
+                svg.append('rect').attr('x', cx).attr('y', barY).attr('width', cellW - 10).attr('height', Math.max(2, barH))
+                    .attr('fill', COLORS.cellState).attr('opacity', opacity).attr('rx', 4);
+                svg.append('text').attr('x', cx + (cellW-10)/2).attr('y', y + 100)
+                    .attr('text-anchor','middle').attr('fill','#e8e8e8').attr('font-size',11)
+                    .attr('font-family','var(--font-mono)').text(fmt(result));
+            });
+
+            // Annotation
+            const annY = H - 30;
+            let annText = fVal < 0.2 ? '几乎完全遗忘 — 旧信息被清除' :
+                          fVal < 0.5 ? '部分遗忘 — 旧信息衰减' :
+                          fVal < 0.8 ? '大部分保留 — 轻微衰减' : '几乎完全保留 — 信息无损通过';
+            svg.append('text').attr('x', W/2).attr('y', annY).attr('text-anchor','middle')
+                .attr('fill', fVal < 0.3 ? COLORS.forget : COLORS.candidate).attr('font-size', 12).attr('font-weight', 600)
+                .text(annText);
+        }
+
+        function drawForgetExample() {
+            const container = document.getElementById('forget-example-viz');
+            const tokens = ['小明','喜欢','猫','。','小红','喜欢','狗'];
+            const forgetVals = [0.9, 0.8, 0.7, 0.6, 0.1, 0.9, 0.8]; // forget gate activations
+            const subjectStrength = [1.0, 0.9, 0.7, 0.6, 0.06, 0.85, 0.78]; // "subject" cell state component
+
+            let html = '<div style="display:flex;flex-wrap:wrap;gap:0.4rem;align-items:flex-end;">';
+            tokens.forEach((t, i) => {
+                const fColor = RNNUtils.gateToColor(forgetVals[i]);
+                const barH = subjectStrength[i] * 40;
+                html += `<div style="text-align:center;min-width:50px;">
+                    <div style="height:40px;display:flex;align-items:flex-end;justify-content:center;">
+                        <div style="width:30px;height:${barH}px;background:${COLORS.cellState};border-radius:3px 3px 0 0;opacity:0.7;"></div>
+                    </div>
+                    <div style="font-size:0.7rem;color:${COLORS.text};margin-top:2px;">f=${fmt(forgetVals[i])}</div>
+                    <div style="padding:0.2rem 0.4rem;background:rgba(255,255,255,0.05);border-radius:4px;font-size:0.85rem;border:1px solid ${i===4?COLORS.forget:'transparent'};">${t}</div>
+                </div>`;
+            });
+            html += '</div>';
+            html += '<p style="font-size:0.8rem;color:var(--text-muted);margin-top:0.5rem;">紫色柱高度 = "主语"在细胞状态中的强度。当"小红"出现时 f≈0.1，旧主语信息几乎被清零。</p>';
+            container.innerHTML = html;
+        }
+
+        /* ======================================================================
+         *  Section 3: 输入门与候选值
+         * ====================================================================== */
+        const candidateVals = [0.6, -0.4, 0.9, -0.2];
+
+        function drawInputGate() {
+            const container = document.getElementById('input-gate-viz');
+            const W = 750, H = 300;
+            const svg = d3.select(container).append('svg')
+                .attr('viewBox', `0 0 ${W} ${H}`)
+                .attr('width', '100%').attr('id','input-svg');
+            updateInputGate(0.7);
+        }
+
+        function updateInputGate(iVal) {
+            const svg = d3.select('#input-svg');
+            svg.selectAll('*').remove();
+            const W = 750, H = 300;
+            const n = 4;
+            const cellW = 55, startX = 30, gateX = 240, resX = 420, finalX = 580;
+            const y = 50, barMax = 80;
+
+            // Labels
+            svg.append('text').attr('x', startX + n*cellW/2).attr('y', 30).attr('text-anchor','middle')
+                .attr('fill', COLORS.candidate).attr('font-size', 11).attr('font-weight', 600).text('候选值 C̃t');
+            svg.append('text').attr('x', gateX + 35).attr('y', 30).attr('text-anchor','middle')
+                .attr('fill', COLORS.input).attr('font-size', 11).attr('font-weight', 600).text('输入门 it');
+            svg.append('text').attr('x', resX + n*cellW/2).attr('y', 30).attr('text-anchor','middle')
+                .attr('fill', '#e8e8e8').attr('font-size', 11).attr('font-weight', 600).text('it ⊙ C̃t');
+            svg.append('text').attr('x', finalX + n*cellW/2 + 30).attr('y', 30).attr('text-anchor','middle')
+                .attr('fill', COLORS.cellState).attr('font-size', 11).attr('font-weight', 600).text('新 Ct');
+
+            // Old cell state value (after forget)
+            const fVal = parseFloat(document.getElementById('forget-val').textContent) || 0.8;
+            const afterForget = cellStateInit.map(v => v * fVal);
+
+            // Candidate bars
+            candidateVals.forEach((v, i) => {
+                const cx = startX + i * cellW;
+                const barH = Math.abs(v) * barMax;
+                const barY = v >= 0 ? y + barMax - barH : y + barMax;
+                svg.append('rect').attr('x', cx + 5).attr('y', barY).attr('width', cellW - 15).attr('height', barH)
+                    .attr('fill', COLORS.candidate).attr('opacity', 0.7).attr('rx', 3);
+                svg.append('text').attr('x', cx + cellW/2 - 2).attr('y', y + barMax + 18)
+                    .attr('text-anchor','middle').attr('fill','#e8e8e8').attr('font-size',10)
+                    .attr('font-family','var(--font-mono)').text(fmt(v));
+            });
+
+            // Multiply
+            svg.append('text').attr('x', gateX - 15).attr('y', y + barMax/2 + 5).attr('text-anchor','middle')
+                .attr('fill', COLORS.input).attr('font-size', 22).attr('font-weight', 700).text('x');
+
+            // Gate circles
+            candidateVals.forEach((_, i) => {
+                const cx = gateX + i * 35 + 10;
+                svg.append('circle').attr('cx', cx).attr('cy', y + barMax/2).attr('r', 13)
+                    .attr('fill', `rgba(79,195,247,${0.15 + iVal*0.5})`).attr('stroke', COLORS.input).attr('stroke-width', 1.5);
+                svg.append('text').attr('x', cx).attr('y', y + barMax/2 + 4).attr('text-anchor','middle')
+                    .attr('fill','#e8e8e8').attr('font-size',9).attr('font-family','var(--font-mono)').text(fmt(iVal));
+            });
+
+            // Equals
+            svg.append('text').attr('x', resX - 18).attr('y', y + barMax/2 + 5).attr('text-anchor','middle')
+                .attr('fill','#a8a8b8').attr('font-size', 18).text('=');
+
+            // Filtered result (i * candidate)
+            const filtered = candidateVals.map(v => v * iVal);
+            filtered.forEach((v, i) => {
+                const cx = resX + i * cellW;
+                const barH = Math.abs(v) * barMax;
+                const barY = v >= 0 ? y + barMax - barH : y + barMax;
+                svg.append('rect').attr('x', cx + 5).attr('y', barY).attr('width', cellW - 15).attr('height', Math.max(2, barH))
+                    .attr('fill', COLORS.input).attr('opacity', 0.6).attr('rx', 3);
+                svg.append('text').attr('x', cx + cellW/2 - 2).attr('y', y + barMax + 18)
+                    .attr('text-anchor','middle').attr('fill','#e8e8e8').attr('font-size',10)
+                    .attr('font-family','var(--font-mono)').text(fmt(v));
+            });
+
+            // Plus sign
+            svg.append('text').attr('x', finalX - 5).attr('y', y + barMax/2 + 5).attr('text-anchor','middle')
+                .attr('fill', COLORS.candidate).attr('font-size', 22).attr('font-weight', 700).text('+');
+
+            // Final new cell state: afterForget + filtered
+            const newC = afterForget.map((v, i) => v + filtered[i]);
+            newC.forEach((v, i) => {
+                const cx = finalX + i * cellW + 20;
+                const barH = Math.abs(v) * barMax * 0.8;
+                const barY = v >= 0 ? y + barMax - barH : y + barMax;
+                svg.append('rect').attr('x', cx + 5).attr('y', barY).attr('width', cellW - 15).attr('height', Math.max(2, barH))
+                    .attr('fill', COLORS.cellState).attr('opacity', 0.7).attr('rx', 3);
+                svg.append('text').attr('x', cx + cellW/2 - 2).attr('y', y + barMax + 18)
+                    .attr('text-anchor','middle').attr('fill','#e8e8e8').attr('font-size',10)
+                    .attr('font-family','var(--font-mono)').text(fmt(v));
+            });
+
+            // Bottom equation summary
+            svg.append('text').attr('x', W/2).attr('y', H - 30).attr('text-anchor','middle')
+                .attr('fill', COLORS.text).attr('font-size', 11)
+                .text(`Ct = ft⊙Ct-1 + it⊙C̃t = [${afterForget.map(v=>fmt(v)).join(', ')}] + [${filtered.map(v=>fmt(v)).join(', ')}] = [${newC.map(v=>fmt(v)).join(', ')}]`);
+        }
+
+        /* ======================================================================
+         *  Section 4: 输出门
+         * ====================================================================== */
+        function drawOutputGate() {
+            const container = document.getElementById('output-gate-viz');
+            const W = 700, H = 270;
+            const svg = d3.select(container).append('svg')
+                .attr('viewBox', `0 0 ${W} ${H}`)
+                .attr('width', '100%').attr('id','output-svg');
+
+            // Compute example values
+            const fVal = 0.8, iVal = 0.7, oVal = 0.6;
+            const afterForget = cellStateInit.map(v => v * fVal);
+            const filtered = candidateVals.map(v => v * iVal);
+            const newC = afterForget.map((v, i) => v + filtered[i]);
+            const tanhC = newC.map(v => Math.tanh(v));
+            const hOut = tanhC.map(v => v * oVal);
+
+            const n = 4, cellW = 55, y = 50, barMax = 70;
+            const col1 = 40, col2 = 250, col3 = 410, col4 = 560;
+
+            // Labels
+            svg.append('text').attr('x', col1 + n*cellW/2).attr('y', 30).attr('text-anchor','middle')
+                .attr('fill', COLORS.cellState).attr('font-size', 11).attr('font-weight', 600).text('Ct（细胞状态）');
+            svg.append('text').attr('x', col2 + 20).attr('y', 30).attr('text-anchor','middle')
+                .attr('fill', '#b388ff').attr('font-size', 11).attr('font-weight', 600).text('tanh(Ct)');
+            svg.append('text').attr('x', col3 + 35).attr('y', 30).attr('text-anchor','middle')
+                .attr('fill', COLORS.output).attr('font-size', 11).attr('font-weight', 600).text('输出门 ot');
+            svg.append('text').attr('x', col4 + n*cellW/2 - 20).attr('y', 30).attr('text-anchor','middle')
+                .attr('fill', '#e8e8e8').attr('font-size', 11).attr('font-weight', 600).text('ht = ot⊙tanh(Ct)');
+
+            // Cell state bars
+            newC.forEach((v, i) => {
+                const cx = col1 + i * cellW;
+                const barH = Math.abs(v) * barMax;
+                const barY = v >= 0 ? y + barMax - barH : y + barMax;
+                svg.append('rect').attr('x', cx+5).attr('y', barY).attr('width', cellW-15).attr('height', Math.max(2, barH))
+                    .attr('fill', COLORS.cellState).attr('opacity', 0.7).attr('rx', 3);
+                svg.append('text').attr('x', cx + cellW/2 - 2).attr('y', y + barMax + 16)
+                    .attr('text-anchor','middle').attr('fill','#e8e8e8').attr('font-size',10)
+                    .attr('font-family','var(--font-mono)').text(fmt(v));
+            });
+
+            // Arrow -> tanh
+            svg.append('text').attr('x', col2 - 25).attr('y', y + barMax/2 + 5).attr('text-anchor','middle')
+                .attr('fill', '#b388ff').attr('font-size', 11).text('tanh');
+            svg.append('text').attr('x', col2 - 25).attr('y', y + barMax/2 + 18).attr('text-anchor','middle')
+                .attr('fill', '#a8a8b8').attr('font-size', 16).text('→');
+
+            // tanh(C) values
+            tanhC.forEach((v, i) => {
+                const cx = col2 + i * 35;
+                svg.append('circle').attr('cx', cx + 10).attr('cy', y + barMax/2).attr('r', 13)
+                    .attr('fill', `rgba(179,136,255,${0.2 + Math.abs(v)*0.5})`).attr('stroke', '#b388ff').attr('stroke-width', 1);
+                svg.append('text').attr('x', cx + 10).attr('y', y + barMax/2 + 4).attr('text-anchor','middle')
+                    .attr('fill','#e8e8e8').attr('font-size',9).attr('font-family','var(--font-mono)').text(fmt(v));
+            });
+
+            // Multiply
+            svg.append('text').attr('x', col3 - 15).attr('y', y + barMax/2 + 5).attr('text-anchor','middle')
+                .attr('fill', COLORS.output).attr('font-size', 20).attr('font-weight', 700).text('x');
+
+            // Output gate circles
+            [oVal, oVal, oVal, oVal].forEach((v, i) => {
+                const cx = col3 + i * 35 + 10;
+                svg.append('circle').attr('cx', cx).attr('cy', y + barMax/2).attr('r', 13)
+                    .attr('fill', `rgba(255,171,64,${0.15 + v*0.5})`).attr('stroke', COLORS.output).attr('stroke-width', 1.5);
+                svg.append('text').attr('x', cx).attr('y', y + barMax/2 + 4).attr('text-anchor','middle')
+                    .attr('fill','#e8e8e8').attr('font-size',9).attr('font-family','var(--font-mono)').text(fmt(v));
+            });
+
+            // Equals
+            svg.append('text').attr('x', col4 - 15).attr('y', y + barMax/2 + 5).attr('text-anchor','middle')
+                .attr('fill','#a8a8b8').attr('font-size', 18).text('=');
+
+            // Hidden state output bars
+            hOut.forEach((v, i) => {
+                const cx = col4 + i * cellW - 10;
+                const barH = Math.abs(v) * barMax;
+                const barY = v >= 0 ? y + barMax - barH : y + barMax;
+                svg.append('rect').attr('x', cx+5).attr('y', barY).attr('width', cellW-15).attr('height', Math.max(2, barH))
+                    .attr('fill', COLORS.output).attr('opacity', 0.7).attr('rx', 3);
+                svg.append('text').attr('x', cx + cellW/2 - 2).attr('y', y + barMax + 16)
+                    .attr('text-anchor','middle').attr('fill','#e8e8e8').attr('font-size',10)
+                    .attr('font-family','var(--font-mono)').text(fmt(v));
+            });
+
+            // Summary
+            svg.append('text').attr('x', W/2).attr('y', H - 20).attr('text-anchor','middle')
+                .attr('fill', COLORS.text).attr('font-size', 11)
+                .text(`ht = ot ⊙ tanh(Ct) = [${hOut.map(v => fmt(v)).join(', ')}]`);
+        }
+
+        function setupDataFlowAnimation() {
+            const flowSteps = document.querySelectorAll('#data-flow-steps .data-flow-step');
+            const btn = document.getElementById('btn-flow-animate');
+            let running = false;
+
+            btn.addEventListener('click', async () => {
+                if (running) return;
+                running = true;
+                btn.disabled = true;
+                btn.textContent = '动画播放中...';
+
+                // Reset
+                flowSteps.forEach(s => s.classList.remove('active'));
+
+                for (let i = 0; i < flowSteps.length; i++) {
+                    flowSteps[i].classList.add('active');
+                    gsap.from(flowSteps[i], { x: -20, opacity: 0, duration: 0.4 });
+                    await new Promise(r => setTimeout(r, 900));
+                }
+
+                await new Promise(r => setTimeout(r, 600));
+                btn.disabled = false;
+                btn.textContent = '播放数据流动画';
+                running = false;
+            });
+        }
+
+        /* ======================================================================
+         *  Section 5: 完整前向传播
+         * ====================================================================== */
+        const SEQ_LEN = 6;
+        let forwardSteps = null;
+        let forwardAnimCtrl = null;
+
+        function generateSequence() {
+            const rng = RNNUtils.seededRandom(123);
+            return Array.from({ length: SEQ_LEN }, () =>
+                Array.from({ length: INPUT }, () => (rng() - 0.5) * 2)
+            );
+        }
+
+        function runForward() {
+            const xs = generateSequence();
+            const h0 = RNNUtils.zerosVector(HIDDEN);
+            const c0 = RNNUtils.zerosVector(HIDDEN);
+            const result = RNNUtils.lstmForward(xs, h0, c0, params);
+            forwardSteps = result.steps;
+            return result;
+        }
+
+        function createTimeStepDots() {
+            const container = document.getElementById('time-step-dots');
+            container.innerHTML = '';
+            for (let t = 0; t < SEQ_LEN; t++) {
+                const dot = document.createElement('div');
+                dot.className = 'step-dot';
+                dot.textContent = `t${t}`;
+                dot.id = `ts-dot-${t}`;
+                container.appendChild(dot);
+            }
+        }
+
+        function drawForwardStep(stepIdx, instant) {
+            return new Promise(resolve => {
+                const container = document.getElementById('forward-viz');
+                container.innerHTML = '';
+                const valsContainer = document.getElementById('forward-gate-vals');
+                valsContainer.style.display = 'block';
+
+                if (stepIdx < 0) {
+                    valsContainer.style.display = 'none';
+                    resolve();
+                    return;
+                }
+
+                const step = forwardSteps[stepIdx];
+                const { gates, h, c, x, hPrev, cPrev } = step;
+
+                // Update time step dots
+                for (let t = 0; t < SEQ_LEN; t++) {
+                    const dot = document.getElementById(`ts-dot-${t}`);
+                    dot.className = 'step-dot';
+                    if (t < stepIdx) dot.classList.add('done');
+                    if (t === stepIdx) dot.classList.add('active');
+                }
+
+                // Draw gate values visualization
+                const W = 850, H = 340;
+                const svg = d3.select(container).append('svg')
+                    .attr('viewBox', `0 0 ${W} ${H}`)
+                    .attr('width', '100%');
+
+                const gateData = [
+                    { name: '遗忘门 ft', vals: gates.f, color: COLORS.forget },
+                    { name: '输入门 it', vals: gates.i, color: COLORS.input },
+                    { name: '候选值 C̃t', vals: gates.cCand, color: COLORS.candidate },
+                    { name: '输出门 ot', vals: gates.o, color: COLORS.output },
+                ];
+
+                const colW = W / 5;
+                const barMax = 70, barY = 70;
+
+                // Gate columns
+                gateData.forEach((gd, gi) => {
+                    const cx = gi * colW + 30;
+                    svg.append('text').attr('x', cx + colW/2 - 15).attr('y', 25).attr('text-anchor','middle')
+                        .attr('fill', gd.color).attr('font-size', 11).attr('font-weight', 600).text(gd.name);
+
+                    gd.vals.forEach((v, vi) => {
+                        const bx = cx + vi * 22 + 2;
+                        const absV = Math.abs(v);
+                        const barH = absV * barMax;
+                        const by = v >= 0 ? barY + barMax - barH : barY + barMax;
+
+                        const rect = svg.append('rect')
+                            .attr('x', bx).attr('y', by).attr('width', 18).attr('height', Math.max(2, barH))
+                            .attr('fill', gd.color).attr('opacity', 0.3 + absV * 0.5).attr('rx', 2);
+
+                        if (!instant) {
+                            rect.attr('height', 0).attr('y', barY + barMax);
+                            rect.transition().duration(500).delay(gi * 150)
+                                .attr('height', Math.max(2, barH)).attr('y', by);
+                        }
+
+                        svg.append('text').attr('x', bx + 9).attr('y', barY + barMax + 14)
+                            .attr('text-anchor','middle').attr('fill','#e8e8e8')
+                            .attr('font-size', 8).attr('font-family','var(--font-mono)').text(fmt(v));
+                    });
+                });
+
+                // Cell state & hidden state (5th column area split across bottom)
+                const bottomY = 200;
+                // Cell state
+                svg.append('text').attr('x', 100).attr('y', bottomY).attr('text-anchor','middle')
+                    .attr('fill', COLORS.cellState).attr('font-size', 11).attr('font-weight', 600).text('细胞状态 Ct');
+                c.forEach((v, i) => {
+                    const bx = 30 + i * 50;
+                    const absV = Math.min(1, Math.abs(v));
+                    const barH = absV * 60;
+                    const by = v >= 0 ? bottomY + 20 + 60 - barH : bottomY + 20 + 60;
+                    svg.append('rect').attr('x', bx).attr('y', by).attr('width', 40).attr('height', Math.max(2, barH))
+                        .attr('fill', COLORS.cellState).attr('opacity', 0.4 + absV * 0.4).attr('rx', 3);
+                    svg.append('text').attr('x', bx + 20).attr('y', bottomY + 100)
+                        .attr('text-anchor','middle').attr('fill','#e8e8e8').attr('font-size', 10)
+                        .attr('font-family','var(--font-mono)').text(fmt(v));
+                });
+
+                // Hidden state
+                svg.append('text').attr('x', 450).attr('y', bottomY).attr('text-anchor','middle')
+                    .attr('fill', '#e8e8e8').attr('font-size', 11).attr('font-weight', 600).text('隐藏状态 ht');
+                h.forEach((v, i) => {
+                    const bx = 380 + i * 50;
+                    const absV = Math.min(1, Math.abs(v));
+                    const barH = absV * 60;
+                    const by = v >= 0 ? bottomY + 20 + 60 - barH : bottomY + 20 + 60;
+                    svg.append('rect').attr('x', bx).attr('y', by).attr('width', 40).attr('height', Math.max(2, barH))
+                        .attr('fill', COLORS.output).attr('opacity', 0.4 + absV * 0.4).attr('rx', 3);
+                    svg.append('text').attr('x', bx + 20).attr('y', bottomY + 100)
+                        .attr('text-anchor','middle').attr('fill','#e8e8e8').attr('font-size', 10)
+                        .attr('font-family','var(--font-mono)').text(fmt(v));
+                });
+
+                // Input vector
+                svg.append('text').attr('x', 740).attr('y', bottomY).attr('text-anchor','middle')
+                    .attr('fill', COLORS.text).attr('font-size', 11).attr('font-weight', 600).text('输入 xt');
+                x.forEach((v, i) => {
+                    const bx = 690 + i * 40;
+                    svg.append('rect').attr('x', bx).attr('y', bottomY + 15).attr('width', 32).attr('height', 28)
+                        .attr('fill', 'rgba(168,168,184,0.1)').attr('stroke', COLORS.border).attr('rx', 4);
+                    svg.append('text').attr('x', bx + 16).attr('y', bottomY + 34)
+                        .attr('text-anchor','middle').attr('fill','#e8e8e8').attr('font-size', 10)
+                        .attr('font-family','var(--font-mono)').text(fmt(v));
+                });
+
+                // Step label
+                svg.append('text').attr('x', W/2).attr('y', H - 10).attr('text-anchor','middle')
+                    .attr('fill', COLORS.text).attr('font-size', 12)
+                    .text(`时间步 t = ${stepIdx}`);
+
+                // Gate values grid (HTML)
+                valsContainer.innerHTML = '';
+                const allGates = [
+                    { name: 'ft', vals: gates.f, color: COLORS.forget },
+                    { name: 'it', vals: gates.i, color: COLORS.input },
+                    { name: 'C̃t', vals: gates.cCand, color: COLORS.candidate },
+                    { name: 'ot', vals: gates.o, color: COLORS.output },
+                    { name: 'Ct', vals: c, color: COLORS.cellState },
+                    { name: 'ht', vals: h, color: '#e8e8e8' },
+                ];
+                allGates.forEach(g => {
+                    const div = document.createElement('div');
+                    div.className = 'gate-val-cell';
+                    div.style.borderColor = g.color;
+                    div.innerHTML = `<div style="font-size:0.7rem;color:${g.color};font-weight:600;">${g.name}</div>
+                        <div style="font-size:0.75rem;">[${g.vals.map(v => fmt(v)).join(', ')}]</div>`;
+                    valsContainer.appendChild(div);
+                });
+
+                if (instant) { resolve(); return; }
+                setTimeout(resolve, 600);
+            });
+        }
+
+        function setupForwardAnimation() {
+            runForward();
+            createTimeStepDots();
+
+            const animSteps = [];
+            for (let t = 0; t < SEQ_LEN; t++) {
+                animSteps.push({
+                    name: `时间步 ${t}`,
+                    duration: 1200,
+                    action: (idx, instant) => drawForwardStep(t, instant)
+                });
+            }
+
+            forwardAnimCtrl = new AnimationController({
+                container: document.getElementById('forward-anim-controls'),
+                steps: animSteps,
+                defaultDuration: 1200,
+                onStepChange: (idx) => {
+                    if (idx >= 0) drawForwardChart(idx + 1);
+                },
+                onComplete: () => {
+                    drawForwardChart(SEQ_LEN);
+                }
+            });
+        }
+
+        function drawForwardChart(upToStep) {
+            const container = document.getElementById('forward-chart');
+            container.innerHTML = '';
+            if (!forwardSteps || upToStep <= 0) return;
+
+            const margin = { top: 30, right: 120, bottom: 35, left: 50 };
+            const fullW = container.clientWidth || 600;
+            const fullH = 280;
+            const W = fullW - margin.left - margin.right;
+            const H = fullH - margin.top - margin.bottom;
+
+            const svg = d3.select(container).append('svg')
+                .attr('width', fullW).attr('height', fullH)
+                .append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+
+            const xScale = d3.scaleLinear().domain([0, SEQ_LEN - 1]).range([0, W]);
+            const yScale = d3.scaleLinear().domain([-1.2, 1.2]).range([H, 0]);
+
+            // Grid
+            svg.append('g').attr('transform', `translate(0,${H})`).call(d3.axisBottom(xScale).ticks(SEQ_LEN).tickFormat(d => `t${d}`))
+                .selectAll('text,line,path').attr('stroke', '#4a4a6a').attr('fill', '#a8a8b8');
+            svg.append('g').call(d3.axisLeft(yScale).ticks(5))
+                .selectAll('text,line,path').attr('stroke', '#4a4a6a').attr('fill', '#a8a8b8');
+
+            // Data series (average across hidden dimensions)
+            const series = [
+                { name: '遗忘门 ft', key: 'f', color: COLORS.forget },
+                { name: '输入门 it', key: 'i', color: COLORS.input },
+                { name: '输出门 ot', key: 'o', color: COLORS.output },
+                { name: '细胞状态', key: 'c', color: COLORS.cellState },
+                { name: '隐藏状态', key: 'h', color: '#e8e8e8' },
+            ];
+
+            series.forEach(s => {
+                const data = [];
+                for (let t = 0; t < upToStep; t++) {
+                    const step = forwardSteps[t];
+                    let vals;
+                    if (s.key === 'c') vals = step.c;
+                    else if (s.key === 'h') vals = step.h;
+                    else vals = step.gates[s.key];
+                    const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+                    data.push({ t, v: avg });
+                }
+
+                const line = d3.line().x(d => xScale(d.t)).y(d => yScale(d.v)).curve(d3.curveMonotoneX);
+                svg.append('path').datum(data).attr('d', line)
+                    .attr('fill', 'none').attr('stroke', s.color).attr('stroke-width', 2)
+                    .attr('opacity', 0.85);
+
+                // Dots
+                svg.selectAll(`.dot-${s.key}`).data(data).enter()
+                    .append('circle').attr('cx', d => xScale(d.t)).attr('cy', d => yScale(d.v))
+                    .attr('r', 3.5).attr('fill', s.color);
+
+                // Legend
+                const li = series.indexOf(s);
+                svg.append('rect').attr('x', W + 15).attr('y', li * 22).attr('width', 14).attr('height', 10)
+                    .attr('fill', s.color).attr('rx', 2).attr('opacity', 0.85);
+                svg.append('text').attr('x', W + 34).attr('y', li * 22 + 9)
+                    .attr('fill', '#a8a8b8').attr('font-size', 10).text(s.name);
+            });
+        }
+
+        /* ======================================================================
+         *  梯度流对比图
+         * ====================================================================== */
+        function drawGradientComparison() {
+            // RNN gradient flow - simulated exponential decay
+            const T = 20;
+            const rnnGrads = [];
+            let g = 1.0;
+            for (let t = 0; t < T; t++) {
+                rnnGrads.push({ t, v: g });
+                g *= 0.75; // typical vanishing: spectral radius < 1
+            }
+
+            // LSTM gradient flow - much more stable
+            const lstmGrads = [];
+            g = 1.0;
+            for (let t = 0; t < T; t++) {
+                lstmGrads.push({ t, v: g });
+                g *= 0.95; // forget gate close to 1 maintains gradient
+            }
+
+            drawGradChart('grad-rnn-chart', rnnGrads, COLORS.forget, '梯度范数');
+            drawGradChart('grad-lstm-chart', lstmGrads, COLORS.candidate, '梯度范数');
+        }
+
+        function drawGradChart(containerId, data, color, yLabel) {
+            const container = document.getElementById(containerId);
+            if (!container) return;
+            container.innerHTML = '';
+
+            const margin = { top: 20, right: 20, bottom: 30, left: 50 };
+            const fullW = container.clientWidth || 350;
+            const fullH = 220;
+            const W = fullW - margin.left - margin.right;
+            const H = fullH - margin.top - margin.bottom;
+
+            const svg = d3.select(container).append('svg')
+                .attr('width', fullW).attr('height', fullH)
+                .append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+
+            const xScale = d3.scaleLinear().domain([0, data.length - 1]).range([0, W]);
+            const yScale = d3.scaleLinear().domain([0, 1.1]).range([H, 0]);
+
+            svg.append('g').attr('transform', `translate(0,${H})`).call(d3.axisBottom(xScale).ticks(5).tickFormat(d => `t-${d}`))
+                .selectAll('text,line,path').attr('stroke', '#4a4a6a').attr('fill', '#a8a8b8');
+            svg.append('g').call(d3.axisLeft(yScale).ticks(4))
+                .selectAll('text,line,path').attr('stroke', '#4a4a6a').attr('fill', '#a8a8b8');
+
+            // Y axis label
+            svg.append('text').attr('x', -H/2).attr('y', -35).attr('transform', 'rotate(-90)')
+                .attr('text-anchor','middle').attr('fill','#6c6c7c').attr('font-size',10).text(yLabel);
+
+            // Area
+            const area = d3.area().x(d => xScale(d.t)).y0(H).y1(d => yScale(d.v)).curve(d3.curveMonotoneX);
+            svg.append('path').datum(data).attr('d', area)
+                .attr('fill', color).attr('opacity', 0.15);
+
+            // Line
+            const line = d3.line().x(d => xScale(d.t)).y(d => yScale(d.v)).curve(d3.curveMonotoneX);
+            svg.append('path').datum(data).attr('d', line)
+                .attr('fill', 'none').attr('stroke', color).attr('stroke-width', 2);
+
+            // Threshold line at 0.1
+            svg.append('line').attr('x1', 0).attr('y1', yScale(0.1)).attr('x2', W).attr('y2', yScale(0.1))
+                .attr('stroke', '#ff5252').attr('stroke-width', 1).attr('stroke-dasharray', '4,4').attr('opacity', 0.6);
+            svg.append('text').attr('x', W - 5).attr('y', yScale(0.1) - 4).attr('text-anchor','end')
+                .attr('fill', '#ff5252').attr('font-size', 9).attr('opacity', 0.8).text('梯度消失阈值');
+
+            // Final value annotation
+            const lastD = data[data.length - 1];
+            svg.append('text').attr('x', xScale(lastD.t) + 5).attr('y', yScale(lastD.v) - 5)
+                .attr('fill', color).attr('font-size', 10).attr('font-weight', 600)
+                .text(fmt(lastD.v, 3));
+        }
+
+        /* ======================================================================
+         *  事件绑定
+         * ====================================================================== */
+        function setupSliders() {
+            const forgetSlider = document.getElementById('forget-slider');
+            const forgetVal = document.getElementById('forget-val');
+            forgetSlider.addEventListener('input', () => {
+                const v = forgetSlider.value / 100;
+                forgetVal.textContent = fmt(v);
+                forgetVal.style.color = v < 0.3 ? COLORS.forget : v > 0.7 ? COLORS.candidate : COLORS.output;
+                updateForgetGate(v);
+            });
+
+            const inputSlider = document.getElementById('input-slider');
+            const inputVal = document.getElementById('input-val');
+            inputSlider.addEventListener('input', () => {
+                const v = inputSlider.value / 100;
+                inputVal.textContent = fmt(v);
+                updateInputGate(v);
+            });
+        }
+
+
+        /* ======================================================================
+         *  初始化
+         * ====================================================================== */
+        document.addEventListener('DOMContentLoaded', () => {
+            drawArchitecture();
+            drawForgetGate();
+            drawForgetExample();
+            drawInputGate();
+            drawOutputGate();
+            setupDataFlowAnimation();
+            setupForwardAnimation();
+            drawGradientComparison();
+            setupSliders();
+
+            // Re-render KaTeX for dynamically added content
+            if (typeof renderMath === 'function') {
+                setTimeout(() => renderMath(document.body), 200);
+            }
+        });
+
+        // Redraw charts on resize
+        let resizeTimer;
+        window.addEventListener('resize', () => {
+            clearTimeout(resizeTimer);
+            resizeTimer = setTimeout(() => {
+                drawGradientComparison();
+                if (forwardAnimCtrl && forwardAnimCtrl.currentStep >= 0) {
+                    drawForwardChart(forwardAnimCtrl.currentStep + 1);
+                }
+            }, 300);
+        });
+    })();
+    </script>
+</body>
+</html>
