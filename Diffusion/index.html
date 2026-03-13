@@ -1,0 +1,742 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Diffusion 扩散模型 — 交互式学习</title>
+    <link rel="stylesheet" href="shared/styles/common.css">
+    <link rel="stylesheet" href="shared/styles/components.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+SC:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+    <style>
+        body { overflow-x: hidden; }
+
+        /* ===== Hero ===== */
+        .hero {
+            text-align: center;
+            padding: calc(var(--header-height) + 2rem) 2rem 3rem;
+            position: relative;
+        }
+        .hero h1 {
+            font-size: 2.8rem;
+            margin-bottom: 0.5rem;
+            background: linear-gradient(135deg, #90caf9, #ce93d8, #ef9a9a);
+            background-size: 200% 200%;
+            animation: heroGradient 6s ease infinite;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        @keyframes heroGradient {
+            0%, 100% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+        }
+        .hero .subtitle {
+            font-size: 1.1rem;
+            color: var(--text-secondary);
+            max-width: 640px;
+            margin: 0 auto 2rem;
+        }
+        .hero .tags {
+            display: flex;
+            justify-content: center;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+
+        /* ===== Hero formula decoration ===== */
+        .hero-formula {
+            margin-top: 1.5rem;
+            font-family: var(--font-mono);
+            font-size: 0.95rem;
+            color: var(--text-muted);
+            letter-spacing: 0.02em;
+            opacity: 0.7;
+        }
+        .hero-formula .hl {
+            color: #90caf9;
+            font-weight: 600;
+        }
+
+        /* ===== Background Canvas ===== */
+        .bg-canvas {
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            pointer-events: none;
+            z-index: -1;
+            opacity: 0.12;
+        }
+
+        /* ===== Noise Grid Overlay ===== */
+        .grid-overlay {
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            pointer-events: none;
+            z-index: -2;
+            opacity: 0.03;
+            background-image:
+                linear-gradient(rgba(144, 202, 249, 0.3) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(144, 202, 249, 0.3) 1px, transparent 1px);
+            background-size: 60px 60px;
+        }
+
+        /* ===== Metro Roadmap ===== */
+        .roadmap {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 2rem;
+            position: relative;
+        }
+        .roadmap-title {
+            text-align: center;
+            margin-bottom: 2.5rem;
+        }
+
+        .metro-line {
+            position: relative;
+            padding-left: 60px;
+        }
+
+        /* Vertical rail with Diffusion-themed gradient */
+        .metro-line::before {
+            content: '';
+            position: absolute;
+            left: 27px;
+            top: 0;
+            bottom: 0;
+            width: 4px;
+            background: linear-gradient(
+                to bottom,
+                #90caf9 0%,
+                #90caf9 25%,
+                #ce93d8 25%,
+                #ce93d8 55%,
+                #ef9a9a 55%,
+                #ef9a9a 78%,
+                #a5d6a7 78%,
+                #a5d6a7 100%
+            );
+            border-radius: 2px;
+        }
+
+        /* Noise particle decoration along the rail */
+        .metro-line::after {
+            content: '';
+            position: absolute;
+            left: 22px;
+            top: 0;
+            bottom: 0;
+            width: 14px;
+            background: repeating-linear-gradient(
+                to bottom,
+                transparent 0px,
+                transparent 56px,
+                rgba(144, 202, 249, 0.08) 56px,
+                rgba(144, 202, 249, 0.08) 60px
+            );
+            pointer-events: none;
+        }
+
+        .station {
+            position: relative;
+            margin-bottom: 1rem;
+            cursor: pointer;
+            transition: transform 0.25s var(--anim-ease);
+        }
+        .station:hover {
+            transform: translateX(6px);
+        }
+
+        /* Station dot — circle for "particle" feel */
+        .station-dot {
+            position: absolute;
+            left: -41px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            border: 3px solid #90caf9;
+            background: var(--bg-primary);
+            z-index: 2;
+            transition: all 0.3s;
+        }
+        .station:hover .station-dot {
+            background: #90caf9;
+            box-shadow: 0 0 14px rgba(144, 202, 249, 0.5);
+        }
+
+        /* Phase colors for station dots */
+        .station[data-phase="forward"] .station-dot { border-color: #90caf9; }
+        .station[data-phase="reverse"] .station-dot { border-color: #ce93d8; }
+        .station[data-phase="architecture"] .station-dot { border-color: #ef9a9a; }
+        .station[data-phase="advanced"] .station-dot { border-color: #a5d6a7; }
+
+        .station:hover .station-dot.phase-forward { background: #90caf9; box-shadow: 0 0 14px rgba(144,202,249,0.5); }
+        .station:hover .station-dot.phase-reverse { background: #ce93d8; box-shadow: 0 0 14px rgba(206,147,216,0.5); }
+        .station:hover .station-dot.phase-architecture { background: #ef9a9a; box-shadow: 0 0 14px rgba(239,154,154,0.5); }
+        .station:hover .station-dot.phase-advanced { background: #a5d6a7; box-shadow: 0 0 14px rgba(165,214,167,0.5); }
+
+        .station-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1.2rem 1.5rem;
+            transition: all 0.3s;
+            position: relative;
+            overflow: hidden;
+        }
+        .station-card::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 2px;
+            background: linear-gradient(90deg, transparent, #90caf9, transparent);
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+        .station:hover .station-card::before {
+            opacity: 1;
+        }
+        .station:hover .station-card {
+            border-color: #90caf9;
+            box-shadow: 0 0 20px rgba(144, 202, 249, 0.15);
+        }
+
+        .station-header {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            margin-bottom: 0.4rem;
+        }
+        .station-icon {
+            font-size: 1.3rem;
+            min-width: 1.5rem;
+            text-align: center;
+        }
+        .station-num {
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            min-width: 2.5rem;
+        }
+        .station-name {
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+        .station-eng {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            font-weight: 400;
+            margin-left: 0.4rem;
+        }
+        .station-desc {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            margin: 0;
+            padding-left: 3.25rem;
+        }
+        .station-keywords {
+            display: flex;
+            gap: 0.4rem;
+            flex-wrap: wrap;
+            padding-left: 3.25rem;
+            margin-top: 0.5rem;
+        }
+        .station-keywords span {
+            font-size: 0.7rem;
+            padding: 0.1rem 0.4rem;
+            background: rgba(144, 202, 249, 0.08);
+            border-radius: 4px;
+            color: var(--text-muted);
+        }
+
+        /* Phase separators */
+        .phase-label {
+            position: relative;
+            padding: 0.5rem 0 0.5rem 0;
+            margin-bottom: 0.5rem;
+            margin-top: 1rem;
+        }
+        .phase-label span {
+            font-size: 0.75rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            padding: 0.2rem 0.8rem;
+            border-radius: 4px;
+        }
+        .phase-label.forward span { color: #90caf9; background: rgba(144,202,249,0.1); }
+        .phase-label.reverse span { color: #ce93d8; background: rgba(206,147,216,0.1); }
+        .phase-label.architecture span { color: #ef9a9a; background: rgba(239,154,154,0.1); }
+        .phase-label.advanced span { color: #a5d6a7; background: rgba(165,214,167,0.1); }
+
+        /* ===== Protocol Warning ===== */
+        .protocol-warning {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.9);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+        }
+        .protocol-warning .inner {
+            background: var(--bg-secondary);
+            border: 1px solid var(--accent-orange);
+            border-radius: var(--radius-lg);
+            padding: 2rem 3rem;
+            max-width: 500px;
+            text-align: center;
+        }
+        .protocol-warning h2 { color: var(--accent-orange); }
+        .protocol-warning code {
+            display: block;
+            margin: 1rem 0;
+            padding: 0.75rem;
+            background: var(--bg-primary);
+            border-radius: var(--radius-sm);
+            font-size: 0.9rem;
+        }
+
+        /* ===== Diffusion Pipeline Diagram (decorative) ===== */
+        .arch-diagram {
+            max-width: 900px;
+            margin: 0 auto 2rem;
+            padding: 0 2rem;
+            display: flex;
+            justify-content: center;
+            gap: 0.3rem;
+            flex-wrap: wrap;
+        }
+        .arch-block {
+            padding: 0.35rem 0.7rem;
+            border-radius: var(--radius-sm);
+            font-size: 0.7rem;
+            font-weight: 600;
+            border: 1px solid;
+            opacity: 0.6;
+            transition: opacity 0.3s, transform 0.3s;
+        }
+        .arch-block:hover {
+            opacity: 1;
+            transform: translateY(-2px);
+        }
+        .arch-block.fwd { color: #90caf9; border-color: rgba(144,202,249,0.3); background: rgba(144,202,249,0.06); }
+        .arch-block.rev { color: #ce93d8; border-color: rgba(206,147,216,0.3); background: rgba(206,147,216,0.06); }
+        .arch-block.net { color: #ef9a9a; border-color: rgba(239,154,154,0.3); background: rgba(239,154,154,0.06); }
+        .arch-block.gen { color: #a5d6a7; border-color: rgba(165,214,167,0.3); background: rgba(165,214,167,0.06); }
+        .arch-arrow {
+            display: flex;
+            align-items: center;
+            color: var(--text-muted);
+            font-size: 0.8rem;
+            opacity: 0.4;
+        }
+
+        /* ===== Footer ===== */
+        .footer {
+            text-align: center;
+            padding: 3rem 2rem;
+            color: var(--text-muted);
+            font-size: 0.8rem;
+        }
+        .footer a {
+            color: #90caf9;
+        }
+
+        /* ===== Responsive ===== */
+        @media (max-width: 768px) {
+            .hero h1 { font-size: 2rem; }
+            .hero .subtitle { font-size: 0.95rem; }
+            .roadmap { padding: 1rem; }
+            .metro-line { padding-left: 50px; }
+            .station-dot { left: -35px; width: 18px; height: 18px; }
+            .station-desc { padding-left: 2.5rem; }
+            .station-keywords { padding-left: 2.5rem; }
+            .arch-diagram { display: none; }
+            .hero-formula { font-size: 0.8rem; }
+        }
+    </style>
+</head>
+<body>
+
+<!-- Top Navigation -->
+<nav class="top-nav">
+    <div class="nav-left">
+        <a href="../index.html" class="nav-home" title="算法总览">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+                <path d="M3 12l9-8 9 8"/>
+                <path d="M5 10v9a1 1 0 001 1h4v-5h4v5h4a1 1 0 001-1v-9"/>
+            </svg>
+        </a>
+        <span class="nav-sep">&rsaquo;</span>
+        <a href="index.html" class="logo">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="3"/>
+                <circle cx="12" cy="12" r="7" stroke-dasharray="3 2"/>
+                <circle cx="12" cy="12" r="10" stroke-dasharray="2 3" opacity="0.5"/>
+            </svg>
+            Diffusion 学习
+        </a>
+    </div>
+</nav>
+
+<!-- Protocol Warning -->
+<div id="protocolWarning" class="protocol-warning hidden">
+    <div class="inner">
+        <h2>请使用本地服务器</h2>
+        <p>直接打开 HTML 文件（file:// 协议）会导致跨域问题。请使用以下方式启动：</p>
+        <code>python -m http.server 8080</code>
+        <p class="text-sm text-muted">或使用 VS Code 的 Live Server 插件</p>
+        <button class="btn btn-primary mt-2" onclick="document.getElementById('protocolWarning').classList.add('hidden')">
+            我知道了，继续浏览
+        </button>
+    </div>
+</div>
+
+<!-- Grid Overlay (noise pattern) -->
+<div class="grid-overlay"></div>
+
+<!-- Background Canvas (floating noise particles) -->
+<canvas id="bgCanvas" class="bg-canvas"></canvas>
+
+<!-- Hero Section -->
+<div class="hero">
+    <h1>Diffusion 扩散模型 — 交互式学习</h1>
+    <p class="subtitle">
+        通过交互式可视化，深入理解扩散模型的每一个核心概念 ——
+        从前向加噪到反向去噪，从数学推导到采样策略，再到条件生成与实际应用
+    </p>
+    <div class="tags">
+        <span class="badge badge-blue">交互式</span>
+        <span class="badge badge-purple">可视化</span>
+        <span class="badge badge-green">逐步动画</span>
+        <span class="badge badge-orange">全中文</span>
+    </div>
+    <div class="hero-formula">
+        <span class="hl">q</span>(x<sub>t</sub> | x<sub>t-1</sub>) = N(x<sub>t</sub>; <span class="hl">&radic;(1-&beta;<sub>t</sub>)</span> x<sub>t-1</sub>, &beta;<sub>t</sub> <span class="hl">I</span>)
+    </div>
+</div>
+
+<!-- Diffusion Pipeline Diagram (decorative mini-diagram) -->
+<div class="arch-diagram">
+    <div class="arch-block fwd">x&#x2080; 原始数据</div>
+    <div class="arch-arrow">&rarr;</div>
+    <div class="arch-block fwd">加噪 q(x&#x209C;|x&#x209C;&#x208B;&#x2081;)</div>
+    <div class="arch-arrow">&rarr;</div>
+    <div class="arch-block rev">x&#x209C; 纯噪声</div>
+    <div class="arch-arrow">&rarr;</div>
+    <div class="arch-block net">U-Net 去噪</div>
+    <div class="arch-arrow">&rarr;</div>
+    <div class="arch-block rev">p&#x3B8;(x&#x209C;&#x208B;&#x2081;|x&#x209C;)</div>
+    <div class="arch-arrow">&rarr;</div>
+    <div class="arch-block gen">x&#x2080; 生成结果</div>
+</div>
+
+<!-- Roadmap -->
+<div class="roadmap">
+    <div class="roadmap-title">
+        <h2>学习路线图</h2>
+        <p class="text-sm text-muted">按顺序学习效果最佳，也可跳转到感兴趣的模块</p>
+    </div>
+
+    <div class="metro-line">
+        <!-- Phase: 前向与反向 -->
+        <div class="phase-label forward"><span>前向与反向过程</span></div>
+
+        <div class="station" data-id="01" data-phase="forward" onclick="goTo('01-forward-process/')">
+            <div class="station-dot"></div>
+            <div class="station-card">
+                <div class="station-header">
+                    <span class="station-num">01</span>
+                    <span class="station-icon">&#x1F4C9;</span>
+                    <span class="station-name">前向过程<span class="station-eng">Forward Process</span></span>
+                </div>
+                <p class="station-desc">从清晰到噪声：逐步加噪的马尔可夫链</p>
+                <div class="station-keywords">
+                    <span>马尔可夫链</span><span>高斯噪声</span><span>重参数化</span><span>闭式公式</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="station" data-id="02" data-phase="forward" onclick="goTo('02-reverse-process/')">
+            <div class="station-dot"></div>
+            <div class="station-card">
+                <div class="station-header">
+                    <span class="station-num">02</span>
+                    <span class="station-icon">&#x1F504;</span>
+                    <span class="station-name">反向去噪<span class="station-eng">Reverse Denoising</span></span>
+                </div>
+                <p class="station-desc">从噪声到清晰：学习去噪的逆过程</p>
+                <div class="station-keywords">
+                    <span>逆过程</span><span>后验分布</span><span>参数化均值</span><span>变分推断</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="station" data-id="03" data-phase="forward" onclick="goTo('03-noise-schedule/')">
+            <div class="station-dot"></div>
+            <div class="station-card">
+                <div class="station-header">
+                    <span class="station-num">03</span>
+                    <span class="station-icon">&#x1F4CA;</span>
+                    <span class="station-name">噪声调度<span class="station-eng">Noise Schedule</span></span>
+                </div>
+                <p class="station-desc">线性、余弦、自适应调度策略对比</p>
+                <div class="station-keywords">
+                    <span>线性调度</span><span>余弦调度</span><span>SNR</span><span>自适应策略</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Phase: 理论基础 -->
+        <div class="phase-label reverse"><span>核心理论</span></div>
+
+        <div class="station" data-id="04" data-phase="reverse" onclick="goTo('04-ddpm/')">
+            <div class="station-dot"></div>
+            <div class="station-card">
+                <div class="station-header">
+                    <span class="station-num">04</span>
+                    <span class="station-icon">&#x1F4D0;</span>
+                    <span class="station-name">DDPM<span class="station-eng">Denoising Diffusion Probabilistic Model</span></span>
+                </div>
+                <p class="station-desc">去噪扩散概率模型的完整数学与实现</p>
+                <div class="station-keywords">
+                    <span>ELBO</span><span>KL散度</span><span>简化目标</span><span>训练循环</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="station" data-id="05" data-phase="reverse" onclick="goTo('05-score-matching/')">
+            <div class="station-dot"></div>
+            <div class="station-card">
+                <div class="station-header">
+                    <span class="station-num">05</span>
+                    <span class="station-icon">&#x1F3AF;</span>
+                    <span class="station-name">Score Matching<span class="station-eng">得分匹配</span></span>
+                </div>
+                <p class="station-desc">得分函数、Langevin 动力学与去噪得分匹配</p>
+                <div class="station-keywords">
+                    <span>得分函数</span><span>Langevin</span><span>噪声扰动</span><span>SDE视角</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="station" data-id="06" data-phase="reverse" onclick="goTo('06-sampling/')">
+            <div class="station-dot"></div>
+            <div class="station-card">
+                <div class="station-header">
+                    <span class="station-num">06</span>
+                    <span class="station-icon">&#x26A1;</span>
+                    <span class="station-name">采样方法<span class="station-eng">Sampling</span></span>
+                </div>
+                <p class="station-desc">DDPM/DDIM/DPM-Solver 采样策略对比</p>
+                <div class="station-keywords">
+                    <span>DDPM采样</span><span>DDIM</span><span>DPM-Solver</span><span>加速采样</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Phase: 架构与应用 -->
+        <div class="phase-label architecture"><span>架构设计</span></div>
+
+        <div class="station" data-id="07" data-phase="architecture" onclick="goTo('07-conditional/')">
+            <div class="station-dot"></div>
+            <div class="station-card">
+                <div class="station-header">
+                    <span class="station-num">07</span>
+                    <span class="station-icon">&#x1F3A8;</span>
+                    <span class="station-name">条件生成<span class="station-eng">Conditional Generation</span></span>
+                </div>
+                <p class="station-desc">Classifier-Free Guidance 与条件控制</p>
+                <div class="station-keywords">
+                    <span>CFG</span><span>条件嵌入</span><span>文本引导</span><span>引导强度</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="station" data-id="08" data-phase="architecture" onclick="goTo('08-architecture/')">
+            <div class="station-dot"></div>
+            <div class="station-card">
+                <div class="station-header">
+                    <span class="station-num">08</span>
+                    <span class="station-icon">&#x1F3D7;</span>
+                    <span class="station-name">U-Net 架构<span class="station-eng">Denoising Network</span></span>
+                </div>
+                <p class="station-desc">时间嵌入、注意力、残差连接的去噪网络</p>
+                <div class="station-keywords">
+                    <span>U-Net</span><span>时间嵌入</span><span>交叉注意力</span><span>残差连接</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Phase: 实验 -->
+        <div class="phase-label advanced"><span>动手实验</span></div>
+
+        <div class="station" data-id="09" data-phase="advanced" onclick="goTo('09-playground/')">
+            <div class="station-dot"></div>
+            <div class="station-card">
+                <div class="station-header">
+                    <span class="station-num">09</span>
+                    <span class="station-icon">&#x1F3AE;</span>
+                    <span class="station-name">游乐场<span class="station-eng">Playground</span></span>
+                </div>
+                <p class="station-desc">自由实验扩散模型的各种配置</p>
+                <div class="station-keywords">
+                    <span>参数调节</span><span>实时生成</span><span>可视化对比</span><span>噪声探索</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<!-- Footer -->
+<div class="footer">
+    <p>Diffusion 扩散模型 — 交互式学习 | 纯前端实现 · 无服务器依赖 · 全中文</p>
+</div>
+
+<script>
+// ========== Protocol Check ==========
+if (window.location.protocol === 'file:') {
+    document.getElementById('protocolWarning').classList.remove('hidden');
+}
+
+// ========== Navigation ==========
+function goTo(path) {
+    window.location.href = path + 'index.html';
+}
+
+// ========== Background Animation: Floating Noise Particles ==========
+(function() {
+    var canvas = document.getElementById('bgCanvas');
+    var ctx = canvas.getContext('2d');
+    var w, h;
+    var particles = [];
+    var PARTICLE_COUNT = 30;
+    var CONNECT_DIST = 150;
+
+    // Labels for floating elements
+    var labels = [
+        'x\u2080', 'x\u209C', '\u03B5', '\u03B2\u209C', '\u03B1\u209C',
+        'q', 'p\u03B8', '\u03BC', '\u03C3', 'U-Net',
+        'DDPM', 'DDIM', 'Score', '\u2207', 'KL',
+        'N(0,I)', 'CFG', 'SNR', 't', 'z\u209C',
+        '\u03B5\u03B8', 's\u03B8', '\u03B1\u0304', '\u03B2\u0304',
+        'ELBO', 'SDE', 'ODE', 'Denoise', 'Noise', 'Sample'
+    ];
+
+    function resize() {
+        w = canvas.width = window.innerWidth;
+        h = canvas.height = window.innerHeight;
+    }
+    resize();
+    window.addEventListener('resize', resize);
+
+    // Initialize particles
+    for (var i = 0; i < PARTICLE_COUNT; i++) {
+        particles.push({
+            x: Math.random() * w,
+            y: Math.random() * h,
+            vx: (Math.random() - 0.5) * 0.35,
+            vy: (Math.random() - 0.5) * 0.35,
+            size: 24 + Math.random() * 18,
+            label: labels[i % labels.length],
+            hue: [200, 280, 0, 130][Math.floor(Math.random() * 4)],
+            phase: Math.random() * Math.PI * 2
+        });
+    }
+
+    function getColor(hue, alpha) {
+        if (hue === 200) return 'rgba(144, 202, 249, ' + alpha + ')';
+        if (hue === 280) return 'rgba(206, 147, 216, ' + alpha + ')';
+        if (hue === 0) return 'rgba(239, 154, 154, ' + alpha + ')';
+        return 'rgba(165, 214, 167, ' + alpha + ')';
+    }
+
+    function draw() {
+        ctx.clearRect(0, 0, w, h);
+        var time = Date.now() * 0.001;
+
+        // Draw connections between nearby particles (diffusion paths)
+        for (var i = 0; i < particles.length; i++) {
+            for (var j = i + 1; j < particles.length; j++) {
+                var dx = particles[i].x - particles[j].x;
+                var dy = particles[i].y - particles[j].y;
+                var dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist < CONNECT_DIST) {
+                    var alpha = (1 - dist / CONNECT_DIST) * 0.35;
+                    ctx.save();
+                    ctx.strokeStyle = 'rgba(144, 202, 249, ' + alpha + ')';
+                    ctx.lineWidth = 1;
+                    ctx.setLineDash([3, 5]);
+                    ctx.lineDashOffset = -time * 15;
+                    ctx.beginPath();
+                    ctx.moveTo(particles[i].x, particles[i].y);
+                    ctx.lineTo(particles[j].x, particles[j].y);
+                    ctx.stroke();
+                    ctx.restore();
+
+                    // Noise dot at midpoint
+                    if (dist < CONNECT_DIST * 0.5) {
+                        var mx = (particles[i].x + particles[j].x) / 2;
+                        var my = (particles[i].y + particles[j].y) / 2;
+                        ctx.beginPath();
+                        ctx.arc(mx, my, 1.5, 0, Math.PI * 2);
+                        ctx.fillStyle = 'rgba(206, 147, 216, ' + (alpha * 0.7) + ')';
+                        ctx.fill();
+                    }
+                }
+            }
+        }
+
+        // Draw particles
+        for (var k = 0; k < particles.length; k++) {
+            var p = particles[k];
+            var pulse = Math.sin(time * 1.2 + p.phase) * 0.15 + 0.85;
+            var s = p.size * pulse;
+
+            // Particle circle (noise-like appearance)
+            ctx.globalAlpha = 0.5;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, s * 0.35, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(22, 33, 62, 0.7)';
+            ctx.fill();
+            ctx.strokeStyle = getColor(p.hue, 0.4);
+            ctx.lineWidth = 1;
+            ctx.stroke();
+
+            // Label
+            ctx.globalAlpha = 0.65;
+            ctx.fillStyle = getColor(p.hue, 1);
+            ctx.font = Math.max(8, s * 0.22) + 'px JetBrains Mono, monospace';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(p.label, p.x, p.y);
+
+            ctx.globalAlpha = 1;
+
+            // Update position
+            p.x += p.vx;
+            p.y += p.vy;
+            if (p.x < -50) p.x = w + 50;
+            if (p.x > w + 50) p.x = -50;
+            if (p.y < -50) p.y = h + 50;
+            if (p.y > h + 50) p.y = -50;
+        }
+
+        requestAnimationFrame(draw);
+    }
+    draw();
+})();
+</script>
+
+</body>
+</html>

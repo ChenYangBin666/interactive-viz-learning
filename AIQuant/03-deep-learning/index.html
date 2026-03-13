@@ -6,11 +6,10 @@
     <title>深度学习 — AI 量化</title>
     <link rel="stylesheet" href="../shared/styles/common.css">
     <link rel="stylesheet" href="../shared/styles/components.css">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" defer>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
     <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js" defer></script>
     <script src="../shared/scripts/nav.js" defer></script>
-    <script src="../shared/scripts/aiquant-utils.js" defer></script>
     <style>
         .module-header { text-align: center; padding: 2rem 0 1rem; }
         .module-header h1 { font-size: 2.2rem; }
@@ -208,18 +207,23 @@
     </div>
 </div>
 
+<script src="../shared/scripts/aiquant-utils.js"></script>
 <script>
 // ========== Shared Data & Utilities ==========
 const U = (() => {
     const DPR = window.devicePixelRatio || 1;
     function initCanvas(id) {
         const c = document.getElementById(id);
-        const r = c.getBoundingClientRect();
-        c.width = r.width * DPR;
-        c.height = parseInt(c.getAttribute('height')) * DPR;
+        const rect = c.parentElement.getBoundingClientRect();
+        const w = Math.floor(rect.width);
+        const h = parseInt(c.getAttribute('height')) || 400;
+        c.width = w * DPR;
+        c.height = h * DPR;
+        c.style.width = w + 'px';
+        c.style.height = h + 'px';
         const ctx = c.getContext('2d');
         ctx.scale(DPR, DPR);
-        return { c, ctx, w: r.width, h: parseInt(c.getAttribute('height')) };
+        return { c, ctx, w, h };
     }
     function genPrices(n, seed, drift, vol) {
         const rng = AIQuantUtils.seededRandom(seed || 42);
@@ -334,35 +338,65 @@ const LSTM = (() => {
 
         // === Price Chart ===
         const showN = animRunning ? Math.min(animFrame + 1, prices.length) : prices.length;
+        const splitIdx = Math.max(0, showN - predWindow);
         const allVals = prices.slice(0, showN).concat(preds.slice(0, showN));
         const yMin = Math.min(...allVals) * 0.995;
         const yMax = Math.max(...allVals) * 1.005;
 
         U.drawGrid(ctx, pad.l, chartTop, chartW, chartH, 10, 5);
 
-        // Confidence interval
+        // Prediction window shaded region
+        const splitX = U.mapX(splitIdx, 0, prices.length - 1, pad.l, chartW);
+        const rightX = U.mapX(showN - 1, 0, prices.length - 1, pad.l, chartW);
+        ctx.fillStyle = 'rgba(255,109,0,0.06)';
+        ctx.fillRect(splitX, chartTop, rightX - splitX, chartH);
+
+        // Confidence interval (only in prediction window)
         const upperPts = [], lowerPts = [];
-        for (let i = 0; i < showN; i++) {
+        for (let i = splitIdx; i < showN; i++) {
             const x = U.mapX(i, 0, prices.length - 1, pad.l, chartW);
-            const spread = Math.abs(preds[i] - prices[i]) * 2.5 + prices[i] * 0.003;
+            const dist = i - splitIdx;
+            const spread = (Math.abs(preds[i] - prices[i]) * 2.5 + prices[i] * 0.003) * (1 + dist * 0.05);
             upperPts.push([x, U.mapY(preds[i] + spread, yMin, yMax, chartTop, chartH)]);
             lowerPts.push([x, U.mapY(preds[i] - spread, yMin, yMax, chartTop, chartH)]);
         }
-        U.fillBand(ctx, upperPts, lowerPts, 'rgba(255,109,0,0.08)');
+        if (upperPts.length > 1) U.fillBand(ctx, upperPts, lowerPts, 'rgba(255,109,0,0.12)');
 
-        // Actual prices
+        // Actual prices (full range, solid)
         const pricePts = [];
         for (let i = 0; i < showN; i++) {
             pricePts.push([U.mapX(i, 0, prices.length - 1, pad.l, chartW), U.mapY(prices[i], yMin, yMax, chartTop, chartH)]);
         }
         U.drawLine(ctx, pricePts, '#00e5ff', 2);
 
-        // Predictions
+        // Predictions - history part (thin, dimmed)
+        if (splitIdx > 0) {
+            const histPredPts = [];
+            for (let i = 0; i <= splitIdx; i++) {
+                histPredPts.push([U.mapX(i, 0, prices.length - 1, pad.l, chartW), U.mapY(preds[i], yMin, yMax, chartTop, chartH)]);
+            }
+            U.drawLine(ctx, histPredPts, 'rgba(255,109,0,0.3)', 1);
+        }
+
+        // Predictions - forecast window (bold, bright)
         const predPts = [];
-        for (let i = 0; i < showN; i++) {
+        for (let i = Math.max(0, splitIdx - 1); i < showN; i++) {
             predPts.push([U.mapX(i, 0, prices.length - 1, pad.l, chartW), U.mapY(preds[i], yMin, yMax, chartTop, chartH)]);
         }
-        U.drawLine(ctx, predPts, '#ff6d00', 2);
+        U.drawLine(ctx, predPts, '#ff6d00', 2.5);
+
+        // Divider line at prediction window boundary
+        ctx.save();
+        ctx.setLineDash([6, 4]);
+        ctx.strokeStyle = '#ff6d00';
+        ctx.lineWidth = 1;
+        ctx.globalAlpha = 0.7;
+        ctx.beginPath();
+        ctx.moveTo(splitX, chartTop);
+        ctx.lineTo(splitX, chartTop + chartH);
+        ctx.stroke();
+        ctx.restore();
+        U.drawText(ctx, '← 历史 | 预测窗口 →', splitX + 4, chartTop + 14, '#ff6d00', 10, 'left');
 
         // Axes
         AIQuantUtils.drawAxis(ctx, { x: pad.l, y: chartTop, w: chartW, h: chartH, xMin: 0, xMax: prices.length - 1, yMin, yMax, xLabel: '时间步', yLabel: '价格', ticks: 5 });

@@ -1,0 +1,1461 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EMC 设计 — PCB 设计</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+<link rel="stylesheet" href="../shared/styles/common.css">
+<link rel="stylesheet" href="../shared/styles/components.css">
+<style>
+/* ===== Page-specific Styles ===== */
+.module-hero { text-align: center; padding: 2rem 0 1rem; }
+.module-hero h1 { font-size: 2.2rem; }
+.module-hero p { max-width: 640px; margin: 0 auto; }
+
+canvas.viz-canvas {
+    display: block; width: 100%; height: 420px;
+    background: var(--bg-secondary); border: 1px solid var(--border-color);
+    border-radius: var(--radius-md); cursor: crosshair;
+}
+.controls-row {
+    display: flex; flex-wrap: wrap; gap: 1rem; margin-top: 1rem;
+    align-items: center;
+}
+.controls-row .slider-group { flex: 1; min-width: 200px; }
+.meter-bar {
+    height: 22px; background: var(--border-color); border-radius: 11px;
+    overflow: hidden; position: relative; margin-top: 0.4rem;
+}
+.meter-bar .fill {
+    height: 100%; border-radius: 11px; transition: width 0.3s, background 0.3s;
+}
+.meter-label {
+    position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+    font-family: var(--font-mono); font-size: 0.75rem; color: #fff;
+}
+.checklist-board { position: relative; }
+.checklist-board canvas { cursor: pointer; }
+.violation-popup {
+    position: absolute; width: 300px; padding: 1rem 1.2rem;
+    background: var(--bg-card); border: 1px solid var(--accent-orange);
+    border-radius: var(--radius-md); box-shadow: var(--shadow);
+    z-index: 50; display: none; font-size: 0.88rem;
+}
+.violation-popup h4 { color: var(--accent-orange); margin-bottom: 0.5rem; }
+.violation-popup .fix { color: var(--accent-green); margin-top: 0.5rem; }
+.violation-popup .close-btn {
+    position: absolute; top: 6px; right: 10px; background: none;
+    border: none; color: var(--text-muted); cursor: pointer; font-size: 1.1rem;
+}
+.toggle-row {
+    display: flex; flex-wrap: wrap; gap: 1.2rem; margin-top: 1rem;
+    align-items: center;
+}
+.toggle-row label {
+    display: flex; align-items: center; gap: 0.5rem;
+    font-size: 0.88rem; color: var(--text-secondary); cursor: pointer;
+}
+.filter-chart-wrap { position: relative; width: 100%; height: 360px; }
+.filter-chart-wrap canvas { width: 100%; height: 100%; }
+.cm-dm-tabs { margin-bottom: 0; }
+</style>
+</head>
+<body>
+<div class="page-container">
+
+<!-- ===== Hero ===== -->
+<div class="module-hero section">
+    <h1>EMC 设计</h1>
+    <p>电磁兼容（EMC）是 PCB 设计的核心挑战。本模块通过交互式动画，帮助你理解 EMI 辐射、回流路径、滤波设计、屏蔽接地以及常见 EMC 设计问题。</p>
+</div>
+
+<!-- ===== Section 1: EMI 辐射原理 ===== -->
+<div class="section" id="sec-radiation">
+    <div class="section-title"><span class="icon">1</span><h2>EMI 辐射原理</h2></div>
+    <div class="split-layout">
+        <div class="text-panel">
+            <p>PCB 上的电流环路像天线一样向外辐射电磁波。辐射强度与<strong>环路面积 A</strong>、<strong>频率 f</strong> 的平方以及<strong>电流 I</strong> 成正比。</p>
+            <div id="katex-radiation" class="mb-2"></div>
+            <div class="info-box">
+                <p>减小环路面积是抑制 EMI 最基本且最有效的手段。缩短走线、紧邻地平面回流路径都能减小环路。</p>
+            </div>
+            <div class="card mt-2" style="padding:1rem;">
+                <div class="slider-group">
+                    <label>环路面积 A</label>
+                    <input type="range" id="sl-area" min="5" max="80" value="30">
+                    <span class="slider-value" id="sv-area">30</span><span class="text-muted text-sm"> mm&sup2;</span>
+                </div>
+                <div class="slider-group mt-1">
+                    <label>频率 f</label>
+                    <input type="range" id="sl-freq" min="1" max="100" value="20">
+                    <span class="slider-value" id="sv-freq">20</span><span class="text-muted text-sm"> MHz</span>
+                </div>
+                <div class="slider-group mt-1">
+                    <label>电流 I</label>
+                    <input type="range" id="sl-current" min="1" max="50" value="15">
+                    <span class="slider-value" id="sv-current">15</span><span class="text-muted text-sm"> mA</span>
+                </div>
+                <p class="text-sm text-muted mt-2">辐射强度</p>
+                <div class="meter-bar">
+                    <div class="fill" id="rad-fill" style="width:10%;background:var(--accent-green);"></div>
+                    <span class="meter-label" id="rad-label">低</span>
+                </div>
+            </div>
+        </div>
+        <div class="viz-panel">
+            <canvas id="cv-radiation" class="viz-canvas" width="800" height="420"></canvas>
+        </div>
+    </div>
+</div>
+
+<!-- ===== Section 2: 回流路径 ===== -->
+<div class="section" id="sec-return">
+    <div class="section-title"><span class="icon">2</span><h2>回流路径</h2></div>
+    <div class="split-layout">
+        <div class="text-panel">
+            <p>高频信号的回流电流会沿阻抗最低的路径流动，即<strong>紧贴信号走线正下方</strong>的地平面。当地平面被开槽切断时，回流被迫绕行，形成巨大环路，产生严重 EMI。</p>
+            <div class="info-box warning">
+                <p>切勿在高速信号走线下方的地平面开槽！这是最常见的 EMC 设计失误之一。</p>
+            </div>
+            <div class="toggle-row">
+                <label><input type="checkbox" id="chk-slot"> 在地平面开槽</label>
+            </div>
+            <div class="card mt-2" style="padding:1rem;">
+                <div class="slider-group">
+                    <label>信号频率</label>
+                    <input type="range" id="sl-ret-freq" min="1" max="100" value="50">
+                    <span class="slider-value" id="sv-ret-freq">50</span><span class="text-muted text-sm"> MHz</span>
+                </div>
+                <p class="text-sm text-muted mt-2">EMI 风险</p>
+                <div class="meter-bar">
+                    <div class="fill" id="ret-fill" style="width:10%;background:var(--accent-green);"></div>
+                    <span class="meter-label" id="ret-label">低</span>
+                </div>
+            </div>
+        </div>
+        <div class="viz-panel">
+            <canvas id="cv-return" class="viz-canvas" width="800" height="420"></canvas>
+        </div>
+    </div>
+</div>
+
+<!-- ===== Section 3: 滤波设计 ===== -->
+<div class="section" id="sec-filter">
+    <div class="section-title"><span class="icon">3</span><h2>滤波设计</h2></div>
+    <div class="split-layout">
+        <div class="text-panel">
+            <p>EMI 滤波器通过<strong>共模扼流圈</strong>（CMC）、<strong>Y 电容</strong>和 <strong>X 电容</strong>衰减传导噪声。共模噪声和差模噪声的路径不同，需分别处理。</p>
+            <div class="tabs cm-dm-tabs">
+                <button class="tab active" data-tab="cm">共模 (CM)</button>
+                <button class="tab" data-tab="dm">差模 (DM)</button>
+            </div>
+            <div class="tab-content active" id="tc-cm">
+                <p class="text-sm">共模噪声：两条线上的电流方向相同，经 Y 电容流入地。共模扼流圈对 CM 噪声呈现高阻抗。</p>
+            </div>
+            <div class="tab-content" id="tc-dm">
+                <p class="text-sm">差模噪声：两条线上的电流方向相反。X 电容跨接在线间提供低阻旁路。</p>
+            </div>
+            <div class="card mt-2" style="padding:1rem;">
+                <div class="slider-group">
+                    <label>CMC 电感</label>
+                    <input type="range" id="sl-cmc" min="1" max="50" value="10">
+                    <span class="slider-value" id="sv-cmc">10</span><span class="text-muted text-sm"> mH</span>
+                </div>
+                <div class="slider-group mt-1">
+                    <label>Y 电容</label>
+                    <input type="range" id="sl-ycap" min="10" max="470" value="100" step="10">
+                    <span class="slider-value" id="sv-ycap">100</span><span class="text-muted text-sm"> pF</span>
+                </div>
+                <div class="slider-group mt-1">
+                    <label>X 电容</label>
+                    <input type="range" id="sl-xcap" min="1" max="100" value="10">
+                    <span class="slider-value" id="sv-xcap">10</span><span class="text-muted text-sm"> nF</span>
+                </div>
+            </div>
+        </div>
+        <div class="viz-panel">
+            <canvas id="cv-filter" class="viz-canvas" width="800" height="420"></canvas>
+        </div>
+    </div>
+</div>
+
+<!-- ===== Section 4: 屏蔽与接地 ===== -->
+<div class="section" id="sec-shield">
+    <div class="section-title"><span class="icon">4</span><h2>屏蔽与接地</h2></div>
+    <div class="split-layout">
+        <div class="text-panel">
+            <p>金属屏蔽外壳将 PCB 的电磁辐射封闭在内部。信号线缆进出外壳时，<strong>屏蔽层接地方式</strong>决定了屏蔽效果。</p>
+            <div class="info-box">
+                <p>高频场景下，电缆屏蔽层应两端接地以形成完整的屏蔽回路。低频场景可单端接地以避免地环路。</p>
+            </div>
+            <div class="toggle-row">
+                <label><input type="checkbox" id="chk-shield" checked> 使用屏蔽电缆</label>
+            </div>
+            <div class="toggle-row">
+                <label><input type="radio" name="gnd-mode" value="single" checked> 单端接地</label>
+                <label><input type="radio" name="gnd-mode" value="both"> 两端接地</label>
+            </div>
+            <div class="card mt-2" style="padding:1rem;">
+                <p class="text-sm text-muted">辐射泄漏</p>
+                <div class="meter-bar">
+                    <div class="fill" id="sh-fill" style="width:40%;background:var(--accent-orange);"></div>
+                    <span class="meter-label" id="sh-label">中</span>
+                </div>
+            </div>
+        </div>
+        <div class="viz-panel">
+            <canvas id="cv-shield" class="viz-canvas" width="800" height="420"></canvas>
+        </div>
+    </div>
+</div>
+
+<!-- ===== Section 5: EMC 检查清单 ===== -->
+<div class="section" id="sec-checklist">
+    <div class="section-title"><span class="icon">5</span><h2>EMC 检查清单</h2></div>
+    <p>下方 PCB 板上标注了 5 处 EMC 违规点（橙色标记）。点击查看问题详情及修复建议。</p>
+    <div class="checklist-board">
+        <canvas id="cv-checklist" class="viz-canvas" width="900" height="500" style="height:500px;"></canvas>
+        <div class="violation-popup" id="vio-popup">
+            <button class="close-btn" id="vio-close">&times;</button>
+            <h4 id="vio-title"></h4>
+            <p id="vio-desc"></p>
+            <p class="fix" id="vio-fix"></p>
+        </div>
+    </div>
+    <div class="legend mt-1">
+        <div class="legend-item"><span class="swatch" style="background:var(--accent-orange);"></span> EMC 违规点</div>
+        <div class="legend-item"><span class="swatch" style="background:var(--accent-green);"></span> 信号走线</div>
+        <div class="legend-item"><span class="swatch" style="background:var(--accent-blue);"></span> 电源平面</div>
+        <div class="legend-item"><span class="swatch" style="background:#555;"></span> 地平面</div>
+    </div>
+</div>
+
+</div><!-- /page-container -->
+
+<script src="../shared/scripts/nav.js"></script>
+<script>
+/* ================================================================
+   EMC 设计 — Interactive Module
+   ================================================================ */
+(() => {
+'use strict';
+
+/* ---------- helpers ---------- */
+const $ = s => document.querySelector(s);
+const dpr = window.devicePixelRatio || 1;
+
+function initCanvas(cv) {
+    const rect = cv.getBoundingClientRect();
+    cv.width = rect.width * dpr;
+    cv.height = rect.height * dpr;
+    const ctx = cv.getContext('2d');
+    ctx.scale(dpr, dpr);
+    return { ctx, w: rect.width, h: rect.height };
+}
+
+function clearCanvas(ctx, w, h) {
+    ctx.fillStyle = '#16213e';
+    ctx.fillRect(0, 0, w, h);
+}
+
+/* ================================================================
+   SECTION 1 — EMI 辐射原理
+   ================================================================ */
+(() => {
+    const cv = $('#cv-radiation');
+    const { ctx, w, h } = initCanvas(cv);
+    const slArea = $('#sl-area'), slFreq = $('#sl-freq'), slCurrent = $('#sl-current');
+    const svArea = $('#sv-area'), svFreq = $('#sv-freq'), svCurrent = $('#sv-current');
+    const radFill = $('#rad-fill'), radLabel = $('#rad-label');
+
+    // KaTeX formula
+    katex.render('E \\propto f^2 \\cdot A \\cdot I', $('#katex-radiation'), { displayMode: true });
+
+    let area = 30, freq = 20, current = 15;
+    let wavePhase = 0;
+
+    function updateValues() {
+        area = +slArea.value; freq = +slFreq.value; current = +slCurrent.value;
+        svArea.textContent = area; svFreq.textContent = freq; svCurrent.textContent = current;
+        const intensity = (freq * freq * area * current) / (100 * 100 * 80 * 50);
+        const pct = Math.min(intensity * 100, 100);
+        radFill.style.width = pct + '%';
+        if (pct < 30) { radFill.style.background = 'var(--accent-green)'; radLabel.textContent = '低'; }
+        else if (pct < 65) { radFill.style.background = 'var(--accent-orange)'; radLabel.textContent = '中'; }
+        else { radFill.style.background = 'var(--accent-red)'; radLabel.textContent = '高'; }
+    }
+
+    function drawPCB() {
+        // PCB board
+        ctx.fillStyle = '#0a5e3c';
+        ctx.fillRect(w * 0.15, h * 0.35, w * 0.35, h * 0.3);
+        ctx.strokeStyle = '#16c79a';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(w * 0.15, h * 0.35, w * 0.35, h * 0.3);
+
+        // Grid lines on PCB
+        ctx.strokeStyle = 'rgba(22,199,154,0.15)';
+        ctx.lineWidth = 0.5;
+        for (let x = w * 0.15; x <= w * 0.5; x += 15) {
+            ctx.beginPath(); ctx.moveTo(x, h * 0.35); ctx.lineTo(x, h * 0.65); ctx.stroke();
+        }
+        for (let y = h * 0.35; y <= h * 0.65; y += 15) {
+            ctx.beginPath(); ctx.moveTo(w * 0.15, y); ctx.lineTo(w * 0.5, y); ctx.stroke();
+        }
+
+        // IC chip
+        ctx.fillStyle = '#2a2a4a';
+        ctx.fillRect(w * 0.25, h * 0.42, 40, 30);
+        ctx.strokeStyle = '#6c6c7c';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(w * 0.25, h * 0.42, 40, 30);
+        ctx.fillStyle = '#a8a8b8';
+        ctx.font = '9px JetBrains Mono';
+        ctx.fillText('IC', w * 0.25 + 14, h * 0.42 + 19);
+    }
+
+    function drawLoop() {
+        const scale = area / 80;
+        const cx = w * 0.325, cy = h * 0.5;
+        const loopW = 60 + scale * 100, loopH = 20 + scale * 40;
+
+        ctx.strokeStyle = '#ff5252';
+        ctx.lineWidth = 2.5;
+        ctx.setLineDash([]);
+        ctx.beginPath();
+        ctx.ellipse(cx, cy, loopW / 2, loopH / 2, 0, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // Arrow on loop
+        const ax = cx + loopW / 2 * Math.cos(wavePhase * 2);
+        const ay = cy - loopH / 2 * Math.sin(wavePhase * 2);
+        ctx.fillStyle = '#ff5252';
+        ctx.beginPath();
+        ctx.arc(ax, ay, 4, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Area label
+        ctx.fillStyle = 'rgba(255,82,82,0.15)';
+        ctx.beginPath();
+        ctx.ellipse(cx, cy, loopW / 2, loopH / 2, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#ff8a80';
+        ctx.font = '12px Noto Sans SC';
+        ctx.textAlign = 'center';
+        ctx.fillText('A = ' + area + ' mm\u00B2', cx, cy + 4);
+        ctx.textAlign = 'start';
+    }
+
+    function drawWaves() {
+        const intensity = (freq * freq * area * current) / (100 * 100 * 80 * 50);
+        const cx = w * 0.325, cy = h * 0.5;
+        const numWaves = 5;
+        const maxR = w * 0.42;
+
+        for (let i = 0; i < numWaves; i++) {
+            const phase = (wavePhase + i / numWaves) % 1;
+            const r = phase * maxR;
+            const alpha = (1 - phase) * intensity * 0.7;
+            if (alpha < 0.02) continue;
+
+            ctx.strokeStyle = `rgba(79,195,247,${Math.min(alpha, 0.6)})`;
+            ctx.lineWidth = 1.5 + intensity * 2;
+            ctx.setLineDash([]);
+            ctx.beginPath();
+            ctx.arc(cx, cy, r, -Math.PI * 0.6, Math.PI * 0.6);
+            ctx.stroke();
+
+            // Right side waves
+            ctx.beginPath();
+            ctx.arc(cx, cy, r, -Math.PI * 0.4 + Math.PI, Math.PI * 0.4 + Math.PI);
+            ctx.stroke();
+        }
+    }
+
+    function drawFreqIndicator() {
+        ctx.fillStyle = '#a8a8b8';
+        ctx.font = '11px Noto Sans SC';
+        ctx.textAlign = 'right';
+        ctx.fillText('f = ' + freq + ' MHz', w - 20, 25);
+        ctx.fillText('I = ' + current + ' mA', w - 20, 42);
+        ctx.textAlign = 'start';
+
+        // Sine wave showing frequency
+        const baseX = w * 0.6, baseY = h - 50;
+        ctx.strokeStyle = 'rgba(255,215,64,0.6)';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        for (let x = 0; x < 180; x++) {
+            const px = baseX + x;
+            const py = baseY + Math.sin((x * freq / 15) + wavePhase * 20) * 15;
+            x === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+        }
+        ctx.stroke();
+        ctx.fillStyle = '#ffd740';
+        ctx.font = '10px Noto Sans SC';
+        ctx.fillText('信号波形', baseX, baseY - 22);
+    }
+
+    function animate() {
+        clearCanvas(ctx, w, h);
+        wavePhase += 0.008;
+        if (wavePhase > 1) wavePhase -= 1;
+        drawPCB();
+        drawLoop();
+        drawWaves();
+        drawFreqIndicator();
+
+        // Title watermark
+        ctx.fillStyle = 'rgba(168,168,184,0.3)';
+        ctx.font = '10px JetBrains Mono';
+        ctx.textAlign = 'right';
+        ctx.fillText('EMI 辐射', w - 10, h - 10);
+        ctx.textAlign = 'start';
+
+        requestAnimationFrame(animate);
+    }
+
+    [slArea, slFreq, slCurrent].forEach(s => s.addEventListener('input', updateValues));
+    updateValues();
+    animate();
+})();
+
+/* ================================================================
+   SECTION 2 — 回流路径
+   ================================================================ */
+(() => {
+    const cv = $('#cv-return');
+    const { ctx, w, h } = initCanvas(cv);
+    const chkSlot = $('#chk-slot');
+    const slRetFreq = $('#sl-ret-freq');
+    const svRetFreq = $('#sv-ret-freq');
+    const retFill = $('#ret-fill'), retLabel = $('#ret-label');
+
+    let hasSlot = false, retFreq = 50, phase = 0;
+
+    function updateReturn() {
+        retFreq = +slRetFreq.value;
+        svRetFreq.textContent = retFreq;
+        hasSlot = chkSlot.checked;
+        const risk = hasSlot ? Math.min(retFreq / 60, 1) : Math.min(retFreq / 200, 1);
+        const pct = risk * 100;
+        retFill.style.width = pct + '%';
+        if (pct < 30) { retFill.style.background = 'var(--accent-green)'; retLabel.textContent = '低'; }
+        else if (pct < 65) { retFill.style.background = 'var(--accent-orange)'; retLabel.textContent = '中'; }
+        else { retFill.style.background = 'var(--accent-red)'; retLabel.textContent = '高'; }
+    }
+
+    function drawLayers() {
+        const topY = h * 0.28, botY = h * 0.58, layerH = 12;
+        const lx = 60, rx = w - 60;
+
+        // Top copper layer
+        ctx.fillStyle = '#b8860b';
+        ctx.fillRect(lx, topY, rx - lx, layerH);
+        ctx.fillStyle = '#a8a8b8';
+        ctx.font = '11px Noto Sans SC';
+        ctx.fillText('顶层铜', lx - 2, topY - 6);
+
+        // Substrate
+        ctx.fillStyle = '#1a5e3c';
+        ctx.fillRect(lx, topY + layerH, rx - lx, botY - topY - layerH);
+
+        // Bottom ground plane
+        if (hasSlot) {
+            const slotL = w * 0.38, slotR = w * 0.58;
+            ctx.fillStyle = '#555';
+            ctx.fillRect(lx, botY, slotL - lx, layerH);
+            ctx.fillRect(slotR, botY, rx - slotR, layerH);
+            // Slot gap
+            ctx.fillStyle = '#1a1a2e';
+            ctx.fillRect(slotL, botY, slotR - slotL, layerH);
+            // Slot label
+            ctx.fillStyle = '#ff5252';
+            ctx.font = '11px Noto Sans SC';
+            ctx.textAlign = 'center';
+            ctx.fillText('开槽!', (slotL + slotR) / 2, botY + layerH + 16);
+            ctx.textAlign = 'start';
+        } else {
+            ctx.fillStyle = '#555';
+            ctx.fillRect(lx, botY, rx - lx, layerH);
+        }
+        ctx.fillStyle = '#a8a8b8';
+        ctx.font = '11px Noto Sans SC';
+        ctx.fillText('地平面', lx - 2, botY + layerH + 16);
+
+        // Signal trace on top
+        const traceY = topY + 3;
+        ctx.strokeStyle = '#16c79a';
+        ctx.lineWidth = 3;
+        ctx.setLineDash([]);
+        ctx.beginPath();
+        ctx.moveTo(lx + 40, traceY + 3);
+        ctx.lineTo(rx - 40, traceY + 3);
+        ctx.stroke();
+
+        // Animated signal current
+        const dotCount = 8;
+        for (let i = 0; i < dotCount; i++) {
+            const t = ((phase + i / dotCount) % 1);
+            const dx = lx + 40 + t * (rx - lx - 80);
+            ctx.fillStyle = '#16c79a';
+            ctx.beginPath(); ctx.arc(dx, traceY + 3, 3.5, 0, Math.PI * 2); ctx.fill();
+        }
+
+        // Signal label
+        ctx.fillStyle = '#16c79a';
+        ctx.font = '10px JetBrains Mono';
+        ctx.fillText('Signal', lx + 40, traceY - 6);
+    }
+
+    function drawReturnCurrent() {
+        const topY = h * 0.28, botY = h * 0.58, layerH = 12;
+        const lx = 60, rx = w - 60;
+        const retY = botY + 3;
+
+        ctx.lineWidth = 2;
+        ctx.setLineDash([6, 4]);
+
+        if (!hasSlot) {
+            // Return current directly under signal trace
+            ctx.strokeStyle = '#4fc3f7';
+            ctx.beginPath();
+            ctx.moveTo(lx + 40, retY + 3);
+            ctx.lineTo(rx - 40, retY + 3);
+            ctx.stroke();
+
+            // Animated return dots (opposite direction)
+            const dotCount = 8;
+            for (let i = 0; i < dotCount; i++) {
+                const t = ((1 - phase + i / dotCount) % 1);
+                const dx = lx + 40 + t * (rx - lx - 80);
+                ctx.fillStyle = '#4fc3f7';
+                ctx.setLineDash([]);
+                ctx.beginPath(); ctx.arc(dx, retY + 3, 3, 0, Math.PI * 2); ctx.fill();
+            }
+
+            // Small loop indicator
+            ctx.strokeStyle = 'rgba(22,199,154,0.3)';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([]);
+            const loopCx = w / 2, loopTop = topY + 6, loopBot = botY + 6;
+            ctx.fillStyle = 'rgba(22,199,154,0.08)';
+            ctx.fillRect(lx + 40, loopTop, rx - lx - 80, loopBot - loopTop);
+            ctx.fillStyle = '#16c79a';
+            ctx.font = '11px Noto Sans SC';
+            ctx.textAlign = 'center';
+            ctx.fillText('小环路 = 低 EMI', loopCx, (loopTop + loopBot) / 2 + 4);
+            ctx.textAlign = 'start';
+        } else {
+            // Return current forced around slot
+            const slotL = w * 0.38, slotR = w * 0.58;
+            ctx.strokeStyle = '#ff5252';
+            ctx.setLineDash([6, 4]);
+            ctx.beginPath();
+            ctx.moveTo(rx - 40, retY + 3);
+            ctx.lineTo(slotR + 5, retY + 3);
+            // Go down, around slot
+            ctx.lineTo(slotR + 5, botY + layerH + 30);
+            ctx.lineTo(slotL - 5, botY + layerH + 30);
+            ctx.lineTo(slotL - 5, retY + 3);
+            ctx.lineTo(lx + 40, retY + 3);
+            ctx.stroke();
+
+            // Animated return dots around slot
+            const path = [
+                { x: rx - 40, y: retY + 3 },
+                { x: slotR + 5, y: retY + 3 },
+                { x: slotR + 5, y: botY + layerH + 30 },
+                { x: slotL - 5, y: botY + layerH + 30 },
+                { x: slotL - 5, y: retY + 3 },
+                { x: lx + 40, y: retY + 3 }
+            ];
+            const dotCount = 10;
+            for (let i = 0; i < dotCount; i++) {
+                const t = ((1 - phase + i / dotCount) % 1);
+                const totalSegs = path.length - 1;
+                const segF = t * totalSegs;
+                const seg = Math.min(Math.floor(segF), totalSegs - 1);
+                const f = segF - seg;
+                const dx = path[seg].x + (path[seg + 1].x - path[seg].x) * f;
+                const dy = path[seg].y + (path[seg + 1].y - path[seg].y) * f;
+                ctx.fillStyle = '#ff5252';
+                ctx.setLineDash([]);
+                ctx.beginPath(); ctx.arc(dx, dy, 3, 0, Math.PI * 2); ctx.fill();
+            }
+
+            // Large loop indicator
+            ctx.fillStyle = 'rgba(255,82,82,0.06)';
+            ctx.fillRect(slotL - 5, topY + 6, slotR - slotL + 10, botY + layerH + 30 - topY - 6);
+            ctx.fillStyle = '#ff5252';
+            ctx.font = '11px Noto Sans SC';
+            ctx.textAlign = 'center';
+            ctx.fillText('大环路 = 高 EMI!', (slotL + slotR) / 2, botY + layerH + 50);
+            ctx.textAlign = 'start';
+        }
+        ctx.setLineDash([]);
+    }
+
+    function drawVias() {
+        const topY = h * 0.28, botY = h * 0.58;
+        const lx = 60, rx = w - 60;
+        // Via connections at ends
+        [lx + 40, rx - 40].forEach(vx => {
+            ctx.fillStyle = '#b388ff';
+            ctx.beginPath(); ctx.arc(vx, topY + 6, 5, 0, Math.PI * 2); ctx.fill();
+            ctx.beginPath(); ctx.arc(vx, botY + 6, 5, 0, Math.PI * 2); ctx.fill();
+            ctx.strokeStyle = '#b388ff';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([2, 3]);
+            ctx.beginPath(); ctx.moveTo(vx, topY + 12); ctx.lineTo(vx, botY); ctx.stroke();
+            ctx.setLineDash([]);
+        });
+    }
+
+    function animate() {
+        clearCanvas(ctx, w, h);
+        phase += 0.006;
+        if (phase > 1) phase -= 1;
+
+        // Layer labels
+        ctx.fillStyle = '#6c6c7c';
+        ctx.font = '10px JetBrains Mono';
+        ctx.fillText('Top Layer', 10, h * 0.25);
+        ctx.fillText('FR-4 基板', 10, h * 0.45);
+        ctx.fillText('Bottom Layer', 10, h * 0.72);
+
+        drawLayers();
+        drawVias();
+        drawReturnCurrent();
+
+        ctx.fillStyle = 'rgba(168,168,184,0.3)';
+        ctx.font = '10px JetBrains Mono';
+        ctx.textAlign = 'right';
+        ctx.fillText('回流路径', w - 10, h - 10);
+        ctx.textAlign = 'start';
+
+        requestAnimationFrame(animate);
+    }
+
+    chkSlot.addEventListener('change', updateReturn);
+    slRetFreq.addEventListener('input', updateReturn);
+    updateReturn();
+    animate();
+})();
+
+/* ================================================================
+   SECTION 3 — 滤波设计
+   ================================================================ */
+(() => {
+    const cv = $('#cv-filter');
+    const { ctx, w, h } = initCanvas(cv);
+    const slCmc = $('#sl-cmc'), slYcap = $('#sl-ycap'), slXcap = $('#sl-xcap');
+    const svCmc = $('#sv-cmc'), svYcap = $('#sv-ycap'), svXcap = $('#sv-xcap');
+    const tabs = document.querySelectorAll('.cm-dm-tabs .tab');
+    const tcCm = $('#tc-cm'), tcDm = $('#tc-dm');
+
+    let cmcVal = 10, ycapVal = 100, xcapVal = 10;
+    let activeMode = 'cm';
+    let animPhase = 0;
+
+    tabs.forEach(t => t.addEventListener('click', () => {
+        tabs.forEach(tb => tb.classList.remove('active'));
+        t.classList.add('active');
+        activeMode = t.dataset.tab;
+        tcCm.classList.toggle('active', activeMode === 'cm');
+        tcDm.classList.toggle('active', activeMode === 'dm');
+    }));
+
+    function updateFilter() {
+        cmcVal = +slCmc.value; ycapVal = +slYcap.value; xcapVal = +slXcap.value;
+        svCmc.textContent = cmcVal; svYcap.textContent = ycapVal; svXcap.textContent = xcapVal;
+    }
+
+    function drawCircuit() {
+        const cy = h * 0.35;
+        const lineY1 = cy - 30, lineY2 = cy + 30;
+        const startX = 50, endX = w - 50;
+        const cmcX = w * 0.3, ycapX = w * 0.55, xcapX = w * 0.7;
+
+        // Input labels
+        ctx.fillStyle = '#a8a8b8';
+        ctx.font = '11px Noto Sans SC';
+        ctx.fillText('L (火线)', 10, lineY1 + 4);
+        ctx.fillText('N (零线)', 10, lineY2 + 4);
+
+        // Two main lines
+        ctx.strokeStyle = '#e8e8e8';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([]);
+        // Line 1
+        ctx.beginPath(); ctx.moveTo(startX, lineY1); ctx.lineTo(endX, lineY1); ctx.stroke();
+        // Line 2
+        ctx.beginPath(); ctx.moveTo(startX, lineY2); ctx.lineTo(endX, lineY2); ctx.stroke();
+
+        // CMC symbol (two coupled inductors)
+        const cmcW = 40 + cmcVal * 0.8;
+        ctx.strokeStyle = '#b388ff';
+        ctx.lineWidth = 2.5;
+        for (let line = 0; line < 2; line++) {
+            const ly = line === 0 ? lineY1 : lineY2;
+            ctx.beginPath();
+            for (let i = 0; i < 6; i++) {
+                const sx = cmcX - cmcW / 2 + (cmcW / 6) * i;
+                ctx.arc(sx + cmcW / 12, ly, 5, Math.PI, 0, line === 1);
+            }
+            ctx.stroke();
+        }
+        // Coupling lines
+        ctx.strokeStyle = 'rgba(179,136,255,0.4)';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([3, 3]);
+        ctx.beginPath(); ctx.moveTo(cmcX, lineY1 + 6); ctx.lineTo(cmcX, lineY2 - 6); ctx.stroke();
+        ctx.setLineDash([]);
+
+        ctx.fillStyle = '#b388ff';
+        ctx.font = '10px Noto Sans SC';
+        ctx.textAlign = 'center';
+        ctx.fillText('CMC ' + cmcVal + 'mH', cmcX, lineY1 - 14);
+
+        // Y-caps (two, line to ground)
+        const gndY = cy + 80;
+        ctx.strokeStyle = '#4fc3f7';
+        ctx.lineWidth = 2;
+        // Y-cap 1
+        ctx.beginPath(); ctx.moveTo(ycapX, lineY1); ctx.lineTo(ycapX, gndY); ctx.stroke();
+        // Y-cap 2
+        ctx.beginPath(); ctx.moveTo(ycapX + 40, lineY2); ctx.lineTo(ycapX + 40, gndY); ctx.stroke();
+        // Cap symbols
+        [ycapX, ycapX + 40].forEach(cx => {
+            const capY = (lineY1 + gndY) / 2;
+            ctx.fillStyle = '#4fc3f7';
+            ctx.fillRect(cx - 8, capY - 2, 16, 3);
+            ctx.fillRect(cx - 8, capY + 4, 16, 3);
+        });
+        // Ground symbol
+        ctx.strokeStyle = '#6c6c7c';
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(ycapX - 10, gndY); ctx.lineTo(ycapX + 50, gndY); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(ycapX, gndY + 6); ctx.lineTo(ycapX + 40, gndY + 6); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(ycapX + 10, gndY + 12); ctx.lineTo(ycapX + 30, gndY + 12); ctx.stroke();
+
+        ctx.fillStyle = '#4fc3f7';
+        ctx.font = '10px Noto Sans SC';
+        ctx.fillText('Y ' + ycapVal + 'pF', ycapX + 20, gndY + 28);
+
+        // X-cap (between lines)
+        ctx.strokeStyle = '#ffab40';
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(xcapX, lineY1); ctx.lineTo(xcapX, lineY2); ctx.stroke();
+        const xcapMid = (lineY1 + lineY2) / 2;
+        ctx.fillStyle = '#ffab40';
+        ctx.fillRect(xcapX - 8, xcapMid - 2, 16, 3);
+        ctx.fillRect(xcapX - 8, xcapMid + 4, 16, 3);
+
+        ctx.fillStyle = '#ffab40';
+        ctx.font = '10px Noto Sans SC';
+        ctx.fillText('X ' + xcapVal + 'nF', xcapX, lineY1 - 14);
+        ctx.textAlign = 'start';
+
+        // Output label
+        ctx.fillStyle = '#16c79a';
+        ctx.font = '11px Noto Sans SC';
+        ctx.fillText('输出', endX + 5, lineY1 + 4);
+    }
+
+    function drawCurrentArrows() {
+        const cy = h * 0.35;
+        const lineY1 = cy - 30, lineY2 = cy + 30;
+        const gndY = cy + 80;
+
+        const speed = 0.01;
+        animPhase += speed;
+
+        if (activeMode === 'cm') {
+            // CM: both currents in same direction
+            ctx.fillStyle = 'rgba(255,82,82,0.8)';
+            const dotCount = 6;
+            for (let i = 0; i < dotCount; i++) {
+                const t = (animPhase + i / dotCount) % 1;
+                const dx = 50 + t * (w - 100);
+                ctx.beginPath(); ctx.arc(dx, lineY1 - 10, 3.5, 0, Math.PI * 2); ctx.fill();
+                ctx.beginPath(); ctx.arc(dx, lineY2 + 10, 3.5, 0, Math.PI * 2); ctx.fill();
+            }
+            // Arrows showing direction
+            ctx.fillStyle = '#ff5252';
+            ctx.font = '10px Noto Sans SC';
+            ctx.fillText('CM 电流 >>>', 80, lineY1 - 18);
+            ctx.fillText('CM 电流 >>>', 80, lineY2 + 22);
+
+            // Y-cap current path to ground
+            const ycapX = w * 0.55;
+            ctx.strokeStyle = 'rgba(79,195,247,0.6)';
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([4, 4]);
+            const bounce = Math.sin(animPhase * 10) * 3;
+            ctx.beginPath();
+            ctx.moveTo(ycapX, lineY1);
+            ctx.lineTo(ycapX, gndY + bounce);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(ycapX + 40, lineY2);
+            ctx.lineTo(ycapX + 40, gndY + bounce);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.fillStyle = '#4fc3f7';
+            ctx.font = '10px Noto Sans SC';
+            ctx.textAlign = 'center';
+            ctx.fillText('Y电容泄放共模噪声', ycapX + 20, gndY + 46);
+            ctx.textAlign = 'start';
+        } else {
+            // DM: currents in opposite directions
+            ctx.fillStyle = 'rgba(255,171,64,0.8)';
+            const dotCount = 6;
+            for (let i = 0; i < dotCount; i++) {
+                const t1 = (animPhase + i / dotCount) % 1;
+                const t2 = (1 - animPhase + i / dotCount) % 1;
+                const dx1 = 50 + t1 * (w - 100);
+                const dx2 = 50 + t2 * (w - 100);
+                ctx.beginPath(); ctx.arc(dx1, lineY1 - 10, 3.5, 0, Math.PI * 2); ctx.fill();
+                ctx.beginPath(); ctx.arc(dx2, lineY2 + 10, 3.5, 0, Math.PI * 2); ctx.fill();
+            }
+            ctx.fillStyle = '#ffab40';
+            ctx.font = '10px Noto Sans SC';
+            ctx.fillText('DM 电流 >>>', 80, lineY1 - 18);
+            ctx.fillText('<<< DM 电流', 80, lineY2 + 22);
+
+            // X-cap current path between lines
+            const xcapX = w * 0.7;
+            ctx.strokeStyle = 'rgba(255,171,64,0.6)';
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([4, 4]);
+            ctx.beginPath();
+            ctx.moveTo(xcapX, lineY1);
+            ctx.lineTo(xcapX, lineY2);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.fillStyle = '#ffab40';
+            ctx.font = '10px Noto Sans SC';
+            ctx.textAlign = 'center';
+            ctx.fillText('X电容旁路差模噪声', xcapX, lineY2 + 22);
+            ctx.textAlign = 'start';
+        }
+    }
+
+    function drawFreqResponse() {
+        const chartL = 50, chartR = w - 30, chartT = h * 0.58, chartB = h - 30;
+        const chartW = chartR - chartL, chartH = chartB - chartT;
+
+        // Chart background
+        ctx.fillStyle = 'rgba(15,52,96,0.5)';
+        ctx.fillRect(chartL, chartT, chartW, chartH);
+
+        // Grid
+        ctx.strokeStyle = 'rgba(42,42,74,0.5)';
+        ctx.lineWidth = 0.5;
+        for (let i = 0; i <= 5; i++) {
+            const y = chartT + (chartH / 5) * i;
+            ctx.beginPath(); ctx.moveTo(chartL, y); ctx.lineTo(chartR, y); ctx.stroke();
+        }
+        for (let i = 0; i <= 6; i++) {
+            const x = chartL + (chartW / 6) * i;
+            ctx.beginPath(); ctx.moveTo(x, chartT); ctx.lineTo(x, chartB); ctx.stroke();
+        }
+
+        // Axes labels
+        ctx.fillStyle = '#6c6c7c';
+        ctx.font = '9px Noto Sans SC';
+        ctx.textAlign = 'center';
+        ctx.fillText('频率 (MHz)', (chartL + chartR) / 2, chartB + 18);
+        ctx.textAlign = 'start';
+        ctx.fillText('衰减(dB)', chartL, chartT - 6);
+
+        // Frequency marks
+        const freqs = ['0.1', '1', '10', '30', '100', '300', '1G'];
+        freqs.forEach((f, i) => {
+            ctx.fillStyle = '#6c6c7c';
+            ctx.font = '8px JetBrains Mono';
+            ctx.textAlign = 'center';
+            ctx.fillText(f, chartL + (chartW / 6) * i, chartB + 10);
+        });
+        ctx.textAlign = 'start';
+
+        // dB marks
+        const dbs = ['0', '-20', '-40', '-60', '-80', '-100'];
+        dbs.forEach((d, i) => {
+            ctx.fillStyle = '#6c6c7c';
+            ctx.font = '8px JetBrains Mono';
+            ctx.textAlign = 'right';
+            ctx.fillText(d, chartL - 4, chartT + (chartH / 5) * i + 3);
+        });
+        ctx.textAlign = 'start';
+
+        // CM attenuation curve
+        ctx.strokeStyle = '#4fc3f7';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        for (let i = 0; i <= 100; i++) {
+            const t = i / 100;
+            const fLog = t * 4; // 0.1 MHz to 1 GHz log scale
+            // CMC + Y-cap: attenuation increases with frequency, then levels
+            const cmcAtten = cmcVal * 2 * Math.min(fLog, 2.5);
+            const ycapAtten = (ycapVal / 100) * Math.max(0, fLog - 0.5) * 8;
+            const total = Math.min(cmcAtten + ycapAtten, 100);
+            const x = chartL + t * chartW;
+            const y = chartT + (total / 100) * chartH;
+            i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+
+        // DM attenuation curve
+        ctx.strokeStyle = '#ffab40';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        for (let i = 0; i <= 100; i++) {
+            const t = i / 100;
+            const fLog = t * 4;
+            const xcapAtten = (xcapVal / 10) * Math.max(0, fLog - 0.3) * 10;
+            const total = Math.min(xcapAtten, 100);
+            const x = chartL + t * chartW;
+            const y = chartT + (total / 100) * chartH;
+            i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+
+        // Legend
+        ctx.fillStyle = '#4fc3f7';
+        ctx.fillRect(chartR - 120, chartT + 10, 10, 3);
+        ctx.fillStyle = '#a8a8b8';
+        ctx.font = '10px Noto Sans SC';
+        ctx.fillText('CM 衰减', chartR - 105, chartT + 15);
+
+        ctx.fillStyle = '#ffab40';
+        ctx.fillRect(chartR - 120, chartT + 26, 10, 3);
+        ctx.fillStyle = '#a8a8b8';
+        ctx.fillText('DM 衰减', chartR - 105, chartT + 31);
+    }
+
+    function animate() {
+        clearCanvas(ctx, w, h);
+        drawCircuit();
+        drawCurrentArrows();
+        drawFreqResponse();
+
+        ctx.fillStyle = 'rgba(168,168,184,0.3)';
+        ctx.font = '10px JetBrains Mono';
+        ctx.textAlign = 'right';
+        ctx.fillText('滤波设计', w - 10, h - 10);
+        ctx.textAlign = 'start';
+
+        requestAnimationFrame(animate);
+    }
+
+    [slCmc, slYcap, slXcap].forEach(s => s.addEventListener('input', updateFilter));
+    updateFilter();
+    animate();
+})();
+
+/* ================================================================
+   SECTION 4 — 屏蔽与接地
+   ================================================================ */
+(() => {
+    const cv = $('#cv-shield');
+    const { ctx, w, h } = initCanvas(cv);
+    const chkShield = $('#chk-shield');
+    const radios = document.querySelectorAll('input[name="gnd-mode"]');
+    const shFill = $('#sh-fill'), shLabel = $('#sh-label');
+
+    let useShield = true, gndMode = 'single', phase = 0;
+
+    function updateShield() {
+        useShield = chkShield.checked;
+        radios.forEach(r => { if (r.checked) gndMode = r.value; });
+        let leak;
+        if (!useShield) leak = 95;
+        else if (gndMode === 'single') leak = 40;
+        else leak = 10;
+        shFill.style.width = leak + '%';
+        if (leak < 25) { shFill.style.background = 'var(--accent-green)'; shLabel.textContent = '低'; }
+        else if (leak < 60) { shFill.style.background = 'var(--accent-orange)'; shLabel.textContent = '中'; }
+        else { shFill.style.background = 'var(--accent-red)'; shLabel.textContent = '高'; }
+    }
+
+    function drawEnclosure() {
+        const ex = w * 0.2, ey = h * 0.15, ew = w * 0.6, eh = h * 0.7;
+
+        // Enclosure shell
+        ctx.strokeStyle = '#6c6c7c';
+        ctx.lineWidth = 3;
+        ctx.setLineDash([]);
+        ctx.strokeRect(ex, ey, ew, eh);
+        ctx.fillStyle = 'rgba(108,108,124,0.08)';
+        ctx.fillRect(ex, ey, ew, eh);
+
+        // Label
+        ctx.fillStyle = '#6c6c7c';
+        ctx.font = '10px Noto Sans SC';
+        ctx.textAlign = 'center';
+        ctx.fillText('金属屏蔽外壳', ex + ew / 2, ey - 8);
+        ctx.textAlign = 'start';
+
+        // PCB inside
+        const px = ex + ew * 0.15, py = ey + eh * 0.3, pw = ew * 0.7, ph = eh * 0.2;
+        ctx.fillStyle = '#0a5e3c';
+        ctx.fillRect(px, py, pw, ph);
+        ctx.strokeStyle = '#16c79a';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(px, py, pw, ph);
+
+        // Components on PCB
+        ctx.fillStyle = '#2a2a4a';
+        ctx.fillRect(px + 20, py + 4, 24, 12);
+        ctx.fillRect(px + 60, py + 4, 16, 12);
+        ctx.fillRect(px + pw - 50, py + 4, 20, 12);
+
+        // Traces
+        ctx.strokeStyle = '#16c79a';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(px + 44, py + 10);
+        ctx.lineTo(px + 60, py + 10);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(px + 76, py + 10);
+        ctx.lineTo(px + pw - 50, py + 10);
+        ctx.stroke();
+
+        // IC label
+        ctx.fillStyle = '#a8a8b8';
+        ctx.font = '7px JetBrains Mono';
+        ctx.fillText('MCU', px + 22, py + 12);
+        ctx.fillText('PCB', px + pw / 2 - 10, py + ph + 14);
+
+        // Connector on left wall
+        const connY = ey + eh * 0.4;
+        ctx.fillStyle = '#b8860b';
+        ctx.fillRect(ex - 4, connY - 8, 12, 16);
+        ctx.strokeStyle = '#6c6c7c';
+        ctx.strokeRect(ex - 4, connY - 8, 12, 16);
+
+        // Connector on right wall
+        ctx.fillRect(ex + ew - 8, connY - 8, 12, 16);
+        ctx.strokeRect(ex + ew - 8, connY - 8, 12, 16);
+    }
+
+    function drawCables() {
+        const ex = w * 0.2, ey = h * 0.15, ew = w * 0.6, eh = h * 0.7;
+        const connY = ey + eh * 0.4;
+        const cableStartX = 30, cableEndX = w - 30;
+
+        if (useShield) {
+            // Shielded cable — outer shield
+            ctx.strokeStyle = '#a8a8b8';
+            ctx.lineWidth = 8;
+            ctx.setLineDash([]);
+            // Left cable
+            ctx.beginPath(); ctx.moveTo(cableStartX, connY); ctx.lineTo(ex - 4, connY); ctx.stroke();
+            // Right cable
+            ctx.beginPath(); ctx.moveTo(ex + ew + 4, connY); ctx.lineTo(cableEndX, connY); ctx.stroke();
+
+            // Inner conductor
+            ctx.strokeStyle = '#ff5252';
+            ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.moveTo(cableStartX, connY); ctx.lineTo(ex - 4, connY); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(ex + ew + 4, connY); ctx.lineTo(cableEndX, connY); ctx.stroke();
+
+            // Ground connections
+            const gndY = ey + eh + 20;
+            ctx.strokeStyle = '#16c79a';
+            ctx.lineWidth = 2;
+
+            if (gndMode === 'single' || gndMode === 'both') {
+                // Left end ground
+                ctx.beginPath();
+                ctx.moveTo(ex - 4, connY + 4);
+                ctx.lineTo(ex - 4, gndY);
+                ctx.stroke();
+                // Ground symbol
+                ctx.beginPath();
+                ctx.moveTo(ex - 14, gndY); ctx.lineTo(ex + 6, gndY); ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(ex - 10, gndY + 4); ctx.lineTo(ex + 2, gndY + 4); ctx.stroke();
+                ctx.fillStyle = '#16c79a';
+                ctx.font = '9px Noto Sans SC';
+                ctx.fillText('GND', ex - 12, gndY + 18);
+            }
+
+            if (gndMode === 'both') {
+                // Right end ground
+                ctx.strokeStyle = '#16c79a';
+                ctx.beginPath();
+                ctx.moveTo(ex + ew + 4, connY + 4);
+                ctx.lineTo(ex + ew + 4, gndY);
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(ex + ew - 6, gndY); ctx.lineTo(ex + ew + 14, gndY); ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(ex + ew - 2, gndY + 4); ctx.lineTo(ex + ew + 10, gndY + 4); ctx.stroke();
+                ctx.fillStyle = '#16c79a';
+                ctx.fillText('GND', ex + ew - 4, gndY + 18);
+            }
+
+            ctx.fillStyle = '#a8a8b8';
+            ctx.font = '10px Noto Sans SC';
+            ctx.fillText('屏蔽电缆', cableStartX, connY - 14);
+        } else {
+            // Unshielded cable — just wire
+            ctx.strokeStyle = '#ff5252';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([]);
+            ctx.beginPath(); ctx.moveTo(cableStartX, connY); ctx.lineTo(ex - 4, connY); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(ex + ew + 4, connY); ctx.lineTo(cableEndX, connY); ctx.stroke();
+
+            ctx.fillStyle = '#ff5252';
+            ctx.font = '10px Noto Sans SC';
+            ctx.fillText('裸线（无屏蔽）', cableStartX, connY - 10);
+        }
+    }
+
+    function drawRadiation() {
+        let intensity;
+        if (!useShield) intensity = 1.0;
+        else if (gndMode === 'single') intensity = 0.4;
+        else intensity = 0.08;
+
+        const ex = w * 0.2, ey = h * 0.15, ew = w * 0.6, eh = h * 0.7;
+        const connY = ey + eh * 0.4;
+
+        // Radiation from cables
+        if (intensity > 0.05) {
+            const sources = [];
+            if (!useShield) {
+                // Radiation from both unshielded cables
+                sources.push({ x: 80, y: connY });
+                sources.push({ x: w - 80, y: connY });
+            } else if (gndMode === 'single') {
+                // Some radiation from right (ungrounded) end
+                sources.push({ x: w - 80, y: connY });
+            }
+
+            sources.forEach(src => {
+                for (let i = 0; i < 4; i++) {
+                    const p = (phase + i * 0.25) % 1;
+                    const r = p * 60;
+                    const alpha = (1 - p) * intensity * 0.5;
+                    if (alpha < 0.02) return;
+                    ctx.strokeStyle = `rgba(255,82,82,${alpha})`;
+                    ctx.lineWidth = 1.5;
+                    ctx.setLineDash([]);
+                    ctx.beginPath();
+                    ctx.arc(src.x, src.y, r, 0, Math.PI * 2);
+                    ctx.stroke();
+                }
+            });
+
+            // Label
+            ctx.fillStyle = intensity > 0.5 ? '#ff5252' : '#ffab40';
+            ctx.font = '11px Noto Sans SC';
+            ctx.textAlign = 'center';
+            if (!useShield) {
+                ctx.fillText('严重辐射泄漏！电缆成为天线', w / 2, h - 20);
+            } else if (gndMode === 'single') {
+                ctx.fillText('右端未接地，屏蔽效果受限', w / 2, h - 20);
+            }
+            ctx.textAlign = 'start';
+        } else {
+            ctx.fillStyle = '#16c79a';
+            ctx.font = '11px Noto Sans SC';
+            ctx.textAlign = 'center';
+            ctx.fillText('两端接地，屏蔽效果优良', w / 2, h - 20);
+            ctx.textAlign = 'start';
+        }
+    }
+
+    function animate() {
+        clearCanvas(ctx, w, h);
+        phase += 0.008;
+        if (phase > 1) phase -= 1;
+        drawEnclosure();
+        drawCables();
+        drawRadiation();
+
+        ctx.fillStyle = 'rgba(168,168,184,0.3)';
+        ctx.font = '10px JetBrains Mono';
+        ctx.textAlign = 'right';
+        ctx.fillText('屏蔽与接地', w - 10, h - 10);
+        ctx.textAlign = 'start';
+
+        requestAnimationFrame(animate);
+    }
+
+    chkShield.addEventListener('change', updateShield);
+    radios.forEach(r => r.addEventListener('change', updateShield));
+    updateShield();
+    animate();
+})();
+
+/* ================================================================
+   SECTION 5 — EMC 检查清单
+   ================================================================ */
+(() => {
+    const cv = $('#cv-checklist');
+    const { ctx, w, h } = initCanvas(cv);
+    const popup = $('#vio-popup');
+    const vioTitle = $('#vio-title'), vioDesc = $('#vio-desc'), vioFix = $('#vio-fix');
+    const closeBtn = $('#vio-close');
+
+    const violations = [
+        {
+            x: 0.18, y: 0.22, label: '未接地散热器',
+            desc: '散热器未连接到地平面，高频噪声通过散热器耦合辐射，形成意外天线。',
+            fix: '修复：将散热器通过低阻抗路径连接到地平面，使用多个接地过孔。'
+        },
+        {
+            x: 0.55, y: 0.18, label: '过长的时钟走线',
+            desc: '时钟信号走线过长且未做包地处理，高频谐波沿走线辐射。时钟信号的奇次谐波能量极高。',
+            fix: '修复：缩短时钟走线、添加串联阻尼电阻、两侧包地并打过孔屏蔽。'
+        },
+        {
+            x: 0.38, y: 0.55, label: '高速信号跨越分割地',
+            desc: '高速数字信号走线跨越了地平面的分割区域，回流电流被迫绕行，环路面积急剧增大。',
+            fix: '修复：避免高速信号跨越地平面分割线；如必须跨越，在分割处桥接去耦电容。'
+        },
+        {
+            x: 0.78, y: 0.35, label: '缺少去耦电容',
+            desc: 'IC 电源引脚附近缺少去耦电容，瞬态开关电流通过长路径获取能量，产生传导和辐射噪声。',
+            fix: '修复：在每个 IC 电源引脚旁尽量近地放置 100nF 去耦电容，过孔直接连接地平面。'
+        },
+        {
+            x: 0.62, y: 0.72, label: '信号走线跨越开槽',
+            desc: '信号走线下方的参考平面有过孔密集区造成的缝隙，回流路径被阻断。',
+            fix: '修复：确保高速信号走线下方有完整的参考平面，避免在走线正下方密集打孔。'
+        }
+    ];
+
+    let hoverIdx = -1, phase = 0;
+
+    function drawBoard() {
+        // PCB board
+        const bx = 40, by = 30, bw = w - 80, bh = h - 60;
+        ctx.fillStyle = '#0a5e3c';
+        ctx.fillRect(bx, by, bw, bh);
+        ctx.strokeStyle = '#16c79a';
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(bx, by, bw, bh);
+
+        // Grid
+        ctx.strokeStyle = 'rgba(22,199,154,0.1)';
+        ctx.lineWidth = 0.5;
+        for (let x = bx; x <= bx + bw; x += 20) {
+            ctx.beginPath(); ctx.moveTo(x, by); ctx.lineTo(x, by + bh); ctx.stroke();
+        }
+        for (let y = by; y <= by + bh; y += 20) {
+            ctx.beginPath(); ctx.moveTo(bx, y); ctx.lineTo(bx + bw, y); ctx.stroke();
+        }
+
+        // Ground plane area (bottom half with split)
+        ctx.fillStyle = 'rgba(85,85,85,0.3)';
+        ctx.fillRect(bx + 10, by + bh * 0.45, bw - 20, bh * 0.1);
+        // Split in ground
+        ctx.fillStyle = '#1a1a2e';
+        ctx.fillRect(bx + bw * 0.3, by + bh * 0.45, bw * 0.15, bh * 0.1);
+
+        // Power plane area
+        ctx.fillStyle = 'rgba(79,195,247,0.1)';
+        ctx.fillRect(bx + bw * 0.6, by + 10, bw * 0.35, bh * 0.25);
+        ctx.strokeStyle = 'rgba(79,195,247,0.3)';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(bx + bw * 0.6, by + 10, bw * 0.35, bh * 0.25);
+        ctx.fillStyle = '#4fc3f7';
+        ctx.font = '9px JetBrains Mono';
+        ctx.fillText('VCC', bx + bw * 0.62, by + 24);
+
+        // Signal traces
+        ctx.strokeStyle = '#16c79a';
+        ctx.lineWidth = 2;
+        // Clock trace (long, violation #2)
+        ctx.beginPath();
+        ctx.moveTo(bx + bw * 0.4, by + bh * 0.18);
+        ctx.lineTo(bx + bw * 0.72, by + bh * 0.18);
+        ctx.stroke();
+        ctx.fillStyle = '#16c79a';
+        ctx.font = '8px JetBrains Mono';
+        ctx.fillText('CLK', bx + bw * 0.56, by + bh * 0.16);
+
+        // Signal crossing split ground (violation #3)
+        ctx.strokeStyle = '#16c79a';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(bx + bw * 0.2, by + bh * 0.55);
+        ctx.lineTo(bx + bw * 0.55, by + bh * 0.55);
+        ctx.stroke();
+        ctx.fillText('DATA', bx + bw * 0.32, by + bh * 0.53);
+
+        // Signal over slot area (violation #5)
+        ctx.beginPath();
+        ctx.moveTo(bx + bw * 0.5, by + bh * 0.72);
+        ctx.lineTo(bx + bw * 0.78, by + bh * 0.72);
+        ctx.stroke();
+        ctx.fillText('SPI', bx + bw * 0.64, by + bh * 0.7);
+
+        // Via field under violation #5
+        ctx.fillStyle = 'rgba(179,136,255,0.4)';
+        for (let i = 0; i < 8; i++) {
+            for (let j = 0; j < 3; j++) {
+                ctx.beginPath();
+                ctx.arc(bx + bw * 0.55 + i * 12, by + bh * 0.75 + j * 12, 2.5, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+
+        // Heatsink (violation #1)
+        ctx.fillStyle = '#4a4a5a';
+        ctx.fillRect(bx + bw * 0.1, by + bh * 0.14, 45, 30);
+        for (let i = 0; i < 5; i++) {
+            ctx.fillRect(bx + bw * 0.1 + i * 10, by + bh * 0.14 - 8, 4, 8);
+        }
+        ctx.fillStyle = '#a8a8b8';
+        ctx.font = '7px JetBrains Mono';
+        ctx.fillText('Heatsink', bx + bw * 0.1 + 2, by + bh * 0.14 + 20);
+
+        // ICs
+        const ics = [
+            { x: bx + bw * 0.35, y: by + bh * 0.12, w: 30, h: 22, label: 'CPU' },
+            { x: bx + bw * 0.73, y: by + bh * 0.28, w: 24, h: 18, label: 'REG' },
+            { x: bx + bw * 0.2, y: by + bh * 0.65, w: 26, h: 20, label: 'ADC' }
+        ];
+        ics.forEach(ic => {
+            ctx.fillStyle = '#2a2a4a';
+            ctx.fillRect(ic.x, ic.y, ic.w, ic.h);
+            ctx.strokeStyle = '#6c6c7c';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(ic.x, ic.y, ic.w, ic.h);
+            ctx.fillStyle = '#a8a8b8';
+            ctx.font = '7px JetBrains Mono';
+            ctx.fillText(ic.label, ic.x + 4, ic.y + ic.h / 2 + 3);
+        });
+
+        // Ground plane labels
+        ctx.fillStyle = '#555';
+        ctx.font = '9px JetBrains Mono';
+        ctx.fillText('GND Plane', bx + 15, by + bh * 0.50 + 5);
+    }
+
+    function drawViolationMarkers() {
+        const bx = 40, by = 30, bw = w - 80, bh = h - 60;
+        const pulse = 0.5 + 0.5 * Math.sin(phase * 6);
+
+        violations.forEach((v, i) => {
+            const vx = bx + v.x * bw, vy = by + v.y * bh;
+            const isHover = (i === hoverIdx);
+            const radius = isHover ? 16 : 12 + pulse * 3;
+
+            // Pulse ring
+            ctx.strokeStyle = isHover ? 'rgba(255,171,64,0.8)' : 'rgba(255,171,64,0.4)';
+            ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.arc(vx, vy, radius + 4, 0, Math.PI * 2); ctx.stroke();
+
+            // Filled circle
+            ctx.fillStyle = isHover ? '#ffab40' : 'rgba(255,171,64,0.7)';
+            ctx.beginPath(); ctx.arc(vx, vy, 10, 0, Math.PI * 2); ctx.fill();
+
+            // Number
+            ctx.fillStyle = '#1a1a2e';
+            ctx.font = 'bold 11px JetBrains Mono';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('' + (i + 1), vx, vy);
+
+            // Label
+            ctx.fillStyle = isHover ? '#ffab40' : 'rgba(255,171,64,0.6)';
+            ctx.font = '10px Noto Sans SC';
+            ctx.textBaseline = 'alphabetic';
+            ctx.fillText(v.label, vx, vy - 16);
+            ctx.textAlign = 'start';
+        });
+    }
+
+    function hitTest(mx, my) {
+        const rect = cv.getBoundingClientRect();
+        const x = mx - rect.left, y = my - rect.top;
+        const bx = 40, by = 30, bw = (rect.width) - 80, bh = (rect.height) - 60;
+        for (let i = 0; i < violations.length; i++) {
+            const vx = bx + violations[i].x * bw;
+            const vy = by + violations[i].y * bh;
+            const dx = x - vx, dy = y - vy;
+            if (dx * dx + dy * dy < 20 * 20) return i;
+        }
+        return -1;
+    }
+
+    cv.addEventListener('mousemove', e => {
+        hoverIdx = hitTest(e.clientX, e.clientY);
+        cv.style.cursor = hoverIdx >= 0 ? 'pointer' : 'crosshair';
+    });
+
+    cv.addEventListener('click', e => {
+        const idx = hitTest(e.clientX, e.clientY);
+        if (idx < 0) { popup.style.display = 'none'; return; }
+        const v = violations[idx];
+        vioTitle.textContent = (idx + 1) + '. ' + v.label;
+        vioDesc.textContent = v.desc;
+        vioFix.textContent = v.fix;
+
+        const rect = cv.getBoundingClientRect();
+        const bx = 40, by = 30, bw = rect.width - 80, bh = rect.height - 60;
+        let px = bx + v.x * bw + 20;
+        let py = by + v.y * bh - 30;
+        if (px + 310 > rect.width) px = px - 340;
+        if (py < 0) py = 10;
+        if (py + 160 > rect.height) py = rect.height - 170;
+        popup.style.left = px + 'px';
+        popup.style.top = py + 'px';
+        popup.style.display = 'block';
+    });
+
+    closeBtn.addEventListener('click', () => { popup.style.display = 'none'; });
+
+    function animate() {
+        clearCanvas(ctx, w, h);
+        phase += 0.015;
+        drawBoard();
+        drawViolationMarkers();
+
+        ctx.fillStyle = 'rgba(168,168,184,0.3)';
+        ctx.font = '10px JetBrains Mono';
+        ctx.textAlign = 'right';
+        ctx.fillText('EMC 检查清单', w - 10, h - 10);
+        ctx.textAlign = 'start';
+
+        requestAnimationFrame(animate);
+    }
+
+    animate();
+})();
+
+/* ---------- GSAP scroll-in ---------- */
+if (typeof gsap !== 'undefined') {
+    gsap.utils.toArray('.section').forEach(sec => {
+        gsap.from(sec, {
+            opacity: 0, y: 40, duration: 0.7,
+            scrollTrigger: { trigger: sec, start: 'top 85%' }
+        });
+    });
+}
+
+/* ---------- Handle resize ---------- */
+let resizeTimer;
+window.addEventListener('resize', () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => location.reload(), 300);
+});
+
+})();
+</script>
+</body>
+</html>

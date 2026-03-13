@@ -1,0 +1,1374 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>前向过程 — Diffusion 扩散模型</title>
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+
+    <!-- KaTeX -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {delimiters:[{left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false}]});">
+    </script>
+
+    <!-- GSAP -->
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+
+    <!-- Shared Styles -->
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+
+    <style>
+        /* ========== Hero ========== */
+        .hero-banner {
+            text-align: center;
+            padding: 2.5rem 0 1.5rem;
+            margin-bottom: 2.5rem;
+        }
+        .hero-banner h1 {
+            font-size: 2.4rem;
+            background: linear-gradient(135deg, var(--accent-green), var(--accent-blue));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 0.5rem;
+        }
+        .hero-banner .subtitle {
+            font-size: 1.05rem;
+            max-width: 660px;
+            margin: 0 auto;
+            color: var(--text-secondary);
+            line-height: 1.8;
+        }
+
+        /* ========== Formula box ========== */
+        .formula-box {
+            background: rgba(15, 52, 96, 0.35);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1rem 1.5rem;
+            margin: 1rem 0;
+        }
+
+        /* ========== Markov chain ========== */
+        .markov-canvas-wrap {
+            position: relative;
+            width: 100%;
+            height: 200px;
+            cursor: pointer;
+        }
+        .markov-canvas-wrap canvas { width: 100%; height: 100%; display: block; }
+        .markov-info { min-height: 56px; margin-top: 0.75rem; }
+
+        /* ========== Noise demo ========== */
+        .noise-demo-wrap { display: flex; flex-direction: column; gap: 1rem; }
+        .noise-canvas-container {
+            position: relative;
+            width: 100%;
+            aspect-ratio: 1.6 / 1;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+        }
+        .noise-canvas-container canvas { width: 100%; height: 100%; display: block; }
+        .noise-stats {
+            display: flex; gap: 1.5rem; flex-wrap: wrap;
+            font-size: 0.85rem; font-family: var(--font-mono);
+            color: var(--text-secondary); margin-top: 0.25rem;
+        }
+        .noise-stats span { color: var(--accent-green); font-weight: 600; }
+
+        /* ========== Reparam ========== */
+        .reparam-panels {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5rem;
+        }
+        .reparam-panel {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1rem;
+        }
+        .reparam-panel h4 { color: var(--accent-blue); margin-bottom: 0.5rem; font-size: 0.95rem; }
+        .reparam-canvas-wrap { width: 100%; aspect-ratio: 1; position: relative; }
+        .reparam-canvas-wrap canvas { width: 100%; height: 100%; display: block; }
+        .match-indicator {
+            text-align: center; margin-top: 1rem; padding: 0.65rem 1rem;
+            border-radius: var(--radius-sm); font-weight: 600; font-size: 0.88rem;
+            background: rgba(22, 199, 154, 0.12); color: var(--accent-green);
+            border: 1px solid rgba(22, 199, 154, 0.25);
+        }
+        .stats-row {
+            display: flex; justify-content: space-around; flex-wrap: wrap;
+            gap: 0.5rem; margin-top: 0.5rem; font-size: 0.8rem;
+            font-family: var(--font-mono); color: var(--text-muted);
+        }
+
+        /* ========== SNR ========== */
+        .snr-layout { display: grid; grid-template-columns: 1fr 1.2fr; gap: 1.5rem; }
+        .snr-left, .snr-right {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1rem;
+        }
+        .snr-component-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-top: 0.75rem; }
+        .snr-component { text-align: center; }
+        .snr-component canvas {
+            width: 100%; aspect-ratio: 1;
+            border-radius: var(--radius-sm); border: 1px solid var(--border-color);
+        }
+        .snr-component .label {
+            font-size: 0.8rem; margin-top: 0.35rem; font-family: var(--font-mono);
+        }
+        .snr-combined-wrap { margin-top: 0.75rem; text-align: center; }
+        .snr-combined-wrap canvas {
+            width: 100%; max-width: 280px; aspect-ratio: 2/1;
+            border-radius: var(--radius-sm); border: 1px solid var(--border-color);
+        }
+        .snr-chart-wrap { width: 100%; aspect-ratio: 1.5 / 1; position: relative; }
+        .snr-chart-wrap canvas { width: 100%; height: 100%; display: block; }
+        .snr-value-display {
+            text-align: center; margin-top: 0.5rem;
+            font-family: var(--font-mono); font-size: 0.9rem;
+        }
+
+        /* ========== Pixel grid ========== */
+        .pixel-main-wrap { display: flex; justify-content: center; margin-bottom: 1rem; }
+        .pixel-main-wrap canvas {
+            border: 2px solid var(--border-color); border-radius: var(--radius-md);
+            image-rendering: pixelated;
+        }
+        .pixel-grid-wrap {
+            display: flex; justify-content: center; gap: 1rem; flex-wrap: wrap;
+            margin-top: 1rem;
+        }
+        .pixel-stage { text-align: center; cursor: pointer; }
+        .pixel-stage canvas {
+            border: 1px solid var(--border-color); border-radius: var(--radius-sm);
+            image-rendering: pixelated; transition: border-color 0.2s;
+        }
+        .pixel-stage:hover canvas { border-color: var(--accent-green); }
+        .pixel-stage.active canvas { border-color: var(--accent-green); box-shadow: 0 0 8px rgba(22,199,154,0.3); }
+        .pixel-stage .label {
+            font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;
+            font-family: var(--font-mono);
+        }
+
+        /* ========== Controls bar ========== */
+        .controls-bar {
+            display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;
+        }
+        .controls-bar .slider-group { flex: 1; min-width: 180px; }
+
+        /* ========== Responsive ========== */
+        @media (max-width: 900px) {
+            .reparam-panels, .snr-layout { grid-template-columns: 1fr; }
+        }
+        @media (max-width: 600px) {
+            .hero-banner h1 { font-size: 1.7rem; }
+        }
+    </style>
+</head>
+<body>
+    <!-- Nav injected by nav.js -->
+
+    <div class="page-container">
+        <!-- ======== Hero ======== -->
+        <div class="hero-banner">
+            <h1>前向过程 Forward Diffusion</h1>
+            <p class="subtitle">
+                理解扩散模型的第一步：将结构化数据逐步转化为纯高斯噪声。
+                本页涵盖马尔可夫链建模、重参数化技巧，以及信噪比分析。
+            </p>
+        </div>
+
+        <!-- ============================================================ -->
+        <!-- Section 1: 马尔可夫链概念 -->
+        <!-- ============================================================ -->
+        <div class="section" id="sec-markov">
+            <div class="section-title">
+                <div class="icon">1</div>
+                <h2>马尔可夫链概念</h2>
+                <span class="badge badge-blue">概念</span>
+            </div>
+            <p>前向过程构造了一条马尔可夫链 $x_0 \to x_1 \to \cdots \to x_T$。每一步独立地向数据添加少量高斯噪声，最终使其变为各向同性高斯分布。马尔可夫性意味着 $x_t$ 只依赖 $x_{t-1}$，不依赖更早的状态。</p>
+            <div class="formula-box">
+                $$q(x_t \mid x_{t-1}) = \mathcal{N}\!\left(x_t;\; \sqrt{1-\beta_t}\, x_{t-1},\; \beta_t \mathbf{I}\right)$$
+                <p class="text-sm text-muted mt-1">其中 $\beta_t \in (0,1)$ 是噪声调度系数，控制每一步添加多少噪声。典型取值范围为 $\beta_1=10^{-4}$ 到 $\beta_T=0.02$。</p>
+            </div>
+            <div class="card">
+                <div class="markov-canvas-wrap">
+                    <canvas id="markovCanvas"></canvas>
+                </div>
+                <div class="markov-info" id="markovInfo">
+                    <p class="text-sm text-muted">点击链条上的任意节点，查看该时间步的参数详情。</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- ============================================================ -->
+        <!-- Section 2: 逐步加噪演示 -->
+        <!-- ============================================================ -->
+        <div class="section" id="sec-noise">
+            <div class="section-title">
+                <div class="icon">2</div>
+                <h2>逐步加噪演示</h2>
+                <span class="badge badge-green">交互</span>
+            </div>
+            <p>下方展示一个二维瑞士卷（Swiss Roll）点云。随着时间步 $t$ 从 $0$ 增加到 $T=100$，点的结构逐渐被破坏，最终退化为各向同性的高斯分布。拖动滑块或点击播放观看动画。</p>
+            <div class="card noise-demo-wrap">
+                <div class="noise-canvas-container">
+                    <canvas id="noiseCanvas"></canvas>
+                    <span class="watermark">t = <span id="noiseTimestepLabel">0</span> / 100</span>
+                </div>
+                <div class="controls-bar">
+                    <button class="btn btn-primary btn-sm" id="noisePlayBtn" title="播放/暂停动画">&#9654; 播放</button>
+                    <button class="btn btn-sm" id="noiseResetBtn" title="重置到 t=0 并重新生成数据">&#8634; 重置</button>
+                    <div class="slider-group">
+                        <label>时间步 t</label>
+                        <input type="range" id="noiseSlider" min="0" max="100" value="0">
+                        <span class="slider-value" id="noiseSliderVal">0</span>
+                    </div>
+                </div>
+                <div class="noise-stats" id="noiseStats">
+                    <div>$\bar\alpha_t$: <span id="statAlphaBar">1.0000</span></div>
+                    <div>信号系数: <span id="statSignal">1.0000</span></div>
+                    <div>噪声系数: <span id="statNoise">0.0000</span></div>
+                    <div>点数: <span>500</span></div>
+                </div>
+                <div class="legend">
+                    <div class="legend-item"><span class="swatch" style="background:var(--accent-green)"></span>原始数据 (t=0)</div>
+                    <div class="legend-item"><span class="swatch" style="background:var(--accent-purple)"></span>中间过渡</div>
+                    <div class="legend-item"><span class="swatch" style="background:var(--accent-red)"></span>纯噪声 (t=T)</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ============================================================ -->
+        <!-- Section 3: 重参数化技巧 -->
+        <!-- ============================================================ -->
+        <div class="section" id="sec-reparam">
+            <div class="section-title">
+                <div class="icon">3</div>
+                <h2>重参数化技巧</h2>
+                <span class="badge badge-purple">数学</span>
+            </div>
+            <p>
+                核心洞察：由于每步噪声独立且均为高斯分布，我们可以利用高斯分布的叠加性质，将 $t$ 步迭代压缩为一步直接采样，无需逐步计算。
+            </p>
+            <div class="formula-box">
+                $$x_t = \sqrt{\bar{\alpha}_t}\, x_0 + \sqrt{1 - \bar{\alpha}_t}\, \varepsilon, \quad \varepsilon \sim \mathcal{N}(0, \mathbf{I})$$
+                <p class="text-sm text-muted mt-1">
+                    其中 $\alpha_t = 1 - \beta_t$，$\bar{\alpha}_t = \prod_{s=1}^{t}\alpha_s$ 是累积保留系数。这使得训练时可以对任意 $t$ 随机采样，大幅提高效率。
+                </p>
+            </div>
+            <div class="card">
+                <div class="controls-bar mb-2">
+                    <div class="slider-group">
+                        <label>选择时间步 t</label>
+                        <input type="range" id="reparamSlider" min="1" max="100" value="30">
+                        <span class="slider-value" id="reparamSliderVal">30</span>
+                    </div>
+                    <button class="btn btn-sm" id="reparamResampleBtn" title="重新采样噪声向量">&#127922; 重新采样</button>
+                </div>
+                <div class="reparam-panels">
+                    <div class="reparam-panel">
+                        <h4>&#8634; 逐步迭代法</h4>
+                        <p class="text-sm text-muted">$x_0 \xrightarrow{\beta_1} x_1 \xrightarrow{\beta_2} \cdots \xrightarrow{\beta_t} x_t$</p>
+                        <div class="reparam-canvas-wrap">
+                            <canvas id="reparamIterCanvas"></canvas>
+                        </div>
+                        <div class="stats-row" id="iterStats"></div>
+                    </div>
+                    <div class="reparam-panel">
+                        <h4>&#9889; 直接采样法</h4>
+                        <p class="text-sm text-muted">$x_t = \sqrt{\bar\alpha_t}\,x_0 + \sqrt{1-\bar\alpha_t}\,\varepsilon$</p>
+                        <div class="reparam-canvas-wrap">
+                            <canvas id="reparamDirectCanvas"></canvas>
+                        </div>
+                        <div class="stats-row" id="directStats"></div>
+                    </div>
+                </div>
+                <div class="match-indicator" id="reparamMatch">
+                    两种方法产生统计上等价的分布 -- 重参数化技巧成立！
+                </div>
+            </div>
+        </div>
+
+        <!-- ============================================================ -->
+        <!-- Section 4: 信噪比可视化 -->
+        <!-- ============================================================ -->
+        <div class="section" id="sec-snr">
+            <div class="section-title">
+                <div class="icon">4</div>
+                <h2>信噪比可视化</h2>
+                <span class="badge badge-orange">分析</span>
+            </div>
+            <p>
+                $x_t = \underbrace{\sqrt{\bar\alpha_t}\,x_0}_{\text{信号}} + \underbrace{\sqrt{1-\bar\alpha_t}\,\varepsilon}_{\text{噪声}}$。
+                左侧将信号与噪声成分分别可视化，右侧展示信噪比 (SNR) 随 $t$ 的变化曲线。
+            </p>
+            <div class="card">
+                <div class="controls-bar mb-2">
+                    <div class="slider-group">
+                        <label>时间步 t</label>
+                        <input type="range" id="snrSlider" min="0" max="100" value="20">
+                        <span class="slider-value" id="snrSliderVal">20</span>
+                    </div>
+                </div>
+                <div class="snr-layout">
+                    <div class="snr-left">
+                        <h4 style="margin-bottom:0.5rem">信号 / 噪声分解</h4>
+                        <div class="snr-component-row">
+                            <div class="snr-component">
+                                <canvas id="snrSignalCanvas" width="140" height="140"></canvas>
+                                <div class="label" style="color:var(--accent-blue)">
+                                    信号 &times; <span id="snrSignalCoeff">0.97</span>
+                                </div>
+                            </div>
+                            <div class="snr-component">
+                                <canvas id="snrNoiseCanvas" width="140" height="140"></canvas>
+                                <div class="label" style="color:var(--accent-red)">
+                                    噪声 &times; <span id="snrNoiseCoeff">0.26</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="snr-combined-wrap">
+                            <canvas id="snrCombinedCanvas" width="280" height="140"></canvas>
+                            <div class="label" style="color:var(--accent-green);font-family:var(--font-mono);font-size:0.8rem;margin-top:0.35rem">
+                                合成结果 x_t
+                            </div>
+                        </div>
+                        <div class="snr-value-display" id="snrValueDisplay">
+                            SNR = <span style="color:var(--accent-orange)">--</span>
+                        </div>
+                    </div>
+                    <div class="snr-right">
+                        <h4 style="margin-bottom:0.5rem">SNR 曲线 (对数坐标)</h4>
+                        <p class="text-sm text-muted" style="margin-bottom:0.5rem">
+                            $\mathrm{SNR}(t) = \frac{\bar\alpha_t}{1 - \bar\alpha_t}$
+                        </p>
+                        <div class="snr-chart-wrap">
+                            <canvas id="snrChartCanvas"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ============================================================ -->
+        <!-- Section 5: 像素级演示 -->
+        <!-- ============================================================ -->
+        <div class="section" id="sec-pixel">
+            <div class="section-title">
+                <div class="icon">5</div>
+                <h2>像素级演示</h2>
+                <span class="badge badge-green">交互</span>
+            </div>
+            <p>
+                一个 8&times;8 像素的简单图案（笑脸），逐帧展示前向扩散过程中每个像素值如何被噪声逐渐吞噬。
+                每个格子中的数字为当前像素值，颜色深浅直观反映数值大小。
+            </p>
+            <div class="card">
+                <div class="pixel-main-wrap">
+                    <canvas id="pixelMainCanvas" width="320" height="320"></canvas>
+                </div>
+                <div class="controls-bar mb-2">
+                    <button class="btn btn-sm" id="pixelPrevBtn" title="上一步">&#9664;</button>
+                    <button class="btn btn-primary btn-sm" id="pixelPlayBtn" title="播放/暂停">&#9654; 播放</button>
+                    <button class="btn btn-sm" id="pixelNextBtn" title="下一步">&#9654;</button>
+                    <button class="btn btn-sm" id="pixelResetBtn" title="重置">&#8634;</button>
+                    <div class="slider-group">
+                        <label>步骤</label>
+                        <input type="range" id="pixelSlider" min="0" max="50" value="0">
+                        <span class="slider-value" id="pixelSliderVal">0/50</span>
+                    </div>
+                </div>
+                <p class="text-sm text-muted text-center">点击下方缩略图可跳转到对应时间步</p>
+                <div class="pixel-grid-wrap" id="pixelThumbnails"></div>
+            </div>
+        </div>
+
+        <!-- ============================================================ -->
+        <!-- Summary / Key Takeaways -->
+        <!-- ============================================================ -->
+        <div class="section" id="sec-summary">
+            <div class="section-title">
+                <div class="icon">&#10003;</div>
+                <h2>本节要点回顾</h2>
+            </div>
+            <div class="info-box success">
+                <p><strong>马尔可夫性</strong>：前向过程是一条马尔可夫链，每步只依赖上一步状态，通过 $q(x_t|x_{t-1})$ 逐步加噪。</p>
+            </div>
+            <div class="info-box">
+                <p><strong>噪声调度</strong>：$\beta_t$ 从 $10^{-4}$ 线性增长到 $0.02$，控制每步添加的噪声量。累积效果由 $\bar\alpha_t$ 描述。</p>
+            </div>
+            <div class="info-box">
+                <p><strong>重参数化</strong>：利用高斯分布可加性，任意 $x_t$ 可直接从 $x_0$ 一步计算，无需逐步迭代。这是训练效率的关键。</p>
+            </div>
+            <div class="info-box warning">
+                <p><strong>信噪比衰减</strong>：随着 $t$ 增大，$\text{SNR} = \bar\alpha_t/(1-\bar\alpha_t)$ 单调递减。当 $t=T$ 时，信号几乎完全被噪声淹没。</p>
+            </div>
+            <div class="info-box">
+                <p><strong>下一步</strong>：理解了前向过程后，反向过程（去噪）将学习如何从 $x_T \sim \mathcal{N}(0,\mathbf{I})$ 逐步恢复出 $x_0$。</p>
+            </div>
+        </div>
+
+        <!-- Footer spacer -->
+        <div style="height:3rem"></div>
+    </div><!-- .page-container -->
+
+    <!-- Shared Scripts -->
+    <script src="../shared/scripts/nav.js"></script>
+    <script src="../shared/scripts/diffusion-utils.js"
+            onerror="console.warn('diffusion-utils.js not loaded; using built-in helpers')"></script>
+
+    <script>
+    /* ================================================================
+     *  Forward Diffusion Process — Full Interactive Module
+     *  Tech: Vanilla JS, Canvas 2D, KaTeX, GSAP
+     * ================================================================ */
+
+    // ── Math helpers ──────────────────────────────────────────────────
+
+    /** Box-Muller normal sample */
+    function randn() {
+        let u = 0, v = 0;
+        while (u === 0) u = Math.random();
+        while (v === 0) v = Math.random();
+        return Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
+    }
+
+    /** Linear beta schedule */
+    function betaLinear(t, T, bMin, bMax) {
+        return bMin + (bMax - bMin) * (t / T);
+    }
+
+    /** Seeded PRNG (Mulberry32) for reproducible noise inside drawings */
+    function mulberry32(seed) {
+        return function () {
+            seed |= 0;
+            seed = seed + 0x6D2B79F5 | 0;
+            let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+            t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+            return ((t ^ t >>> 14) >>> 0) / 4294967296;
+        };
+    }
+
+    function lerp(a, b, f) { return a + (b - a) * f; }
+
+    function lerpColor(c1, c2, f) {
+        return [
+            Math.round(lerp(c1[0], c2[0], f)),
+            Math.round(lerp(c1[1], c2[1], f)),
+            Math.round(lerp(c1[2], c2[2], f))
+        ];
+    }
+
+    /** Color ramp: green -> purple -> red based on t/T */
+    function colorForT(t, T) {
+        const f = t / T;
+        const green  = [22, 199, 154];
+        const purple = [179, 136, 255];
+        const red    = [255, 82, 82];
+        const c = f < 0.5
+            ? lerpColor(green, purple, f * 2)
+            : lerpColor(purple, red, (f - 0.5) * 2);
+        return `rgb(${c[0]},${c[1]},${c[2]})`;
+    }
+
+    // ── Precompute alpha_bar schedule ─────────────────────────────────
+    const T_MAX   = 100;
+    const BETA_MIN = 1e-4;
+    const BETA_MAX = 0.02;
+    const alphaBarCache = new Float64Array(T_MAX + 1);
+    const betaCache     = new Float64Array(T_MAX + 1);
+    (function precompute() {
+        alphaBarCache[0] = 1.0;
+        betaCache[0] = 0;
+        for (let t = 1; t <= T_MAX; t++) {
+            betaCache[t] = betaLinear(t, T_MAX, BETA_MIN, BETA_MAX);
+            alphaBarCache[t] = alphaBarCache[t - 1] * (1 - betaCache[t]);
+        }
+    })();
+
+    // ── Canvas hi-DPI helper ──────────────────────────────────────────
+    function fitCanvas(canvas) {
+        const par = canvas.parentElement;
+        const rect = par.getBoundingClientRect();
+        const w = Math.floor(rect.width);
+        const h = Math.floor(rect.height);
+        const dpr = window.devicePixelRatio || 1;
+        canvas.width  = w * dpr;
+        canvas.height = h * dpr;
+        canvas.style.width  = w + 'px';
+        canvas.style.height = h + 'px';
+        const ctx = canvas.getContext('2d');
+        ctx.scale(dpr, dpr);
+        return { ctx, w, h, dpr };
+    }
+
+    // ── Re-render KaTeX in a subtree ──────────────────────────────────
+    function rekaTex(el) {
+        if (window.renderMathInElement) {
+            renderMathInElement(el, {
+                delimiters: [
+                    { left: '$$', right: '$$', display: true },
+                    { left: '$',  right: '$',  display: false }
+                ]
+            });
+        }
+    }
+
+    /* ================================================================
+     *  Section 1 — 马尔可夫链
+     * ================================================================ */
+    (function markovSection() {
+        const canvas  = document.getElementById('markovCanvas');
+        const infoEl  = document.getElementById('markovInfo');
+        const displaySteps = [0, 5, 15, 30, 50, 70, 90, 100];
+        const nodeCount = displaySteps.length;
+        let nodes = [];
+        let selectedIdx = -1;
+
+        function draw() {
+            const { ctx, w, h } = fitCanvas(canvas);
+            ctx.clearRect(0, 0, w, h);
+
+            const padX = 50;
+            const cy = h * 0.48;
+            const spacing = (w - 2 * padX) / (nodeCount - 1);
+            const nodeR = Math.min(20, spacing * 0.26);
+
+            nodes = displaySteps.map((t, i) => ({
+                x: padX + i * spacing, y: cy, t, r: nodeR
+            }));
+
+            // Arrows between nodes
+            for (let i = 0; i < nodeCount - 1; i++) {
+                const a = nodes[i], b = nodes[i + 1];
+                const ax = a.x + nodeR + 4;
+                const bx = b.x - nodeR - 4;
+                // Line
+                ctx.strokeStyle = 'rgba(168,168,184,0.35)';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(ax, cy);
+                ctx.lineTo(bx, cy);
+                ctx.stroke();
+                // Arrowhead
+                ctx.fillStyle = 'rgba(168,168,184,0.35)';
+                ctx.beginPath();
+                ctx.moveTo(bx, cy);
+                ctx.lineTo(bx - 7, cy - 4);
+                ctx.lineTo(bx - 7, cy + 4);
+                ctx.closePath();
+                ctx.fill();
+                // Beta label above arrow
+                ctx.fillStyle = 'rgba(168,168,184,0.3)';
+                ctx.font = '10px "JetBrains Mono", monospace';
+                ctx.textAlign = 'center';
+                ctx.fillText(
+                    `\u03B2=${betaCache[displaySteps[i + 1]].toFixed(4)}`,
+                    (ax + bx) / 2, cy - 16
+                );
+            }
+
+            // Nodes
+            for (let i = 0; i < nodeCount; i++) {
+                const n = nodes[i];
+                const isSel = (i === selectedIdx);
+                const col = colorForT(n.t, T_MAX);
+
+                if (isSel) { ctx.shadowColor = col; ctx.shadowBlur = 16; }
+
+                // Circle bg
+                ctx.fillStyle = isSel ? col : 'rgba(22,33,62,0.92)';
+                ctx.strokeStyle = col;
+                ctx.lineWidth = isSel ? 3 : 2;
+                ctx.beginPath();
+                ctx.arc(n.x, n.y, nodeR, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.stroke();
+                ctx.shadowBlur = 0;
+
+                // Decorative noise dots inside circle
+                const noiseLevel = 1 - alphaBarCache[n.t];
+                const dotCount = Math.floor(noiseLevel * 18);
+                const rng = mulberry32(n.t * 137 + 42);
+                for (let d = 0; d < dotCount; d++) {
+                    const ang  = rng() * Math.PI * 2;
+                    const dist = rng() * (nodeR - 4);
+                    ctx.fillStyle = `rgba(255,255,255,${0.12 + rng() * 0.22})`;
+                    ctx.beginPath();
+                    ctx.arc(
+                        n.x + Math.cos(ang) * dist,
+                        n.y + Math.sin(ang) * dist,
+                        1.4, 0, Math.PI * 2
+                    );
+                    ctx.fill();
+                }
+
+                // Label inside node
+                ctx.fillStyle = isSel ? '#1a1a2e' : '#e8e8e8';
+                ctx.font = `bold ${Math.round(nodeR * 0.58)}px "JetBrains Mono", monospace`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                const label = n.t === 0 ? 'x\u2080'
+                            : n.t === T_MAX ? 'x_T'
+                            : 'x';
+                ctx.fillText(label, n.x, n.y);
+
+                // Timestep below node
+                ctx.fillStyle = '#a8a8b8';
+                ctx.font = '11px "JetBrains Mono", monospace';
+                ctx.fillText(`t=${n.t}`, n.x, n.y + nodeR + 15);
+            }
+        }
+
+        function updateInfo() {
+            if (selectedIdx < 0) {
+                infoEl.innerHTML = '<p class="text-sm text-muted">点击链条上的任意节点，查看该时间步的参数详情。</p>';
+                return;
+            }
+            const n = nodes[selectedIdx];
+            const ab = alphaBarCache[n.t];
+            const b  = betaCache[n.t];
+            infoEl.innerHTML = `
+                <div style="display:flex;gap:1.5rem;flex-wrap:wrap;align-items:center;">
+                    <span class="badge badge-blue" style="font-size:0.85rem">t = ${n.t}</span>
+                    <span class="text-sm">$\\beta_{${n.t}} = ${b.toFixed(6)}$</span>
+                    <span class="text-sm">$\\bar\\alpha_{${n.t}} = ${ab.toFixed(6)}$</span>
+                    <span class="text-sm">
+                        信号保留 <strong style="color:var(--accent-blue)">${(Math.sqrt(ab) * 100).toFixed(1)}%</strong>
+                        &nbsp;|&nbsp;
+                        噪声系数 <strong style="color:var(--accent-red)">${(Math.sqrt(1 - ab) * 100).toFixed(1)}%</strong>
+                    </span>
+                </div>`;
+            rekaTex(infoEl);
+        }
+
+        canvas.addEventListener('click', e => {
+            const rect = canvas.getBoundingClientRect();
+            const mx = e.clientX - rect.left;
+            const my = e.clientY - rect.top;
+            selectedIdx = -1;
+            for (let i = 0; i < nodes.length; i++) {
+                if (Math.hypot(mx - nodes[i].x, my - nodes[i].y) < nodes[i].r + 10) {
+                    selectedIdx = i;
+                    break;
+                }
+            }
+            draw();
+            updateInfo();
+        });
+
+        window.addEventListener('resize', draw);
+        requestAnimationFrame(draw);
+    })();
+
+    /* ================================================================
+     *  Section 2 — 逐步加噪演示 (Swiss Roll)
+     * ================================================================ */
+    (function noiseSection() {
+        const canvas       = document.getElementById('noiseCanvas');
+        const slider       = document.getElementById('noiseSlider');
+        const sliderVal    = document.getElementById('noiseSliderVal');
+        const tsLabel      = document.getElementById('noiseTimestepLabel');
+        const playBtn      = document.getElementById('noisePlayBtn');
+        const resetBtn     = document.getElementById('noiseResetBtn');
+        const statAB       = document.getElementById('statAlphaBar');
+        const statSig      = document.getElementById('statSignal');
+        const statNoi      = document.getElementById('statNoise');
+
+        const N = 500;
+        let base = [], eps = [];
+        let currentT = 0, playing = false;
+
+        function generateSwissRoll() {
+            base = []; eps = [];
+            for (let i = 0; i < N; i++) {
+                const tt = 1.5 * Math.PI * (1 + 2 * Math.random());
+                base.push([tt * Math.cos(tt) * 0.05, tt * Math.sin(tt) * 0.05]);
+                eps.push([randn(), randn()]);
+            }
+        }
+
+        function draw() {
+            const { ctx, w, h } = fitCanvas(canvas);
+            ctx.clearRect(0, 0, w, h);
+
+            const ab = alphaBarCache[currentT];
+            const sc = Math.sqrt(ab);
+            const nc = Math.sqrt(1 - ab);
+            const cx = w / 2, cy = h / 2;
+            const scale = Math.min(w, h) * 0.36;
+
+            // Faint grid
+            ctx.strokeStyle = 'rgba(42,42,74,0.25)';
+            ctx.lineWidth = 0.5;
+            const gridStep = scale * 0.25;
+            for (let gx = cx % gridStep; gx < w; gx += gridStep) {
+                ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, h); ctx.stroke();
+            }
+            for (let gy = cy % gridStep; gy < h; gy += gridStep) {
+                ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(w, gy); ctx.stroke();
+            }
+
+            // Axes
+            ctx.strokeStyle = 'rgba(168,168,184,0.15)';
+            ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.moveTo(0, cy); ctx.lineTo(w, cy); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(cx, 0); ctx.lineTo(cx, h); ctx.stroke();
+
+            // Points
+            const col = colorForT(currentT, T_MAX);
+            for (let i = 0; i < N; i++) {
+                const px = sc * base[i][0] + nc * eps[i][0] * 0.3;
+                const py = sc * base[i][1] + nc * eps[i][1] * 0.3;
+                ctx.fillStyle = col;
+                ctx.globalAlpha = 0.65;
+                ctx.beginPath();
+                ctx.arc(cx + px * scale, cy + py * scale, 2.8, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            ctx.globalAlpha = 1;
+
+            // Corner label
+            ctx.fillStyle = 'rgba(232,232,232,0.6)';
+            ctx.font = '12px "JetBrains Mono", monospace';
+            ctx.textAlign = 'left';
+            ctx.fillText(`\u0101_t = ${ab.toFixed(4)}`, 10, 18);
+        }
+
+        function setT(t) {
+            currentT = Math.max(0, Math.min(T_MAX, t));
+            slider.value = currentT;
+            sliderVal.textContent = currentT;
+            tsLabel.textContent = currentT;
+            const ab = alphaBarCache[currentT];
+            statAB.textContent  = ab.toFixed(4);
+            statSig.textContent = Math.sqrt(ab).toFixed(4);
+            statNoi.textContent = Math.sqrt(1 - ab).toFixed(4);
+            draw();
+        }
+
+        slider.addEventListener('input', () => setT(+slider.value));
+
+        playBtn.addEventListener('click', () => {
+            playing = !playing;
+            playBtn.innerHTML = playing ? '&#10074;&#10074; 暂停' : '&#9654; 播放';
+            if (playing) {
+                if (currentT >= T_MAX) setT(0);
+                requestAnimationFrame(tick);
+            }
+        });
+
+        resetBtn.addEventListener('click', () => {
+            playing = false;
+            playBtn.innerHTML = '&#9654; 播放';
+            generateSwissRoll();
+            setT(0);
+        });
+
+        let lastTick = 0;
+        function tick(ts) {
+            if (!playing) return;
+            if (ts - lastTick > 55) {
+                lastTick = ts;
+                if (currentT < T_MAX) setT(currentT + 1);
+                else { playing = false; playBtn.innerHTML = '&#9654; 播放'; return; }
+            }
+            requestAnimationFrame(tick);
+        }
+
+        generateSwissRoll();
+        window.addEventListener('resize', draw);
+        requestAnimationFrame(() => setT(0));
+    })();
+
+    /* ================================================================
+     *  Section 3 — 重参数化技巧
+     * ================================================================ */
+    (function reparamSection() {
+        const iterCanvas   = document.getElementById('reparamIterCanvas');
+        const directCanvas = document.getElementById('reparamDirectCanvas');
+        const slider       = document.getElementById('reparamSlider');
+        const sliderVal    = document.getElementById('reparamSliderVal');
+        const resampleBtn  = document.getElementById('reparamResampleBtn');
+        const matchEl      = document.getElementById('reparamMatch');
+        const iterStatsEl  = document.getElementById('iterStats');
+        const directStatsEl= document.getElementById('directStats');
+
+        const N = 300;
+        let basePoints = [], directEps = [], stepNoises = [];
+
+        function generateData() {
+            basePoints = []; directEps = []; stepNoises = [];
+            for (let i = 0; i < N; i++) {
+                const cl = Math.random() < 0.5 ? -1 : 1;
+                basePoints.push([cl * 0.3 + randn() * 0.08, cl * 0.3 + randn() * 0.08]);
+                directEps.push([randn(), randn()]);
+            }
+            for (let t = 0; t <= T_MAX; t++) {
+                const arr = [];
+                for (let i = 0; i < N; i++) arr.push([randn(), randn()]);
+                stepNoises.push(arr);
+            }
+        }
+
+        function iterative(tgt) {
+            const pts = basePoints.map(p => [...p]);
+            for (let t = 1; t <= tgt; t++) {
+                const b = betaCache[t];
+                const s1 = Math.sqrt(1 - b);
+                const s2 = Math.sqrt(b);
+                for (let i = 0; i < N; i++) {
+                    pts[i][0] = s1 * pts[i][0] + s2 * stepNoises[t][i][0];
+                    pts[i][1] = s1 * pts[i][1] + s2 * stepNoises[t][i][1];
+                }
+            }
+            return pts;
+        }
+
+        function direct(tgt) {
+            const ab = alphaBarCache[tgt];
+            const sc = Math.sqrt(ab), nc = Math.sqrt(1 - ab);
+            return basePoints.map((p, i) => [
+                sc * p[0] + nc * directEps[i][0],
+                sc * p[1] + nc * directEps[i][1]
+            ]);
+        }
+
+        function stats(pts) {
+            let mx = 0, my = 0;
+            for (const p of pts) { mx += p[0]; my += p[1]; }
+            mx /= N; my /= N;
+            let vx = 0, vy = 0;
+            for (const p of pts) { vx += (p[0] - mx) ** 2; vy += (p[1] - my) ** 2; }
+            vx /= N; vy /= N;
+            return { mx, my, vx, vy };
+        }
+
+        function drawCloud(canvas, pts) {
+            const { ctx, w, h } = fitCanvas(canvas);
+            ctx.clearRect(0, 0, w, h);
+            const cx = w / 2, cy = h / 2;
+            const sc = Math.min(w, h) * 0.6;
+            // Faint axes
+            ctx.strokeStyle = 'rgba(168,168,184,0.12)';
+            ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.moveTo(0, cy); ctx.lineTo(w, cy); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(cx, 0); ctx.lineTo(cx, h); ctx.stroke();
+            // Points
+            const t = +slider.value;
+            const col = colorForT(t, T_MAX);
+            for (const p of pts) {
+                ctx.fillStyle = col;
+                ctx.globalAlpha = 0.55;
+                ctx.beginPath();
+                ctx.arc(cx + p[0] * sc, cy + p[1] * sc, 2.2, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            ctx.globalAlpha = 1;
+        }
+
+        function update() {
+            const t = +slider.value;
+            sliderVal.textContent = t;
+
+            const iPts = iterative(t);
+            const dPts = direct(t);
+            drawCloud(iterCanvas, iPts);
+            drawCloud(directCanvas, dPts);
+
+            const is = stats(iPts), ds = stats(dPts);
+            iterStatsEl.innerHTML =
+                `<span>\u03BC=(${is.mx.toFixed(3)},${is.my.toFixed(3)})</span>` +
+                `<span>\u03C3\u00B2=(${is.vx.toFixed(4)},${is.vy.toFixed(4)})</span>`;
+            directStatsEl.innerHTML =
+                `<span>\u03BC=(${ds.mx.toFixed(3)},${ds.my.toFixed(3)})</span>` +
+                `<span>\u03C3\u00B2=(${ds.vx.toFixed(4)},${ds.vy.toFixed(4)})</span>`;
+
+            // Variance ratio comparison
+            const vrx = Math.min(is.vx, ds.vx) / Math.max(is.vx, ds.vx, 1e-10);
+            const vry = Math.min(is.vy, ds.vy) / Math.max(is.vy, ds.vy, 1e-10);
+            matchEl.textContent =
+                `方差比 X:${vrx.toFixed(3)}  Y:${vry.toFixed(3)} ` +
+                `-- 分布形状一致，重参数化技巧成立！`;
+        }
+
+        slider.addEventListener('input', update);
+        resampleBtn.addEventListener('click', () => { generateData(); update(); });
+
+        generateData();
+        window.addEventListener('resize', update);
+        requestAnimationFrame(update);
+    })();
+
+    /* ================================================================
+     *  Section 4 — 信噪比 (SNR) 可视化
+     * ================================================================ */
+    (function snrSection() {
+        const slider        = document.getElementById('snrSlider');
+        const sliderVal     = document.getElementById('snrSliderVal');
+        const sigCanvas     = document.getElementById('snrSignalCanvas');
+        const noiCanvas     = document.getElementById('snrNoiseCanvas');
+        const combCanvas    = document.getElementById('snrCombinedCanvas');
+        const chartCanvas   = document.getElementById('snrChartCanvas');
+        const sigCoeffEl    = document.getElementById('snrSignalCoeff');
+        const noiCoeffEl    = document.getElementById('snrNoiseCoeff');
+        const snrDispEl     = document.getElementById('snrValueDisplay');
+
+        const SZ = 8;
+
+        // Base image: diagonal gradient + checkerboard
+        const baseImg = [];
+        for (let r = 0; r < SZ; r++) {
+            const row = [];
+            for (let c = 0; c < SZ; c++) {
+                const grad = (r + c) / (2 * (SZ - 1));
+                const check = ((r + c) % 2 === 0) ? 0.18 : 0;
+                row.push(Math.min(1, grad + check));
+            }
+            baseImg.push(row);
+        }
+
+        // Fixed noise field
+        const noiseImg = [];
+        for (let r = 0; r < SZ; r++) {
+            const row = [];
+            for (let c = 0; c < SZ; c++) row.push(randn() * 0.5);
+            noiseImg.push(row);
+        }
+
+        function drawGrid(canvas, data, colorFn) {
+            const ctx = canvas.getContext('2d');
+            const w = canvas.width, h = canvas.height;
+            ctx.clearRect(0, 0, w, h);
+            const cw = w / SZ, ch = h / SZ;
+            for (let r = 0; r < SZ; r++) {
+                for (let c = 0; c < SZ; c++) {
+                    ctx.fillStyle = colorFn(data[r][c]);
+                    ctx.fillRect(c * cw, r * ch, cw, ch);
+                    ctx.strokeStyle = 'rgba(42,42,74,0.45)';
+                    ctx.lineWidth = 0.5;
+                    ctx.strokeRect(c * cw, r * ch, cw, ch);
+                }
+            }
+        }
+
+        function blueScale(v) {
+            const f = Math.max(0, Math.min(1, v));
+            return `rgb(${Math.round(20 + f * 59)},${Math.round(40 + f * 155)},${Math.round(80 + f * 167)})`;
+        }
+        function redScale(v) {
+            const f = Math.max(0, Math.min(1, (v + 1.5) / 3));
+            return `rgb(${Math.round(255 * f)},${Math.round(82 * f)},${Math.round(82 * f)})`;
+        }
+        function greenScale(v) {
+            const f = Math.max(0, Math.min(1, (v + 1) / 2));
+            return `rgb(${Math.round(22 + f * 200)},${Math.round(60 + f * 139)},${Math.round(80 + f * 74)})`;
+        }
+
+        function drawChart() {
+            const { ctx, w, h } = fitCanvas(chartCanvas);
+            ctx.clearRect(0, 0, w, h);
+
+            const pL = 52, pR = 16, pT = 20, pB = 36;
+            const pw = w - pL - pR, ph = h - pT - pB;
+
+            // Axes
+            ctx.strokeStyle = 'rgba(168,168,184,0.3)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(pL, pT); ctx.lineTo(pL, pT + ph);
+            ctx.lineTo(pL + pw, pT + ph);
+            ctx.stroke();
+
+            // SNR in log10
+            const snrLog = [];
+            for (let t = 0; t <= T_MAX; t++) {
+                const ab = alphaBarCache[t];
+                snrLog.push(Math.log10(Math.max(1e-4, ab / Math.max(1e-12, 1 - ab))));
+            }
+            const logMin = -4, logMax = Math.ceil(Math.max(...snrLog));
+
+            // Horizontal grid + Y labels
+            ctx.fillStyle = 'rgba(168,168,184,0.4)';
+            ctx.font = '10px "JetBrains Mono", monospace';
+            ctx.textAlign = 'right';
+            ctx.textBaseline = 'middle';
+            for (let lv = logMin; lv <= logMax; lv++) {
+                const y = pT + ph - (lv - logMin) / (logMax - logMin) * ph;
+                ctx.strokeStyle = 'rgba(168,168,184,0.08)';
+                ctx.beginPath(); ctx.moveTo(pL, y); ctx.lineTo(pL + pw, y); ctx.stroke();
+                ctx.fillStyle = 'rgba(168,168,184,0.4)';
+                ctx.fillText(`10^${lv}`, pL - 5, y);
+            }
+
+            // X labels
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'top';
+            for (let t = 0; t <= T_MAX; t += 20) {
+                const x = pL + (t / T_MAX) * pw;
+                ctx.fillStyle = 'rgba(168,168,184,0.4)';
+                ctx.fillText(String(t), x, pT + ph + 5);
+            }
+
+            // SNR curve (orange)
+            ctx.strokeStyle = '#ffab40';
+            ctx.lineWidth = 2.5;
+            ctx.beginPath();
+            for (let t = 0; t <= T_MAX; t++) {
+                const x = pL + (t / T_MAX) * pw;
+                const y = pT + ph - (snrLog[t] - logMin) / (logMax - logMin) * ph;
+                t === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+
+            // Alpha_bar curve (blue, dashed)
+            ctx.strokeStyle = 'rgba(79,195,247,0.55)';
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([5, 3]);
+            ctx.beginPath();
+            for (let t = 0; t <= T_MAX; t++) {
+                const x = pL + (t / T_MAX) * pw;
+                const y = pT + ph - alphaBarCache[t] * ph * 0.85;
+                t === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            // 1 - alpha_bar curve (red, dashed)
+            ctx.strokeStyle = 'rgba(255,82,82,0.45)';
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([3, 4]);
+            ctx.beginPath();
+            for (let t = 0; t <= T_MAX; t++) {
+                const x = pL + (t / T_MAX) * pw;
+                const y = pT + ph - (1 - alphaBarCache[t]) * ph * 0.85;
+                t === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            // Current t vertical line
+            const ct = +slider.value;
+            const cx = pL + (ct / T_MAX) * pw;
+            const cy = pT + ph - (snrLog[ct] - logMin) / (logMax - logMin) * ph;
+            ctx.strokeStyle = '#16c79a';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([3, 3]);
+            ctx.beginPath(); ctx.moveTo(cx, pT); ctx.lineTo(cx, pT + ph); ctx.stroke();
+            ctx.setLineDash([]);
+
+            // Dot on SNR curve
+            ctx.fillStyle = '#16c79a';
+            ctx.beginPath();
+            ctx.arc(cx, cy, 5, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = '#0d9e75';
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+
+            // Value label
+            const snrVal = alphaBarCache[ct] / Math.max(1e-12, 1 - alphaBarCache[ct]);
+            ctx.fillStyle = '#e8e8e8';
+            ctx.font = 'bold 11px "JetBrains Mono", monospace';
+            ctx.textAlign = ct > 70 ? 'right' : 'left';
+            ctx.fillText(`SNR=${snrVal.toFixed(2)}`, cx + (ct > 70 ? -8 : 8), cy - 8);
+
+            // Mini legend
+            ctx.font = '10px "Noto Sans SC", sans-serif';
+            ctx.textAlign = 'left';
+            ctx.fillStyle = '#ffab40';
+            ctx.fillRect(pL + 8, pT + 6, 14, 3);
+            ctx.fillText('SNR', pL + 26, pT + 11);
+            ctx.fillStyle = 'rgba(79,195,247,0.55)';
+            ctx.fillRect(pL + 8, pT + 18, 14, 2);
+            ctx.fillText('\u0101_t', pL + 26, pT + 23);
+            ctx.fillStyle = 'rgba(255,82,82,0.45)';
+            ctx.fillRect(pL + 8, pT + 30, 14, 2);
+            ctx.fillText('1-\u0101_t', pL + 26, pT + 35);
+        }
+
+        function update() {
+            const t = +slider.value;
+            sliderVal.textContent = t;
+            const ab = alphaBarCache[t];
+            const sc = Math.sqrt(ab), nc = Math.sqrt(1 - ab);
+            sigCoeffEl.textContent = sc.toFixed(3);
+            noiCoeffEl.textContent = nc.toFixed(3);
+
+            drawGrid(sigCanvas,  baseImg.map(row => row.map(v => sc * v)), blueScale);
+            drawGrid(noiCanvas,  noiseImg.map(row => row.map(v => nc * v)), redScale);
+
+            const combData = baseImg.map((row, r) =>
+                row.map((v, c) => sc * v + nc * noiseImg[r][c])
+            );
+            drawGrid(combCanvas, combData, greenScale);
+
+            const snrVal = ab / Math.max(1e-12, 1 - ab);
+            snrDispEl.innerHTML = `SNR = <span style="color:var(--accent-orange);font-weight:700">${snrVal.toFixed(3)}</span>` +
+                ` &nbsp;|&nbsp; <span style="color:var(--accent-blue)">\u221A\u0101_t = ${sc.toFixed(4)}</span>` +
+                ` &nbsp;|&nbsp; <span style="color:var(--accent-red)">\u221A(1-\u0101_t) = ${nc.toFixed(4)}</span>`;
+
+            drawChart();
+        }
+
+        slider.addEventListener('input', update);
+        window.addEventListener('resize', update);
+        requestAnimationFrame(update);
+    })();
+
+    /* ================================================================
+     *  Section 5 — 像素级演示
+     * ================================================================ */
+    (function pixelSection() {
+        const mainCanvas = document.getElementById('pixelMainCanvas');
+        const slider     = document.getElementById('pixelSlider');
+        const sliderVal  = document.getElementById('pixelSliderVal');
+        const playBtn    = document.getElementById('pixelPlayBtn');
+        const prevBtn    = document.getElementById('pixelPrevBtn');
+        const nextBtn    = document.getElementById('pixelNextBtn');
+        const resetBtn   = document.getElementById('pixelResetBtn');
+        const thumbWrap  = document.getElementById('pixelThumbnails');
+
+        const G = 8, MAX_STEP = 50, CELL = 40;
+        let step = 0, playing = false;
+
+        // Smiley face pattern
+        const pattern = [
+            [0.0, 0.0, 0.3, 0.5, 0.5, 0.3, 0.0, 0.0],
+            [0.0, 0.3, 0.8, 0.9, 0.9, 0.8, 0.3, 0.0],
+            [0.3, 0.8, 1.0, 0.2, 0.2, 1.0, 0.8, 0.3],
+            [0.5, 0.9, 0.2, 0.9, 0.9, 0.2, 0.9, 0.5],
+            [0.5, 0.9, 0.9, 0.9, 0.9, 0.9, 0.9, 0.5],
+            [0.3, 0.8, 0.2, 0.9, 0.9, 0.2, 0.8, 0.3],
+            [0.0, 0.3, 0.8, 0.2, 0.2, 0.8, 0.3, 0.0],
+            [0.0, 0.0, 0.3, 0.5, 0.5, 0.3, 0.0, 0.0],
+        ];
+
+        // Fixed per-pixel noise
+        const pxNoise = [];
+        for (let r = 0; r < G; r++) {
+            const row = [];
+            for (let c = 0; c < G; c++) row.push(randn());
+            pxNoise.push(row);
+        }
+
+        function getData(s) {
+            const t  = Math.round((s / MAX_STEP) * T_MAX);
+            const ab = alphaBarCache[t];
+            const sc = Math.sqrt(ab), nc = Math.sqrt(1 - ab);
+            return pattern.map((row, r) =>
+                row.map((v, c) => sc * v + nc * pxNoise[r][c] * 0.5)
+            );
+        }
+
+        function heatmap(v) {
+            const f = Math.max(0, Math.min(1, (v + 0.5) / 1.5));
+            let r, g, b;
+            if (f < 0.33) {
+                const p = f / 0.33;
+                r = 26 + p * 50;  g = 26 + p * 100; b = 46 + p * 150;
+            } else if (f < 0.66) {
+                const p = (f - 0.33) / 0.33;
+                r = 76 + p * 100; g = 126 + p * 73;  b = 196 - p * 100;
+            } else {
+                const p = (f - 0.66) / 0.34;
+                r = 176 + p * 79; g = 199 + p * 40;  b = 96 + p * 50;
+            }
+            return `rgb(${Math.round(r)},${Math.round(g)},${Math.round(b)})`;
+        }
+
+        function drawMain(s) {
+            const sz = G * CELL;
+            mainCanvas.width = sz;
+            mainCanvas.height = sz;
+            mainCanvas.style.width = sz + 'px';
+            mainCanvas.style.height = sz + 'px';
+
+            const ctx = mainCanvas.getContext('2d');
+            const data = getData(s);
+
+            for (let r = 0; r < G; r++) {
+                for (let c = 0; c < G; c++) {
+                    const v = data[r][c];
+                    const x = c * CELL, y = r * CELL;
+                    // Cell bg
+                    ctx.fillStyle = heatmap(v);
+                    ctx.fillRect(x, y, CELL, CELL);
+                    // Value text
+                    ctx.fillStyle = v > 0.5 ? 'rgba(0,0,0,0.55)' : 'rgba(255,255,255,0.55)';
+                    ctx.font = '10px "JetBrains Mono", monospace';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText(v.toFixed(2), x + CELL / 2, y + CELL / 2);
+                    // Grid
+                    ctx.strokeStyle = 'rgba(42,42,74,0.4)';
+                    ctx.lineWidth = 1;
+                    ctx.strokeRect(x, y, CELL, CELL);
+                }
+            }
+        }
+
+        function drawThumb(canvas, s) {
+            const ctx = canvas.getContext('2d');
+            const data = getData(s);
+            const cw = canvas.width / G, ch = canvas.height / G;
+            for (let r = 0; r < G; r++)
+                for (let c = 0; c < G; c++) {
+                    ctx.fillStyle = heatmap(data[r][c]);
+                    ctx.fillRect(c * cw, r * ch, cw, ch);
+                }
+        }
+
+        function buildThumbs() {
+            thumbWrap.innerHTML = '';
+            const keySteps = [0, 5, 10, 15, 20, 30, 40, 50];
+            keySteps.forEach(s => {
+                const div = document.createElement('div');
+                div.className = 'pixel-stage' + (s === step ? ' active' : '');
+                const cv = document.createElement('canvas');
+                cv.width = 56; cv.height = 56;
+                cv.style.width = '56px'; cv.style.height = '56px';
+                div.appendChild(cv);
+                const lb = document.createElement('div');
+                lb.className = 'label';
+                lb.textContent = `t=${Math.round((s / MAX_STEP) * T_MAX)}`;
+                div.appendChild(lb);
+                thumbWrap.appendChild(div);
+                drawThumb(cv, s);
+                div.addEventListener('click', () => setStep(s));
+            });
+        }
+
+        function setStep(s) {
+            step = Math.max(0, Math.min(MAX_STEP, s));
+            slider.value = step;
+            sliderVal.textContent = `${step}/${MAX_STEP}`;
+            drawMain(step);
+            // Update active thumb
+            const thumbs = thumbWrap.querySelectorAll('.pixel-stage');
+            const keySteps = [0, 5, 10, 15, 20, 30, 40, 50];
+            thumbs.forEach((el, i) => {
+                el.classList.toggle('active', keySteps[i] === step);
+            });
+        }
+
+        slider.addEventListener('input', () => setStep(+slider.value));
+        prevBtn.addEventListener('click', () => setStep(step - 1));
+        nextBtn.addEventListener('click', () => setStep(step + 1));
+        resetBtn.addEventListener('click', () => {
+            playing = false;
+            playBtn.innerHTML = '&#9654; 播放';
+            setStep(0);
+        });
+
+        let lastPT = 0;
+        function animPx(ts) {
+            if (!playing) return;
+            if (ts - lastPT > 110) {
+                lastPT = ts;
+                if (step < MAX_STEP) setStep(step + 1);
+                else { playing = false; playBtn.innerHTML = '&#9654; 播放'; return; }
+            }
+            requestAnimationFrame(animPx);
+        }
+        playBtn.addEventListener('click', () => {
+            playing = !playing;
+            playBtn.innerHTML = playing ? '&#10074;&#10074; 暂停' : '&#9654; 播放';
+            if (playing) {
+                if (step >= MAX_STEP) setStep(0);
+                lastPT = 0;
+                requestAnimationFrame(animPx);
+            }
+        });
+
+        buildThumbs();
+        setStep(0);
+    })();
+
+    /* ================================================================
+     *  Smooth-scroll for internal section navigation
+     * ================================================================ */
+    document.querySelectorAll('a[href^="#sec-"]').forEach(link => {
+        link.addEventListener('click', e => {
+            e.preventDefault();
+            const target = document.querySelector(link.getAttribute('href'));
+            if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
+    });
+
+    /* ================================================================
+     *  Keyboard shortcuts for convenience
+     * ================================================================ */
+    document.addEventListener('keydown', e => {
+        // Space toggles play for the noise demo if it's in view
+        if (e.code === 'Space' && document.activeElement === document.body) {
+            const noiseSection = document.getElementById('sec-noise');
+            const rect = noiseSection.getBoundingClientRect();
+            if (rect.top < window.innerHeight && rect.bottom > 0) {
+                e.preventDefault();
+                document.getElementById('noisePlayBtn').click();
+            }
+        }
+        // Left/Right arrows for pixel stepper if pixel section visible
+        if (e.code === 'ArrowLeft' || e.code === 'ArrowRight') {
+            const pixSec = document.getElementById('sec-pixel');
+            const rect = pixSec.getBoundingClientRect();
+            if (rect.top < window.innerHeight && rect.bottom > 0) {
+                if (document.activeElement.tagName !== 'INPUT') {
+                    e.preventDefault();
+                    if (e.code === 'ArrowLeft') document.getElementById('pixelPrevBtn').click();
+                    else document.getElementById('pixelNextBtn').click();
+                }
+            }
+        }
+    });
+
+    /* ================================================================
+     *  GSAP entrance animations
+     * ================================================================ */
+    document.addEventListener('DOMContentLoaded', () => {
+        if (typeof gsap === 'undefined') return;
+
+        gsap.from('.hero-banner', {
+            opacity: 0, y: -30, duration: 0.8, ease: 'power2.out'
+        });
+
+        const sections = document.querySelectorAll('.section');
+        sections.forEach((sec, i) => {
+            gsap.from(sec, {
+                opacity: 0, y: 40, duration: 0.65,
+                delay: 0.3 + i * 0.12,
+                ease: 'power2.out'
+            });
+        });
+
+        // Animate formula boxes with a subtle scale effect
+        gsap.from('.formula-box', {
+            opacity: 0, scale: 0.96, duration: 0.5,
+            stagger: 0.1, delay: 0.6, ease: 'power2.out'
+        });
+
+        // Info boxes in summary section
+        gsap.from('#sec-summary .info-box', {
+            opacity: 0, x: -20, duration: 0.5,
+            stagger: 0.08, delay: 0.4, ease: 'power2.out'
+        });
+    });
+    </script>
+</body>
+</html>

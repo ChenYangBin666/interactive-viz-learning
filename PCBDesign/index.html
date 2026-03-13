@@ -1,0 +1,761 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PCB 设计 — 交互式学习</title>
+    <link rel="stylesheet" href="shared/styles/common.css">
+    <link rel="stylesheet" href="shared/styles/components.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+SC:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+    <style>
+        body { overflow-x: hidden; }
+
+        /* ===== Hero ===== */
+        .hero {
+            text-align: center;
+            padding: calc(var(--header-height) + 2rem) 2rem 3rem;
+            position: relative;
+        }
+        .hero h1 {
+            font-size: 2.8rem;
+            margin-bottom: 0.5rem;
+            background: linear-gradient(135deg, #a1887f, #6d4c41, #d7ccc8);
+            background-size: 200% 200%;
+            animation: heroGradient 6s ease infinite;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        @keyframes heroGradient {
+            0%, 100% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+        }
+        .hero .subtitle {
+            font-size: 1.1rem;
+            color: var(--text-secondary);
+            max-width: 640px;
+            margin: 0 auto 2rem;
+        }
+        .hero .tags {
+            display: flex;
+            justify-content: center;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+
+        /* ===== Hero formula decoration ===== */
+        .hero-formula {
+            margin-top: 1.5rem;
+            font-family: var(--font-mono);
+            font-size: 0.95rem;
+            color: var(--text-muted);
+            letter-spacing: 0.02em;
+            opacity: 0.7;
+        }
+        .hero-formula .hl {
+            color: #a1887f;
+            font-weight: 600;
+        }
+
+        /* ===== Background Canvas ===== */
+        .bg-canvas {
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            pointer-events: none;
+            z-index: -1;
+            opacity: 0.12;
+        }
+
+        /* ===== PCB Trace Grid Overlay ===== */
+        .grid-overlay {
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            pointer-events: none;
+            z-index: -2;
+            opacity: 0.03;
+            background-image:
+                linear-gradient(rgba(109, 76, 65, 0.3) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(109, 76, 65, 0.3) 1px, transparent 1px);
+            background-size: 60px 60px;
+        }
+
+        /* ===== Metro Roadmap ===== */
+        .roadmap {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 2rem;
+            position: relative;
+        }
+        .roadmap-title {
+            text-align: center;
+            margin-bottom: 2.5rem;
+        }
+
+        .metro-line {
+            position: relative;
+            padding-left: 60px;
+        }
+
+        /* Vertical rail with PCB-themed gradient */
+        .metro-line::before {
+            content: '';
+            position: absolute;
+            left: 27px;
+            top: 0;
+            bottom: 0;
+            width: 4px;
+            background: linear-gradient(
+                to bottom,
+                #a1887f 0%,
+                #a1887f 22%,
+                #8d6e63 22%,
+                #8d6e63 44%,
+                #6d4c41 44%,
+                #6d4c41 67%,
+                #4e342e 67%,
+                #4e342e 100%
+            );
+            border-radius: 2px;
+        }
+
+        /* Solder-pad decoration along the rail */
+        .metro-line::after {
+            content: '';
+            position: absolute;
+            left: 22px;
+            top: 0;
+            bottom: 0;
+            width: 14px;
+            background: repeating-linear-gradient(
+                to bottom,
+                transparent 0px,
+                transparent 56px,
+                rgba(109, 76, 65, 0.08) 56px,
+                rgba(109, 76, 65, 0.08) 60px
+            );
+            pointer-events: none;
+        }
+
+        .station {
+            position: relative;
+            margin-bottom: 1rem;
+            cursor: pointer;
+            transition: transform 0.25s var(--anim-ease);
+        }
+        .station:hover {
+            transform: translateX(6px);
+        }
+
+        /* Station dot */
+        .station-dot {
+            position: absolute;
+            left: -41px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            border: 3px solid #a1887f;
+            background: var(--bg-primary);
+            z-index: 2;
+            transition: all 0.3s;
+        }
+        .station:hover .station-dot {
+            background: #a1887f;
+            box-shadow: 0 0 14px rgba(161, 136, 127, 0.5);
+        }
+
+        /* Phase colors for station dots */
+        .station[data-phase="schematic"] .station-dot { border-color: #a1887f; }
+        .station[data-phase="layout"] .station-dot { border-color: #8d6e63; }
+        .station[data-phase="signal"] .station-dot { border-color: #6d4c41; }
+        .station[data-phase="production"] .station-dot { border-color: #4e342e; }
+
+        .station:hover .station-dot.phase-schematic,
+        .station[data-phase="schematic"]:hover .station-dot { background: #a1887f; box-shadow: 0 0 14px rgba(161,136,127,0.5); }
+        .station:hover .station-dot.phase-layout,
+        .station[data-phase="layout"]:hover .station-dot { background: #8d6e63; box-shadow: 0 0 14px rgba(141,110,99,0.5); }
+        .station:hover .station-dot.phase-signal,
+        .station[data-phase="signal"]:hover .station-dot { background: #6d4c41; box-shadow: 0 0 14px rgba(109,76,65,0.5); }
+        .station:hover .station-dot.phase-production,
+        .station[data-phase="production"]:hover .station-dot { background: #4e342e; box-shadow: 0 0 14px rgba(78,52,46,0.5); }
+
+        .station-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1.2rem 1.5rem;
+            transition: all 0.3s;
+            position: relative;
+            overflow: hidden;
+        }
+        .station-card::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 2px;
+            background: linear-gradient(90deg, transparent, #a1887f, transparent);
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+        .station:hover .station-card::before {
+            opacity: 1;
+        }
+        .station:hover .station-card {
+            border-color: #a1887f;
+            box-shadow: 0 0 20px rgba(109, 76, 65, 0.2);
+        }
+
+        .station-header {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            margin-bottom: 0.4rem;
+        }
+        .station-icon {
+            font-size: 1.3rem;
+            min-width: 1.5rem;
+            text-align: center;
+        }
+        .station-num {
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            min-width: 2.5rem;
+        }
+        .station-name {
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+        .station-eng {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            font-weight: 400;
+            margin-left: 0.4rem;
+        }
+        .station-desc {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            margin: 0;
+            padding-left: 3.25rem;
+        }
+        .station-keywords {
+            display: flex;
+            gap: 0.4rem;
+            flex-wrap: wrap;
+            padding-left: 3.25rem;
+            margin-top: 0.5rem;
+        }
+        .station-keywords span {
+            font-size: 0.7rem;
+            padding: 0.1rem 0.4rem;
+            background: rgba(109, 76, 65, 0.1);
+            border-radius: 4px;
+            color: var(--text-muted);
+        }
+
+        /* Phase separators */
+        .phase-label {
+            position: relative;
+            padding: 0.5rem 0 0.5rem 0;
+            margin-bottom: 0.5rem;
+            margin-top: 1rem;
+        }
+        .phase-label span {
+            font-size: 0.75rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            padding: 0.2rem 0.8rem;
+            border-radius: 4px;
+        }
+        .phase-label.schematic span { color: #a1887f; background: rgba(161,136,127,0.1); }
+        .phase-label.layout span { color: #8d6e63; background: rgba(141,110,99,0.1); }
+        .phase-label.signal span { color: #bcaaa4; background: rgba(109,76,65,0.12); }
+        .phase-label.production span { color: #d7ccc8; background: rgba(78,52,46,0.15); }
+
+        /* ===== Protocol Warning ===== */
+        .protocol-warning {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.9);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+        }
+        .protocol-warning .inner {
+            background: var(--bg-secondary);
+            border: 1px solid var(--accent-orange);
+            border-radius: var(--radius-lg);
+            padding: 2rem 3rem;
+            max-width: 500px;
+            text-align: center;
+        }
+        .protocol-warning h2 { color: var(--accent-orange); }
+        .protocol-warning code {
+            display: block;
+            margin: 1rem 0;
+            padding: 0.75rem;
+            background: var(--bg-primary);
+            border-radius: var(--radius-sm);
+            font-size: 0.9rem;
+        }
+
+        /* ===== PCB Design Flow Diagram (decorative) ===== */
+        .arch-diagram {
+            max-width: 900px;
+            margin: 0 auto 2rem;
+            padding: 0 2rem;
+            display: flex;
+            justify-content: center;
+            gap: 0.3rem;
+            flex-wrap: wrap;
+        }
+        .arch-block {
+            padding: 0.35rem 0.7rem;
+            border-radius: var(--radius-sm);
+            font-size: 0.7rem;
+            font-weight: 600;
+            border: 1px solid;
+            opacity: 0.6;
+            transition: opacity 0.3s, transform 0.3s;
+        }
+        .arch-block:hover {
+            opacity: 1;
+            transform: translateY(-2px);
+        }
+        .arch-block.sch { color: #a1887f; border-color: rgba(161,136,127,0.3); background: rgba(161,136,127,0.06); }
+        .arch-block.lay { color: #8d6e63; border-color: rgba(141,110,99,0.3); background: rgba(141,110,99,0.06); }
+        .arch-block.sig { color: #bcaaa4; border-color: rgba(188,170,164,0.3); background: rgba(109,76,65,0.06); }
+        .arch-block.mfg { color: #d7ccc8; border-color: rgba(215,204,200,0.3); background: rgba(78,52,46,0.06); }
+        .arch-arrow {
+            display: flex;
+            align-items: center;
+            color: var(--text-muted);
+            font-size: 0.8rem;
+            opacity: 0.4;
+        }
+
+        /* ===== Footer ===== */
+        .footer {
+            text-align: center;
+            padding: 3rem 2rem;
+            color: var(--text-muted);
+            font-size: 0.8rem;
+        }
+        .footer a {
+            color: #a1887f;
+        }
+
+        /* ===== Responsive ===== */
+        @media (max-width: 768px) {
+            .hero h1 { font-size: 2rem; }
+            .hero .subtitle { font-size: 0.95rem; }
+            .roadmap { padding: 1rem; }
+            .metro-line { padding-left: 50px; }
+            .station-dot { left: -35px; width: 18px; height: 18px; }
+            .station-desc { padding-left: 2.5rem; }
+            .station-keywords { padding-left: 2.5rem; }
+            .arch-diagram { display: none; }
+            .hero-formula { font-size: 0.8rem; }
+        }
+    </style>
+</head>
+<body>
+
+<!-- Top Navigation -->
+<nav class="top-nav">
+    <div class="nav-left">
+        <a href="../index.html" class="nav-home" title="算法总览">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+                <path d="M3 12l9-8 9 8"/>
+                <path d="M5 10v9a1 1 0 001 1h4v-5h4v5h4a1 1 0 001-1v-9"/>
+            </svg>
+        </a>
+        <span class="nav-sep">&rsaquo;</span>
+        <a href="index.html" class="logo">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="3" width="18" height="18" rx="2"/>
+                <circle cx="8" cy="8" r="1.5" fill="currentColor"/>
+                <circle cx="16" cy="8" r="1.5" fill="currentColor"/>
+                <circle cx="8" cy="16" r="1.5" fill="currentColor"/>
+                <circle cx="16" cy="16" r="1.5" fill="currentColor"/>
+                <line x1="8" y1="9.5" x2="8" y2="14.5"/>
+                <line x1="16" y1="9.5" x2="16" y2="14.5"/>
+                <line x1="9.5" y1="8" x2="14.5" y2="8"/>
+            </svg>
+            PCB 设计学习
+        </a>
+    </div>
+</nav>
+
+<!-- Protocol Warning -->
+<div id="protocolWarning" class="protocol-warning hidden">
+    <div class="inner">
+        <h2>请使用本地服务器</h2>
+        <p>直接打开 HTML 文件（file:// 协议）会导致跨域问题。请使用以下方式启动：</p>
+        <code>python -m http.server 8080</code>
+        <p class="text-sm text-muted">或使用 VS Code 的 Live Server 插件</p>
+        <button class="btn btn-primary mt-2" onclick="document.getElementById('protocolWarning').classList.add('hidden')">
+            我知道了，继续浏览
+        </button>
+    </div>
+</div>
+
+<!-- Grid Overlay (PCB trace pattern) -->
+<div class="grid-overlay"></div>
+
+<!-- Background Canvas (floating PCB elements) -->
+<canvas id="bgCanvas" class="bg-canvas"></canvas>
+
+<!-- Hero Section -->
+<div class="hero">
+    <h1>PCB 设计 — 交互式学习</h1>
+    <p class="subtitle">
+        通过交互式可视化，系统掌握 PCB 设计的每一个核心环节 ——
+        从原理图绘制到元器件布局，从阻抗控制到 EMC 设计，再到制造工艺与自由实验
+    </p>
+    <div class="tags">
+        <span class="badge badge-blue">交互式</span>
+        <span class="badge badge-purple">可视化</span>
+        <span class="badge badge-green">逐步动画</span>
+        <span class="badge badge-orange">全中文</span>
+    </div>
+    <div class="hero-formula">
+        <span class="hl">Z</span><sub>0</sub> = (87 / <span class="hl">&radic;(&epsilon;<sub>r</sub>+1.41)</span>) &times; ln(5.98<span class="hl">h</span> / (0.8<span class="hl">w</span> + <span class="hl">t</span>))
+    </div>
+</div>
+
+<!-- PCB Design Flow Diagram (decorative mini-diagram) -->
+<div class="arch-diagram">
+    <div class="arch-block sch">原理图设计</div>
+    <div class="arch-arrow">&rarr;</div>
+    <div class="arch-block sch">网表生成</div>
+    <div class="arch-arrow">&rarr;</div>
+    <div class="arch-block lay">元件布局</div>
+    <div class="arch-arrow">&rarr;</div>
+    <div class="arch-block lay">PCB 布线</div>
+    <div class="arch-arrow">&rarr;</div>
+    <div class="arch-block sig">信号完整性</div>
+    <div class="arch-arrow">&rarr;</div>
+    <div class="arch-block sig">DRC 检查</div>
+    <div class="arch-arrow">&rarr;</div>
+    <div class="arch-block mfg">Gerber 输出</div>
+</div>
+
+<!-- Roadmap -->
+<div class="roadmap">
+    <div class="roadmap-title">
+        <h2>学习路线图</h2>
+        <p class="text-sm text-muted">按顺序学习效果最佳，也可跳转到感兴趣的模块</p>
+    </div>
+
+    <div class="metro-line">
+        <!-- Phase: 原理图与器件 -->
+        <div class="phase-label schematic"><span>原理图与器件</span></div>
+
+        <div class="station" data-id="01" data-phase="schematic" onclick="goTo('01-schematic-basics/')">
+            <div class="station-dot"></div>
+            <div class="station-card">
+                <div class="station-header">
+                    <span class="station-num">01</span>
+                    <span class="station-icon">&#x1F4D0;</span>
+                    <span class="station-name">原理图基础<span class="station-eng">Schematic Basics</span></span>
+                </div>
+                <p class="station-desc">电路符号、网表、原理图绘制规范</p>
+                <div class="station-keywords">
+                    <span>电路符号</span><span>网表</span><span>绘制规范</span><span>层次化设计</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="station" data-id="02" data-phase="schematic" onclick="goTo('02-component-library/')">
+            <div class="station-dot"></div>
+            <div class="station-card">
+                <div class="station-header">
+                    <span class="station-num">02</span>
+                    <span class="station-icon">&#x1F4E6;</span>
+                    <span class="station-name">元器件库<span class="station-eng">Component Library</span></span>
+                </div>
+                <p class="station-desc">封装、焊盘、符号映射、IPC 标准</p>
+                <div class="station-keywords">
+                    <span>封装</span><span>焊盘设计</span><span>符号映射</span><span>IPC 标准</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Phase: 布局与布线 -->
+        <div class="phase-label layout"><span>布局与布线</span></div>
+
+        <div class="station" data-id="03" data-phase="layout" onclick="goTo('03-layout-placement/')">
+            <div class="station-dot"></div>
+            <div class="station-card">
+                <div class="station-header">
+                    <span class="station-num">03</span>
+                    <span class="station-icon">&#x1F4CB;</span>
+                    <span class="station-name">布局摆放<span class="station-eng">Layout & Placement</span></span>
+                </div>
+                <p class="station-desc">元件分区、热设计、关键器件优先</p>
+                <div class="station-keywords">
+                    <span>元件分区</span><span>热设计</span><span>关键器件</span><span>模块化布局</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="station" data-id="04" data-phase="layout" onclick="goTo('04-routing/')">
+            <div class="station-dot"></div>
+            <div class="station-card">
+                <div class="station-header">
+                    <span class="station-num">04</span>
+                    <span class="station-icon">&#x1F500;</span>
+                    <span class="station-name">布线<span class="station-eng">Routing</span></span>
+                </div>
+                <p class="station-desc">走线规则、拓扑、蛇形等长、差分对</p>
+                <div class="station-keywords">
+                    <span>走线规则</span><span>拓扑结构</span><span>蛇形等长</span><span>差分对</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Phase: 信号与电源完整性 -->
+        <div class="phase-label signal"><span>信号与电源完整性</span></div>
+
+        <div class="station" data-id="05" data-phase="signal" onclick="goTo('05-impedance-control/')">
+            <div class="station-dot"></div>
+            <div class="station-card">
+                <div class="station-header">
+                    <span class="station-num">05</span>
+                    <span class="station-icon">&#x1F4C8;</span>
+                    <span class="station-name">阻抗控制<span class="station-eng">Impedance Control</span></span>
+                </div>
+                <p class="station-desc">微带线、带状线、阻抗匹配与仿真</p>
+                <div class="station-keywords">
+                    <span>微带线</span><span>带状线</span><span>阻抗匹配</span><span>叠层设计</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="station" data-id="06" data-phase="signal" onclick="goTo('06-power-ground/')">
+            <div class="station-dot"></div>
+            <div class="station-card">
+                <div class="station-header">
+                    <span class="station-num">06</span>
+                    <span class="station-icon">&#x26A1;</span>
+                    <span class="station-name">电源与地<span class="station-eng">Power & Ground</span></span>
+                </div>
+                <p class="station-desc">电源完整性、去耦、地平面设计</p>
+                <div class="station-keywords">
+                    <span>电源完整性</span><span>去耦电容</span><span>地平面</span><span>PDN 分析</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="station" data-id="07" data-phase="signal" onclick="goTo('07-emc-design/')">
+            <div class="station-dot"></div>
+            <div class="station-card">
+                <div class="station-header">
+                    <span class="station-num">07</span>
+                    <span class="station-icon">&#x1F6E1;</span>
+                    <span class="station-name">EMC 设计<span class="station-eng">EMC Design</span></span>
+                </div>
+                <p class="station-desc">电磁兼容、屏蔽、滤波、接地策略</p>
+                <div class="station-keywords">
+                    <span>电磁兼容</span><span>屏蔽设计</span><span>滤波</span><span>接地策略</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Phase: 制造与实验 -->
+        <div class="phase-label production"><span>制造与实验</span></div>
+
+        <div class="station" data-id="08" data-phase="production" onclick="goTo('08-manufacturing/')">
+            <div class="station-dot"></div>
+            <div class="station-card">
+                <div class="station-header">
+                    <span class="station-num">08</span>
+                    <span class="station-icon">&#x1F3ED;</span>
+                    <span class="station-name">制造工艺<span class="station-eng">Manufacturing</span></span>
+                </div>
+                <p class="station-desc">Gerber 输出、DFM 规则、焊接工艺</p>
+                <div class="station-keywords">
+                    <span>Gerber</span><span>DFM 规则</span><span>焊接工艺</span><span>钻孔文件</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="station" data-id="09" data-phase="production" onclick="goTo('09-playground/')">
+            <div class="station-dot"></div>
+            <div class="station-card">
+                <div class="station-header">
+                    <span class="station-num">09</span>
+                    <span class="station-icon">&#x1F3AE;</span>
+                    <span class="station-name">游乐场<span class="station-eng">Playground</span></span>
+                </div>
+                <p class="station-desc">自由实验 PCB 设计参数</p>
+                <div class="station-keywords">
+                    <span>参数调节</span><span>阻抗计算</span><span>叠层模拟</span><span>布线探索</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<!-- Footer -->
+<div class="footer">
+    <p>PCB 设计 — 交互式学习 | 纯前端实现 · 无服务器依赖 · 全中文</p>
+</div>
+
+<script>
+// ========== Protocol Check ==========
+if (window.location.protocol === 'file:') {
+    document.getElementById('protocolWarning').classList.remove('hidden');
+}
+
+// ========== Navigation ==========
+function goTo(path) {
+    window.location.href = path + 'index.html';
+}
+
+// ========== Background Animation: Floating PCB Elements ==========
+(function() {
+    var canvas = document.getElementById('bgCanvas');
+    var ctx = canvas.getContext('2d');
+    var w, h;
+    var particles = [];
+    var PARTICLE_COUNT = 30;
+    var CONNECT_DIST = 150;
+
+    // Labels for floating elements (PCB design terms)
+    var labels = [
+        'GND', 'VCC', 'R', 'C', 'L',
+        'Via', 'Pad', 'Trace', 'Net', 'DRC',
+        'BGA', 'QFP', 'SMD', 'PTH', 'FR-4',
+        'Cu', 'Z\u2080', '\u03B5r', 'mil', '\u03A9',
+        'Gerber', 'DFM', 'EMC', 'PDN', 'SI',
+        'ENIG', 'OSP', 'Layer', 'Drill', 'Mask'
+    ];
+
+    function resize() {
+        w = canvas.width = window.innerWidth;
+        h = canvas.height = window.innerHeight;
+    }
+    resize();
+    window.addEventListener('resize', resize);
+
+    // Initialize particles
+    for (var i = 0; i < PARTICLE_COUNT; i++) {
+        particles.push({
+            x: Math.random() * w,
+            y: Math.random() * h,
+            vx: (Math.random() - 0.5) * 0.35,
+            vy: (Math.random() - 0.5) * 0.35,
+            size: 24 + Math.random() * 18,
+            label: labels[i % labels.length],
+            hue: [20, 30, 15, 10][Math.floor(Math.random() * 4)],
+            phase: Math.random() * Math.PI * 2
+        });
+    }
+
+    function getColor(hue, alpha) {
+        if (hue === 20) return 'rgba(161, 136, 127, ' + alpha + ')';
+        if (hue === 30) return 'rgba(141, 110, 99, ' + alpha + ')';
+        if (hue === 15) return 'rgba(188, 170, 164, ' + alpha + ')';
+        return 'rgba(109, 76, 65, ' + alpha + ')';
+    }
+
+    function draw() {
+        ctx.clearRect(0, 0, w, h);
+        var time = Date.now() * 0.001;
+
+        // Draw connections between nearby particles (PCB traces)
+        for (var i = 0; i < particles.length; i++) {
+            for (var j = i + 1; j < particles.length; j++) {
+                var dx = particles[i].x - particles[j].x;
+                var dy = particles[i].y - particles[j].y;
+                var dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist < CONNECT_DIST) {
+                    var alpha = (1 - dist / CONNECT_DIST) * 0.35;
+                    ctx.save();
+                    ctx.strokeStyle = 'rgba(161, 136, 127, ' + alpha + ')';
+                    ctx.lineWidth = 1;
+
+                    // PCB-style right-angle traces
+                    ctx.beginPath();
+                    var midX = (particles[i].x + particles[j].x) / 2;
+                    ctx.moveTo(particles[i].x, particles[i].y);
+                    ctx.lineTo(midX, particles[i].y);
+                    ctx.lineTo(midX, particles[j].y);
+                    ctx.lineTo(particles[j].x, particles[j].y);
+                    ctx.stroke();
+                    ctx.restore();
+
+                    // Via dot at corner point
+                    if (dist < CONNECT_DIST * 0.5) {
+                        ctx.beginPath();
+                        ctx.arc(midX, particles[i].y, 2, 0, Math.PI * 2);
+                        ctx.fillStyle = 'rgba(141, 110, 99, ' + (alpha * 0.7) + ')';
+                        ctx.fill();
+                    }
+                }
+            }
+        }
+
+        // Draw particles
+        for (var k = 0; k < particles.length; k++) {
+            var p = particles[k];
+            var pulse = Math.sin(time * 1.2 + p.phase) * 0.15 + 0.85;
+            var s = p.size * pulse;
+
+            // Particle — pad-like square with rounded corners
+            ctx.globalAlpha = 0.5;
+            var padSize = s * 0.3;
+            ctx.beginPath();
+            ctx.rect(p.x - padSize, p.y - padSize, padSize * 2, padSize * 2);
+            ctx.fillStyle = 'rgba(22, 33, 62, 0.7)';
+            ctx.fill();
+            ctx.strokeStyle = getColor(p.hue, 0.4);
+            ctx.lineWidth = 1;
+            ctx.stroke();
+
+            // Drill hole in center
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, padSize * 0.3, 0, Math.PI * 2);
+            ctx.fillStyle = getColor(p.hue, 0.2);
+            ctx.fill();
+
+            // Label
+            ctx.globalAlpha = 0.65;
+            ctx.fillStyle = getColor(p.hue, 1);
+            ctx.font = Math.max(8, s * 0.22) + 'px JetBrains Mono, monospace';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(p.label, p.x, p.y + padSize + 8);
+
+            ctx.globalAlpha = 1;
+
+            // Update position
+            p.x += p.vx;
+            p.y += p.vy;
+            if (p.x < -50) p.x = w + 50;
+            if (p.x > w + 50) p.x = -50;
+            if (p.y < -50) p.y = h + 50;
+            if (p.y > h + 50) p.y = -50;
+        }
+
+        requestAnimationFrame(draw);
+    }
+    draw();
+})();
+</script>
+
+</body>
+</html>

@@ -1,0 +1,1349 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>U-Net 架构 — Diffusion 扩散模型</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+    <!-- KaTeX -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+    <!-- GSAP -->
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+    <!-- Local shared -->
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+    <style>
+        /* ========== Module-specific styles ========== */
+        .unet-canvas-wrap {
+            position: relative;
+            width: 100%;
+            border-radius: var(--radius-md);
+            overflow: hidden;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+        }
+        .unet-canvas-wrap canvas {
+            display: block;
+            width: 100%;
+            cursor: pointer;
+        }
+        .block-tooltip {
+            position: absolute;
+            padding: 0.6rem 0.9rem;
+            background: rgba(15, 52, 96, 0.95);
+            border: 1px solid var(--accent-green);
+            border-radius: var(--radius-sm);
+            color: var(--text-primary);
+            font-size: 0.8rem;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.2s;
+            z-index: 50;
+            max-width: 220px;
+            line-height: 1.5;
+            white-space: pre-line;
+        }
+        .block-tooltip.visible { opacity: 1; }
+        .block-tooltip .tt-title {
+            color: var(--accent-green);
+            font-weight: 700;
+            margin-bottom: 0.2rem;
+        }
+        .block-tooltip .tt-detail {
+            color: var(--text-secondary);
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+        }
+
+        /* Time embedding viz */
+        .time-embed-container {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+        .embed-bars {
+            display: flex;
+            gap: 1px;
+            height: 60px;
+            align-items: flex-end;
+            background: var(--bg-secondary);
+            border-radius: var(--radius-sm);
+            padding: 4px;
+            border: 1px solid var(--border-color);
+            overflow: hidden;
+        }
+        .embed-bars .bar {
+            flex: 1;
+            min-width: 2px;
+            border-radius: 1px 1px 0 0;
+            transition: height 0.3s, background 0.3s;
+        }
+
+        /* ResBlock detail */
+        .resblock-diagram {
+            display: flex;
+            flex-direction: column;
+            gap: 0;
+            align-items: center;
+        }
+        .resblock-op {
+            width: 220px;
+            padding: 0.5rem 0.7rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            text-align: center;
+            font-size: 0.82rem;
+            cursor: pointer;
+            transition: all 0.25s;
+            position: relative;
+        }
+        .resblock-op:hover, .resblock-op.active {
+            border-color: var(--accent-green);
+            background: rgba(22, 199, 154, 0.08);
+        }
+        .resblock-op .op-name {
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+        .resblock-op .op-shape {
+            font-family: var(--font-mono);
+            font-size: 0.72rem;
+            color: var(--accent-blue);
+            margin-top: 0.2rem;
+            display: none;
+        }
+        .resblock-op.active .op-shape { display: block; }
+        .resblock-arrow {
+            width: 2px;
+            height: 18px;
+            background: var(--border-color);
+            position: relative;
+        }
+        .resblock-arrow::after {
+            content: '';
+            position: absolute;
+            bottom: -3px;
+            left: 50%;
+            transform: translateX(-50%);
+            border-left: 4px solid transparent;
+            border-right: 4px solid transparent;
+            border-top: 5px solid var(--border-color);
+        }
+        .resblock-skip-line {
+            position: absolute;
+            right: -30px;
+            top: 0;
+            bottom: 0;
+            width: 30px;
+            pointer-events: none;
+        }
+
+        /* Attention heatmap */
+        .attn-grid {
+            display: grid;
+            gap: 1px;
+            background: var(--border-color);
+            border-radius: var(--radius-sm);
+            overflow: hidden;
+            border: 1px solid var(--border-color);
+        }
+        .attn-cell {
+            aspect-ratio: 1;
+            cursor: pointer;
+            transition: outline 0.15s;
+            position: relative;
+        }
+        .attn-cell.selected {
+            outline: 2px solid var(--accent-green);
+            outline-offset: -1px;
+            z-index: 2;
+        }
+        .attn-cell.query-pos {
+            outline: 2px solid var(--accent-orange);
+            outline-offset: -1px;
+            z-index: 3;
+        }
+
+        /* Data flow section */
+        .flow-canvas-wrap {
+            position: relative;
+            width: 100%;
+            border-radius: var(--radius-md);
+            overflow: hidden;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+        }
+        .flow-canvas-wrap canvas {
+            display: block;
+            width: 100%;
+        }
+        .flow-step-info {
+            margin-top: 0.75rem;
+            padding: 0.8rem 1rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            font-size: 0.85rem;
+            min-height: 60px;
+        }
+        .flow-step-info .step-name {
+            color: var(--accent-green);
+            font-weight: 700;
+        }
+        .flow-step-info .step-shape {
+            font-family: var(--font-mono);
+            color: var(--accent-blue);
+            font-size: 0.8rem;
+        }
+
+        .controls-row {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+            margin-bottom: 1rem;
+        }
+
+        .section-desc {
+            color: var(--text-secondary);
+            font-size: 0.92rem;
+            margin-bottom: 1.2rem;
+            line-height: 1.7;
+        }
+
+        .math-block {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            padding: 1rem;
+            margin: 0.75rem 0;
+            overflow-x: auto;
+        }
+
+        .cross-attn-label {
+            display: inline-block;
+            padding: 0.2rem 0.5rem;
+            border-radius: var(--radius-sm);
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+    </style>
+</head>
+<body>
+<div class="page-container">
+    <!-- ==================== Header ==================== -->
+    <header class="section" style="text-align:center; padding-top: 1.5rem;">
+        <h1>🏗 U-Net 架构</h1>
+        <p style="max-width:680px; margin:0 auto;">
+            扩散模型的核心网络结构 — U-Net 将编码器-解码器结构与跳跃连接结合，
+            在每一层注入时间步信息，使模型能够预测不同噪声级别下的噪声。
+        </p>
+    </header>
+
+    <!-- ==================== Section 1: U-Net 总览 ==================== -->
+    <section class="section" id="sec-overview">
+        <div class="section-title">
+            <div class="icon">1</div>
+            <h2>U-Net 总览</h2>
+        </div>
+        <p class="section-desc">
+            U-Net 呈经典的 U 形结构：左侧编码器逐步下采样提取特征，右侧解码器逐步上采样恢复分辨率，
+            中间通过跳跃连接（skip connections）传递细节信息。悬停查看每个模块的详细参数，点击
+            <strong>播放数据流</strong> 观察数据如何在网络中流动。
+        </p>
+        <div class="controls-row">
+            <button class="btn btn-primary" id="btn-unet-flow">▶ 播放数据流</button>
+            <button class="btn" id="btn-unet-reset">↺ 重置</button>
+            <span class="text-sm text-muted" id="unet-status">悬停模块查看详情</span>
+        </div>
+        <div class="unet-canvas-wrap" id="unet-wrap">
+            <canvas id="unet-canvas" width="900" height="520"></canvas>
+            <div class="block-tooltip" id="unet-tooltip"></div>
+        </div>
+        <div class="legend" style="margin-top:0.5rem;">
+            <div class="legend-item"><div class="swatch" style="background:#4fc3f7"></div>编码器（下采样）</div>
+            <div class="legend-item"><div class="swatch" style="background:#b388ff"></div>瓶颈层</div>
+            <div class="legend-item"><div class="swatch" style="background:#16c79a"></div>解码器（上采样）</div>
+            <div class="legend-item"><div class="swatch" style="background:#ffab40"></div>跳跃连接</div>
+            <div class="legend-item"><div class="swatch" style="background:#ff80ab"></div>时间嵌入</div>
+        </div>
+    </section>
+
+    <!-- ==================== Section 2: 时间嵌入 ==================== -->
+    <section class="section" id="sec-time-embed">
+        <div class="section-title">
+            <div class="icon">2</div>
+            <h2>时间嵌入</h2>
+        </div>
+        <div class="split-layout">
+            <div class="text-panel">
+                <p class="section-desc">
+                    扩散模型需要知道当前处于哪个时间步 \(t\)，以决定噪声的程度。
+                    时间步首先通过正弦位置编码转换为高维向量，再通过 MLP 映射后注入每个残差块。
+                </p>
+                <div class="math-block">
+                    $$PE_{(t, 2i)} = \sin\!\left(\frac{t}{10000^{2i/d}}\right), \quad PE_{(t, 2i+1)} = \cos\!\left(\frac{t}{10000^{2i/d}}\right)$$
+                </div>
+                <p class="text-sm text-muted">其中 \(d\) 为嵌入维度，\(i\) 为维度索引。</p>
+                <div class="info-box" style="margin-top:1rem;">
+                    <p>调整下方滑块改变时间步 \(t\)，观察嵌入向量的变化模式。低频分量变化缓慢，高频分量变化迅速。</p>
+                </div>
+                <div class="slider-group mt-2">
+                    <label>时间步 t =</label>
+                    <input type="range" id="slider-t" min="0" max="999" value="100" step="1">
+                    <span class="slider-value" id="val-t">100</span>
+                </div>
+                <div class="slider-group mt-1">
+                    <label>嵌入维度 d =</label>
+                    <input type="range" id="slider-d" min="16" max="128" value="64" step="16">
+                    <span class="slider-value" id="val-d">64</span>
+                </div>
+            </div>
+            <div class="viz-panel">
+                <h4 style="margin-bottom:0.5rem;">嵌入向量可视化</h4>
+                <div class="embed-bars" id="embed-bars"></div>
+                <p class="text-sm text-muted mt-1" id="embed-info">维度: 64 | sin/cos 交替排列</p>
+                <h4 style="margin-top:1.2rem; margin-bottom:0.5rem;">不同时间步对比</h4>
+                <canvas id="embed-heatmap" width="640" height="180" style="width:100%; border-radius:var(--radius-sm); border:1px solid var(--border-color);"></canvas>
+                <p class="text-sm text-muted mt-1">行 = 不同时间步 (0, 100, 250, 500, 750, 999)，列 = 嵌入维度</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- ==================== Section 3: 残差块 ==================== -->
+    <section class="section" id="sec-resblock">
+        <div class="section-title">
+            <div class="icon">3</div>
+            <h2>残差块 (ResBlock)</h2>
+        </div>
+        <div class="split-layout">
+            <div class="text-panel">
+                <p class="section-desc">
+                    U-Net 中每个阶段由若干残差块组成。每个 ResBlock 包含两次 "归一化→激活→卷积" 操作，
+                    并在中间注入时间嵌入。最终通过残差连接将输入与输出相加。
+                </p>
+                <div class="info-box">
+                    <p>点击右侧图中的每个操作，查看张量形状的变化过程。</p>
+                </div>
+                <div class="slider-group mt-2">
+                    <label>输入通道 C =</label>
+                    <input type="range" id="slider-cin" min="64" max="512" value="256" step="64">
+                    <span class="slider-value" id="val-cin">256</span>
+                </div>
+                <div class="slider-group mt-1">
+                    <label>空间尺寸 H =</label>
+                    <input type="range" id="slider-h" min="8" max="64" value="32" step="8">
+                    <span class="slider-value" id="val-h">32</span>
+                </div>
+                <div class="controls-row mt-2">
+                    <button class="btn btn-primary btn-sm" id="btn-resblock-anim">▶ 播放动画</button>
+                    <button class="btn btn-sm" id="btn-resblock-reset">↺ 重置</button>
+                </div>
+            </div>
+            <div class="viz-panel" style="display:flex; justify-content:center;">
+                <div class="resblock-diagram" id="resblock-diagram"></div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ==================== Section 4: 注意力机制 ==================== -->
+    <section class="section" id="sec-attention">
+        <div class="section-title">
+            <div class="icon">4</div>
+            <h2>注意力机制</h2>
+        </div>
+        <div class="split-layout">
+            <div class="text-panel">
+                <p class="section-desc">
+                    在 U-Net 的低分辨率层（如 16×16、8×8），插入自注意力层让每个位置
+                    能够关注到全局信息。特征图被展平为序列，计算 Q, K, V 得到注意力权重。
+                </p>
+                <div class="math-block">
+                    $$\text{Attention}(Q, K, V) = \text{softmax}\!\left(\frac{QK^T}{\sqrt{d_k}}\right)V$$
+                </div>
+                <p class="section-desc">
+                    对于条件生成（如文本到图像），还会加入<span class="cross-attn-label badge-purple">交叉注意力</span>：
+                    Q 来自图像特征，K 和 V 来自文本编码（如 CLIP）。
+                </p>
+                <div class="info-box">
+                    <p>点击热力图中的位置，观察该位置对其他位置的注意力权重分布。</p>
+                </div>
+                <div class="controls-row mt-2">
+                    <span class="text-sm">网格大小:</span>
+                    <div class="btn-group">
+                        <button class="btn btn-sm attn-size-btn active" data-size="8">8×8</button>
+                        <button class="btn btn-sm attn-size-btn" data-size="12">12×12</button>
+                    </div>
+                    <span class="text-sm" style="margin-left:0.5rem;">模式:</span>
+                    <div class="btn-group">
+                        <button class="btn btn-sm attn-mode-btn active" data-mode="self">自注意力</button>
+                        <button class="btn btn-sm attn-mode-btn" data-mode="cross">交叉注意力</button>
+                    </div>
+                </div>
+            </div>
+            <div class="viz-panel">
+                <h4 style="margin-bottom:0.5rem;" id="attn-title">自注意力权重热力图</h4>
+                <div class="attn-grid" id="attn-grid" style="max-width:420px;"></div>
+                <p class="text-sm text-muted mt-1" id="attn-info">点击任意位置查看注意力分布</p>
+                <div class="info-box success mt-2" id="attn-detail" style="display:none;">
+                    <p id="attn-detail-text"></p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ==================== Section 5: 完整数据流 ==================== -->
+    <section class="section" id="sec-dataflow">
+        <div class="section-title">
+            <div class="icon">5</div>
+            <h2>完整数据流</h2>
+        </div>
+        <p class="section-desc">
+            端到端动画：带噪声的输入图像 \(x_t\) 与时间步 \(t\) 一起进入 U-Net，
+            依次通过编码器（分辨率缩小）→ 瓶颈层 → 解码器（分辨率恢复），
+            最终输出预测的噪声 \(\epsilon_\theta(x_t, t)\)。使用按钮逐步观察每一层的变化。
+        </p>
+        <div class="controls-row">
+            <button class="btn" id="btn-flow-prev">◀ 上一步</button>
+            <button class="btn btn-primary" id="btn-flow-play">▶ 自动播放</button>
+            <button class="btn" id="btn-flow-next">下一步 ▶</button>
+            <button class="btn" id="btn-flow-reset">↺ 重置</button>
+            <span class="text-sm text-muted" id="flow-step-label">步骤 0 / 13</span>
+        </div>
+        <div class="flow-canvas-wrap">
+            <canvas id="flow-canvas" width="1000" height="400"></canvas>
+        </div>
+        <div class="flow-step-info" id="flow-info">
+            <span class="step-name">准备就绪</span> — 点击 "自动播放" 或 "下一步" 开始观察数据在 U-Net 中的流动过程。
+        </div>
+    </section>
+</div>
+
+<!-- Nav injection -->
+<script src="../shared/scripts/nav.js"></script>
+<script>
+// ============================================================
+// Utilities
+// ============================================================
+const lerp = (a, b, t) => a + (b - a) * t;
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+
+// roundRect polyfill for older browsers
+if (!CanvasRenderingContext2D.prototype.roundRect) {
+    CanvasRenderingContext2D.prototype.roundRect = function(x, y, w, h, r) {
+        if (typeof r === 'number') r = [r, r, r, r];
+        const [tl, tr, br, bl] = r;
+        this.moveTo(x + tl, y);
+        this.arcTo(x + w, y, x + w, y + h, tr);
+        this.arcTo(x + w, y + h, x, y + h, br);
+        this.arcTo(x, y + h, x, y, bl);
+        this.arcTo(x, y, x + w, y, tl);
+    };
+}
+
+function hslToRgb(h, s, l) {
+    s /= 100; l /= 100;
+    const k = n => (n + h / 30) % 12;
+    const a = s * Math.min(l, 1 - l);
+    const f = n => l - a * Math.max(-1, Math.min(k(n) - 3, 9 - k(n), 1));
+    return [Math.round(f(0)*255), Math.round(f(8)*255), Math.round(f(4)*255)];
+}
+
+function valToColor(v) {
+    // v in [-1, 1] -> blue to red
+    const t = (v + 1) / 2;
+    const h = lerp(240, 0, t);
+    const [r, g, b] = hslToRgb(h, 80, 45 + t * 15);
+    return `rgb(${r},${g},${b})`;
+}
+
+// ============================================================
+// Section 1: U-Net Overview
+// ============================================================
+(() => {
+    const canvas = document.getElementById('unet-canvas');
+    const ctx = canvas.getContext('2d');
+    const wrap = document.getElementById('unet-wrap');
+    const tooltip = document.getElementById('unet-tooltip');
+    const statusEl = document.getElementById('unet-status');
+
+    const W = canvas.width, H = canvas.height;
+    const blocks = [];
+    const skipLines = [];
+
+    // Define U-Net architecture blocks
+    const encoderLevels = [
+        { ch: 64,  res: '64×64', label: 'Conv + ResBlock' },
+        { ch: 128, res: '32×32', label: '下采样 + ResBlock' },
+        { ch: 256, res: '16×16', label: '下采样 + ResBlock + Attn' },
+        { ch: 512, res: '8×8',   label: '下采样 + ResBlock + Attn' },
+    ];
+    const bottleneck = { ch: 512, res: '8×8', label: '瓶颈 ResBlock + Attn' };
+    const decoderLevels = [
+        { ch: 512, res: '8×8',   label: 'ResBlock + Attn + 上采样' },
+        { ch: 256, res: '16×16', label: 'ResBlock + Attn + 上采样' },
+        { ch: 128, res: '32×32', label: 'ResBlock + 上采样' },
+        { ch: 64,  res: '64×64', label: 'ResBlock + Conv' },
+    ];
+
+    const bx = 60, by = 40;
+    const bw = 90, gap = 16;
+
+    // Build block positions (U shape)
+    function buildBlocks() {
+        blocks.length = 0;
+        skipLines.length = 0;
+        const colW = bw + gap;
+
+        // Encoder (left, going down)
+        encoderLevels.forEach((lv, i) => {
+            const bh = 50 + i * 18;
+            const x = bx;
+            const y = by + i * (70 + i * 6);
+            blocks.push({
+                x, y, w: bw, h: bh,
+                type: 'encoder', level: i,
+                ch: lv.ch, res: lv.res, label: lv.label,
+                color: '#4fc3f7'
+            });
+        });
+
+        // Bottleneck (bottom center)
+        const bnX = bx + colW * 2;
+        const bnY = H - 100;
+        blocks.push({
+            x: bnX, y: bnY, w: bw + 20, h: 55,
+            type: 'bottleneck', level: -1,
+            ch: bottleneck.ch, res: bottleneck.res, label: bottleneck.label,
+            color: '#b388ff'
+        });
+
+        // Decoder (right, going up)
+        decoderLevels.forEach((lv, i) => {
+            const ri = decoderLevels.length - 1 - i;
+            const bh = 50 + ri * 18;
+            const x = W - bx - bw;
+            const y = by + ri * (70 + ri * 6);
+            blocks.push({
+                x, y, w: bw, h: bh,
+                type: 'decoder', level: i,
+                ch: lv.ch, res: lv.res, label: lv.label,
+                color: '#16c79a'
+            });
+        });
+
+        // Time embedding block (center top)
+        blocks.push({
+            x: W / 2 - 50, y: 15, w: 100, h: 36,
+            type: 'time', level: -1,
+            ch: 256, res: '—', label: '时间嵌入 MLP',
+            color: '#ff80ab'
+        });
+
+        // Input block
+        blocks.push({
+            x: bx - 10, y: by - 30, w: 70, h: 24,
+            type: 'io', level: -1,
+            ch: 3, res: '64×64', label: '输入 x_t',
+            color: '#ffd740'
+        });
+
+        // Output block
+        blocks.push({
+            x: W - bx - bw + 10, y: by - 30, w: 70, h: 24,
+            type: 'io', level: -1,
+            ch: 3, res: '64×64', label: '输出 ε_θ',
+            color: '#ffd740'
+        });
+
+        // Build skip connections
+        for (let i = 0; i < encoderLevels.length; i++) {
+            const enc = blocks[i];
+            const decIdx = blocks.findIndex(b => b.type === 'decoder' && b.level === (encoderLevels.length - 1 - i));
+            if (decIdx >= 0) {
+                const dec = blocks[decIdx];
+                skipLines.push({ from: enc, to: dec, level: i });
+            }
+        }
+    }
+
+    let flowAnim = null;
+    let flowProgress = -1;
+    let hoveredBlock = null;
+
+    function drawBlock(b, highlight, flowHit) {
+        ctx.save();
+        const alpha = flowHit ? 1 : (flowProgress >= 0 ? 0.35 : 1);
+        ctx.globalAlpha = alpha;
+
+        // Shadow
+        if (highlight || flowHit) {
+            ctx.shadowColor = b.color;
+            ctx.shadowBlur = 14;
+        }
+
+        ctx.fillStyle = highlight || flowHit
+            ? b.color + 'cc'
+            : b.color + '33';
+        ctx.strokeStyle = b.color;
+        ctx.lineWidth = highlight || flowHit ? 2.5 : 1.2;
+
+        const r = 6;
+        ctx.beginPath();
+        ctx.roundRect(b.x, b.y, b.w, b.h, r);
+        ctx.fill();
+        ctx.stroke();
+
+        // Label
+        ctx.fillStyle = '#e8e8e8';
+        ctx.font = '600 12px "Noto Sans SC", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        const txt = b.type === 'io' ? b.label : `${b.ch}ch`;
+        ctx.fillText(txt, b.x + b.w / 2, b.y + b.h / 2 - (b.type !== 'io' ? 6 : 0));
+        if (b.type !== 'io' && b.type !== 'time') {
+            ctx.font = '11px "JetBrains Mono", monospace';
+            ctx.fillStyle = '#a8a8b8';
+            ctx.fillText(b.res, b.x + b.w / 2, b.y + b.h / 2 + 10);
+        }
+
+        ctx.restore();
+    }
+
+    function drawArrow(x1, y1, x2, y2, color, alpha) {
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+        // Arrowhead
+        const angle = Math.atan2(y2 - y1, x2 - x1);
+        const sz = 6;
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.moveTo(x2, y2);
+        ctx.lineTo(x2 - sz * Math.cos(angle - 0.4), y2 - sz * Math.sin(angle - 0.4));
+        ctx.lineTo(x2 - sz * Math.cos(angle + 0.4), y2 - sz * Math.sin(angle + 0.4));
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+    }
+
+    function draw() {
+        ctx.clearRect(0, 0, W, H);
+
+        // Draw skip connections
+        const baseAlpha = flowProgress >= 0 ? 0.15 : 0.4;
+        skipLines.forEach((s, i) => {
+            const fx = s.from.x + s.from.w;
+            const fy = s.from.y + s.from.h / 2;
+            const tx = s.to.x;
+            const ty = s.to.y + s.to.h / 2;
+            const midY = Math.min(fy, ty) - 20 - i * 12;
+
+            ctx.save();
+            ctx.globalAlpha = baseAlpha;
+            ctx.strokeStyle = '#ffab40';
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([5, 4]);
+            ctx.beginPath();
+            ctx.moveTo(fx, fy);
+            ctx.lineTo(fx + 15 + i * 8, fy);
+            ctx.lineTo(tx - 15 - i * 8, ty);
+            ctx.lineTo(tx, ty);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.restore();
+        });
+
+        // Draw arrows between encoder blocks
+        for (let i = 0; i < encoderLevels.length - 1; i++) {
+            const a = blocks[i], b = blocks[i + 1];
+            drawArrow(a.x + a.w / 2, a.y + a.h, b.x + b.w / 2, b.y, '#4fc3f7', baseAlpha + 0.2);
+        }
+        // Encoder -> bottleneck
+        const lastEnc = blocks[encoderLevels.length - 1];
+        const bn = blocks[encoderLevels.length];
+        drawArrow(lastEnc.x + lastEnc.w / 2, lastEnc.y + lastEnc.h, bn.x + bn.w / 2, bn.y, '#b388ff', baseAlpha + 0.2);
+        // Bottleneck -> first decoder
+        const firstDec = blocks.find(b => b.type === 'decoder' && b.level === 0);
+        drawArrow(bn.x + bn.w, bn.y + bn.h / 2, firstDec.x, firstDec.y + firstDec.h / 2, '#16c79a', baseAlpha + 0.2);
+        // Decoder arrows
+        const decoders = blocks.filter(b => b.type === 'decoder').sort((a, b) => a.level - b.level);
+        for (let i = 0; i < decoders.length - 1; i++) {
+            const a = decoders[i], b = decoders[i + 1];
+            drawArrow(a.x + a.w / 2, a.y, b.x + b.w / 2, b.y + b.h, '#16c79a', baseAlpha + 0.2);
+        }
+
+        // Time embedding arrows to encoder & decoder blocks
+        const timeBlock = blocks.find(b => b.type === 'time');
+        if (timeBlock) {
+            ctx.save();
+            ctx.globalAlpha = baseAlpha;
+            ctx.strokeStyle = '#ff80ab';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([3, 3]);
+            blocks.filter(b => b.type === 'encoder' || b.type === 'decoder' || b.type === 'bottleneck').forEach(b => {
+                ctx.beginPath();
+                ctx.moveTo(timeBlock.x + timeBlock.w / 2, timeBlock.y + timeBlock.h);
+                ctx.lineTo(b.x + b.w / 2, b.y);
+                ctx.stroke();
+            });
+            ctx.setLineDash([]);
+            ctx.restore();
+        }
+
+        // Draw blocks
+        const flowOrder = buildFlowOrder();
+        blocks.forEach(b => {
+            const isHovered = b === hoveredBlock;
+            let isFlowHit = false;
+            if (flowProgress >= 0 && flowProgress < flowOrder.length) {
+                const cur = flowOrder[flowProgress];
+                isFlowHit = (b === cur);
+            }
+            drawBlock(b, isHovered, isFlowHit);
+        });
+    }
+
+    function buildFlowOrder() {
+        const order = [];
+        // input
+        const ioIn = blocks.find(b => b.type === 'io' && b.label.includes('输入'));
+        if (ioIn) order.push(ioIn);
+        // time
+        const tBlock = blocks.find(b => b.type === 'time');
+        if (tBlock) order.push(tBlock);
+        // encoder
+        for (let i = 0; i < encoderLevels.length; i++) order.push(blocks[i]);
+        // bottleneck
+        order.push(blocks[encoderLevels.length]);
+        // decoder
+        const decs = blocks.filter(b => b.type === 'decoder').sort((a, b) => a.level - b.level);
+        decs.forEach(d => order.push(d));
+        // output
+        const ioOut = blocks.find(b => b.type === 'io' && b.label.includes('输出'));
+        if (ioOut) order.push(ioOut);
+        return order;
+    }
+
+    function hitTest(mx, my) {
+        const rect = canvas.getBoundingClientRect();
+        const sx = W / rect.width;
+        const x = (mx - rect.left) * sx;
+        const y = (my - rect.top) * sx;
+        for (let i = blocks.length - 1; i >= 0; i--) {
+            const b = blocks[i];
+            if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) return b;
+        }
+        return null;
+    }
+
+    canvas.addEventListener('mousemove', e => {
+        const b = hitTest(e.clientX, e.clientY);
+        hoveredBlock = b;
+        if (b) {
+            const rect = wrap.getBoundingClientRect();
+            tooltip.innerHTML = `<div class="tt-title">${b.label}</div><div class="tt-detail">通道: ${b.ch}\n分辨率: ${b.res}</div>`;
+            tooltip.classList.add('visible');
+            const tx = e.clientX - rect.left + 12;
+            const ty = e.clientY - rect.top - 10;
+            tooltip.style.left = Math.min(tx, rect.width - 230) + 'px';
+            tooltip.style.top = ty + 'px';
+        } else {
+            tooltip.classList.remove('visible');
+        }
+        draw();
+    });
+
+    canvas.addEventListener('mouseleave', () => {
+        hoveredBlock = null;
+        tooltip.classList.remove('visible');
+        draw();
+    });
+
+    // Flow animation
+    document.getElementById('btn-unet-flow').addEventListener('click', () => {
+        if (flowAnim) flowAnim.kill();
+        const order = buildFlowOrder();
+        flowProgress = 0;
+        draw();
+        const obj = { p: 0 };
+        flowAnim = gsap.to(obj, {
+            p: order.length - 1,
+            duration: order.length * 0.6,
+            ease: 'steps(' + (order.length - 1) + ')',
+            onUpdate: () => {
+                flowProgress = Math.round(obj.p);
+                const cur = order[flowProgress];
+                statusEl.textContent = `▶ ${cur.label} (${cur.res})`;
+                draw();
+            },
+            onComplete: () => {
+                statusEl.textContent = '✓ 数据流演示完成';
+                setTimeout(() => { flowProgress = -1; draw(); statusEl.textContent = '悬停模块查看详情'; }, 2000);
+            }
+        });
+    });
+
+    document.getElementById('btn-unet-reset').addEventListener('click', () => {
+        if (flowAnim) flowAnim.kill();
+        flowProgress = -1;
+        statusEl.textContent = '悬停模块查看详情';
+        draw();
+    });
+
+    buildBlocks();
+    draw();
+})();
+
+// ============================================================
+// Section 2: Time Embedding
+// ============================================================
+(() => {
+    const sliderT = document.getElementById('slider-t');
+    const sliderD = document.getElementById('slider-d');
+    const valT = document.getElementById('val-t');
+    const valD = document.getElementById('val-d');
+    const barsEl = document.getElementById('embed-bars');
+    const infoEl = document.getElementById('embed-info');
+    const heatCanvas = document.getElementById('embed-heatmap');
+    const hctx = heatCanvas.getContext('2d');
+
+    function computeEmbedding(t, d) {
+        const emb = [];
+        for (let i = 0; i < d; i++) {
+            const div = Math.pow(10000, (2 * Math.floor(i / 2)) / d);
+            emb.push(i % 2 === 0 ? Math.sin(t / div) : Math.cos(t / div));
+        }
+        return emb;
+    }
+
+    function renderBars() {
+        const t = parseInt(sliderT.value);
+        const d = parseInt(sliderD.value);
+        valT.textContent = t;
+        valD.textContent = d;
+        infoEl.textContent = `维度: ${d} | sin/cos 交替排列 | t = ${t}`;
+
+        const emb = computeEmbedding(t, d);
+        barsEl.innerHTML = '';
+        emb.forEach(v => {
+            const bar = document.createElement('div');
+            bar.className = 'bar';
+            const norm = (v + 1) / 2;
+            bar.style.height = (10 + norm * 50) + 'px';
+            bar.style.background = valToColor(v);
+            barsEl.appendChild(bar);
+        });
+    }
+
+    function renderHeatmap() {
+        const d = parseInt(sliderD.value);
+        const ts = [0, 100, 250, 500, 750, 999];
+        const cw = heatCanvas.width, ch = heatCanvas.height;
+        hctx.clearRect(0, 0, cw, ch);
+
+        const cellW = cw / d;
+        const cellH = ch / ts.length;
+
+        ts.forEach((t, row) => {
+            const emb = computeEmbedding(t, d);
+            emb.forEach((v, col) => {
+                hctx.fillStyle = valToColor(v);
+                hctx.fillRect(col * cellW, row * cellH, cellW + 0.5, cellH + 0.5);
+            });
+            // Row label
+            hctx.fillStyle = '#e8e8e8';
+            hctx.font = '11px JetBrains Mono';
+            hctx.textAlign = 'left';
+            hctx.textBaseline = 'middle';
+            hctx.fillText(`t=${t}`, 4, row * cellH + cellH / 2);
+        });
+    }
+
+    function update() {
+        renderBars();
+        renderHeatmap();
+    }
+
+    sliderT.addEventListener('input', update);
+    sliderD.addEventListener('input', update);
+
+    // GSAP intro animation for bars
+    gsap.fromTo('#embed-bars', { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.6, delay: 0.3 });
+
+    update();
+})();
+
+// ============================================================
+// Section 3: ResBlock Diagram
+// ============================================================
+(() => {
+    const container = document.getElementById('resblock-diagram');
+    const sliderCin = document.getElementById('slider-cin');
+    const sliderH = document.getElementById('slider-h');
+    const valCin = document.getElementById('val-cin');
+    const valH = document.getElementById('val-h');
+
+    const ops = [
+        { name: 'GroupNorm', shapeF: (c, h) => `[B, ${c}, ${h}, ${h}]` },
+        { name: 'SiLU 激活', shapeF: (c, h) => `[B, ${c}, ${h}, ${h}]` },
+        { name: 'Conv3×3', shapeF: (c, h) => `[B, ${c}, ${h}, ${h}]` },
+        { name: '+ time_emb', shapeF: (c, h) => `[B, ${c}, ${h}, ${h}] + [B, ${c}]`, special: true },
+        { name: 'GroupNorm', shapeF: (c, h) => `[B, ${c}, ${h}, ${h}]` },
+        { name: 'SiLU 激活', shapeF: (c, h) => `[B, ${c}, ${h}, ${h}]` },
+        { name: 'Dropout', shapeF: (c, h) => `[B, ${c}, ${h}, ${h}]` },
+        { name: 'Conv3×3', shapeF: (c, h) => `[B, ${c}, ${h}, ${h}]` },
+        { name: '+ 残差连接', shapeF: (c, h) => `[B, ${c}, ${h}, ${h}] + input`, special: true },
+    ];
+
+    let activeIdx = -1;
+
+    function buildDiagram() {
+        const c = parseInt(sliderCin.value);
+        const h = parseInt(sliderH.value);
+        valCin.textContent = c;
+        valH.textContent = h;
+
+        container.innerHTML = '';
+
+        // Input label
+        const inputEl = document.createElement('div');
+        inputEl.className = 'resblock-op';
+        inputEl.style.background = 'rgba(79,195,247,0.12)';
+        inputEl.style.borderColor = '#4fc3f7';
+        inputEl.innerHTML = `<div class="op-name" style="color:#4fc3f7">输入</div><div class="op-shape" style="display:block">[B, ${c}, ${h}, ${h}]</div>`;
+        container.appendChild(inputEl);
+
+        ops.forEach((op, i) => {
+            // Arrow
+            const arrow = document.createElement('div');
+            arrow.className = 'resblock-arrow';
+            container.appendChild(arrow);
+
+            const el = document.createElement('div');
+            el.className = 'resblock-op' + (i === activeIdx ? ' active' : '');
+            if (op.special) el.style.borderColor = '#ff80ab';
+            el.innerHTML = `<div class="op-name">${op.name}</div><div class="op-shape">${op.shapeF(c, h)}</div>`;
+            el.addEventListener('click', () => {
+                activeIdx = activeIdx === i ? -1 : i;
+                buildDiagram();
+            });
+            container.appendChild(el);
+        });
+
+        // Arrow
+        const arrow = document.createElement('div');
+        arrow.className = 'resblock-arrow';
+        container.appendChild(arrow);
+
+        // Output label
+        const outputEl = document.createElement('div');
+        outputEl.className = 'resblock-op';
+        outputEl.style.background = 'rgba(22,199,154,0.12)';
+        outputEl.style.borderColor = '#16c79a';
+        outputEl.innerHTML = `<div class="op-name" style="color:#16c79a">输出</div><div class="op-shape" style="display:block">[B, ${c}, ${h}, ${h}]</div>`;
+        container.appendChild(outputEl);
+    }
+
+    // Animate through all ops
+    document.getElementById('btn-resblock-anim').addEventListener('click', () => {
+        activeIdx = -1;
+        buildDiagram();
+        const allOps = container.querySelectorAll('.resblock-op');
+        const tl = gsap.timeline();
+        allOps.forEach((el, i) => {
+            tl.fromTo(el,
+                { opacity: 0.3, scale: 0.95 },
+                { opacity: 1, scale: 1, duration: 0.25, ease: 'power2.out',
+                  onStart: () => {
+                      el.classList.add('active');
+                      el.style.borderColor = 'var(--accent-green)';
+                  }
+                }, i * 0.3);
+        });
+    });
+
+    document.getElementById('btn-resblock-reset').addEventListener('click', () => {
+        activeIdx = -1;
+        buildDiagram();
+    });
+
+    sliderCin.addEventListener('input', buildDiagram);
+    sliderH.addEventListener('input', buildDiagram);
+
+    buildDiagram();
+})();
+
+// ============================================================
+// Section 4: Attention Mechanism
+// ============================================================
+(() => {
+    const gridEl = document.getElementById('attn-grid');
+    const infoEl = document.getElementById('attn-info');
+    const detailEl = document.getElementById('attn-detail');
+    const detailText = document.getElementById('attn-detail-text');
+    const titleEl = document.getElementById('attn-title');
+
+    let gridSize = 8;
+    let mode = 'self';
+    let selectedPos = -1;
+    let attnWeights = [];
+
+    function generateWeights(size) {
+        // Generate pseudo-random attention weights with local bias
+        const n = size * size;
+        attnWeights = [];
+        for (let q = 0; q < n; q++) {
+            const row = [];
+            const qr = Math.floor(q / size), qc = q % size;
+            let sum = 0;
+            for (let k = 0; k < n; k++) {
+                const kr = Math.floor(k / size), kc = k % size;
+                const dist = Math.sqrt((qr - kr) ** 2 + (qc - kc) ** 2);
+                // Local attention bias
+                let w = Math.exp(-dist * 0.5) + Math.random() * 0.2;
+                if (mode === 'cross') {
+                    // Cross attention: more uniform with some structure
+                    w = 0.3 + Math.random() * 0.7 + (Math.sin(qr * 0.5 + kc * 0.3) * 0.3);
+                }
+                row.push(w);
+                sum += w;
+            }
+            // Normalize (softmax-like)
+            attnWeights.push(row.map(v => v / sum));
+        }
+    }
+
+    function renderGrid() {
+        const n = gridSize;
+        gridEl.style.gridTemplateColumns = `repeat(${n}, 1fr)`;
+        gridEl.style.maxWidth = Math.min(420, n * 42) + 'px';
+        gridEl.innerHTML = '';
+
+        const cells = [];
+        for (let i = 0; i < n * n; i++) {
+            const cell = document.createElement('div');
+            cell.className = 'attn-cell';
+            cell.dataset.idx = i;
+
+            if (selectedPos >= 0 && selectedPos < attnWeights.length) {
+                const w = attnWeights[selectedPos][i];
+                const intensity = Math.min(1, w * n * n * 0.6);
+                if (mode === 'self') {
+                    const r = Math.round(lerp(26, 79, intensity));
+                    const g = Math.round(lerp(26, 195, intensity));
+                    const b = Math.round(lerp(46, 247, intensity));
+                    cell.style.background = `rgb(${r},${g},${b})`;
+                } else {
+                    const r = Math.round(lerp(26, 179, intensity));
+                    const g = Math.round(lerp(26, 136, intensity));
+                    const b = Math.round(lerp(46, 255, intensity));
+                    cell.style.background = `rgb(${r},${g},${b})`;
+                }
+                if (i === selectedPos) cell.classList.add('query-pos');
+            } else {
+                cell.style.background = 'var(--bg-card)';
+            }
+
+            cell.addEventListener('click', () => {
+                selectedPos = i;
+                renderGrid();
+                const row = Math.floor(i / n), col = i % n;
+                infoEl.textContent = `查询位置: (${row}, ${col}) — 颜色越亮表示注意力权重越高`;
+                detailEl.style.display = 'block';
+                // Find top-3 attended positions
+                const weights = attnWeights[i].map((w, idx) => ({ w, idx })).sort((a, b) => b.w - a.w);
+                const top3 = weights.slice(0, 3).map(
+                    x => `(${Math.floor(x.idx / n)},${x.idx % n}): ${(x.w * 100).toFixed(1)}%`
+                ).join('，');
+                detailText.textContent = `最高注意力位置：${top3}`;
+            });
+
+            gridEl.appendChild(cell);
+            cells.push(cell);
+        }
+
+        // GSAP subtle entrance
+        if (cells.length <= 144) {
+            gsap.fromTo(cells, { opacity: 0 }, { opacity: 1, duration: 0.3, stagger: 0.005 });
+        }
+    }
+
+    function init() {
+        generateWeights(gridSize);
+        selectedPos = -1;
+        detailEl.style.display = 'none';
+        infoEl.textContent = '点击任意位置查看注意力分布';
+        titleEl.textContent = mode === 'self' ? '自注意力权重热力图' : '交叉注意力权重热力图';
+        renderGrid();
+    }
+
+    // Size buttons
+    document.querySelectorAll('.attn-size-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.attn-size-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            gridSize = parseInt(btn.dataset.size);
+            init();
+        });
+    });
+
+    // Mode buttons
+    document.querySelectorAll('.attn-mode-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.attn-mode-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            mode = btn.dataset.mode;
+            init();
+        });
+    });
+
+    init();
+})();
+
+// ============================================================
+// Section 5: Full Data Flow
+// ============================================================
+(() => {
+    const canvas = document.getElementById('flow-canvas');
+    const ctx = canvas.getContext('2d');
+    const infoEl = document.getElementById('flow-info');
+    const stepLabel = document.getElementById('flow-step-label');
+    const W = canvas.width, H = canvas.height;
+
+    const layers = [
+        { name: '输入 x_t', ch: 3,   res: 64, color: '#ffd740', desc: '带噪声的输入图像' },
+        { name: 'Conv 初始', ch: 64,  res: 64, color: '#4fc3f7', desc: '初始卷积，提升通道数' },
+        { name: 'Enc1 下采样', ch: 128, res: 32, color: '#4fc3f7', desc: 'ResBlock + 下采样，分辨率减半' },
+        { name: 'Enc2 下采样', ch: 256, res: 16, color: '#4fc3f7', desc: 'ResBlock + Attn + 下采样' },
+        { name: 'Enc3 下采样', ch: 512, res: 8,  color: '#4fc3f7', desc: 'ResBlock + Attn + 下采样' },
+        { name: '瓶颈层',     ch: 512, res: 8,  color: '#b388ff', desc: 'ResBlock + Self-Attn + ResBlock' },
+        { name: 'Dec1 上采样', ch: 512, res: 8,  color: '#16c79a', desc: 'concat skip + ResBlock + Attn' },
+        { name: 'Dec2 上采样', ch: 256, res: 16, color: '#16c79a', desc: 'concat skip + ResBlock + Attn + 上采样' },
+        { name: 'Dec3 上采样', ch: 128, res: 32, color: '#16c79a', desc: 'concat skip + ResBlock + 上采样' },
+        { name: 'Dec4',       ch: 64,  res: 64, color: '#16c79a', desc: 'concat skip + ResBlock' },
+        { name: 'GroupNorm+SiLU', ch: 64, res: 64, color: '#16c79a', desc: '最终归一化和激活' },
+        { name: 'Conv 输出',  ch: 3,   res: 64, color: '#ffd740', desc: '1×1 卷积映射到输出通道' },
+        { name: '预测噪声 ε_θ', ch: 3, res: 64, color: '#ff5252', desc: '网络输出：预测的噪声' },
+    ];
+
+    let currentStep = -1;
+    let playAnim = null;
+
+    function getBlockRect(i) {
+        const padding = 50;
+        const totalW = W - padding * 2;
+        const stepW = totalW / layers.length;
+        const x = padding + i * stepW;
+        const maxBarH = H - 120;
+        const minBarH = 40;
+        // Height proportional to resolution (bigger res = taller)
+        const maxRes = 64;
+        const barH = minBarH + (layers[i].res / maxRes) * (maxBarH - minBarH);
+        // Width proportional to channels
+        const maxCh = 512;
+        const barW = 14 + (layers[i].ch / maxCh) * 40;
+        const y = (H - 40) / 2 - barH / 2 + 20;
+        return { x: x + (stepW - barW) / 2, y, w: barW, h: barH };
+    }
+
+    function drawFlow() {
+        ctx.clearRect(0, 0, W, H);
+
+        // Draw skip connection arcs
+        const skipPairs = [[1, 9], [2, 8], [3, 7], [4, 6]];
+        skipPairs.forEach(([from, to]) => {
+            const a = getBlockRect(from);
+            const b = getBlockRect(to);
+            const ax = a.x + a.w / 2, bx = b.x + b.w / 2;
+            const topY = Math.min(a.y, b.y) - 15;
+
+            ctx.save();
+            ctx.globalAlpha = 0.3;
+            ctx.strokeStyle = '#ffab40';
+            ctx.lineWidth = 1.2;
+            ctx.setLineDash([4, 3]);
+            ctx.beginPath();
+            ctx.moveTo(ax, a.y);
+            ctx.quadraticCurveTo((ax + bx) / 2, topY - 15, bx, b.y);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.restore();
+        });
+
+        // Draw blocks
+        layers.forEach((layer, i) => {
+            const r = getBlockRect(i);
+            const isActive = i === currentStep;
+            const isPast = i < currentStep;
+            const alpha = currentStep < 0 ? 0.7 : (isActive ? 1 : (isPast ? 0.6 : 0.25));
+
+            ctx.save();
+            ctx.globalAlpha = alpha;
+
+            if (isActive) {
+                ctx.shadowColor = layer.color;
+                ctx.shadowBlur = 16;
+            }
+
+            ctx.fillStyle = isActive ? layer.color + 'dd' : layer.color + '55';
+            ctx.strokeStyle = layer.color;
+            ctx.lineWidth = isActive ? 2.5 : 1;
+            ctx.beginPath();
+            ctx.roundRect(r.x, r.y, r.w, r.h, 4);
+            ctx.fill();
+            ctx.stroke();
+
+            // Label below
+            ctx.globalAlpha = alpha + 0.2;
+            ctx.fillStyle = '#e8e8e8';
+            ctx.font = '10px "Noto Sans SC"';
+            ctx.textAlign = 'center';
+            ctx.save();
+            ctx.translate(r.x + r.w / 2, r.y + r.h + 14);
+            ctx.rotate(-Math.PI / 6);
+            ctx.fillText(layer.name, 0, 0);
+            ctx.restore();
+
+            // Channel/res info
+            if (isActive) {
+                ctx.fillStyle = '#fff';
+                ctx.font = '700 10px "JetBrains Mono"';
+                ctx.textAlign = 'center';
+                ctx.fillText(`${layer.ch}ch`, r.x + r.w / 2, r.y - 18);
+                ctx.fillText(`${layer.res}²`, r.x + r.w / 2, r.y - 6);
+            }
+
+            ctx.restore();
+        });
+
+        // Arrows between adjacent blocks
+        for (let i = 0; i < layers.length - 1; i++) {
+            const a = getBlockRect(i);
+            const b = getBlockRect(i + 1);
+            const alpha = currentStep < 0 ? 0.3 : (i < currentStep ? 0.5 : 0.1);
+            drawFlowArrow(a.x + a.w, a.y + a.h / 2, b.x, b.y + b.h / 2, layers[i].color, alpha);
+        }
+
+        // Time embedding indicator
+        ctx.save();
+        ctx.globalAlpha = 0.6;
+        ctx.fillStyle = '#ff80ab';
+        ctx.font = '600 11px "Noto Sans SC"';
+        ctx.textAlign = 'center';
+        ctx.fillText('时间嵌入 t → 注入每层', W / 2, 18);
+        ctx.strokeStyle = '#ff80ab';
+        ctx.lineWidth = 0.8;
+        ctx.setLineDash([3, 3]);
+        ctx.beginPath();
+        ctx.moveTo(W / 2 - 60, 24);
+        ctx.lineTo(W / 2 + 60, 24);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.restore();
+    }
+
+    function drawFlowArrow(x1, y1, x2, y2, color, alpha) {
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(x1 + 2, y1);
+        ctx.lineTo(x2 - 2, y2);
+        ctx.stroke();
+        ctx.restore();
+    }
+
+    function updateInfo() {
+        if (currentStep < 0) {
+            infoEl.innerHTML = '<span class="step-name">准备就绪</span> — 点击 "自动播放" 或 "下一步" 开始观察数据在 U-Net 中的流动过程。';
+            stepLabel.textContent = `步骤 0 / ${layers.length}`;
+        } else {
+            const l = layers[currentStep];
+            infoEl.innerHTML = `<span class="step-name">${l.name}</span> — ${l.desc}<br><span class="step-shape">张量形状: [B, ${l.ch}, ${l.res}, ${l.res}]</span>`;
+            stepLabel.textContent = `步骤 ${currentStep + 1} / ${layers.length}`;
+        }
+    }
+
+    document.getElementById('btn-flow-next').addEventListener('click', () => {
+        if (currentStep < layers.length - 1) {
+            currentStep++;
+            drawFlow();
+            updateInfo();
+        }
+    });
+
+    document.getElementById('btn-flow-prev').addEventListener('click', () => {
+        if (currentStep > 0) {
+            currentStep--;
+        } else {
+            currentStep = -1;
+        }
+        drawFlow();
+        updateInfo();
+    });
+
+    document.getElementById('btn-flow-reset').addEventListener('click', () => {
+        if (playAnim) playAnim.kill();
+        currentStep = -1;
+        drawFlow();
+        updateInfo();
+    });
+
+    document.getElementById('btn-flow-play').addEventListener('click', () => {
+        if (playAnim) playAnim.kill();
+        currentStep = -1;
+        drawFlow();
+        updateInfo();
+
+        const obj = { step: -1 };
+        playAnim = gsap.to(obj, {
+            step: layers.length - 1,
+            duration: layers.length * 0.65,
+            ease: 'steps(' + layers.length + ')',
+            onUpdate: () => {
+                const s = Math.round(obj.step);
+                if (s !== currentStep && s >= 0) {
+                    currentStep = s;
+                    drawFlow();
+                    updateInfo();
+                }
+            },
+            onComplete: () => {
+                stepLabel.textContent = `✓ 完成 — 步骤 ${layers.length} / ${layers.length}`;
+            }
+        });
+    });
+
+    drawFlow();
+    updateInfo();
+})();
+
+// ============================================================
+// KaTeX auto-render
+// ============================================================
+document.addEventListener('DOMContentLoaded', () => {
+    if (typeof renderMathInElement === 'function') {
+        renderMathInElement(document.body, {
+            delimiters: [
+                { left: '$$', right: '$$', display: true },
+                { left: '\\(', right: '\\)', display: false },
+            ],
+            throwOnError: false
+        });
+    }
+});
+</script>
+</body>
+</html>

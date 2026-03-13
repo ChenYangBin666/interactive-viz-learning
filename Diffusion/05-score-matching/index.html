@@ -1,0 +1,1287 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>05 - Score Matching | Diffusion 扩散模型</title>
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+
+    <!-- KaTeX -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+
+    <!-- GSAP -->
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+
+    <!-- Shared styles -->
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+
+    <style>
+        /* ========== Page-specific styles ========== */
+        .hero-banner {
+            text-align: center;
+            padding: 2rem 0 1.5rem;
+            margin-bottom: 2rem;
+        }
+        .hero-banner h1 {
+            font-size: 2.2rem;
+            background: linear-gradient(135deg, var(--accent-green), var(--accent-blue));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .hero-banner .subtitle {
+            color: var(--text-secondary);
+            font-size: 1.05rem;
+            margin-top: 0.5rem;
+        }
+
+        /* Canvas containers */
+        .canvas-wrap {
+            position: relative;
+            width: 100%;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+        }
+        .canvas-wrap canvas {
+            display: block;
+            width: 100%;
+            cursor: crosshair;
+        }
+
+        /* Controls row */
+        .controls-row {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 1rem;
+            padding: 0.75rem 1rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            margin-top: 0.75rem;
+        }
+
+        /* Comparison panels */
+        .compare-panels {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+        }
+        .compare-panels .panel-label {
+            text-align: center;
+            font-size: 0.85rem;
+            color: var(--accent-green);
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+        }
+
+        /* Particle display */
+        .particle-stats {
+            display: flex;
+            gap: 1.5rem;
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+        }
+        .particle-stats span {
+            color: var(--accent-green);
+        }
+
+        @media (max-width: 768px) {
+            .compare-panels { grid-template-columns: 1fr; }
+            .split-layout { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <div class="page-container">
+        <!-- Hero -->
+        <div class="hero-banner">
+            <h1>Score Matching 得分匹配</h1>
+            <p class="subtitle">绕过归一化常数，直接学习概率分布的梯度</p>
+        </div>
+
+        <!-- ===== Section 1: Score Function Intuition ===== -->
+        <div class="section" id="sec-score-intuition">
+            <div class="section-title">
+                <div class="icon">1</div>
+                <h2>得分函数直觉</h2>
+                <span class="badge badge-green">交互</span>
+            </div>
+            <div class="split-layout">
+                <div class="text-panel">
+                    <p>在概率论中，<strong>得分函数</strong>（Score Function）定义为对数概率密度关于数据的梯度：</p>
+                    <div class="katex-block">$$\mathbf{s}(\mathbf{x}) = \nabla_{\mathbf{x}} \log p(\mathbf{x})$$</div>
+                    <p>直觉上，得分向量指向概率密度<strong>增长最快</strong>的方向 —— 即"上坡"方向，朝向分布的众数（mode）。</p>
+                    <div class="info-box">
+                        <p>对于高斯分布 $\mathcal{N}(\mu, \sigma^2)$，得分函数为 $s(x) = -\frac{x - \mu}{\sigma^2}$，始终指向均值 $\mu$。</p>
+                    </div>
+                    <p class="text-sm text-muted mt-2">拖动下方的高斯中心（彩色圆点）或调整方差，观察向量场如何变化。箭头越长代表梯度越大。</p>
+                </div>
+                <div class="viz-panel">
+                    <div class="canvas-wrap">
+                        <canvas id="canvas-score-field" width="600" height="450"></canvas>
+                        <div class="watermark">得分向量场</div>
+                    </div>
+                    <div class="controls-row">
+                        <div class="slider-group">
+                            <label>方差 σ²</label>
+                            <input type="range" id="slider-variance" min="0.5" max="4" step="0.1" value="1.5">
+                            <span class="slider-value" id="val-variance">1.5</span>
+                        </div>
+                        <div class="slider-group">
+                            <label>箭头密度</label>
+                            <input type="range" id="slider-density" min="8" max="24" step="2" value="14">
+                            <span class="slider-value" id="val-density">14</span>
+                        </div>
+                        <button class="btn btn-sm" id="btn-reset-means">重置位置</button>
+                    </div>
+                    <div class="legend mt-1">
+                        <div class="legend-item"><div class="swatch" style="background:#ff5252"></div> 高斯 1</div>
+                        <div class="legend-item"><div class="swatch" style="background:#4fc3f7"></div> 高斯 2</div>
+                        <div class="legend-item"><div class="swatch" style="background:#b388ff"></div> 高斯 3</div>
+                        <div class="legend-item"><div class="swatch" style="background:#16c79a44"></div> 密度等高线</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== Section 2: Why Score? ===== -->
+        <div class="section" id="sec-why-score">
+            <div class="section-title">
+                <div class="icon">2</div>
+                <h2>为什么用得分？</h2>
+                <span class="badge badge-blue">核心</span>
+            </div>
+            <div class="split-layout">
+                <div class="text-panel">
+                    <p>传统的密度估计需要计算<strong>归一化常数</strong> $Z$：</p>
+                    <div class="katex-block">$$p(\mathbf{x}) = \frac{\tilde{p}(\mathbf{x})}{Z}, \quad Z = \int \tilde{p}(\mathbf{x})\,d\mathbf{x}$$</div>
+                    <p>这个积分通常<strong>难以计算</strong>（intractable），尤其在高维空间。</p>
+                    <div class="info-box success">
+                        <p><strong>关键洞察：</strong>对 $\log p(\mathbf{x})$ 求梯度时，$Z$ 作为常数消失了！</p>
+                    </div>
+                    <div class="katex-block">$$\nabla_{\mathbf{x}} \log p(\mathbf{x}) = \nabla_{\mathbf{x}} \log \tilde{p}(\mathbf{x}) - \underbrace{\nabla_{\mathbf{x}} \log Z}_{= 0}$$</div>
+                    <p>因此，得分函数只依赖于<strong>未归一化</strong>的密度 $\tilde{p}(\mathbf{x})$，完全绕过了 $Z$ 的计算。</p>
+                    <p>右侧对比了两种方法的区别：密度估计需要知道完整的概率值，而得分匹配只需知道方向。</p>
+                </div>
+                <div class="viz-panel">
+                    <div class="compare-panels">
+                        <div>
+                            <div class="panel-label">密度估计 p(x)</div>
+                            <div class="canvas-wrap">
+                                <canvas id="canvas-density" width="300" height="300"></canvas>
+                            </div>
+                        </div>
+                        <div>
+                            <div class="panel-label">得分函数 ∇log p(x)</div>
+                            <div class="canvas-wrap">
+                                <canvas id="canvas-score-only" width="300" height="300"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="controls-row">
+                        <button class="btn btn-sm btn-primary" id="btn-animate-z">演示归一化常数消除</button>
+                        <div class="particle-stats">
+                            <div>Z = <span id="val-z">?</span></div>
+                            <div>∇log Z = <span id="val-grad-z">0</span></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== Section 3: Denoising Score Matching ===== -->
+        <div class="section" id="sec-denoising">
+            <div class="section-title">
+                <div class="icon">3</div>
+                <h2>去噪得分匹配</h2>
+                <span class="badge badge-purple">关键</span>
+            </div>
+            <div class="split-layout">
+                <div class="text-panel">
+                    <p><strong>核心等价关系：</strong>加噪分布的得分函数与去噪方向直接相关：</p>
+                    <div class="katex-block">$$\nabla_{\mathbf{x}} \log q_\sigma(\mathbf{x}) = -\frac{\mathbf{x} - \mathbf{x}_{\text{clean}}}{\sigma^2}$$</div>
+                    <p>这意味着：</p>
+                    <div class="info-box success">
+                        <p><strong>预测噪声 ≈ 估计得分！</strong>二者只差一个缩放因子 $-\sigma$。如果模型学会预测噪声 $\boldsymbol{\epsilon}$，那它也隐式地学会了得分函数。</p>
+                    </div>
+                    <div class="katex-block">$$\boldsymbol{\epsilon} = -\sigma \cdot \nabla_{\mathbf{x}} \log q_\sigma(\mathbf{x})$$</div>
+                    <p>右侧可视化展示：蓝色箭头为<strong>噪声预测方向</strong>（从噪声点指向干净点），绿色箭头为<strong>得分方向</strong>。它们方向相同，仅长度不同。</p>
+                </div>
+                <div class="viz-panel">
+                    <div class="canvas-wrap">
+                        <canvas id="canvas-denoise" width="600" height="400"></canvas>
+                        <div class="watermark">去噪得分匹配</div>
+                    </div>
+                    <div class="controls-row">
+                        <div class="slider-group">
+                            <label>噪声 σ</label>
+                            <input type="range" id="slider-noise-sigma" min="0.3" max="3.0" step="0.1" value="1.0">
+                            <span class="slider-value" id="val-noise-sigma">1.0</span>
+                        </div>
+                        <button class="btn btn-sm" id="btn-resample-noise">重新采样</button>
+                        <label class="toggle">
+                            <input type="checkbox" id="toggle-show-score" checked>
+                            <div class="track"></div>
+                        </label>
+                        <span class="text-sm text-muted">显示得分</span>
+                    </div>
+                    <div class="legend mt-1">
+                        <div class="legend-item"><div class="swatch" style="background:#16c79a"></div> 干净数据点</div>
+                        <div class="legend-item"><div class="swatch" style="background:#ff5252"></div> 噪声数据点</div>
+                        <div class="legend-item"><div class="swatch" style="background:#4fc3f7"></div> 噪声预测方向</div>
+                        <div class="legend-item"><div class="swatch" style="background:#ffd740"></div> 得分方向</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== Section 4: Langevin Dynamics ===== -->
+        <div class="section" id="sec-langevin">
+            <div class="section-title">
+                <div class="icon">4</div>
+                <h2>Langevin 动力学</h2>
+                <span class="badge badge-orange">交互</span>
+            </div>
+            <div class="split-layout">
+                <div class="text-panel">
+                    <p>给定得分函数，我们可以用 <strong>Langevin 动力学</strong>从分布中采样：</p>
+                    <div class="katex-block">$$\mathbf{x}_{t+1} = \mathbf{x}_t + \eta\,\nabla_{\mathbf{x}} \log p(\mathbf{x}_t) + \sqrt{2\eta}\,\mathbf{z}$$</div>
+                    <p>其中 $\eta$ 是步长，$\mathbf{z} \sim \mathcal{N}(0, I)$ 是随机噪声。</p>
+                    <p>三个分量的作用：</p>
+                    <ul style="color:var(--text-secondary);padding-left:1.2rem;margin-bottom:0.75rem;">
+                        <li><strong>$\mathbf{x}_t$</strong>：当前位置</li>
+                        <li><strong>$\eta\,\nabla_{\mathbf{x}} \log p$</strong>：沿得分方向移动（确定性漂移）</li>
+                        <li><strong>$\sqrt{2\eta}\,\mathbf{z}$</strong>：随机扰动（保证探索性）</li>
+                    </ul>
+                    <div class="info-box">
+                        <p>当 $\eta \to 0$ 且步数 $\to \infty$ 时，粒子的分布收敛到目标分布 $p(\mathbf{x})$。</p>
+                    </div>
+                    <p class="text-sm text-muted">点击"开始"观察粒子从随机位置出发，沿得分场收敛到数据分布。</p>
+                </div>
+                <div class="viz-panel">
+                    <div class="canvas-wrap">
+                        <canvas id="canvas-langevin" width="600" height="450"></canvas>
+                        <div class="watermark">Langevin 采样</div>
+                    </div>
+                    <div class="controls-row">
+                        <button class="btn btn-sm btn-primary" id="btn-langevin-start">开始</button>
+                        <button class="btn btn-sm" id="btn-langevin-reset">重置</button>
+                        <div class="slider-group">
+                            <label>步长 η</label>
+                            <input type="range" id="slider-eta" min="0.001" max="0.08" step="0.001" value="0.02">
+                            <span class="slider-value" id="val-eta">0.020</span>
+                        </div>
+                        <div class="slider-group">
+                            <label>噪声强度</label>
+                            <input type="range" id="slider-langevin-noise" min="0" max="2" step="0.1" value="1.0">
+                            <span class="slider-value" id="val-langevin-noise">1.0</span>
+                        </div>
+                    </div>
+                    <div class="anim-controls mt-1">
+                        <span class="step-label" id="langevin-step">步骤: 0</span>
+                        <div class="progress-bar"><div class="fill" id="langevin-progress" style="width:0%"></div></div>
+                        <span class="step-label" id="langevin-max-step">/ 500</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== Section 5: Multi-Scale Denoising ===== -->
+        <div class="section" id="sec-multiscale">
+            <div class="section-title">
+                <div class="icon">5</div>
+                <h2>多尺度去噪</h2>
+                <span class="badge badge-purple">关键</span>
+            </div>
+            <div class="split-layout">
+                <div class="text-panel">
+                    <p><strong>问题：</strong>在低密度区域，得分估计不准确。因为训练数据稀疏的地方，模型没有足够的梯度信号。</p>
+                    <div class="info-box warning">
+                        <p>如果数据集中在几个众数周围，那众数之间的"低谷"区域几乎没有训练样本，得分估计会失败。</p>
+                    </div>
+                    <p><strong>解决方案：</strong>添加<strong>不同级别的噪声</strong> $\{\sigma_1 > \sigma_2 > \cdots > \sigma_L\}$：</p>
+                    <ul style="color:var(--text-secondary);padding-left:1.2rem;margin-bottom:0.75rem;">
+                        <li><strong>大噪声</strong> $\sigma$ 大：得分场处处平滑，覆盖整个空间</li>
+                        <li><strong>小噪声</strong> $\sigma$ 小：得分场精确，但只在众数附近可靠</li>
+                    </ul>
+                    <div class="katex-block">$$\frac{1}{2}\mathbb{E}\left[\|\mathbf{s}_\theta(\tilde{\mathbf{x}}, \sigma) - \nabla_{\tilde{\mathbf{x}}} \log q_\sigma(\tilde{\mathbf{x}} | \mathbf{x})\|^2\right]$$</div>
+                    <p>通过在多个噪声尺度上训练，模型先在大尺度获得全局方向感，再在小尺度精细化。</p>
+                </div>
+                <div class="viz-panel">
+                    <div class="canvas-wrap">
+                        <canvas id="canvas-multiscale" width="600" height="450"></canvas>
+                        <div class="watermark">多尺度向量场</div>
+                    </div>
+                    <div class="controls-row">
+                        <div class="slider-group" style="flex:1">
+                            <label>噪声尺度 σ</label>
+                            <input type="range" id="slider-multiscale-sigma" min="0.2" max="4.0" step="0.05" value="2.0">
+                            <span class="slider-value" id="val-multiscale-sigma">2.00</span>
+                        </div>
+                        <button class="btn btn-sm btn-primary" id="btn-sweep-sigma">自动扫描</button>
+                    </div>
+                    <div class="legend mt-1">
+                        <div class="legend-item"><div class="swatch" style="background:#16c79a"></div> 数据众数</div>
+                        <div class="legend-item"><div class="swatch" style="background:rgba(79,195,247,0.5)"></div> 向量场强度</div>
+                        <div class="legend-item"><div class="swatch" style="background:#ff80ab"></div> 低密度区域</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div><!-- /.page-container -->
+
+    <!-- Shared nav -->
+    <script src="../shared/scripts/nav.js"></script>
+
+    <script>
+    /* ================================================================
+       Score Matching — Interactive Visualization
+       ================================================================ */
+    document.addEventListener('DOMContentLoaded', () => {
+        // KaTeX auto-render
+        if (typeof renderMathInElement === 'function') {
+            renderMathInElement(document.body, {
+                delimiters: [
+                    { left: '$$', right: '$$', display: true },
+                    { left: '$', right: '$', display: false }
+                ],
+                throwOnError: false
+            });
+        }
+
+        // ---- Utility functions ----
+        const dpr = window.devicePixelRatio || 1;
+
+        function setupCanvas(canvas) {
+            const rect = canvas.getBoundingClientRect();
+            const w = canvas.getAttribute('width') | 0;
+            const h = canvas.getAttribute('height') | 0;
+            canvas.width = w * dpr;
+            canvas.height = h * dpr;
+            canvas.style.width = w + 'px';
+            canvas.style.height = h + 'px';
+            const ctx = canvas.getContext('2d');
+            ctx.scale(dpr, dpr);
+            return { ctx, w, h };
+        }
+
+        // putImageData ignores canvas transform, so use a temp canvas + drawImage
+        function putImageDataScaled(ctx, imgData, w, h) {
+            const tmp = document.createElement('canvas');
+            tmp.width = w; tmp.height = h;
+            const tc = tmp.getContext('2d');
+            tc.putImageData(imgData, 0, 0);
+            ctx.drawImage(tmp, 0, 0, w, h);
+        }
+
+        function gauss2D(x, y, mx, my, s) {
+            const dx = x - mx, dy = y - my;
+            return Math.exp(-(dx * dx + dy * dy) / (2 * s * s));
+        }
+
+        function gaussMixtureDensity(x, y, means, sigma) {
+            let sum = 0;
+            for (const m of means) sum += gauss2D(x, y, m[0], m[1], sigma);
+            return sum / means.length;
+        }
+
+        function gaussMixtureScore(x, y, means, sigma) {
+            // ∇_x log p(x) = (Σ w_i * ∇ N(x;μ_i,σ²)) / (Σ w_i * N(x;μ_i,σ²))
+            let totalDensity = 0;
+            let gx = 0, gy = 0;
+            for (const m of means) {
+                const d = gauss2D(x, y, m[0], m[1], sigma);
+                totalDensity += d;
+                gx += d * (-(x - m[0]) / (sigma * sigma));
+                gy += d * (-(y - m[1]) / (sigma * sigma));
+            }
+            if (totalDensity < 1e-12) return [0, 0];
+            return [gx / totalDensity, gy / totalDensity];
+        }
+
+        function drawArrow(ctx, x, y, dx, dy, color, maxLen, headSize) {
+            const len = Math.sqrt(dx * dx + dy * dy);
+            if (len < 0.001) return;
+            const scale = Math.min(len, maxLen) / len;
+            const ex = x + dx * scale;
+            const ey = y + dy * scale;
+            const drawLen = Math.sqrt((ex - x) ** 2 + (ey - y) ** 2);
+            const hs = Math.min(headSize || 4, drawLen * 0.4);
+            const angle = Math.atan2(ey - y, ex - x);
+
+            ctx.beginPath();
+            ctx.moveTo(x, y);
+            ctx.lineTo(ex, ey);
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 1.2;
+            ctx.stroke();
+
+            ctx.beginPath();
+            ctx.moveTo(ex, ey);
+            ctx.lineTo(ex - hs * Math.cos(angle - 0.4), ey - hs * Math.sin(angle - 0.4));
+            ctx.lineTo(ex - hs * Math.cos(angle + 0.4), ey - hs * Math.sin(angle + 0.4));
+            ctx.closePath();
+            ctx.fillStyle = color;
+            ctx.fill();
+        }
+
+        function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+        function lerp(a, b, t) { return a + (b - a) * t; }
+        function randGauss() {
+            let u = 0, v = 0;
+            while (u === 0) u = Math.random();
+            while (v === 0) v = Math.random();
+            return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+        }
+
+        // Color helper
+        function hslStr(h, s, l, a) {
+            return a !== undefined ? `hsla(${h},${s}%,${l}%,${a})` : `hsl(${h},${s}%,${l}%)`;
+        }
+
+
+        /* ================================================================
+           SECTION 1: Score Function Intuition — 2D Gaussian Mixture
+           ================================================================ */
+        (() => {
+            const canvas = document.getElementById('canvas-score-field');
+            const { ctx, w, h } = setupCanvas(canvas);
+
+            // State: 3 draggable Gaussian means (in canvas coords)
+            const colors = ['#ff5252', '#4fc3f7', '#b388ff'];
+            let means = [
+                [w * 0.3, h * 0.35],
+                [w * 0.65, h * 0.55],
+                [w * 0.5, h * 0.75]
+            ];
+            let sigma = 1.5;
+            let density = 14;
+            let dragging = -1;
+
+            const sliderVar = document.getElementById('slider-variance');
+            const valVar = document.getElementById('val-variance');
+            const sliderDen = document.getElementById('slider-density');
+            const valDen = document.getElementById('val-density');
+            const btnReset = document.getElementById('btn-reset-means');
+
+            sliderVar.addEventListener('input', () => {
+                sigma = parseFloat(sliderVar.value);
+                valVar.textContent = sigma.toFixed(1);
+                drawField();
+            });
+            sliderDen.addEventListener('input', () => {
+                density = parseInt(sliderDen.value);
+                valDen.textContent = density;
+                drawField();
+            });
+            btnReset.addEventListener('click', () => {
+                means = [[w*0.3, h*0.35],[w*0.65, h*0.55],[w*0.5, h*0.75]];
+                drawField();
+            });
+
+            // Coordinate mapping: canvas px → "data" space
+            const dataScale = 6; // data range roughly [-3,3] x [-3,3]
+            function px2data(px, py) {
+                return [(px / w - 0.5) * dataScale, (py / h - 0.5) * dataScale];
+            }
+            function data2px(dx, dy) {
+                return [(dx / dataScale + 0.5) * w, (dy / dataScale + 0.5) * h];
+            }
+
+            function getDataMeans() {
+                return means.map(m => px2data(m[0], m[1]));
+            }
+
+            function drawField() {
+                ctx.clearRect(0, 0, w, h);
+
+                // Background gradient
+                const bg = ctx.createRadialGradient(w/2, h/2, 0, w/2, h/2, w*0.7);
+                bg.addColorStop(0, '#1e1e3a');
+                bg.addColorStop(1, '#1a1a2e');
+                ctx.fillStyle = bg;
+                ctx.fillRect(0, 0, w, h);
+
+                const dm = getDataMeans();
+                const sigData = sigma;
+
+                // Draw density contours
+                const contourLevels = [0.05, 0.15, 0.3, 0.5, 0.7];
+                const imgData = ctx.createImageData(w, h);
+                for (let py = 0; py < h; py++) {
+                    for (let px = 0; px < w; px++) {
+                        const [dx, dy] = px2data(px, py);
+                        const d = gaussMixtureDensity(dx, dy, dm, sigData);
+                        const idx = (py * w + px) * 4;
+                        const intensity = Math.min(d * 1.5, 1);
+                        imgData.data[idx] = 22;
+                        imgData.data[idx+1] = Math.floor(199 * intensity * 0.4);
+                        imgData.data[idx+2] = Math.floor(154 * intensity * 0.3);
+                        imgData.data[idx+3] = Math.floor(intensity * 80);
+                    }
+                }
+                putImageDataScaled(ctx, imgData, w, h);
+
+                // Draw vector field
+                const step = Math.max(w, h) / density;
+                const arrowMax = step * 0.55;
+                for (let px = step/2; px < w; px += step) {
+                    for (let py = step/2; py < h; py += step) {
+                        const [dx, dy] = px2data(px, py);
+                        const [sx, sy] = gaussMixtureScore(dx, dy, dm, sigData);
+                        const mag = Math.sqrt(sx*sx + sy*sy);
+                        if (mag < 0.01) continue;
+
+                        // Map score to arrow
+                        const arrowScale = arrowMax * Math.min(mag / 3, 1);
+                        const nx = sx / mag, ny = sy / mag;
+                        const adx = nx * arrowScale;
+                        const ady = ny * arrowScale;
+
+                        // Alpha based on density
+                        const dens = gaussMixtureDensity(dx, dy, dm, sigData);
+                        const alpha = clamp(0.2 + dens * 2, 0.2, 0.95);
+                        const hue = 160 + mag * 20;
+                        drawArrow(ctx, px, py, adx, ady, hslStr(hue, 70, 65, alpha), arrowMax, 5);
+                    }
+                }
+
+                // Draw means as circles
+                for (let i = 0; i < means.length; i++) {
+                    ctx.beginPath();
+                    ctx.arc(means[i][0], means[i][1], 10, 0, Math.PI * 2);
+                    ctx.fillStyle = colors[i];
+                    ctx.fill();
+                    ctx.strokeStyle = '#fff';
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+
+                    // Label
+                    ctx.fillStyle = '#fff';
+                    ctx.font = '11px Inter, sans-serif';
+                    ctx.textAlign = 'center';
+                    ctx.fillText(`μ${i+1}`, means[i][0], means[i][1] - 16);
+                }
+            }
+
+            // Drag interaction
+            function getMousePos(e) {
+                const rect = canvas.getBoundingClientRect();
+                return [
+                    (e.clientX - rect.left) * (w / rect.width),
+                    (e.clientY - rect.top) * (h / rect.height)
+                ];
+            }
+
+            canvas.addEventListener('mousedown', (e) => {
+                const [mx, my] = getMousePos(e);
+                for (let i = 0; i < means.length; i++) {
+                    const dx = mx - means[i][0], dy = my - means[i][1];
+                    if (dx*dx + dy*dy < 400) { dragging = i; break; }
+                }
+            });
+            canvas.addEventListener('mousemove', (e) => {
+                if (dragging < 0) return;
+                const [mx, my] = getMousePos(e);
+                means[dragging] = [clamp(mx, 20, w-20), clamp(my, 20, h-20)];
+                drawField();
+            });
+            canvas.addEventListener('mouseup', () => { dragging = -1; });
+            canvas.addEventListener('mouseleave', () => { dragging = -1; });
+
+            // Touch support
+            canvas.addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                const touch = e.touches[0];
+                const rect = canvas.getBoundingClientRect();
+                const mx = (touch.clientX - rect.left) * (w / rect.width);
+                const my = (touch.clientY - rect.top) * (h / rect.height);
+                for (let i = 0; i < means.length; i++) {
+                    const dx = mx - means[i][0], dy = my - means[i][1];
+                    if (dx*dx + dy*dy < 600) { dragging = i; break; }
+                }
+            }, { passive: false });
+            canvas.addEventListener('touchmove', (e) => {
+                e.preventDefault();
+                if (dragging < 0) return;
+                const touch = e.touches[0];
+                const rect = canvas.getBoundingClientRect();
+                const mx = (touch.clientX - rect.left) * (w / rect.width);
+                const my = (touch.clientY - rect.top) * (h / rect.height);
+                means[dragging] = [clamp(mx, 20, w-20), clamp(my, 20, h-20)];
+                drawField();
+            }, { passive: false });
+            canvas.addEventListener('touchend', () => { dragging = -1; });
+
+            drawField();
+        })();
+
+
+        /* ================================================================
+           SECTION 2: Why Score? — Density vs Score Comparison
+           ================================================================ */
+        (() => {
+            const canvasD = document.getElementById('canvas-density');
+            const canvasS = document.getElementById('canvas-score-only');
+            const { ctx: ctxD, w: wD, h: hD } = setupCanvas(canvasD);
+            const { ctx: ctxS, w: wS, h: hS } = setupCanvas(canvasS);
+            const btnAnimate = document.getElementById('btn-animate-z');
+            const valZ = document.getElementById('val-z');
+            const valGZ = document.getElementById('val-grad-z');
+
+            const means2 = [[0, -0.8], [1.2, 0.6], [-1.0, 0.8]];
+            const sig2 = 0.9;
+            const scale2 = 4;
+
+            function px2d(px, py, cw, ch) {
+                return [(px / cw - 0.5) * scale2, (py / ch - 0.5) * scale2];
+            }
+
+            let animZValue = 1;
+            let animating = false;
+
+            function drawDensityPanel(zFactor) {
+                ctxD.clearRect(0, 0, wD, hD);
+                const bg = ctxD.createLinearGradient(0, 0, 0, hD);
+                bg.addColorStop(0, '#1e1e3a');
+                bg.addColorStop(1, '#1a1a2e');
+                ctxD.fillStyle = bg;
+                ctxD.fillRect(0, 0, wD, hD);
+
+                // Draw density as heatmap
+                const imgData = ctxD.createImageData(wD, hD);
+                for (let py = 0; py < hD; py++) {
+                    for (let px = 0; px < wD; px++) {
+                        const [dx, dy] = px2d(px, py, wD, hD);
+                        const d = gaussMixtureDensity(dx, dy, means2, sig2) / zFactor;
+                        const idx = (py * wD + px) * 4;
+                        const v = Math.min(d, 1);
+                        imgData.data[idx] = Math.floor(79 * v);
+                        imgData.data[idx+1] = Math.floor(195 * v);
+                        imgData.data[idx+2] = Math.floor(247 * v);
+                        imgData.data[idx+3] = Math.floor(v * 200 + 20);
+                    }
+                }
+                putImageDataScaled(ctxD, imgData, wD, hD);
+
+                // Z label
+                ctxD.fillStyle = '#fff';
+                ctxD.font = '12px JetBrains Mono';
+                ctxD.textAlign = 'left';
+                ctxD.fillText(`Z = ${zFactor.toFixed(2)}`, 8, 18);
+
+                // Label "需要 Z"
+                ctxD.fillStyle = 'rgba(255,82,82,0.9)';
+                ctxD.font = 'bold 13px Noto Sans SC, sans-serif';
+                ctxD.textAlign = 'center';
+                ctxD.fillText('需要归一化常数 Z', wD / 2, hD - 12);
+            }
+
+            function drawScorePanel() {
+                ctxS.clearRect(0, 0, wS, hS);
+                const bg = ctxS.createLinearGradient(0, 0, 0, hS);
+                bg.addColorStop(0, '#1e1e3a');
+                bg.addColorStop(1, '#1a1a2e');
+                ctxS.fillStyle = bg;
+                ctxS.fillRect(0, 0, wS, hS);
+
+                // Faint density background
+                const imgData = ctxS.createImageData(wS, hS);
+                for (let py = 0; py < hS; py++) {
+                    for (let px = 0; px < wS; px++) {
+                        const [dx, dy] = px2d(px, py, wS, hS);
+                        const d = gaussMixtureDensity(dx, dy, means2, sig2);
+                        const idx = (py * wS + px) * 4;
+                        imgData.data[idx] = 22;
+                        imgData.data[idx+1] = Math.floor(199 * d * 0.25);
+                        imgData.data[idx+2] = Math.floor(154 * d * 0.2);
+                        imgData.data[idx+3] = Math.floor(d * 50);
+                    }
+                }
+                putImageDataScaled(ctxS, imgData, wS, hS);
+
+                // Vector field
+                const step = 25;
+                const arrowMax = step * 0.5;
+                for (let px = step/2; px < wS; px += step) {
+                    for (let py = step/2; py < hS; py += step) {
+                        const [dx, dy] = px2d(px, py, wS, hS);
+                        const [sx, sy] = gaussMixtureScore(dx, dy, means2, sig2);
+                        const mag = Math.sqrt(sx*sx + sy*sy);
+                        if (mag < 0.01) continue;
+                        const s = arrowMax * Math.min(mag / 3, 1);
+                        const nx = sx / mag, ny = sy / mag;
+                        const alpha = clamp(0.3 + mag * 0.2, 0.3, 0.95);
+                        drawArrow(ctxS, px, py, nx * s, ny * s, hslStr(160, 80, 60, alpha), arrowMax, 4);
+                    }
+                }
+
+                // Label "无需 Z"
+                ctxS.fillStyle = 'rgba(22,199,154,0.9)';
+                ctxS.font = 'bold 13px Noto Sans SC, sans-serif';
+                ctxS.textAlign = 'center';
+                ctxS.fillText('无需归一化常数！', wS / 2, hS - 12);
+            }
+
+            btnAnimate.addEventListener('click', () => {
+                if (animating) return;
+                animating = true;
+                animZValue = 1;
+                const obj = { z: 0.2 };
+                gsap.to(obj, {
+                    z: 3.0, duration: 2, ease: 'power2.inOut', yoyo: true, repeat: 1,
+                    onUpdate: () => {
+                        animZValue = obj.z;
+                        valZ.textContent = obj.z.toFixed(2);
+                        drawDensityPanel(obj.z);
+                    },
+                    onComplete: () => {
+                        animating = false;
+                        valZ.textContent = '?';
+                        drawDensityPanel(1);
+                    }
+                });
+            });
+
+            drawDensityPanel(1);
+            drawScorePanel();
+        })();
+
+
+        /* ================================================================
+           SECTION 3: Denoising Score Matching
+           ================================================================ */
+        (() => {
+            const canvas = document.getElementById('canvas-denoise');
+            const { ctx, w, h } = setupCanvas(canvas);
+
+            const sliderSigma = document.getElementById('slider-noise-sigma');
+            const valSigma = document.getElementById('val-noise-sigma');
+            const btnResample = document.getElementById('btn-resample-noise');
+            const toggleScore = document.getElementById('toggle-show-score');
+
+            let noiseSigma = 1.0;
+            let showScore = true;
+
+            // Generate clean data points (circle + cluster)
+            const cleanPoints = [];
+            const numPts = 30;
+            for (let i = 0; i < numPts; i++) {
+                const angle = (i / numPts) * Math.PI * 2;
+                const r = 1.5 + 0.15 * Math.sin(i * 3);
+                cleanPoints.push([Math.cos(angle) * r, Math.sin(angle) * r]);
+            }
+            // Add a center cluster
+            for (let i = 0; i < 10; i++) {
+                cleanPoints.push([randGauss() * 0.3, randGauss() * 0.3]);
+            }
+
+            let noisyPoints = [];
+            const dataScale = 5;
+
+            function px2d(px, py) {
+                return [(px / w - 0.5) * dataScale, (py / h - 0.5) * dataScale];
+            }
+            function d2px(dx, dy) {
+                return [(dx / dataScale + 0.5) * w, (dy / dataScale + 0.5) * h];
+            }
+
+            function generateNoisy() {
+                noisyPoints = cleanPoints.map(p => [
+                    p[0] + randGauss() * noiseSigma,
+                    p[1] + randGauss() * noiseSigma
+                ]);
+            }
+
+            function draw() {
+                ctx.clearRect(0, 0, w, h);
+
+                // Background
+                const bg = ctx.createRadialGradient(w/2, h/2, 0, w/2, h/2, w*0.6);
+                bg.addColorStop(0, '#1e1e3a');
+                bg.addColorStop(1, '#1a1a2e');
+                ctx.fillStyle = bg;
+                ctx.fillRect(0, 0, w, h);
+
+                // For each pair, draw lines and arrows
+                for (let i = 0; i < cleanPoints.length; i++) {
+                    const [cx, cy] = d2px(cleanPoints[i][0], cleanPoints[i][1]);
+                    const [nx, ny] = d2px(noisyPoints[i][0], noisyPoints[i][1]);
+
+                    // Dashed line from noisy to clean
+                    ctx.beginPath();
+                    ctx.setLineDash([3, 3]);
+                    ctx.moveTo(nx, ny);
+                    ctx.lineTo(cx, cy);
+                    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+                    ctx.lineWidth = 1;
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+
+                    // Noise prediction arrow (noisy → clean direction) — BLUE
+                    const dirX = cx - nx, dirY = cy - ny;
+                    const dist = Math.sqrt(dirX * dirX + dirY * dirY);
+                    if (dist > 2) {
+                        const arrowLen = Math.min(dist * 0.6, 40);
+                        const ndx = (dirX / dist) * arrowLen;
+                        const ndy = (dirY / dist) * arrowLen;
+                        drawArrow(ctx, nx, ny, ndx, ndy, 'rgba(79,195,247,0.8)', 45, 5);
+                    }
+
+                    // Score arrow (same direction, different scale) — YELLOW
+                    if (showScore && dist > 2) {
+                        const scoreMag = 1 / (noiseSigma * noiseSigma);
+                        const scoreLen = Math.min(dist * 0.35 * scoreMag * 0.5, 30);
+                        const sdx = (dirX / dist) * scoreLen;
+                        const sdy = (dirY / dist) * scoreLen;
+                        // Offset slightly to the side
+                        const perpX = -dirY / dist * 3;
+                        const perpY = dirX / dist * 3;
+                        drawArrow(ctx, nx + perpX, ny + perpY, sdx, sdy, 'rgba(255,215,64,0.8)', 35, 4);
+                    }
+                }
+
+                // Draw clean points
+                for (const p of cleanPoints) {
+                    const [px, py] = d2px(p[0], p[1]);
+                    ctx.beginPath();
+                    ctx.arc(px, py, 4, 0, Math.PI * 2);
+                    ctx.fillStyle = '#16c79a';
+                    ctx.fill();
+                }
+
+                // Draw noisy points
+                for (const p of noisyPoints) {
+                    const [px, py] = d2px(p[0], p[1]);
+                    ctx.beginPath();
+                    ctx.arc(px, py, 3.5, 0, Math.PI * 2);
+                    ctx.fillStyle = '#ff5252';
+                    ctx.fill();
+                    ctx.strokeStyle = 'rgba(255,82,82,0.4)';
+                    ctx.lineWidth = 1;
+                    ctx.stroke();
+                }
+
+                // Equation overlay
+                ctx.fillStyle = 'rgba(255,255,255,0.7)';
+                ctx.font = '12px JetBrains Mono';
+                ctx.textAlign = 'left';
+                ctx.fillText(`σ = ${noiseSigma.toFixed(1)}   ε = -σ · ∇log q(x)`, 10, 20);
+            }
+
+            sliderSigma.addEventListener('input', () => {
+                noiseSigma = parseFloat(sliderSigma.value);
+                valSigma.textContent = noiseSigma.toFixed(1);
+                generateNoisy();
+                draw();
+            });
+            btnResample.addEventListener('click', () => {
+                generateNoisy();
+                draw();
+            });
+            toggleScore.addEventListener('change', () => {
+                showScore = toggleScore.checked;
+                draw();
+            });
+
+            generateNoisy();
+            draw();
+        })();
+
+
+        /* ================================================================
+           SECTION 4: Langevin Dynamics
+           ================================================================ */
+        (() => {
+            const canvas = document.getElementById('canvas-langevin');
+            const { ctx, w, h } = setupCanvas(canvas);
+
+            const btnStart = document.getElementById('btn-langevin-start');
+            const btnReset = document.getElementById('btn-langevin-reset');
+            const sliderEta = document.getElementById('slider-eta');
+            const valEta = document.getElementById('val-eta');
+            const sliderNoise = document.getElementById('slider-langevin-noise');
+            const valNoise = document.getElementById('val-langevin-noise');
+            const stepLabel = document.getElementById('langevin-step');
+            const progressFill = document.getElementById('langevin-progress');
+
+            const maxSteps = 500;
+            const numParticles = 150;
+            const dataScale = 5;
+
+            // Target distribution: 3 Gaussians
+            const targetMeans = [[-1.3, -0.8], [1.2, 0.5], [0, 1.5]];
+            const targetSig = 0.7;
+
+            let eta = 0.02;
+            let noiseScale = 1.0;
+            let particles = [];
+            let step = 0;
+            let running = false;
+            let animId = null;
+
+            function px2d(px, py) {
+                return [(px / w - 0.5) * dataScale, (py / h - 0.5) * dataScale];
+            }
+            function d2px(dx, dy) {
+                return [(dx / dataScale + 0.5) * w, (dy / dataScale + 0.5) * h];
+            }
+
+            function initParticles() {
+                particles = [];
+                for (let i = 0; i < numParticles; i++) {
+                    particles.push({
+                        x: (Math.random() - 0.5) * dataScale * 1.8,
+                        y: (Math.random() - 0.5) * dataScale * 1.8,
+                        trail: []
+                    });
+                }
+                step = 0;
+            }
+
+            function stepParticles() {
+                for (const p of particles) {
+                    p.trail.push([p.x, p.y]);
+                    if (p.trail.length > 30) p.trail.shift();
+
+                    const [sx, sy] = gaussMixtureScore(p.x, p.y, targetMeans, targetSig);
+                    p.x += eta * sx + Math.sqrt(2 * eta) * noiseScale * randGauss();
+                    p.y += eta * sy + Math.sqrt(2 * eta) * noiseScale * randGauss();
+
+                    // Soft boundary
+                    const bound = dataScale * 0.9;
+                    p.x = clamp(p.x, -bound, bound);
+                    p.y = clamp(p.y, -bound, bound);
+                }
+                step++;
+            }
+
+            function draw() {
+                ctx.clearRect(0, 0, w, h);
+
+                // Background
+                const bg = ctx.createRadialGradient(w/2, h/2, 0, w/2, h/2, w*0.7);
+                bg.addColorStop(0, '#1e1e3a');
+                bg.addColorStop(1, '#1a1a2e');
+                ctx.fillStyle = bg;
+                ctx.fillRect(0, 0, w, h);
+
+                // Draw faint vector field
+                const fieldStep = 40;
+                const arrowMax = fieldStep * 0.4;
+                for (let px = fieldStep/2; px < w; px += fieldStep) {
+                    for (let py = fieldStep/2; py < h; py += fieldStep) {
+                        const [dx, dy] = px2d(px, py);
+                        const [sx, sy] = gaussMixtureScore(dx, dy, targetMeans, targetSig);
+                        const mag = Math.sqrt(sx*sx + sy*sy);
+                        if (mag < 0.01) continue;
+                        const s = arrowMax * Math.min(mag / 3, 1);
+                        const nx = sx / mag, ny = sy / mag;
+                        drawArrow(ctx, px, py, nx * s, ny * s, 'rgba(22,199,154,0.15)', arrowMax, 3);
+                    }
+                }
+
+                // Draw target means as glow
+                for (const m of targetMeans) {
+                    const [px, py] = d2px(m[0], m[1]);
+                    const grd = ctx.createRadialGradient(px, py, 0, px, py, 40);
+                    grd.addColorStop(0, 'rgba(22,199,154,0.25)');
+                    grd.addColorStop(1, 'rgba(22,199,154,0)');
+                    ctx.fillStyle = grd;
+                    ctx.beginPath();
+                    ctx.arc(px, py, 40, 0, Math.PI * 2);
+                    ctx.fill();
+
+                    ctx.beginPath();
+                    ctx.arc(px, py, 5, 0, Math.PI * 2);
+                    ctx.fillStyle = '#16c79a';
+                    ctx.fill();
+                }
+
+                // Draw particle trails
+                for (const p of particles) {
+                    if (p.trail.length > 1) {
+                        ctx.beginPath();
+                        const [startPx, startPy] = d2px(p.trail[0][0], p.trail[0][1]);
+                        ctx.moveTo(startPx, startPy);
+                        for (let i = 1; i < p.trail.length; i++) {
+                            const [tpx, tpy] = d2px(p.trail[i][0], p.trail[i][1]);
+                            ctx.lineTo(tpx, tpy);
+                        }
+                        ctx.strokeStyle = `rgba(255,171,64,${0.08 + 0.15 * (step / maxSteps)})`;
+                        ctx.lineWidth = 0.8;
+                        ctx.stroke();
+                    }
+                }
+
+                // Draw particles
+                for (const p of particles) {
+                    const [px, py] = d2px(p.x, p.y);
+                    ctx.beginPath();
+                    ctx.arc(px, py, 2.5, 0, Math.PI * 2);
+                    ctx.fillStyle = step < 10 ? '#ff5252' :
+                        `hsl(${lerp(0, 160, Math.min(step / maxSteps * 2, 1))}, 80%, 65%)`;
+                    ctx.fill();
+                }
+
+                // Step info
+                stepLabel.textContent = `步骤: ${step}`;
+                progressFill.style.width = `${(step / maxSteps) * 100}%`;
+            }
+
+            function animate() {
+                if (!running || step >= maxSteps) {
+                    running = false;
+                    btnStart.textContent = '继续';
+                    if (step >= maxSteps) btnStart.textContent = '已完成';
+                    return;
+                }
+                // Do multiple sub-steps per frame for speed
+                const stepsPerFrame = 2;
+                for (let i = 0; i < stepsPerFrame && step < maxSteps; i++) {
+                    stepParticles();
+                }
+                draw();
+                animId = requestAnimationFrame(animate);
+            }
+
+            btnStart.addEventListener('click', () => {
+                if (step >= maxSteps) return;
+                if (running) {
+                    running = false;
+                    btnStart.textContent = '继续';
+                } else {
+                    running = true;
+                    btnStart.textContent = '暂停';
+                    animate();
+                }
+            });
+
+            btnReset.addEventListener('click', () => {
+                running = false;
+                if (animId) cancelAnimationFrame(animId);
+                initParticles();
+                btnStart.textContent = '开始';
+                draw();
+            });
+
+            sliderEta.addEventListener('input', () => {
+                eta = parseFloat(sliderEta.value);
+                valEta.textContent = eta.toFixed(3);
+            });
+            sliderNoise.addEventListener('input', () => {
+                noiseScale = parseFloat(sliderNoise.value);
+                valNoise.textContent = noiseScale.toFixed(1);
+            });
+
+            initParticles();
+            draw();
+        })();
+
+
+        /* ================================================================
+           SECTION 5: Multi-Scale Denoising
+           ================================================================ */
+        (() => {
+            const canvas = document.getElementById('canvas-multiscale');
+            const { ctx, w, h } = setupCanvas(canvas);
+
+            const sliderSigma = document.getElementById('slider-multiscale-sigma');
+            const valSigma = document.getElementById('val-multiscale-sigma');
+            const btnSweep = document.getElementById('btn-sweep-sigma');
+
+            // Two modes for data distribution
+            const dataModes = [[-1.5, -0.5], [1.5, 0.5]];
+            const dataSig = 0.35;
+            const dataScale = 4.5;
+
+            let currentSigma = 2.0;
+            let sweeping = false;
+
+            function px2d(px, py) {
+                return [(px / w - 0.5) * dataScale, (py / h - 0.5) * dataScale];
+            }
+            function d2px(dx, dy) {
+                return [(dx / dataScale + 0.5) * w, (dy / dataScale + 0.5) * h];
+            }
+
+            // Score of noise-perturbed distribution: original convolved with Gaussian(sigma)
+            // Effective sigma = sqrt(dataSig² + sigma²)
+            function effectiveSigma(sigma) {
+                return Math.sqrt(dataSig * dataSig + sigma * sigma);
+            }
+
+            function draw() {
+                ctx.clearRect(0, 0, w, h);
+
+                // Background
+                ctx.fillStyle = '#1a1a2e';
+                ctx.fillRect(0, 0, w, h);
+
+                const effSig = effectiveSigma(currentSigma);
+
+                // Draw density heatmap
+                const imgData = ctx.createImageData(w, h);
+                for (let py = 0; py < h; py++) {
+                    for (let px = 0; px < w; px++) {
+                        const [dx, dy] = px2d(px, py);
+                        const d = gaussMixtureDensity(dx, dy, dataModes, effSig);
+                        const idx = (py * w + px) * 4;
+                        const v = Math.min(d * 2, 1);
+                        // Blue-green heatmap
+                        imgData.data[idx] = Math.floor(30 + 49 * v);
+                        imgData.data[idx+1] = Math.floor(30 + 165 * v);
+                        imgData.data[idx+2] = Math.floor(60 + 187 * v);
+                        imgData.data[idx+3] = Math.floor(40 + v * 160);
+                    }
+                }
+                putImageDataScaled(ctx, imgData, w, h);
+
+                // Mark low-density region between modes
+                if (currentSigma < 1.0) {
+                    const midX = (dataModes[0][0] + dataModes[1][0]) / 2;
+                    const midY = (dataModes[0][1] + dataModes[1][1]) / 2;
+                    const [mpx, mpy] = d2px(midX, midY);
+                    const radius = 30 + (1.0 - currentSigma) * 40;
+
+                    ctx.beginPath();
+                    ctx.arc(mpx, mpy, radius, 0, Math.PI * 2);
+                    ctx.strokeStyle = 'rgba(255,128,171,0.6)';
+                    ctx.lineWidth = 2;
+                    ctx.setLineDash([5, 5]);
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+
+                    ctx.fillStyle = 'rgba(255,128,171,0.7)';
+                    ctx.font = '11px Noto Sans SC';
+                    ctx.textAlign = 'center';
+                    ctx.fillText('低密度区域', mpx, mpy - radius - 6);
+                    ctx.fillText('得分估计不准', mpx, mpy + radius + 14);
+                }
+
+                // Vector field
+                const step = 30;
+                const arrowMax = step * 0.5;
+                for (let px = step / 2; px < w; px += step) {
+                    for (let py = step / 2; py < h; py += step) {
+                        const [dx, dy] = px2d(px, py);
+                        const [sx, sy] = gaussMixtureScore(dx, dy, dataModes, effSig);
+                        const mag = Math.sqrt(sx * sx + sy * sy);
+                        if (mag < 0.005) continue;
+
+                        const s = arrowMax * Math.min(mag / 2.5, 1);
+                        const nx = sx / mag, ny = sy / mag;
+
+                        // Color: high sigma = blue, low sigma = green
+                        const t = clamp((currentSigma - 0.2) / 3.8, 0, 1);
+                        const hue = lerp(160, 210, t);
+                        const alpha = clamp(0.3 + mag * 0.3, 0.25, 0.9);
+                        drawArrow(ctx, px, py, nx * s, ny * s, hslStr(hue, 75, 60, alpha), arrowMax, 4);
+                    }
+                }
+
+                // Draw data modes
+                for (const m of dataModes) {
+                    const [px, py] = d2px(m[0], m[1]);
+
+                    // Glow proportional to how "sharp" the density is
+                    const glowR = 15 + currentSigma * 10;
+                    const grd = ctx.createRadialGradient(px, py, 0, px, py, glowR);
+                    grd.addColorStop(0, 'rgba(22,199,154,0.5)');
+                    grd.addColorStop(1, 'rgba(22,199,154,0)');
+                    ctx.fillStyle = grd;
+                    ctx.beginPath();
+                    ctx.arc(px, py, glowR, 0, Math.PI * 2);
+                    ctx.fill();
+
+                    ctx.beginPath();
+                    ctx.arc(px, py, 6, 0, Math.PI * 2);
+                    ctx.fillStyle = '#16c79a';
+                    ctx.fill();
+                    ctx.strokeStyle = '#fff';
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+                }
+
+                // Status label
+                ctx.fillStyle = 'rgba(255,255,255,0.8)';
+                ctx.font = '13px JetBrains Mono';
+                ctx.textAlign = 'left';
+                const status = currentSigma > 2.5 ? '大噪声：全局覆盖，方向模糊' :
+                    currentSigma > 1.0 ? '中噪声：较好的全局-局部平衡' :
+                    '小噪声：局部精确，低密度区失效';
+                ctx.fillText(`σ = ${currentSigma.toFixed(2)}  ${status}`, 10, 22);
+            }
+
+            sliderSigma.addEventListener('input', () => {
+                currentSigma = parseFloat(sliderSigma.value);
+                valSigma.textContent = currentSigma.toFixed(2);
+                draw();
+            });
+
+            btnSweep.addEventListener('click', () => {
+                if (sweeping) return;
+                sweeping = true;
+                btnSweep.textContent = '扫描中...';
+                const obj = { sigma: 4.0 };
+                gsap.to(obj, {
+                    sigma: 0.2, duration: 4, ease: 'power1.inOut',
+                    onUpdate: () => {
+                        currentSigma = obj.sigma;
+                        sliderSigma.value = currentSigma;
+                        valSigma.textContent = currentSigma.toFixed(2);
+                        draw();
+                    },
+                    onComplete: () => {
+                        sweeping = false;
+                        btnSweep.textContent = '自动扫描';
+                    }
+                });
+            });
+
+            draw();
+        })();
+
+
+        /* ================================================================
+           GSAP entrance animations
+           ================================================================ */
+        gsap.from('.hero-banner', { opacity: 0, y: -30, duration: 0.8, ease: 'power2.out' });
+        gsap.from('.section', {
+            opacity: 0, y: 40, duration: 0.7, stagger: 0.15, ease: 'power2.out',
+            scrollTrigger: undefined // no scrollTrigger without plugin, just sequential
+        });
+
+    }); // end DOMContentLoaded
+
+    // KaTeX auto-render fallback (wait for script load)
+    document.addEventListener('DOMContentLoaded', () => {
+        const checkKatex = setInterval(() => {
+            if (typeof renderMathInElement === 'function') {
+                clearInterval(checkKatex);
+                renderMathInElement(document.body, {
+                    delimiters: [
+                        { left: '$$', right: '$$', display: true },
+                        { left: '$', right: '$', display: false }
+                    ],
+                    throwOnError: false
+                });
+            }
+        }, 200);
+        setTimeout(() => clearInterval(checkKatex), 5000);
+    });
+    </script>
+</body>
+</html>

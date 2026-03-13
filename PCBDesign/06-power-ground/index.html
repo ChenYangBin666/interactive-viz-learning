@@ -1,0 +1,1350 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>电源与地 — PCB 设计</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=JetBrains+Mono:wght@400;600&family=Noto+Sans+SC:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<link rel="stylesheet" href="../shared/styles/common.css">
+<link rel="stylesheet" href="../shared/styles/components.css">
+<style>
+canvas{display:block;width:100%;border-radius:var(--radius-md)}
+.ctrl-row{display:flex;flex-wrap:wrap;gap:.75rem;align-items:center;margin:.75rem 0}
+.ctrl-row label{font-size:.85rem;color:var(--text-secondary);white-space:nowrap}
+.readout{font-family:var(--font-mono);font-size:.85rem;color:var(--accent-green);min-width:3.5rem;text-align:center}
+.readout.warn{color:var(--accent-orange)}.readout.danger{color:var(--accent-red)}
+.cap-palette{display:flex;gap:.5rem;flex-wrap:wrap;margin:.5rem 0}
+.cap-btn{padding:.35rem .7rem;border-radius:var(--radius-sm);border:1px solid var(--border-color);background:var(--bg-secondary);color:var(--text-secondary);font-size:.8rem;cursor:pointer;transition:all .2s;font-family:var(--font-mono)}
+.cap-btn:hover,.cap-btn.active{border-color:var(--accent-blue);color:var(--accent-blue);background:rgba(79,195,247,.1)}
+.status-bar{display:flex;gap:1rem;flex-wrap:wrap;padding:.6rem 1rem;background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:var(--radius-sm);font-size:.82rem;color:var(--text-secondary)}
+.status-bar .val{color:var(--accent-green);font-family:var(--font-mono)}
+.node-info{position:absolute;padding:.8rem 1rem;background:rgba(15,52,96,.95);border:1px solid var(--accent-blue);border-radius:var(--radius-md);color:var(--text-primary);font-size:.82rem;pointer-events:none;z-index:50;min-width:180px;backdrop-filter:blur(6px)}
+.node-info h4{color:var(--accent-blue);margin-bottom:.3rem;font-size:.9rem}
+.node-info .row{display:flex;justify-content:space-between;gap:1rem;margin-top:.2rem}
+.node-info .row .lbl{color:var(--text-muted)}.node-info .row .v{color:var(--accent-green);font-family:var(--font-mono)}
+.node-info .row .v.warn{color:var(--accent-orange)}.node-info .row .v.danger{color:var(--accent-red)}
+.layer-row{display:flex;align-items:center;gap:.5rem;padding:.5rem .75rem;border-radius:var(--radius-sm);border:1px solid var(--border-color);background:var(--bg-secondary);cursor:pointer;transition:all .2s;font-size:.85rem}
+.layer-row:hover{border-color:var(--accent-green)}.layer-row.active{border-color:var(--accent-green);background:rgba(22,199,154,.08)}
+.layer-color{width:16px;height:16px;border-radius:3px;flex-shrink:0}
+.formula-card{padding:1rem;background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:var(--radius-md);margin:.75rem 0}
+</style>
+</head>
+<body>
+<div class="page-container">
+<!-- ===== Section 1: 电源完整性概念 ===== -->
+<section class="section" id="sec-pdn">
+<div class="section-title"><div class="icon">⚡</div><h2>电源完整性概念</h2></div>
+<div class="split-layout">
+<div class="text-panel">
+<p>电源配送网络 (PDN) 的目标是以最低阻抗将干净的电压送到 IC 电源引脚。走线上存在直流电阻，导致 <strong>IR 压降</strong>：电压随路径长度递减。</p>
+<div class="formula-card" id="formula-pdn"></div>
+<div class="info-box">
+<p>设计准则：PDN 阻抗必须足够低，使得最大瞬态电流引起的纹波不超过容许值。</p>
+</div>
+<p class="text-sm text-muted">铜的电阻率 ρ = 1.72×10⁻⁸ Ω·m，1oz 铜厚 ≈ 35μm。走线越宽越短，电阻越低，压降越小。</p>
+<div class="ctrl-row">
+<label>走线宽度</label>
+<input type="range" id="sl-trace-w" min="5" max="60" value="20" style="width:120px">
+<span class="readout" id="ro-trace-w">20 mil</span>
+</div>
+<div class="ctrl-row">
+<label>走线长度</label>
+<input type="range" id="sl-trace-l" min="10" max="200" value="80" style="width:120px">
+<span class="readout" id="ro-trace-l">80 mm</span>
+</div>
+<div class="status-bar mt-1">
+<div>走线电阻: <span class="val" id="st-res">—</span></div>
+<div>IC 端电压: <span class="val" id="st-vic">—</span></div>
+<div>压降: <span class="val" id="st-drop">—</span></div>
+</div>
+<div class="info-box success mt-1">
+<p>目标：对于 3.3V 电源，5% 纹波容许值为 165mV。在 2A 瞬态电流下，目标阻抗 Z < 82.5mΩ。</p>
+</div>
+</div>
+<div class="viz-panel">
+<div class="viz-area"><canvas id="cv-pdn" height="420"></canvas><span class="watermark">PDN IR-Drop</span></div>
+</div>
+</div>
+</section>
+
+<!-- ===== Section 2: 去耦电容 ===== -->
+<section class="section" id="sec-decap">
+<div class="section-title"><div class="icon">🔋</div><h2>去耦电容</h2></div>
+<div class="split-layout">
+<div class="text-panel">
+<p>去耦电容充当本地能量储备，在 IC 发生瞬态大电流需求时提供电荷。不同容值的电容在不同频率范围提供低阻抗。选择多个不同值的电容并联可覆盖宽频段。</p>
+<div class="info-box mt-1">
+<p>大电容(10μF~100μF)覆盖低频，小电容(100pF~100nF)覆盖高频。ESL(等效串联电感)决定谐振频率。</p>
+</div>
+<div class="formula-card" id="formula-cap"></div>
+<div class="cap-palette" id="cap-palette"></div>
+<div class="ctrl-row">
+<label>放置距离</label>
+<input type="range" id="sl-cap-dist" min="1" max="50" value="5" style="width:120px">
+<span class="readout" id="ro-cap-dist">5 mm</span>
+</div>
+<div class="ctrl-row">
+<label>电容数量</label>
+<input type="range" id="sl-cap-cnt" min="1" max="8" value="3" style="width:100px">
+<span class="readout" id="ro-cap-cnt">3</span>
+</div>
+<div class="ctrl-row">
+<button class="btn btn-primary btn-sm" id="btn-spike">触发电流脉冲</button>
+</div>
+<div class="status-bar">
+<div>选中: <span class="val" id="st-capval">100nF</span></div>
+<div>谐振频率: <span class="val" id="st-fres">—</span></div>
+</div>
+</div>
+<div class="viz-panel">
+<div class="viz-area"><canvas id="cv-decap" height="420"></canvas><span class="watermark">去耦电容</span></div>
+</div>
+</div>
+</section>
+
+<!-- ===== Section 3: 地平面设计 ===== -->
+<section class="section" id="sec-gnd">
+<div class="section-title"><div class="icon">🌍</div><h2>地平面设计</h2></div>
+<div class="split-layout">
+<div class="text-panel">
+<p>完整的地平面为信号提供低阻抗回流路径。高频信号的回流紧贴走线正下方的地平面流动。地平面上的裂缝 (slot) 会迫使回流绕行，增大环路面积，带来 EMI 和信号完整性风险。</p>
+<div class="info-box warning">
+<p>在地平面上放置裂缝后观察回流路径变化——环路面积越大，辐射越强。</p>
+</div>
+<div class="ctrl-row">
+<button class="btn btn-sm" id="btn-slot-mode">切换: 放置裂缝</button>
+<button class="btn btn-sm" id="btn-clear-slots">清除裂缝</button>
+<button class="btn btn-sm" id="btn-toggle-freq">低频 / 高频</button>
+</div>
+<div class="status-bar">
+<div>环路面积: <span class="val" id="st-loop">—</span></div>
+<div>模式: <span class="val" id="st-freq">高频</span></div>
+</div>
+</div>
+<div class="viz-panel">
+<div class="viz-area"><canvas id="cv-gnd" height="420"></canvas><span class="watermark">地平面回流</span></div>
+</div>
+</div>
+</section>
+
+<!-- ===== Section 4: 电源层叠设计 ===== -->
+<section class="section" id="sec-stackup">
+<div class="section-title"><div class="icon">📚</div><h2>电源层叠设计</h2></div>
+<div class="split-layout">
+<div class="text-panel">
+<p>4 层板经典叠层：Signal - GND - VCC - Signal。GND 与 VCC 平面紧密相邻产生寄生电容，形成天然去耦，降低 PDN 阻抗。层间距越小、面积越大，电容越大。</p>
+<div class="info-box mt-1">
+<p>FR-4 的相对介电常数约 4.2~4.5。减小 GND-VCC 间距可显著增加平面电容，但需考虑制造工艺限制。</p>
+</div>
+<div class="formula-card" id="formula-stackup"></div>
+<div class="ctrl-row">
+<label>层间距 d</label>
+<input type="range" id="sl-spacing" min="2" max="30" value="8" style="width:120px">
+<span class="readout" id="ro-spacing">8 mil</span>
+</div>
+<div class="ctrl-row">
+<label>板面积 A</label>
+<input type="range" id="sl-area" min="10" max="200" value="60" style="width:120px">
+<span class="readout" id="ro-area">60 cm²</span>
+</div>
+<div class="ctrl-row">
+<label>介电常数 εr</label>
+<input type="range" id="sl-er" min="20" max="60" value="42" style="width:100px">
+<span class="readout" id="ro-er">4.2</span>
+</div>
+<div class="ctrl-row">
+<button class="btn btn-sm" id="btn-2layer">2 层板</button>
+<button class="btn btn-sm active" id="btn-4layer">4 层板</button>
+</div>
+<div class="status-bar">
+<div>平面电容: <span class="val" id="st-planecap">—</span></div>
+</div>
+</div>
+<div class="viz-panel">
+<div class="viz-area"><canvas id="cv-stackup" height="420"></canvas><span class="watermark">层叠设计</span></div>
+</div>
+</div>
+</section>
+
+<!-- ===== Section 5: 电源树与配电 ===== -->
+<section class="section" id="sec-tree">
+<div class="section-title"><div class="icon">🌳</div><h2>电源树与配电</h2></div>
+<div class="split-layout">
+<div class="text-panel">
+<p>电源树描述从输入端到各负载的电压变换与分配。每个调压器有额定输出电流和效率，需确保负载不超过预算。DCDC 效率高但噪声大，LDO 纹波小但压差导致热耗。</p>
+<div class="info-box warning">
+<p>调整各路负载电流，观察调压器是否超出额定功率。热超标将产生告警。</p>
+</div>
+<div class="ctrl-row">
+<label>3.3V 负载</label>
+<input type="range" id="sl-load33" min="0" max="2000" value="500" step="50" style="width:120px">
+<span class="readout" id="ro-load33">500 mA</span>
+</div>
+<div class="ctrl-row">
+<label>1.8V 负载</label>
+<input type="range" id="sl-load18" min="0" max="1500" value="300" step="50" style="width:120px">
+<span class="readout" id="ro-load18">300 mA</span>
+</div>
+<div class="ctrl-row">
+<label>1.2V 负载</label>
+<input type="range" id="sl-load12" min="0" max="3000" value="800" step="50" style="width:120px">
+<span class="readout" id="ro-load12">800 mA</span>
+</div>
+<div class="status-bar">
+<div>总输入功率: <span class="val" id="st-pin">—</span></div>
+<div>总效率: <span class="val" id="st-eff">—</span></div>
+</div>
+</div>
+<div class="viz-panel">
+<div class="viz-area" style="position:relative">
+<canvas id="cv-tree" height="460"></canvas>
+<div class="node-info hidden" id="node-info"></div>
+<span class="watermark">电源树</span>
+</div>
+</div>
+</div>
+</section>
+</div><!-- /page-container -->
+
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+<script src="../shared/scripts/nav.js"></script>
+<script>
+// roundRect polyfill for older browsers
+if (!CanvasRenderingContext2D.prototype.roundRect) {
+    CanvasRenderingContext2D.prototype.roundRect = function(x, y, w, h, r) {
+        if (typeof r === 'number') r = [r, r, r, r];
+        const [tl, tr, br, bl] = r;
+        this.moveTo(x + tl, y);
+        this.arcTo(x + w, y, x + w, y + h, tr);
+        this.arcTo(x + w, y + h, x, y + h, br);
+        this.arcTo(x, y + h, x, y, bl);
+        this.arcTo(x, y, x + w, y, tl);
+    };
+}
+/* ================================================================
+   06 — 电源与地  ·  Interactive Module  ·  ~1300 lines
+   ================================================================ */
+"use strict";
+const C = {
+    green:'#16c79a', blue:'#4fc3f7', purple:'#b388ff', orange:'#ffab40',
+    red:'#ff5252', yellow:'#ffd740', pink:'#ff80ab',
+    bg:'#1a1a2e', bg2:'#16213e', card:'#0f3460', border:'#2a2a4a',
+    text:'#e8e8e8', dim:'#6c6c7c'
+};
+const dpr = Math.min(window.devicePixelRatio||1,2);
+function initCanvas(id){
+    const cv=document.getElementById(id), ctx=cv.getContext('2d');
+    function resize(){
+        const r=cv.parentElement.getBoundingClientRect();
+        cv.width=r.width*dpr; cv.height=(parseInt(cv.getAttribute('height'))||400)*dpr;
+        cv.style.height=(parseInt(cv.getAttribute('height'))||400)+'px';
+        ctx.setTransform(dpr,0,0,dpr,0,0);
+    }
+    resize();
+    return {cv,ctx,resize,w:()=>cv.width/dpr,h:()=>cv.height/dpr};
+}
+function lerp(a,b,t){return a+(b-a)*t}
+function clamp(v,mn,mx){return Math.max(mn,Math.min(mx,v))}
+function hsl(h,s,l){return`hsl(${h},${s}%,${l}%)`}
+
+/* ---------- KaTeX formulas ---------- */
+document.addEventListener('DOMContentLoaded',()=>{
+    katex.render('Z_{PDN} < \\dfrac{V_{ripple}}{I_{transient}}', document.getElementById('formula-pdn'),{displayMode:true});
+    katex.render('Z_C(f)=\\dfrac{1}{2\\pi f C}\\;,\\quad f_{res}=\\dfrac{1}{2\\pi\\sqrt{LC}}', document.getElementById('formula-cap'),{displayMode:true});
+    katex.render('C_{plane}=\\varepsilon_0 \\varepsilon_r \\dfrac{A}{d}', document.getElementById('formula-stackup'),{displayMode:true});
+});
+
+/* ================================================================
+   SECTION 1 — 电源完整性概念 / IR Drop
+   ================================================================ */
+(()=>{
+    const {cv,ctx,resize,w,h}=initCanvas('cv-pdn');
+    const slW=document.getElementById('sl-trace-w'), slL=document.getElementById('sl-trace-l');
+    const roW=document.getElementById('ro-trace-w'), roL=document.getElementById('ro-trace-l');
+    const stRes=document.getElementById('st-res'), stVic=document.getElementById('st-vic'), stDrop=document.getElementById('st-drop');
+    const Vsrc=3.3, Iload=0.8, rho=1.72e-8;
+    let traceW=20, traceL=80, anim=0;
+
+    function calcR(){
+        const wm=traceW*25.4e-6, thick=35e-6, lm=traceL/1000;
+        return rho*lm/(wm*thick);
+    }
+    function update(){
+        traceW=+slW.value; traceL=+slL.value;
+        roW.textContent=traceW+' mil'; roL.textContent=traceL+' mm';
+        const R=calcR(), drop=Iload*R, vic=Vsrc-drop;
+        stRes.textContent=R.toFixed(3)+' Ω';
+        stVic.textContent=vic.toFixed(3)+' V';
+        stDrop.textContent=(drop*1000).toFixed(1)+' mV';
+        stVic.className='val'+(vic<3.0?' danger':vic<3.15?' warn':'');
+        stDrop.className='val'+(drop>0.3?' danger':drop>0.15?' warn':'');
+    }
+
+    function draw(){
+        const W=w(), H=h();
+        ctx.clearRect(0,0,W,H);
+        /* VRM block */
+        const vrmX=40, vrmY=H/2-40, vrmW=70, vrmH=80;
+        ctx.fillStyle=C.card; ctx.strokeStyle=C.green; ctx.lineWidth=2;
+        ctx.beginPath(); ctx.roundRect(vrmX,vrmY,vrmW,vrmH,8); ctx.fill(); ctx.stroke();
+        ctx.fillStyle=C.green; ctx.font='bold 13px "Noto Sans SC"'; ctx.textAlign='center';
+        ctx.fillText('VRM',vrmX+vrmW/2,vrmY+35);
+        ctx.font='11px "JetBrains Mono"'; ctx.fillStyle=C.text;
+        ctx.fillText(Vsrc.toFixed(1)+'V',vrmX+vrmW/2,vrmY+55);
+
+        /* IC block */
+        const icX=W-110, icY=H/2-50, icW=80, icH=100;
+        const R=calcR(), drop=Iload*R, vic=Vsrc-drop;
+        ctx.fillStyle=C.card; ctx.strokeStyle=vic<3.0?C.red:vic<3.15?C.orange:C.blue; ctx.lineWidth=2;
+        ctx.beginPath(); ctx.roundRect(icX,icY,icW,icH,8); ctx.fill(); ctx.stroke();
+        ctx.fillStyle=C.blue; ctx.font='bold 13px "Noto Sans SC"'; ctx.textAlign='center';
+        ctx.fillText('IC',icX+icW/2,icY+35);
+        ctx.font='11px "JetBrains Mono"'; ctx.fillStyle=vic<3.0?C.red:vic<3.15?C.orange:C.green;
+        ctx.fillText(vic.toFixed(3)+'V',icX+icW/2,icY+55);
+        ctx.fillStyle=C.dim; ctx.font='10px "Noto Sans SC"';
+        ctx.fillText(Iload+'A 负载',icX+icW/2,icY+75);
+
+        /* Trace: VRM output to IC */
+        const tx0=vrmX+vrmW, tx1=icX, ty=H/2;
+        const trPx=Math.max(4,traceW/60*20);
+        const segs=80;
+        for(let i=0;i<segs;i++){
+            const t0=i/segs, t1=(i+1)/segs;
+            const x0=lerp(tx0,tx1,t0), x1=lerp(tx0,tx1,t1);
+            const v0=lerp(Vsrc,vic,t0), v1=lerp(Vsrc,vic,t1);
+            const ratio0=(v0-2.8)/(Vsrc-2.8), ratio1=(v1-2.8)/(Vsrc-2.8);
+            const h0=lerp(0,140,clamp(ratio0,0,1)), h1=lerp(0,140,clamp(ratio1,0,1));
+            const grad=ctx.createLinearGradient(x0,0,x1,0);
+            grad.addColorStop(0,hsl(h0,80,50)); grad.addColorStop(1,hsl(h1,80,50));
+            ctx.fillStyle=grad;
+            ctx.fillRect(x0,ty-trPx/2,x1-x0+1,trPx);
+        }
+        /* Trace label */
+        ctx.fillStyle=C.dim; ctx.font='10px "JetBrains Mono"'; ctx.textAlign='center';
+        ctx.fillText(traceW+' mil × '+traceL+' mm',(tx0+tx1)/2,ty-trPx/2-8);
+
+        /* animated current dots */
+        anim=(anim+0.005)%1;
+        const dotCount=12;
+        for(let i=0;i<dotCount;i++){
+            const t=((anim+i/dotCount)%1);
+            const dx=lerp(tx0,tx1,t);
+            const v=lerp(Vsrc,vic,t);
+            const hr=lerp(0,140,clamp((v-2.8)/(Vsrc-2.8),0,1));
+            ctx.beginPath(); ctx.arc(dx,ty,3,0,Math.PI*2);
+            ctx.fillStyle=hsl(hr,90,70); ctx.fill();
+        }
+
+        /* ground return */
+        const gy=ty+60;
+        ctx.setLineDash([6,4]); ctx.strokeStyle=C.dim; ctx.lineWidth=1.5;
+        ctx.beginPath(); ctx.moveTo(tx0,gy); ctx.lineTo(tx1,gy); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle=C.dim; ctx.font='10px "Noto Sans SC"'; ctx.textAlign='center';
+        ctx.fillText('GND 回流',(tx0+tx1)/2,gy+16);
+
+        /* vertical connections */
+        ctx.strokeStyle=C.border; ctx.lineWidth=1;
+        ctx.beginPath(); ctx.moveTo(tx0,ty); ctx.lineTo(tx0,ty); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(vrmX+vrmW,vrmY+vrmH); ctx.lineTo(vrmX+vrmW,gy); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(icX,icY+icH); ctx.lineTo(icX,gy); ctx.stroke();
+
+        /* target impedance line & annotation */
+        const Vripple=Vsrc*0.05, Itrans=2.0;
+        const Ztarget=Vripple/Itrans;
+        const ztX=tx0, ztY=H/2-80, ztW=tx1-tx0;
+        ctx.strokeStyle=C.purple+'88'; ctx.lineWidth=1; ctx.setLineDash([6,4]);
+        ctx.beginPath(); ctx.moveTo(ztX,ztY); ctx.lineTo(ztX+ztW,ztY); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle=C.purple; ctx.font='9px "JetBrains Mono"'; ctx.textAlign='right';
+        ctx.fillText('Z_target = '+Ztarget.toFixed(3)+' Ω',ztX+ztW,ztY-5);
+        ctx.fillStyle=C.dim; ctx.font='8px "Noto Sans SC"'; ctx.textAlign='right';
+        ctx.fillText('(5% ripple, 2A transient)',ztX+ztW,ztY+12);
+
+        /* PDN impedance vs target comparison bar */
+        const barX=tx0, barY2=H-85, barW2=tx1-tx0, barH2=16;
+        const Rtrace=calcR();
+        const ratio2=clamp(Rtrace/Ztarget,0,2);
+        ctx.fillStyle=C.bg2;
+        ctx.beginPath(); ctx.roundRect(barX,barY2,barW2,barH2,4); ctx.fill();
+        const fillW=clamp(ratio2*barW2/2,0,barW2);
+        const barColor=ratio2>1?C.red:ratio2>0.6?C.orange:C.green;
+        ctx.fillStyle=barColor+'66';
+        ctx.beginPath(); ctx.roundRect(barX,barY2,fillW,barH2,4); ctx.fill();
+        /* target line on bar */
+        const targetX=barX+barW2/2;
+        ctx.strokeStyle=C.purple; ctx.lineWidth=2;
+        ctx.beginPath(); ctx.moveTo(targetX,barY2-3); ctx.lineTo(targetX,barY2+barH2+3); ctx.stroke();
+        ctx.fillStyle=C.dim; ctx.font='8px "Noto Sans SC"'; ctx.textAlign='center';
+        ctx.fillText('R_trace / Z_target',barX+barW2/2,barY2-5);
+        ctx.fillStyle=barColor; ctx.font='9px "JetBrains Mono"'; ctx.textAlign='left';
+        ctx.fillText((ratio2*100).toFixed(0)+'%',barX+fillW+4,barY2+barH2/2+3);
+
+        /* voltage gradient legend */
+        const lgX=tx0, lgY=H-40, lgW=tx1-tx0, lgH=12;
+        const lgGrad=ctx.createLinearGradient(lgX,0,lgX+lgW,0);
+        lgGrad.addColorStop(0,hsl(140,80,50)); lgGrad.addColorStop(1,hsl(0,80,50));
+        ctx.fillStyle=lgGrad; ctx.beginPath(); ctx.roundRect(lgX,lgY,lgW,lgH,4); ctx.fill();
+        ctx.fillStyle=C.text; ctx.font='10px "JetBrains Mono"'; ctx.textAlign='left';
+        ctx.fillText(Vsrc.toFixed(1)+'V',lgX,lgY-4);
+        ctx.textAlign='right';
+        ctx.fillText(vic.toFixed(2)+'V',lgX+lgW,lgY-4);
+        ctx.textAlign='center';
+        ctx.fillStyle=C.dim; ctx.fillText('电压分布',lgX+lgW/2,lgY+lgH+14);
+
+        requestAnimationFrame(draw);
+    }
+    slW.addEventListener('input',update); slL.addEventListener('input',update);
+    window.addEventListener('resize',()=>{resize()});
+    update(); draw();
+})();
+
+/* ================================================================
+   SECTION 2 — 去耦电容
+   ================================================================ */
+(()=>{
+    const {cv,ctx,resize,w,h}=initCanvas('cv-decap');
+    const capValues=[{label:'100pF',c:100e-12,color:C.purple},{label:'1nF',c:1e-9,color:C.pink},{label:'10nF',c:10e-9,color:C.blue},{label:'100nF',c:100e-9,color:C.green},{label:'1μF',c:1e-6,color:C.yellow},{label:'10μF',c:10e-6,color:C.orange},{label:'100μF',c:100e-6,color:C.red}];
+    let selCap=3, capDist=5, capCnt=3, spikeT=-1, anim=0;
+    const palette=document.getElementById('cap-palette');
+    const slDist=document.getElementById('sl-cap-dist'), roDist=document.getElementById('ro-cap-dist');
+    const slCnt=document.getElementById('sl-cap-cnt'), roCnt=document.getElementById('ro-cap-cnt');
+    const btnSpike=document.getElementById('btn-spike');
+    const stCapVal=document.getElementById('st-capval'), stFres=document.getElementById('st-fres');
+
+    capValues.forEach((cv2,i)=>{
+        const b=document.createElement('button');
+        b.className='cap-btn'+(i===selCap?' active':'');
+        b.textContent=cv2.label;
+        b.style.borderColor=cv2.color; b.style.color=cv2.color;
+        b.onclick=()=>{selCap=i; palette.querySelectorAll('.cap-btn').forEach((e,j)=>e.classList.toggle('active',j===i)); updateInfo()};
+        palette.appendChild(b);
+    });
+
+    function updateInfo(){
+        const c=capValues[selCap];
+        stCapVal.textContent=c.label;
+        const esl=1e-9;
+        const fres=1/(2*Math.PI*Math.sqrt(esl*c.c));
+        stFres.textContent=fres>=1e6?(fres/1e6).toFixed(1)+' MHz':(fres/1e3).toFixed(0)+' kHz';
+    }
+
+    slDist.addEventListener('input',()=>{capDist=+slDist.value;roDist.textContent=capDist+' mm'});
+    slCnt.addEventListener('input',()=>{capCnt=+slCnt.value;roCnt.textContent=capCnt});
+    btnSpike.addEventListener('click',()=>{spikeT=0});
+
+    function draw(){
+        const W=w(), H=h();
+        ctx.clearRect(0,0,W,H);
+        anim+=0.016;
+
+        /* IC chip */
+        const icX=W/2-30, icY=50, icW=60, icH=60;
+        ctx.fillStyle=C.card; ctx.strokeStyle=C.blue; ctx.lineWidth=2;
+        ctx.beginPath(); ctx.roundRect(icX,icY,icW,icH,6); ctx.fill(); ctx.stroke();
+        ctx.fillStyle=C.blue; ctx.font='bold 12px "Noto Sans SC"'; ctx.textAlign='center';
+        ctx.fillText('IC',icX+icW/2,icY+28);
+
+        /* power pins */
+        const pinCount=6, pinY=icY+icH;
+        for(let i=0;i<pinCount;i++){
+            const px=icX+10+i*(icW-20)/(pinCount-1);
+            ctx.fillStyle=C.orange; ctx.fillRect(px-2,pinY,4,10);
+        }
+        ctx.fillStyle=C.dim; ctx.font='9px "Noto Sans SC"'; ctx.textAlign='center';
+        ctx.fillText('VCC pins',icX+icW/2,pinY+24);
+
+        /* Power rail line */
+        const railY=pinY+35, railX0=30, railX1=W-30;
+        ctx.strokeStyle=C.orange; ctx.lineWidth=3;
+        ctx.beginPath(); ctx.moveTo(railX0,railY); ctx.lineTo(railX1,railY); ctx.stroke();
+        ctx.fillStyle=C.dim; ctx.font='9px "JetBrains Mono"'; ctx.textAlign='left';
+        ctx.fillText('VCC Rail',railX0,railY-8);
+
+        /* GND rail */
+        const gndY=railY+120;
+        ctx.strokeStyle=C.dim; ctx.lineWidth=2;
+        ctx.beginPath(); ctx.moveTo(railX0,gndY); ctx.lineTo(railX1,gndY); ctx.stroke();
+        ctx.fillStyle=C.dim; ctx.textAlign='left';
+        ctx.fillText('GND Rail',railX0,gndY+16);
+
+        /* pin connections to rail */
+        ctx.strokeStyle=C.border; ctx.lineWidth=1;
+        for(let i=0;i<pinCount;i++){
+            const px=icX+10+i*(icW-20)/(pinCount-1);
+            ctx.beginPath(); ctx.moveTo(px,pinY+10); ctx.lineTo(px,railY); ctx.stroke();
+        }
+
+        /* Decoupling caps */
+        const capC=capValues[selCap];
+        const capSpacing=Math.max(30,Math.min(60,(W-100)/capCnt));
+        const capsStartX=W/2-(capCnt-1)*capSpacing/2;
+        for(let i=0;i<capCnt;i++){
+            const cx=capsStartX+i*capSpacing;
+            const distPx=clamp(capDist*2,4,100);
+            const cy=railY+distPx*0.5+20;
+            /* cap body */
+            ctx.fillStyle='rgba(22,199,154,.12)';
+            ctx.strokeStyle=capC.color; ctx.lineWidth=1.5;
+            ctx.beginPath(); ctx.roundRect(cx-12,cy,24,30,4); ctx.fill(); ctx.stroke();
+            /* cap plates */
+            ctx.strokeStyle=capC.color; ctx.lineWidth=2;
+            ctx.beginPath(); ctx.moveTo(cx-7,cy+10); ctx.lineTo(cx+7,cy+10); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(cx-7,cy+20); ctx.lineTo(cx+7,cy+20); ctx.stroke();
+            /* wires to rails */
+            ctx.strokeStyle=capC.color; ctx.lineWidth=1; ctx.setLineDash([3,2]);
+            ctx.beginPath(); ctx.moveTo(cx,railY); ctx.lineTo(cx,cy); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(cx,cy+30); ctx.lineTo(cx,gndY); ctx.stroke();
+            ctx.setLineDash([]);
+            /* label */
+            ctx.fillStyle=capC.color; ctx.font='9px "JetBrains Mono"'; ctx.textAlign='center';
+            ctx.fillText(capC.label,cx,cy+44);
+        }
+
+        /* Current spike animation */
+        if(spikeT>=0){
+            spikeT+=0.02;
+            if(spikeT>2) spikeT=-1;
+            else {
+                const intensity=Math.exp(-spikeT*3)*Math.abs(Math.sin(spikeT*15));
+                /* spike glow on IC */
+                const grad=ctx.createRadialGradient(icX+icW/2,icY+icH/2,0,icX+icW/2,icY+icH/2,50+intensity*40);
+                grad.addColorStop(0,`rgba(255,82,82,${intensity*0.5})`);
+                grad.addColorStop(1,'rgba(255,82,82,0)');
+                ctx.fillStyle=grad;
+                ctx.fillRect(icX-40,icY-40,icW+80,icH+80);
+                /* charge flow dots from caps */
+                for(let i=0;i<capCnt;i++){
+                    const cx=capsStartX+i*capSpacing;
+                    const distPx=clamp(capDist*2,4,100);
+                    const cy=railY+distPx*0.5+20;
+                    const dotT=clamp(spikeT*3-capDist*0.02*i,0,1);
+                    if(dotT>0&&dotT<1){
+                        const dy=lerp(cy,railY,dotT);
+                        ctx.beginPath(); ctx.arc(cx,dy,4,0,Math.PI*2);
+                        ctx.fillStyle=C.yellow; ctx.fill();
+                    }
+                }
+                /* spike label */
+                ctx.fillStyle=C.red; ctx.font='bold 11px "Noto Sans SC"'; ctx.textAlign='center';
+                ctx.globalAlpha=clamp(1-spikeT*0.5,0,1);
+                ctx.fillText('⚡ 电流脉冲',icX+icW/2,icY-10);
+                ctx.globalAlpha=1;
+            }
+        }
+
+        /* Impedance vs Frequency chart */
+        const chartX=40, chartY=H-155, chartW=W-80, chartH=110;
+        ctx.fillStyle='rgba(22,33,62,.6)';
+        ctx.beginPath(); ctx.roundRect(chartX-10,chartY-25,chartW+20,chartH+50,8); ctx.fill();
+        ctx.fillStyle=C.text; ctx.font='bold 10px "Noto Sans SC"'; ctx.textAlign='center';
+        ctx.fillText('阻抗 vs 频率 (对数坐标)',chartX+chartW/2,chartY-10);
+        /* axes */
+        ctx.strokeStyle=C.border; ctx.lineWidth=1;
+        ctx.beginPath(); ctx.moveTo(chartX,chartY); ctx.lineTo(chartX,chartY+chartH); ctx.lineTo(chartX+chartW,chartY+chartH); ctx.stroke();
+        /* frequency axis labels */
+        ctx.fillStyle=C.dim; ctx.font='8px "JetBrains Mono"'; ctx.textAlign='center';
+        const freqLabels=['1k','10k','100k','1M','10M','100M','1G'];
+        freqLabels.forEach((fl,fi)=>{
+            const fx=chartX+fi*chartW/(freqLabels.length-1);
+            ctx.fillText(fl,fx,chartY+chartH+12);
+            ctx.strokeStyle=C.border+'44'; ctx.lineWidth=0.5;
+            ctx.beginPath(); ctx.moveTo(fx,chartY); ctx.lineTo(fx,chartY+chartH); ctx.stroke();
+        });
+        ctx.textAlign='right'; ctx.fillStyle=C.dim;
+        ctx.fillText('|Z|',chartX-4,chartY+6);
+        /* impedance gridlines */
+        const zLabels=['1mΩ','10mΩ','0.1Ω','1Ω','10Ω','100Ω'];
+        zLabels.forEach((zl,zi)=>{
+            const zy=chartY+chartH-zi*chartH/(zLabels.length-1);
+            ctx.fillStyle=C.dim; ctx.font='7px "JetBrains Mono"'; ctx.textAlign='right';
+            ctx.fillText(zl,chartX-4,zy+3);
+            ctx.strokeStyle=C.border+'30'; ctx.lineWidth=0.5;
+            ctx.beginPath(); ctx.moveTo(chartX,zy); ctx.lineTo(chartX+chartW,zy); ctx.stroke();
+        });
+
+        /* draw curves for a few representative cap values */
+        const drawCurves=[0,3,5];
+        drawCurves.forEach(ci=>{
+            const cap=capValues[ci];
+            const esl=1e-9;
+            ctx.beginPath(); ctx.strokeStyle=cap.color; ctx.lineWidth=ci===selCap?2.5:1;
+            ctx.globalAlpha=ci===selCap?1:0.4;
+            for(let i=0;i<=chartW;i++){
+                const fLog=lerp(3,9,i/chartW);
+                const f=Math.pow(10,fLog);
+                const xc=1/(2*Math.PI*f*cap.c);
+                const xl=2*Math.PI*f*esl;
+                const z=Math.abs(xc-xl)+0.01;
+                const zLog=Math.log10(z);
+                const ny=clamp((zLog+2)/6,0,1);
+                const py=chartY+chartH-(ny*chartH);
+                i===0?ctx.moveTo(chartX+i,py):ctx.lineTo(chartX+i,py);
+            }
+            ctx.stroke();
+            ctx.globalAlpha=1;
+        });
+
+        /* combined impedance curve (all placed caps in parallel) */
+        ctx.beginPath(); ctx.strokeStyle='#fff'; ctx.lineWidth=2;
+        ctx.setLineDash([5,3]);
+        for(let i=0;i<=chartW;i++){
+            const fLog=lerp(3,9,i/chartW);
+            const f=Math.pow(10,fLog);
+            let yTotal=0;
+            for(let ci2=0;ci2<capCnt;ci2++){
+                const cap2=capValues[selCap];
+                const esl2=1e-9;
+                const xc2=1/(2*Math.PI*f*cap2.c);
+                const xl2=2*Math.PI*f*esl2;
+                const z2=Math.abs(xc2-xl2)+0.01;
+                yTotal+=1/z2;
+            }
+            const zComb=1/yTotal;
+            const zLog2=Math.log10(zComb);
+            const ny2=clamp((zLog2+2)/6,0,1);
+            const py2=chartY+chartH-(ny2*chartH);
+            i===0?ctx.moveTo(chartX+i,py2):ctx.lineTo(chartX+i,py2);
+        }
+        ctx.stroke(); ctx.setLineDash([]);
+
+        /* resonance marker for selected cap */
+        const selC=capValues[selCap];
+        const esl_sel=1e-9;
+        const fRes=1/(2*Math.PI*Math.sqrt(esl_sel*selC.c));
+        const fResLog=Math.log10(fRes);
+        const fResPx=chartX+(fResLog-3)/6*chartW;
+        if(fResPx>chartX&&fResPx<chartX+chartW){
+            ctx.strokeStyle=selC.color; ctx.lineWidth=1; ctx.setLineDash([2,2]);
+            ctx.beginPath(); ctx.moveTo(fResPx,chartY); ctx.lineTo(fResPx,chartY+chartH); ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.fillStyle=selC.color; ctx.font='8px "Noto Sans SC"'; ctx.textAlign='center';
+            ctx.fillText('谐振点',fResPx,chartY-2);
+        }
+
+        /* legend */
+        drawCurves.forEach((ci,idx)=>{
+            const cap=capValues[ci];
+            const lx=chartX+10+idx*60;
+            ctx.fillStyle=cap.color; ctx.font='8px "JetBrains Mono"'; ctx.textAlign='left';
+            ctx.fillRect(lx,chartY-20,10,3);
+            ctx.fillText(cap.label,lx+14,chartY-17);
+        });
+        /* combined legend */
+        const clx=chartX+10+drawCurves.length*60;
+        ctx.strokeStyle='#fff'; ctx.lineWidth=1.5; ctx.setLineDash([4,2]);
+        ctx.beginPath(); ctx.moveTo(clx,clx>chartX+chartW-60?chartY-28:chartY-19);
+        ctx.lineTo(clx+10,clx>chartX+chartW-60?chartY-28:chartY-19); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle='#fff'; ctx.font='8px "JetBrains Mono"';
+        ctx.fillText('并联合成',clx+14,clx>chartX+chartW-60?chartY-25:chartY-17);
+
+        requestAnimationFrame(draw);
+    }
+    window.addEventListener('resize',()=>{resize()});
+    updateInfo(); draw();
+})();
+
+/* ================================================================
+   SECTION 3 — 地平面设计 / Ground Plane
+   ================================================================ */
+(()=>{
+    const {cv,ctx,resize,w,h}=initCanvas('cv-gnd');
+    const btnSlot=document.getElementById('btn-slot-mode');
+    const btnClear=document.getElementById('btn-clear-slots');
+    const btnFreq=document.getElementById('btn-toggle-freq');
+    const stLoop=document.getElementById('st-loop');
+    const stFreqEl=document.getElementById('st-freq');
+    let slotMode=false, highFreq=true, anim=0;
+
+    /* ground plane grid */
+    const cols=30, rows=20;
+    let grid=Array.from({length:rows},()=>Array(cols).fill(1));
+    /* trace position (horizontal across middle) */
+    const traceRow=5, traceC0=3, traceC1=cols-4;
+
+    btnSlot.addEventListener('click',()=>{
+        slotMode=!slotMode;
+        btnSlot.textContent=slotMode?'模式: 点击放置裂缝':'切换: 放置裂缝';
+        btnSlot.classList.toggle('active',slotMode);
+    });
+    btnClear.addEventListener('click',()=>{grid=Array.from({length:rows},()=>Array(cols).fill(1))});
+    btnFreq.addEventListener('click',()=>{highFreq=!highFreq;stFreqEl.textContent=highFreq?'高频':'低频'});
+
+    cv.addEventListener('click',(e)=>{
+        if(!slotMode) return;
+        const rect=cv.getBoundingClientRect();
+        const mx=(e.clientX-rect.left), my=(e.clientY-rect.top);
+        const W=w(), H=h();
+        const padX=30, padY=50;
+        const cellW=(W-padX*2)/cols, cellH=(H-padY*2)/rows;
+        const c=Math.floor((mx-padX)/cellW), r=Math.floor((my-padY)/cellH);
+        if(r>=0&&r<rows&&c>=0&&c<cols&&r!==traceRow){
+            grid[r][c]=grid[r][c]?0:1;
+        }
+    });
+
+    function findReturnPath(){
+        /* BFS on ground grid for return current path */
+        const startC=traceC0, endC=traceC1, targetRow=traceRow+1;
+        if(!highFreq){
+            /* low freq: shortest DC path (straight across bottom) */
+            const path=[];
+            for(let c=startC;c<=endC;c++) path.push({r:rows-1,c});
+            return path;
+        }
+        /* high freq: BFS trying to stay close to trace row */
+        const visited=Array.from({length:rows},()=>Array(cols).fill(false));
+        const parent=Array.from({length:rows},()=>Array(cols).fill(null));
+        const queue=[{r:targetRow,c:startC}];
+        visited[targetRow][startC]=true;
+        const dirs=[{dr:0,dc:1},{dr:0,dc:-1},{dr:1,dc:0},{dr:-1,dc:0}];
+        let found=false;
+        while(queue.length>0){
+            const {r,c}=queue.shift();
+            if(r===targetRow&&c===endC){found=true;break}
+            /* sort neighbors: prefer same row, then closer to trace */
+            const nbrs=dirs.map(d=>({r:r+d.dr,c:c+d.dc}))
+                .filter(n=>n.r>=0&&n.r<rows&&n.c>=0&&n.c<cols&&grid[n.r][n.c]&&!visited[n.r][n.c])
+                .sort((a,b)=>Math.abs(a.r-targetRow)-Math.abs(b.r-targetRow));
+            for(const n of nbrs){
+                visited[n.r][n.c]=true;
+                parent[n.r][n.c]={r,c};
+                queue.push(n);
+            }
+        }
+        if(!found) return [];
+        const path=[]; let cur={r:targetRow,c:endC};
+        while(cur){path.unshift(cur);cur=parent[cur.r][cur.c]}
+        return path;
+    }
+
+    function draw(){
+        const W=w(), H=h();
+        ctx.clearRect(0,0,W,H);
+        anim+=0.015;
+        const padX=30, padY=50;
+        const cellW=(W-padX*2)/cols, cellH=(H-padY*2)/rows;
+
+        /* title */
+        ctx.fillStyle=C.text; ctx.font='bold 12px "Noto Sans SC"'; ctx.textAlign='center';
+        ctx.fillText('俯视图 — 信号走线(红) + 地平面(绿)',W/2,25);
+        ctx.fillStyle=C.dim; ctx.font='10px "Noto Sans SC"';
+        ctx.fillText(slotMode?'点击下方网格放置/移除裂缝':'切换到放置模式来编辑地平面',W/2,40);
+
+        /* ground plane cells */
+        for(let r=0;r<rows;r++){
+            for(let c=0;c<cols;c++){
+                const x=padX+c*cellW, y=padY+r*cellH;
+                if(grid[r][c]){
+                    ctx.fillStyle='rgba(22,199,154,0.18)';
+                    ctx.strokeStyle='rgba(22,199,154,0.25)';
+                } else {
+                    ctx.fillStyle='rgba(255,82,82,0.08)';
+                    ctx.strokeStyle='rgba(255,82,82,0.2)';
+                }
+                ctx.lineWidth=0.5;
+                ctx.fillRect(x,y,cellW,cellH);
+                ctx.strokeRect(x,y,cellW,cellH);
+            }
+        }
+
+        /* signal trace (on top layer, above ground plane) */
+        ctx.strokeStyle=C.red; ctx.lineWidth=3;
+        const ty=padY+traceRow*cellH+cellH/2;
+        const tx0=padX+traceC0*cellW+cellW/2, tx1=padX+traceC1*cellW+cellW/2;
+        ctx.beginPath(); ctx.moveTo(tx0,ty); ctx.lineTo(tx1,ty); ctx.stroke();
+        /* trace dots */
+        ctx.fillStyle=C.red; ctx.beginPath(); ctx.arc(tx0,ty,4,0,Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(tx1,ty,4,0,Math.PI*2); ctx.fill();
+        ctx.fillStyle=C.dim; ctx.font='9px "Noto Sans SC"'; ctx.textAlign='left';
+        ctx.fillText('发送端',tx0-4,ty-10);
+        ctx.textAlign='right';
+        ctx.fillText('接收端',tx1+4,ty-10);
+
+        /* return current path */
+        const path=findReturnPath();
+        if(path.length>1){
+            ctx.strokeStyle='rgba(79,195,247,0.7)'; ctx.lineWidth=2.5; ctx.setLineDash([]);
+            ctx.beginPath();
+            path.forEach((p,i)=>{
+                const px=padX+p.c*cellW+cellW/2, py=padY+p.r*cellH+cellH/2;
+                i===0?ctx.moveTo(px,py):ctx.lineTo(px,py);
+            });
+            ctx.stroke();
+            /* animated dots along path */
+            const totalLen=path.length;
+            const dotCnt=8;
+            for(let d=0;d<dotCnt;d++){
+                const t=((anim*2+d/dotCnt)%1)*totalLen;
+                const idx=Math.floor(t), frac=t-idx;
+                if(idx<totalLen-1){
+                    const px=lerp(padX+path[idx].c*cellW+cellW/2, padX+path[idx+1].c*cellW+cellW/2, frac);
+                    const py=lerp(padY+path[idx].r*cellH+cellH/2, padY+path[idx+1].r*cellH+cellH/2, frac);
+                    ctx.beginPath(); ctx.arc(px,py,3,0,Math.PI*2);
+                    ctx.fillStyle=C.blue; ctx.fill();
+                }
+            }
+            /* loop area estimation */
+            let maxDeviation=0;
+            path.forEach(p=>{maxDeviation=Math.max(maxDeviation,Math.abs(p.r-(traceRow+1)))});
+            const area=path.length*maxDeviation;
+            stLoop.textContent=area.toFixed(0)+' (相对)';
+            stLoop.className='val'+(area>30?' danger':area>15?' warn':'');
+        } else {
+            stLoop.textContent='断开!'; stLoop.className='val danger';
+        }
+
+        /* EM loop area shading — show enclosed area between trace and return */
+        if(path.length>1){
+            ctx.fillStyle='rgba(79,195,247,0.06)';
+            ctx.beginPath();
+            ctx.moveTo(tx0,ty);
+            ctx.lineTo(tx1,ty);
+            /* trace back along return path */
+            for(let pi=path.length-1;pi>=0;pi--){
+                const px2=padX+path[pi].c*cellW+cellW/2;
+                const py2=padY+path[pi].r*cellH+cellH/2;
+                ctx.lineTo(px2,py2);
+            }
+            ctx.closePath(); ctx.fill();
+            /* loop area boundary */
+            ctx.strokeStyle='rgba(79,195,247,0.15)'; ctx.lineWidth=1; ctx.setLineDash([3,3]);
+            ctx.stroke(); ctx.setLineDash([]);
+        }
+
+        /* slot count display */
+        let slotCount=0;
+        for(let r2=0;r2<rows;r2++)
+            for(let c2=0;c2<cols;c2++)
+                if(!grid[r2][c2]) slotCount++;
+        ctx.fillStyle=C.dim; ctx.font='9px "Noto Sans SC"'; ctx.textAlign='right';
+        ctx.fillText('裂缝数: '+slotCount,W-padX,25);
+
+        /* quality indicator */
+        const quality=slotCount===0?'优':'路径长度: '+(path.length||'断');
+        const qColor=slotCount===0?C.green:path.length>cols?C.red:path.length>cols*0.7?C.orange:C.green;
+        ctx.fillStyle=qColor; ctx.font='bold 10px "Noto Sans SC"'; ctx.textAlign='right';
+        ctx.fillText(quality,W-padX,40);
+
+        /* cross-section mini diagram at bottom */
+        const csY=H-50, csH=30;
+        ctx.fillStyle='rgba(22,33,62,.5)';
+        ctx.beginPath(); ctx.roundRect(padX,csY-5,W-padX*2,csH+10,6); ctx.fill();
+        /* signal layer */
+        ctx.fillStyle=C.red+'44'; ctx.fillRect(padX+10,csY,W-padX*2-20,4);
+        ctx.fillStyle=C.red; ctx.font='7px "JetBrains Mono"'; ctx.textAlign='left';
+        ctx.fillText('Signal',padX+12,csY-2);
+        /* ground plane */
+        ctx.fillStyle=C.green+'44'; ctx.fillRect(padX+10,csY+csH-4,W-padX*2-20,4);
+        ctx.fillStyle=C.green; ctx.fillText('GND',padX+12,csY+csH+8);
+        /* coupling arrows */
+        const arrowX=W/2;
+        ctx.strokeStyle=C.blue+'66'; ctx.lineWidth=1;
+        ctx.beginPath(); ctx.moveTo(arrowX,csY+6); ctx.lineTo(arrowX,csY+csH-6); ctx.stroke();
+        ctx.fillStyle=C.blue+'66';
+        ctx.beginPath(); ctx.moveTo(arrowX-3,csY+csH-8); ctx.lineTo(arrowX+3,csY+csH-8); ctx.lineTo(arrowX,csY+csH-5); ctx.fill();
+        ctx.fillStyle=C.dim; ctx.font='7px "Noto Sans SC"'; ctx.textAlign='center';
+        ctx.fillText('回流耦合',arrowX+30,csY+csH/2+3);
+
+        /* legend */
+        const ly=H-16;
+        ctx.font='9px "Noto Sans SC"'; ctx.textAlign='left';
+        [{c:C.red,t:'信号走线'},{c:C.blue,t:'回流路径'},{c:C.green,t:'地平面'},{c:'rgba(255,82,82,0.5)',t:'裂缝'}].forEach((it,i)=>{
+            const lx=padX+i*100;
+            ctx.fillStyle=it.c; ctx.fillRect(lx,ly,12,4);
+            ctx.fillStyle=C.dim; ctx.fillText(it.t,lx+16,ly+5);
+        });
+
+        requestAnimationFrame(draw);
+    }
+    window.addEventListener('resize',()=>{resize()});
+    draw();
+})();
+
+/* ================================================================
+   SECTION 4 — 电源层叠设计 / Stackup
+   ================================================================ */
+(()=>{
+    const {cv,ctx,resize,w,h}=initCanvas('cv-stackup');
+    const slSp=document.getElementById('sl-spacing'), roSp=document.getElementById('ro-spacing');
+    const slA=document.getElementById('sl-area'), roA=document.getElementById('ro-area');
+    const slEr=document.getElementById('sl-er'), roEr=document.getElementById('ro-er');
+    const btn2=document.getElementById('btn-2layer'), btn4=document.getElementById('btn-4layer');
+    const stCap=document.getElementById('st-planecap');
+    let layerMode=4, spacing=8, area=60, er=4.2, anim=0;
+    const eps0=8.854e-12;
+
+    slSp.addEventListener('input',()=>{spacing=+slSp.value;roSp.textContent=spacing+' mil';calcCap()});
+    slA.addEventListener('input',()=>{area=+slA.value;roA.textContent=area+' cm²';calcCap()});
+    slEr.addEventListener('input',()=>{er=+slEr.value/10;roEr.textContent=er.toFixed(1);calcCap()});
+    btn2.addEventListener('click',()=>{layerMode=2;btn2.classList.add('active');btn4.classList.remove('active')});
+    btn4.addEventListener('click',()=>{layerMode=4;btn4.classList.add('active');btn2.classList.remove('active')});
+
+    function calcCap(){
+        const d=spacing*25.4e-6;
+        const A_m2=area*1e-4;
+        const C_val=eps0*er*A_m2/d;
+        if(C_val>=1e-9) stCap.textContent=(C_val*1e9).toFixed(2)+' nF';
+        else stCap.textContent=(C_val*1e12).toFixed(1)+' pF';
+    }
+    calcCap();
+
+    function draw(){
+        const W=w(), H=h();
+        ctx.clearRect(0,0,W,H);
+        anim+=0.01;
+
+        const layers4=[
+            {name:'L1 — Signal',color:C.red,type:'signal'},
+            {name:'L2 — GND',color:C.green,type:'gnd'},
+            {name:'L3 — VCC',color:C.orange,type:'vcc'},
+            {name:'L4 — Signal',color:C.red,type:'signal'}
+        ];
+        const layers2=[
+            {name:'L1 — Signal+VCC',color:C.red,type:'signal'},
+            {name:'L2 — Signal+GND',color:C.green,type:'gnd'}
+        ];
+        const layers=layerMode===4?layers4:layers2;
+        const layerH=30, gap=clamp(spacing*1.5,10,50);
+        const totalH=layers.length*layerH+(layers.length-1)*gap;
+        const startY=(H-totalH)/2-20;
+        const lx=60, lw=W-120;
+
+        /* Draw layers */
+        layers.forEach((l,i)=>{
+            const y=startY+i*(layerH+gap);
+            /* substrate between layers */
+            if(i<layers.length-1){
+                const subY=y+layerH;
+                const subH=gap;
+                ctx.fillStyle='rgba(179,136,255,0.08)';
+                ctx.fillRect(lx,subY,lw,subH);
+                /* dielectric label */
+                if(layerMode===4&&i===1){
+                    /* GND-VCC gap: show capacitance field lines */
+                    ctx.strokeStyle='rgba(255,215,64,0.3)'; ctx.lineWidth=1; ctx.setLineDash([3,3]);
+                    const nLines=12;
+                    for(let j=0;j<nLines;j++){
+                        const fx=lx+30+j*(lw-60)/(nLines-1);
+                        const phase=Math.sin(anim*3+j*0.5)*2;
+                        ctx.beginPath(); ctx.moveTo(fx,subY+2); ctx.lineTo(fx+phase,subY+subH-2); ctx.stroke();
+                    }
+                    ctx.setLineDash([]);
+                    ctx.fillStyle=C.yellow; ctx.font='9px "Noto Sans SC"'; ctx.textAlign='center';
+                    ctx.fillText('寄生电容 (天然去耦)',lx+lw/2,subY+subH/2+4);
+                }
+                /* spacing dimension */
+                ctx.fillStyle=C.dim; ctx.font='8px "JetBrains Mono"'; ctx.textAlign='right';
+                ctx.fillText(spacing+' mil',lx-8,subY+subH/2+3);
+            }
+
+            /* Layer bar */
+            const grad=ctx.createLinearGradient(lx,y,lx+lw,y);
+            grad.addColorStop(0,l.color+'44'); grad.addColorStop(0.5,l.color+'66'); grad.addColorStop(1,l.color+'44');
+            ctx.fillStyle=grad;
+            ctx.beginPath(); ctx.roundRect(lx,y,lw,layerH,4); ctx.fill();
+            ctx.strokeStyle=l.color+'88'; ctx.lineWidth=1;
+            ctx.beginPath(); ctx.roundRect(lx,y,lw,layerH,4); ctx.stroke();
+
+            /* Layer name */
+            ctx.fillStyle=l.color; ctx.font='bold 11px "Noto Sans SC"'; ctx.textAlign='left';
+            ctx.fillText(l.name,lx+12,y+layerH/2+4);
+
+            /* Draw features on signal layers */
+            if(l.type==='signal'){
+                ctx.strokeStyle=l.color; ctx.lineWidth=2;
+                const ty=y+layerH/2;
+                for(let t=0;t<3;t++){
+                    const sx=lx+lw*0.4+t*60;
+                    ctx.beginPath(); ctx.moveTo(sx,ty); ctx.lineTo(sx+40,ty); ctx.stroke();
+                }
+            }
+            /* plane fill pattern for GND/VCC */
+            if(l.type==='gnd'||l.type==='vcc'){
+                ctx.fillStyle=l.color+'18';
+                ctx.fillRect(lx+2,y+2,lw-4,layerH-4);
+                ctx.strokeStyle=l.color+'30'; ctx.lineWidth=0.5;
+                for(let dx=0;dx<lw;dx+=15){
+                    ctx.beginPath(); ctx.moveTo(lx+dx,y); ctx.lineTo(lx+dx+layerH,y+layerH); ctx.stroke();
+                }
+            }
+        });
+
+        /* Cross-section annotation */
+        ctx.fillStyle=C.text; ctx.font='bold 12px "Noto Sans SC"'; ctx.textAlign='center';
+        ctx.fillText(layerMode+' 层板叠层截面',W/2,startY-20);
+
+        /* Draw vias connecting layers */
+        if(layerMode===4){
+            const viaPositions=[0.25,0.5,0.75];
+            viaPositions.forEach(vp=>{
+                const vx=lx+lw*vp;
+                /* via barrel */
+                ctx.strokeStyle=C.yellow+'66'; ctx.lineWidth=2;
+                const vy0=startY, vy1=startY+(layers.length-1)*(layerH+gap)+layerH;
+                ctx.beginPath(); ctx.moveTo(vx,vy0); ctx.lineTo(vx,vy1); ctx.stroke();
+                /* via pads on each layer */
+                layers.forEach((_,li)=>{
+                    const py3=startY+li*(layerH+gap)+layerH/2;
+                    ctx.beginPath(); ctx.arc(vx,py3,5,0,Math.PI*2);
+                    ctx.fillStyle=C.yellow+'44'; ctx.fill();
+                    ctx.strokeStyle=C.yellow+'88'; ctx.lineWidth=1; ctx.stroke();
+                });
+                /* via label */
+                ctx.fillStyle=C.dim; ctx.font='7px "JetBrains Mono"'; ctx.textAlign='center';
+                ctx.fillText('VIA',vx,vy1+12);
+            });
+        }
+
+        /* E-field intensity indicator for GND-VCC gap */
+        if(layerMode===4){
+            const eFieldY=startY+1*(layerH+gap)+layerH;
+            const eFieldH=gap;
+            /* intensity depends on spacing — closer = stronger */
+            const intensity2=clamp(1-spacing/30,0.1,1);
+            const efGrad=ctx.createLinearGradient(0,eFieldY,0,eFieldY+eFieldH);
+            efGrad.addColorStop(0,`rgba(255,215,64,${intensity2*0.15})`);
+            efGrad.addColorStop(0.5,`rgba(255,215,64,${intensity2*0.3})`);
+            efGrad.addColorStop(1,`rgba(255,215,64,${intensity2*0.15})`);
+            ctx.fillStyle=efGrad;
+            ctx.fillRect(lx,eFieldY,lw,eFieldH);
+            /* field strength label */
+            ctx.fillStyle=C.yellow; ctx.font='8px "JetBrains Mono"'; ctx.textAlign='left';
+            ctx.fillText('E-field: '+(intensity2*100).toFixed(0)+'%',lx+lw+8,eFieldY+eFieldH/2+3);
+        }
+
+        /* Benefit callout for 4-layer */
+        if(layerMode===4){
+            const callY=startY+totalH+35;
+            ctx.fillStyle='rgba(22,199,154,.08)';
+            ctx.beginPath(); ctx.roundRect(lx,callY,lw,60,8); ctx.fill();
+            ctx.strokeStyle=C.green+'44'; ctx.lineWidth=1;
+            ctx.beginPath(); ctx.roundRect(lx,callY,lw,60,8); ctx.stroke();
+            ctx.fillStyle=C.green; ctx.font='11px "Noto Sans SC"'; ctx.textAlign='center';
+            ctx.fillText('GND-VCC 紧密耦合 → 低阻抗 PDN → 天然去耦电容',W/2,callY+18);
+            const d=spacing*25.4e-6, A_m2=area*1e-4;
+            const Cv=eps0*er*A_m2/d;
+            const capStr=Cv>=1e-9?(Cv*1e9).toFixed(2)+' nF':(Cv*1e12).toFixed(1)+' pF';
+            ctx.fillStyle=C.yellow; ctx.font='bold 11px "JetBrains Mono"';
+            ctx.fillText('C_plane = '+capStr,W/2,callY+36);
+            /* equivalent number of 100nF caps */
+            const nEquiv=(Cv/100e-9).toFixed(1);
+            ctx.fillStyle=C.dim; ctx.font='9px "Noto Sans SC"';
+            ctx.fillText('≈ '+nEquiv+' 个 100nF 电容的等效去耦',W/2,callY+52);
+        } else {
+            const callY=startY+totalH+35;
+            ctx.fillStyle='rgba(255,82,82,.08)';
+            ctx.beginPath(); ctx.roundRect(lx,callY,lw,50,8); ctx.fill();
+            ctx.strokeStyle=C.red+'44'; ctx.lineWidth=1;
+            ctx.beginPath(); ctx.roundRect(lx,callY,lw,50,8); ctx.stroke();
+            ctx.fillStyle=C.red; ctx.font='11px "Noto Sans SC"'; ctx.textAlign='center';
+            ctx.fillText('2 层板无专用电源/地平面 → PDN 阻抗高',W/2,callY+20);
+            ctx.fillStyle=C.orange; ctx.font='10px "Noto Sans SC"';
+            ctx.fillText('需大量去耦电容补偿，成本和面积增加',W/2,callY+38);
+        }
+
+        requestAnimationFrame(draw);
+    }
+    window.addEventListener('resize',()=>{resize()});
+    draw();
+})();
+
+/* ================================================================
+   SECTION 5 — 电源树与配电 / Power Tree
+   ================================================================ */
+(()=>{
+    const {cv,ctx,resize,w,h}=initCanvas('cv-tree');
+    const slL33=document.getElementById('sl-load33'), roL33=document.getElementById('ro-load33');
+    const slL18=document.getElementById('sl-load18'), roL18=document.getElementById('ro-load18');
+    const slL12=document.getElementById('sl-load12'), roL12=document.getElementById('ro-load12');
+    const stPin=document.getElementById('st-pin'), stEff=document.getElementById('st-eff');
+    const nodeInfoEl=document.getElementById('node-info');
+
+    const regulators=[
+        {id:'dcdc33',type:'DCDC',name:'TPS5430',vin:5,vout:3.3,imax:1500,eff:0.92,color:C.green},
+        {id:'ldo18',type:'LDO',name:'AMS1117-1.8',vin:3.3,vout:1.8,imax:1000,eff:0,color:C.blue},
+        {id:'dcdc12',type:'DCDC',name:'TPS54331',vin:5,vout:1.2,imax:3000,eff:0.90,color:C.purple}
+    ];
+    /* LDO efficiency is Vout/Vin */
+    regulators[1].eff=1.8/3.3;
+
+    let loads={v33:500,v18:300,v12:800};
+    let hoverNode=null, anim=0;
+
+    function updateLoads(){
+        loads.v33=+slL33.value; loads.v18=+slL18.value; loads.v12=+slL12.value;
+        roL33.textContent=loads.v33+' mA'; roL18.textContent=loads.v18+' mA'; roL12.textContent=loads.v12+' mA';
+        /* total power */
+        const p33=3.3*loads.v33/1000/regulators[0].eff;
+        const p18_from33=1.8*loads.v18/1000/regulators[1].eff;
+        const p12=1.2*loads.v12/1000/regulators[2].eff;
+        const pTotal=p33+p18_from33+p12;
+        const pOut=3.3*loads.v33/1000+1.8*loads.v18/1000+1.2*loads.v12/1000;
+        stPin.textContent=pTotal.toFixed(2)+' W';
+        stEff.textContent=(pOut/pTotal*100).toFixed(1)+' %';
+        /* check overloads */
+        roL33.className='readout'+(loads.v33>regulators[0].imax?' danger':'');
+        roL18.className='readout'+(loads.v18>regulators[1].imax?' danger':'');
+        roL12.className='readout'+(loads.v12>regulators[2].imax?' danger':'');
+    }
+
+    slL33.addEventListener('input',updateLoads);
+    slL18.addEventListener('input',updateLoads);
+    slL12.addEventListener('input',updateLoads);
+
+    /* Node positions (computed in draw) */
+    let nodes=[];
+
+    cv.addEventListener('mousemove',(e)=>{
+        const rect=cv.getBoundingClientRect();
+        const mx=e.clientX-rect.left, my=e.clientY-rect.top;
+        hoverNode=null;
+        for(const n of nodes){
+            if(mx>=n.x-n.w/2&&mx<=n.x+n.w/2&&my>=n.y-n.h/2&&my<=n.y+n.h/2){
+                hoverNode=n; break;
+            }
+        }
+        if(hoverNode){
+            cv.style.cursor='pointer';
+            nodeInfoEl.classList.remove('hidden');
+            /* position info panel */
+            let infoX=e.clientX-cv.getBoundingClientRect().left+15;
+            let infoY=e.clientY-cv.getBoundingClientRect().top-10;
+            if(infoX+200>w()) infoX-=220;
+            if(infoY+120>h()) infoY-=120;
+            nodeInfoEl.style.left=infoX+'px';
+            nodeInfoEl.style.top=infoY+'px';
+            const n=hoverNode;
+            let html=`<h4>${n.label}</h4>`;
+            if(n.data){
+                const d=n.data;
+                if(d.vin!==undefined) html+=`<div class="row"><span class="lbl">输入电压</span><span class="v">${d.vin.toFixed(1)} V</span></div>`;
+                if(d.vout!==undefined) html+=`<div class="row"><span class="lbl">输出电压</span><span class="v">${d.vout.toFixed(1)} V</span></div>`;
+                if(d.iload!==undefined){
+                    const overload=d.imax&&d.iload>d.imax;
+                    html+=`<div class="row"><span class="lbl">负载电流</span><span class="v${overload?' danger':''}">${d.iload} / ${d.imax||'—'} mA</span></div>`;
+                }
+                if(d.eff!==undefined) html+=`<div class="row"><span class="lbl">效率</span><span class="v">${(d.eff*100).toFixed(1)} %</span></div>`;
+                if(d.pdiss!==undefined){
+                    const hot=d.pdiss>1.5;
+                    html+=`<div class="row"><span class="lbl">功耗</span><span class="v${hot?' danger':d.pdiss>0.8?' warn':''}">${d.pdiss.toFixed(2)} W${hot?' ⚠ 过热':''}${!hot&&d.pdiss>0.8?' △ 偏高':''}</span></div>`;
+                }
+            }
+            nodeInfoEl.innerHTML=html;
+        } else {
+            cv.style.cursor='default';
+            nodeInfoEl.classList.add('hidden');
+        }
+    });
+
+    cv.addEventListener('mouseleave',()=>{nodeInfoEl.classList.add('hidden');hoverNode=null});
+
+    function draw(){
+        const W=w(), H=h();
+        ctx.clearRect(0,0,W,H);
+        anim+=0.01;
+        nodes=[];
+
+        const centerX=W/2;
+        /* Input connector */
+        const inY=40, inW=100, inH=40;
+        drawNode(centerX,inY+inH/2,inW,inH,'USB 5V 输入','#fff',C.orange,
+            {vin:5,vout:5,iload:Math.round((3.3*loads.v33/1000/regulators[0].eff+1.8*loads.v18/1000/regulators[1].eff+1.2*loads.v12/1000/regulators[2].eff)/5*1000),imax:3000});
+
+        /* 5V bus */
+        const busY=inY+inH+25;
+        ctx.strokeStyle=C.orange; ctx.lineWidth=3;
+        ctx.beginPath(); ctx.moveTo(centerX,inY+inH); ctx.lineTo(centerX,busY); ctx.stroke();
+        ctx.strokeStyle=C.orange+'88'; ctx.lineWidth=2;
+        const busW=W*0.6;
+        ctx.beginPath(); ctx.moveTo(centerX-busW/2,busY); ctx.lineTo(centerX+busW/2,busY); ctx.stroke();
+        ctx.fillStyle=C.orange; ctx.font='bold 10px "JetBrains Mono"'; ctx.textAlign='center';
+        ctx.fillText('5V Bus',centerX,busY-6);
+
+        /* regulators row */
+        const regY=busY+60, regSpacing=W*0.28;
+        const regPositions=[centerX-regSpacing, centerX, centerX+regSpacing];
+
+        regulators.forEach((reg,i)=>{
+            const rx=regPositions[i], rw=110, rh=50;
+            /* wire from bus */
+            ctx.strokeStyle=C.orange+'66'; ctx.lineWidth=1.5;
+            ctx.beginPath(); ctx.moveTo(rx,busY); ctx.lineTo(rx,regY-rh/2); ctx.stroke();
+
+            const iload=i===0?loads.v33+Math.round(loads.v18*1.8/3.3/regulators[1].eff):i===1?loads.v18:loads.v12;
+            const overload=iload>reg.imax;
+            const pIn=reg.vout*iload/1000/reg.eff;
+            const pOut=reg.vout*iload/1000;
+            const pDiss=pIn-pOut;
+
+            const borderC=overload?C.red:pDiss>1.5?C.red:pDiss>0.8?C.orange:reg.color;
+            drawNode(rx,regY,rw,rh,reg.type+': '+reg.name,reg.color,borderC,
+                {vin:reg.vin,vout:reg.vout,iload,imax:reg.imax,eff:reg.eff,pdiss:pDiss});
+
+            /* warning flash */
+            if(overload||pDiss>1.5){
+                const flash=Math.sin(anim*8)*0.3+0.4;
+                ctx.fillStyle=`rgba(255,82,82,${flash})`;
+                ctx.beginPath(); ctx.roundRect(rx-rw/2-3,regY-rh/2-3,rw+6,rh+6,10); ctx.fill();
+                ctx.fillStyle=C.red; ctx.font='bold 10px "Noto Sans SC"'; ctx.textAlign='center';
+                ctx.fillText('⚠ '+(overload?'超载':'过热'),rx,regY+rh/2+14);
+            }
+
+            /* output rail */
+            const outY=regY+rh/2+30;
+            ctx.strokeStyle=reg.color+'88'; ctx.lineWidth=2;
+            ctx.beginPath(); ctx.moveTo(rx,regY+rh/2); ctx.lineTo(rx,outY); ctx.stroke();
+
+            /* voltage rail label */
+            const railW=90, railH=24;
+            ctx.fillStyle=reg.color+'22';
+            ctx.beginPath(); ctx.roundRect(rx-railW/2,outY,railW,railH,4); ctx.fill();
+            ctx.strokeStyle=reg.color+'66'; ctx.lineWidth=1;
+            ctx.beginPath(); ctx.roundRect(rx-railW/2,outY,railW,railH,4); ctx.stroke();
+            ctx.fillStyle=reg.color; ctx.font='bold 11px "JetBrains Mono"'; ctx.textAlign='center';
+            ctx.fillText(reg.vout+'V Rail',rx,outY+railH/2+4);
+
+            /* 1.8V is fed from 3.3V — draw connection */
+            if(i===1){
+                ctx.strokeStyle=C.green+'44'; ctx.lineWidth=1; ctx.setLineDash([4,3]);
+                ctx.beginPath();
+                ctx.moveTo(regPositions[0],regY+rh/2+30+railH);
+                ctx.lineTo(regPositions[0],regY+rh/2+30+railH+15);
+                ctx.lineTo(rx,regY+rh/2+30+railH+15);
+                ctx.lineTo(rx,busY);
+                ctx.stroke();
+                ctx.setLineDash([]);
+                ctx.fillStyle=C.dim; ctx.font='8px "Noto Sans SC"'; ctx.textAlign='center';
+                ctx.fillText('由 3.3V 供电',(regPositions[0]+rx)/2,regY+rh/2+30+railH+12);
+            }
+
+            /* thermal bar on regulator */
+            const thermalW=rw-10, thermalH=5;
+            const thermalX2=rx-thermalW/2, thermalY2=regY+rh/2+3;
+            const thermalMax=2.0;
+            const thermalRatio=clamp(pDiss/thermalMax,0,1);
+            ctx.fillStyle=C.bg2;
+            ctx.beginPath(); ctx.roundRect(thermalX2,thermalY2,thermalW,thermalH,2); ctx.fill();
+            const tColor2=pDiss>1.5?C.red:pDiss>0.8?C.orange:C.green;
+            ctx.fillStyle=tColor2+'88';
+            ctx.beginPath(); ctx.roundRect(thermalX2,thermalY2,thermalW*thermalRatio,thermalH,2); ctx.fill();
+
+            /* efficiency percentage arc */
+            const effArcX=rx+rw/2+18, effArcY=regY, effArcR=12;
+            ctx.strokeStyle=C.border; ctx.lineWidth=3;
+            ctx.beginPath(); ctx.arc(effArcX,effArcY,effArcR,-Math.PI/2,Math.PI*1.5); ctx.stroke();
+            ctx.strokeStyle=reg.color; ctx.lineWidth=3;
+            ctx.beginPath(); ctx.arc(effArcX,effArcY,effArcR,-Math.PI/2,-Math.PI/2+Math.PI*2*reg.eff); ctx.stroke();
+            ctx.fillStyle=reg.color; ctx.font='7px "JetBrains Mono"'; ctx.textAlign='center';
+            ctx.fillText(Math.round(reg.eff*100)+'%',effArcX,effArcY+3);
+
+            /* Load blocks */
+            const loadY=outY+railH+35;
+            const loadW=80, loadH=50;
+            const iStr=i===0?loads.v33+'mA':i===1?loads.v18+'mA':loads.v12+'mA';
+            ctx.strokeStyle=reg.color+'44'; ctx.lineWidth=1.5;
+            ctx.beginPath(); ctx.moveTo(rx,outY+railH); ctx.lineTo(rx,loadY-loadH/2); ctx.stroke();
+
+            const loadCurr=i===0?loads.v33:i===1?loads.v18:loads.v12;
+            const loadPower=(reg.vout*loadCurr/1000).toFixed(2);
+            drawNode(rx,loadY,loadW,loadH,'负载\n'+iStr,C.dim,reg.color+'66',
+                {vout:reg.vout,iload:loadCurr});
+
+            /* load power label */
+            ctx.fillStyle=C.dim; ctx.font='8px "JetBrains Mono"'; ctx.textAlign='center';
+            ctx.fillText(loadPower+'W',rx,loadY+loadH/2+12);
+
+            /* animated current dots on output — multiple dots */
+            const dotSpeed=clamp(loadCurr/500,0.5,4);
+            for(let dd=0;dd<3;dd++){
+                const dotPhase2=((anim*dotSpeed+i+dd*0.33)%1);
+                const dy2=lerp(regY+rh/2+10,loadY-loadH/2,dotPhase2);
+                ctx.beginPath(); ctx.arc(rx,dy2,2.5,0,Math.PI*2);
+                ctx.fillStyle=reg.color; ctx.globalAlpha=0.7+dd*0.1; ctx.fill();
+                ctx.globalAlpha=1;
+            }
+
+            /* current arrow on bus input */
+            const inputI=i===0?iload:i===1?loads.v18:loads.v12;
+            const inputImA=(reg.vin>0?(reg.vout*inputI/1000/reg.eff)/reg.vin*1000:0);
+            ctx.fillStyle=C.dim; ctx.font='7px "JetBrains Mono"'; ctx.textAlign='center';
+            ctx.fillText(Math.round(inputImA)+'mA',rx+20,busY+10);
+        });
+
+        /* total power budget summary at bottom */
+        const sumY=H-45, sumW=W*0.7, sumX=(W-sumW)/2;
+        ctx.fillStyle='rgba(22,33,62,.7)';
+        ctx.beginPath(); ctx.roundRect(sumX,sumY,sumW,35,6); ctx.fill();
+        ctx.strokeStyle=C.border; ctx.lineWidth=1;
+        ctx.beginPath(); ctx.roundRect(sumX,sumY,sumW,35,6); ctx.stroke();
+
+        const p33out=3.3*loads.v33/1000, p18out=1.8*loads.v18/1000, p12out=1.2*loads.v12/1000;
+        const pTotalOut=p33out+p18out+p12out;
+        const p33in=p33out/regulators[0].eff, p18in=p18out/regulators[1].eff, p12in=p12out/regulators[2].eff;
+        const pTotalIn=p33in+p18in+p12in;
+        const pLoss=pTotalIn-pTotalOut;
+
+        ctx.font='9px "Noto Sans SC"'; ctx.textAlign='center';
+        const items=[
+            {label:'输入',val:pTotalIn.toFixed(2)+'W',color:C.orange},
+            {label:'输出',val:pTotalOut.toFixed(2)+'W',color:C.green},
+            {label:'损耗',val:pLoss.toFixed(2)+'W',color:pLoss>2?C.red:pLoss>1?C.orange:C.dim},
+            {label:'效率',val:(pTotalOut/pTotalIn*100).toFixed(1)+'%',color:C.blue}
+        ];
+        items.forEach((it,idx)=>{
+            const ix=sumX+sumW*(idx+0.5)/items.length;
+            ctx.fillStyle=C.dim; ctx.fillText(it.label,ix,sumY+13);
+            ctx.fillStyle=it.color; ctx.font='bold 10px "JetBrains Mono"';
+            ctx.fillText(it.val,ix,sumY+27);
+            ctx.font='9px "Noto Sans SC"';
+        });
+
+        requestAnimationFrame(draw);
+    }
+
+    function drawNode(x,y,nw,nh,label,textColor,borderColor,data){
+        const isHover=hoverNode&&hoverNode.x===x&&hoverNode.y===y;
+        ctx.fillStyle=isHover?'rgba(15,52,96,0.95)':'rgba(22,33,62,0.85)';
+        ctx.strokeStyle=borderColor; ctx.lineWidth=isHover?2.5:1.5;
+        ctx.beginPath(); ctx.roundRect(x-nw/2,y-nh/2,nw,nh,8); ctx.fill(); ctx.stroke();
+        ctx.fillStyle=textColor; ctx.font='bold 10px "Noto Sans SC"'; ctx.textAlign='center';
+        const lines=label.split('\n');
+        lines.forEach((line,i)=>{
+            ctx.fillText(line,x,y-((lines.length-1)*7)+i*14+4);
+        });
+        nodes.push({x,y,w:nw,h:nh,label:label.replace('\n',' '),data});
+    }
+
+    window.addEventListener('resize',()=>{resize()});
+    updateLoads(); draw();
+})();
+
+/* ========== Section observers for GSAP entrance ========== */
+document.addEventListener('DOMContentLoaded',()=>{
+    if(typeof gsap!=='undefined'){
+        gsap.from('.section',{
+            y:40, opacity:0, duration:0.7, stagger:0.15,
+            ease:'power2.out', scrollTrigger:undefined
+        });
+    }
+    document.querySelectorAll('.section').forEach(sec=>{
+        const obs=new IntersectionObserver(entries=>{
+            entries.forEach(e=>{
+                if(e.isIntersecting){
+                    e.target.style.opacity='1';
+                    e.target.style.transform='translateY(0)';
+                }
+            });
+        },{threshold:0.1});
+        sec.style.opacity='0'; sec.style.transform='translateY(30px)';
+        sec.style.transition='opacity .6s ease, transform .6s ease';
+        obs.observe(sec);
+    });
+});
+</script>
+</body>
+</html>

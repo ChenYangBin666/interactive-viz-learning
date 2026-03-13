@@ -1,0 +1,1356 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>制造工艺 — PCB 设计</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=JetBrains+Mono:wght@400;600&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<link rel="stylesheet" href="../shared/styles/common.css">
+<link rel="stylesheet" href="../shared/styles/components.css">
+<style>
+/* ====== Module-specific styles ====== */
+.hero-banner {
+    text-align: center;
+    padding: 2rem 0 1rem;
+}
+.hero-banner h1 { font-size: 2.2rem; }
+.hero-banner p { max-width: 640px; margin: 0 auto; }
+
+/* Pipeline */
+.pipeline-bar {
+    display: flex; align-items: center; gap: 0;
+    overflow-x: auto; padding: 1rem 0; margin-bottom: 1rem;
+}
+.pipe-step {
+    display: flex; flex-direction: column; align-items: center;
+    gap: 0.3rem; min-width: 80px; cursor: pointer;
+    padding: 0.6rem 0.4rem; border-radius: var(--radius-md);
+    transition: background 0.2s, transform 0.2s; position: relative;
+}
+.pipe-step:hover { background: rgba(22,199,154,0.08); transform: translateY(-2px); }
+.pipe-step.active { background: rgba(22,199,154,0.15); }
+.pipe-step .dot {
+    width: 36px; height: 36px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1rem; transition: all 0.3s;
+    background: var(--border-color); color: var(--text-muted);
+}
+.pipe-step.done .dot { background: rgba(22,199,154,0.3); color: var(--accent-green); }
+.pipe-step.active .dot { background: var(--accent-green); color: var(--bg-primary); box-shadow: 0 0 12px rgba(22,199,154,0.5); }
+.pipe-step .label { font-size: 0.72rem; color: var(--text-muted); white-space: nowrap; }
+.pipe-step.active .label { color: var(--accent-green); font-weight: 600; }
+.pipe-arrow { color: var(--border-color); font-size: 1rem; margin: 0 2px; flex-shrink: 0; }
+.pipe-arrow.done { color: var(--accent-green); }
+
+.pipeline-progress {
+    height: 4px; background: var(--border-color); border-radius: 2px;
+    overflow: hidden; margin-bottom: 1.5rem;
+}
+.pipeline-progress .fill {
+    height: 100%; background: linear-gradient(90deg, var(--accent-green), var(--accent-blue));
+    border-radius: 2px; transition: width 0.5s ease;
+}
+
+.step-detail {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem;
+    min-height: 320px;
+}
+.step-canvas-wrap {
+    background: var(--bg-secondary); border: 1px solid var(--border-color);
+    border-radius: var(--radius-md); overflow: hidden; position: relative;
+}
+.step-canvas-wrap canvas { width: 100%; height: 100%; display: block; }
+.step-info { display: flex; flex-direction: column; gap: 0.75rem; }
+.step-info h3 { color: var(--accent-green); }
+.step-info .param-grid {
+    display: grid; grid-template-columns: auto 1fr; gap: 0.3rem 1rem; font-size: 0.85rem;
+}
+.step-info .param-grid dt { color: var(--text-muted); }
+.step-info .param-grid dd { color: var(--text-primary); font-family: var(--font-mono); }
+
+/* Gerber layers */
+.gerber-controls {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(200px,1fr));
+    gap: 0.75rem; margin-bottom: 1rem;
+}
+.layer-toggle {
+    display: flex; align-items: center; gap: 0.75rem;
+    padding: 0.6rem 0.8rem; background: var(--bg-secondary);
+    border: 1px solid var(--border-color); border-radius: var(--radius-sm);
+    cursor: pointer; transition: border-color 0.2s;
+}
+.layer-toggle:hover { border-color: var(--accent-green); }
+.layer-toggle .swatch {
+    width: 16px; height: 16px; border-radius: 3px; flex-shrink: 0;
+}
+.layer-toggle .lname { flex: 1; font-size: 0.85rem; }
+.layer-toggle input[type="range"] { width: 60px; }
+
+.gerber-canvas-wrap {
+    position: relative; width: 100%; height: 480px;
+    background: var(--bg-secondary); border: 1px solid var(--border-color);
+    border-radius: var(--radius-md); overflow: hidden;
+}
+.gerber-canvas-wrap canvas { position: absolute; inset: 0; }
+
+/* DFM */
+.dfm-grid {
+    display: grid; grid-template-columns: 280px 1fr; gap: 1.5rem;
+}
+.dfm-list { display: flex; flex-direction: column; gap: 0.5rem; }
+.dfm-item {
+    display: flex; align-items: center; gap: 0.75rem;
+    padding: 0.7rem 1rem; background: var(--bg-secondary);
+    border: 1px solid var(--border-color); border-radius: var(--radius-sm);
+    cursor: pointer; transition: all 0.2s;
+}
+.dfm-item:hover { border-color: var(--accent-orange); }
+.dfm-item.active { border-color: var(--accent-green); background: rgba(22,199,154,0.08); }
+.dfm-item .indicator {
+    width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+}
+.dfm-item .indicator.fail { background: var(--accent-red); box-shadow: 0 0 6px rgba(255,82,82,0.5); }
+.dfm-item .indicator.pass { background: var(--accent-green); box-shadow: 0 0 6px rgba(22,199,154,0.5); }
+.dfm-detail-panel {
+    background: var(--bg-secondary); border: 1px solid var(--border-color);
+    border-radius: var(--radius-md); padding: 1.5rem;
+}
+.dfm-detail-panel canvas { width: 100%; height: 240px; display: block; margin-bottom: 1rem; border-radius: var(--radius-sm); }
+
+/* Soldering */
+.solder-tabs { display: flex; gap: 0; margin-bottom: 1rem; }
+.solder-tab {
+    padding: 0.6rem 1.2rem; border: none; background: none;
+    color: var(--text-muted); font-family: inherit; font-size: 0.9rem;
+    cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.2s;
+}
+.solder-tab.active { color: var(--accent-green); border-bottom-color: var(--accent-green); }
+.profile-canvas-wrap {
+    width: 100%; height: 320px; background: var(--bg-secondary);
+    border: 1px solid var(--border-color); border-radius: var(--radius-md);
+    overflow: hidden; position: relative; margin-bottom: 1rem;
+}
+.profile-canvas-wrap canvas { width: 100%; height: 100%; }
+.zone-sliders { display: grid; grid-template-columns: repeat(4,1fr); gap: 1rem; margin-bottom: 1.5rem; }
+.zone-slider label { display: block; font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.3rem; }
+.zone-slider .val { font-family: var(--font-mono); color: var(--accent-green); font-size: 0.85rem; }
+.joints-row { display: grid; grid-template-columns: repeat(3,1fr); gap: 1rem; }
+.joint-card { text-align: center; }
+.joint-card canvas { width: 100%; height: 140px; display: block; border-radius: var(--radius-sm); margin-bottom: 0.5rem; }
+.joint-card .jlabel { font-size: 0.85rem; }
+.joint-card .jlabel.good { color: var(--accent-green); }
+.joint-card .jlabel.cold { color: var(--accent-orange); }
+.joint-card .jlabel.bridge { color: var(--accent-red); }
+
+/* Cost */
+.cost-layout { display: grid; grid-template-columns: 320px 1fr; gap: 2rem; }
+.cost-inputs { display: flex; flex-direction: column; gap: 1rem; }
+.cost-field label { display: block; font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.3rem; }
+.cost-field select {
+    width: 100%; padding: 0.5rem; background: var(--bg-secondary);
+    border: 1px solid var(--border-color); border-radius: var(--radius-sm);
+    color: var(--text-primary); font-family: inherit; font-size: 0.85rem;
+}
+.cost-field .val-display { font-family: var(--font-mono); color: var(--accent-green); font-size: 0.85rem; }
+.cost-result {
+    display: flex; flex-direction: column; gap: 1.5rem;
+}
+.cost-bar-chart { flex: 1; }
+.cost-bar-row {
+    display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.6rem;
+}
+.cost-bar-row .bar-label { min-width: 80px; font-size: 0.82rem; color: var(--text-secondary); text-align: right; }
+.cost-bar-row .bar-track {
+    flex: 1; height: 24px; background: var(--border-color); border-radius: 4px; overflow: hidden;
+    position: relative;
+}
+.cost-bar-row .bar-fill {
+    height: 100%; border-radius: 4px; transition: width 0.5s ease;
+    display: flex; align-items: center; padding-left: 8px;
+    font-family: var(--font-mono); font-size: 0.75rem; color: var(--bg-primary); font-weight: 600;
+}
+.cost-total {
+    font-size: 1.4rem; font-weight: 700; color: var(--accent-green);
+    font-family: var(--font-mono); text-align: center;
+    padding: 1rem; border: 1px solid var(--border-color);
+    border-radius: var(--radius-md); background: rgba(22,199,154,0.05);
+}
+.cost-tips { font-size: 0.85rem; }
+.cost-tips li { color: var(--text-secondary); margin-bottom: 0.4rem; }
+
+@media (max-width:1024px) {
+    .step-detail, .dfm-grid, .cost-layout { grid-template-columns: 1fr; }
+    .zone-sliders { grid-template-columns: repeat(2,1fr); }
+}
+@media (max-width:768px) {
+    .joints-row { grid-template-columns: 1fr; }
+    .gerber-controls { grid-template-columns: 1fr 1fr; }
+    .zone-sliders { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="page-container">
+
+<!-- ========== HERO ========== -->
+<div class="hero-banner section">
+    <h1>制造工艺</h1>
+    <p>从裸板到成品：了解 PCB 制造全流程、Gerber 文件、DFM 规则、焊接工艺与成本估算。</p>
+</div>
+
+<!-- ========== S1: 制造流程 ========== -->
+<div class="section" id="sec-pipeline">
+    <div class="section-title"><div class="icon">1</div><h2>PCB 制造流程</h2></div>
+    <p>点击每个工艺步骤查看详细说明与动画演示。</p>
+    <div id="pipelineBar" class="pipeline-bar"></div>
+    <div class="pipeline-progress"><div class="fill" id="pipelineProgress"></div></div>
+    <div class="anim-controls mb-2">
+        <button class="btn btn-sm" id="pipePrev" title="上一步">&#9664;</button>
+        <button class="btn btn-sm btn-primary" id="pipePlay" title="自动播放">&#9654;</button>
+        <button class="btn btn-sm" id="pipeNext" title="下一步">&#9654;</button>
+        <span class="step-label" id="pipeLabel">1 / 10</span>
+    </div>
+    <div class="step-detail" id="stepDetail">
+        <div class="step-canvas-wrap"><canvas id="stepCanvas"></canvas></div>
+        <div class="step-info" id="stepInfo"></div>
+    </div>
+</div>
+
+<!-- ========== S2: Gerber 文件 ========== -->
+<div class="section" id="sec-gerber">
+    <div class="section-title"><div class="icon">2</div><h2>Gerber 文件</h2></div>
+    <p>切换各层可见性和透明度，观察各 Gerber 层如何叠加组成完整 PCB。</p>
+    <div class="gerber-controls" id="gerberControls"></div>
+    <div class="gerber-canvas-wrap" id="gerberWrap">
+        <canvas id="gerberCanvas"></canvas>
+    </div>
+</div>
+
+<!-- ========== S3: DFM 规则 ========== -->
+<div class="section" id="sec-dfm">
+    <div class="section-title"><div class="icon">3</div><h2>DFM 规则检查</h2></div>
+    <p>点击左侧违规项目，查看对应的设计规则、最小值要求和修复方式。</p>
+    <div class="dfm-grid">
+        <div class="dfm-list" id="dfmList"></div>
+        <div class="dfm-detail-panel" id="dfmPanel">
+            <canvas id="dfmCanvas"></canvas>
+            <div id="dfmInfo"></div>
+        </div>
+    </div>
+</div>
+
+<!-- ========== S4: 焊接工艺 ========== -->
+<div class="section" id="sec-solder">
+    <div class="section-title"><div class="icon">4</div><h2>焊接工艺</h2></div>
+    <p>比较不同焊接方式，拖动温度区间滑块调节回流焊温度曲线。</p>
+    <div class="solder-tabs" id="solderTabs">
+        <button class="solder-tab active" data-tab="reflow">回流焊 (SMT)</button>
+        <button class="solder-tab" data-tab="wave">波峰焊</button>
+        <button class="solder-tab" data-tab="hand">手工焊接</button>
+    </div>
+    <div id="solderContent">
+        <!-- filled by JS -->
+    </div>
+    <h3 class="mt-3 mb-1">焊点截面对比</h3>
+    <div class="joints-row" id="jointsRow">
+        <div class="joint-card"><canvas id="jointGood"></canvas><div class="jlabel good">良好焊点</div></div>
+        <div class="joint-card"><canvas id="jointCold"></canvas><div class="jlabel cold">冷焊 / 虚焊</div></div>
+        <div class="joint-card"><canvas id="jointBridge"></canvas><div class="jlabel bridge">桥接 / 短路</div></div>
+    </div>
+</div>
+
+<!-- ========== S5: 成本估算 ========== -->
+<div class="section" id="sec-cost">
+    <div class="section-title"><div class="icon">5</div><h2>成本估算</h2></div>
+    <p>调整参数查看 PCB 打样/量产的相对成本分布与优化建议。</p>
+    <div class="cost-layout">
+        <div class="cost-inputs" id="costInputs"></div>
+        <div class="cost-result">
+            <div class="cost-total" id="costTotal">估算总价: --</div>
+            <div class="cost-bar-chart" id="costBars"></div>
+            <div class="info-box success cost-tips">
+                <h4>降本建议</h4>
+                <ul id="costTips"></ul>
+            </div>
+        </div>
+    </div>
+</div>
+
+</div><!-- /page-container -->
+
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/gsap.min.js"></script>
+<script src="../shared/scripts/nav.js"></script>
+<script>
+// roundRect polyfill for older browsers
+if (!CanvasRenderingContext2D.prototype.roundRect) {
+    CanvasRenderingContext2D.prototype.roundRect = function(x, y, w, h, r) {
+        if (typeof r === 'number') r = [r, r, r, r];
+        const [tl, tr, br, bl] = r;
+        this.moveTo(x + tl, y);
+        this.arcTo(x + w, y, x + w, y + h, tr);
+        this.arcTo(x + w, y + h, x, y + h, br);
+        this.arcTo(x, y + h, x, y, bl);
+        this.arcTo(x, y, x + w, y, tl);
+    };
+}
+/* ================================================================
+   08 - 制造工艺  (Manufacturing)
+   ================================================================ */
+(() => {
+'use strict';
+
+/* ---------- helpers ---------- */
+const $ = s => document.querySelector(s);
+const $$ = s => document.querySelectorAll(s);
+const clamp = (v,lo,hi) => Math.max(lo,Math.min(hi,v));
+const lerp = (a,b,t) => a + (b-a)*t;
+const dpr = window.devicePixelRatio || 1;
+
+function sizeCanvas(canvas, w, h) {
+    canvas.width = w * dpr;
+    canvas.height = h * dpr;
+    canvas.style.width = w + 'px';
+    canvas.style.height = h + 'px';
+    const ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+    return ctx;
+}
+
+function fitCanvas(canvas) {
+    const r = canvas.parentElement.getBoundingClientRect();
+    return sizeCanvas(canvas, r.width, r.height);
+}
+
+/* ================================================================
+   S1  —  PCB 制造流程
+   ================================================================ */
+const pipeSteps = [
+    { name:'基板切割', icon:'✂', color:'#4fc3f7',
+      desc:'将大面积覆铜基材（FR-4 环氧玻璃纤维）按设定尺寸裁切为生产拼板。',
+      params:{材料:'FR-4 / CEM-3', 厚度:'0.4–3.2 mm', 'Tg 值':'130–180°C', 精度:'±0.2 mm'}},
+    { name:'钻孔', icon:'⊙', color:'#b388ff',
+      desc:'使用 CNC 数控钻床在基板上钻出过孔、盲孔、埋孔。钻头转速可达 15 万 RPM。',
+      params:{最小孔径:'0.15 mm (HDI)', 位置精度:'±0.05 mm', 转速:'80k–150k RPM', 钻头材质:'硬质合金'}},
+    { name:'镀铜', icon:'Cu', color:'#ffab40',
+      desc:'通过化学镀铜（无电解）在孔壁沉积薄铜层，再电镀铜至目标厚度，形成层间导通。',
+      params:{化学镀厚度:'0.3–0.5 μm', 电镀铜厚度:'18–25 μm', 均匀性:'±10%', 溶液:'硫酸铜'}},
+    { name:'光刻', icon:'☀', color:'#ffd740',
+      desc:'将感光干膜或湿膜贴覆/涂覆于铜面，通过紫外曝光将 Gerber 图形转移到板面。',
+      params:{最小线宽:'3 mil (75μm)', 对位精度:'±15 μm', 光源:'UV 365nm', 膜类型:'干膜/湿膜'}},
+    { name:'蚀刻', icon:'⚗', color:'#ff5252',
+      desc:'用氯化铜或碱性蚀刻液溶解未被光刻胶保护的铜，形成电路走线图形。',
+      params:{蚀刻液:'CuCl₂ / 碱性氨', 温度:'48–52°C', 蚀刻因子:'>3.0', 侧蚀控制:'<15%'}},
+    { name:'阻焊层', icon:'▦', color:'#16c79a',
+      desc:'丝网印刷或喷涂绿色（或其他颜色）阻焊油墨，保护铜面防止意外短路和氧化。',
+      params:{颜色:'绿/红/蓝/黑/白', 厚度:'15–25 μm', 开窗精度:'±50 μm', 附着力:'百格测试 5B'}},
+    { name:'丝印', icon:'A', color:'#ff80ab',
+      desc:'在阻焊层上印刷元器件位号、标识、Logo 等白色（或其他颜色）文字标记。',
+      params:{最小字高:'0.8 mm', 线宽:'0.15 mm', 颜色:'白/黄/黑', 方法:'丝印/喷墨'}},
+    { name:'表面处理', icon:'Au', color:'#ffd740',
+      desc:'对裸露焊盘进行表面处理：HASL（喷锡）、ENIG（沉金）、OSP（有机保焊膜）等。',
+      params:{'HASL 厚度':'1–40 μm', 'ENIG 金厚':'0.05–0.1 μm', 'OSP 厚度':'0.2–0.5 μm', 保质期:'ENIG > 12月'}},
+    { name:'电测', icon:'⚡', color:'#4fc3f7',
+      desc:'飞针测试或专用治具测试全板连通性与绝缘性，确保无断路或短路。',
+      params:{方式:'飞针 / 治具', 测试点:'所有网络', 电压:'250V 绝缘', 速度:'30–60 点/秒'}},
+    { name:'外形加工', icon:'⬡', color:'#b388ff',
+      desc:'使用 CNC 铣刀、V-CUT 或冲压模具将拼板分割为单板，并去毛刺。',
+      params:{方式:'CNC铣 / V-CUT', 精度:'±0.1 mm', 最小槽宽:'0.8 mm', 板边余量:'≥0.3 mm'}},
+];
+
+let pipeIdx = 0, pipeTimer = null;
+const barEl = $('#pipelineBar');
+
+function buildPipeline() {
+    barEl.innerHTML = '';
+    pipeSteps.forEach((s,i) => {
+        if (i > 0) barEl.insertAdjacentHTML('beforeend', `<span class="pipe-arrow" id="arrow${i}">&#9654;</span>`);
+        const el = document.createElement('div');
+        el.className = 'pipe-step';
+        el.id = 'pstep' + i;
+        el.innerHTML = `<div class="dot">${s.icon}</div><span class="label">${s.name}</span>`;
+        el.onclick = () => goStep(i);
+        barEl.appendChild(el);
+    });
+}
+
+function goStep(i) {
+    pipeIdx = clamp(i, 0, pipeSteps.length - 1);
+    // update classes
+    pipeSteps.forEach((_,j) => {
+        const el = $(`#pstep${j}`);
+        el.classList.toggle('active', j === pipeIdx);
+        el.classList.toggle('done', j < pipeIdx);
+        if (j > 0) {
+            const arr = $(`#arrow${j}`);
+            arr.classList.toggle('done', j <= pipeIdx);
+        }
+    });
+    $('#pipelineProgress').style.width = ((pipeIdx) / (pipeSteps.length - 1) * 100) + '%';
+    $('#pipeLabel').textContent = `${pipeIdx + 1} / ${pipeSteps.length}`;
+    renderStepInfo();
+    renderStepCanvas();
+    gsap.from('#stepDetail', { opacity: 0, y: 10, duration: 0.35, ease: 'power2.out' });
+}
+
+function renderStepInfo() {
+    const s = pipeSteps[pipeIdx];
+    let html = `<h3>${s.icon} ${s.name}</h3><p>${s.desc}</p><dl class="param-grid">`;
+    for (const [k,v] of Object.entries(s.params)) html += `<dt>${k}</dt><dd>${v}</dd>`;
+    html += '</dl>';
+    if (pipeIdx < pipeSteps.length - 1) {
+        html += `<button class="btn btn-primary btn-sm mt-2" onclick="window._pipeNext()">下一步: ${pipeSteps[pipeIdx+1].name} &#9654;</button>`;
+    }
+    $('#stepInfo').innerHTML = html;
+}
+window._pipeNext = () => goStep(pipeIdx + 1);
+
+function renderStepCanvas() {
+    const canvas = $('#stepCanvas');
+    const ctx = fitCanvas(canvas);
+    const W = canvas.width / dpr, H = canvas.height / dpr;
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = '#0d1b2a';
+    ctx.fillRect(0, 0, W, H);
+    const s = pipeSteps[pipeIdx];
+    drawStepAnim(ctx, W, H, pipeIdx, s);
+}
+
+function drawStepAnim(ctx, W, H, idx, s) {
+    const cx = W / 2, cy = H / 2;
+    ctx.save();
+    // board outline
+    const bw = W * 0.6, bh = H * 0.55;
+    const bx = cx - bw/2, by = cy - bh/2;
+
+    switch(idx) {
+    case 0: // 基板切割
+        ctx.strokeStyle = '#4fc3f740'; ctx.lineWidth = 1;
+        for (let i = 0; i < 4; i++) for (let j = 0; j < 3; j++) {
+            ctx.strokeRect(bx + i*bw/4 + 2, by + j*bh/3 + 2, bw/4 - 4, bh/3 - 4);
+        }
+        ctx.strokeStyle = s.color; ctx.lineWidth = 2; ctx.setLineDash([6,4]);
+        ctx.strokeRect(bx + bw/4, by + bh/3, bw/4, bh/3);
+        ctx.setLineDash([]);
+        ctx.fillStyle = s.color + '30';
+        ctx.fillRect(bx + bw/4, by + bh/3, bw/4, bh/3);
+        drawLabel(ctx, '裁切线', cx, by + bh + 20, s.color);
+        break;
+    case 1: // 钻孔
+        ctx.fillStyle = '#1a3a2e'; ctx.fillRect(bx, by, bw, bh);
+        ctx.strokeStyle = '#2a5a4e'; ctx.lineWidth = 1; ctx.strokeRect(bx, by, bw, bh);
+        const holes = [[0.2,0.2],[0.5,0.15],[0.8,0.25],[0.15,0.7],[0.45,0.5],[0.75,0.75],[0.3,0.4],[0.65,0.45],[0.85,0.6],[0.5,0.8]];
+        holes.forEach(([hx,hy],i) => {
+            const r = 3 + (i % 3);
+            ctx.beginPath(); ctx.arc(bx + bw*hx, by + bh*hy, r, 0, Math.PI*2);
+            ctx.fillStyle = i < 6 ? s.color : '#555'; ctx.fill();
+            if (i < 6) { ctx.strokeStyle = s.color+'80'; ctx.lineWidth = 1; ctx.stroke(); }
+        });
+        drawLabel(ctx, 'CNC 钻孔位', cx, by + bh + 20, s.color);
+        break;
+    case 2: // 镀铜
+        ctx.fillStyle = '#1a2a1e'; ctx.fillRect(bx, by, bw, bh);
+        // layers
+        const lh = bh * 0.15;
+        [['#d4a574','铜箔 (顶层)'], ['#2a5a2e','FR-4 基材'], ['#d4a574','铜箔 (底层)']].forEach(([c,l],i) => {
+            const ly = by + bh*0.25 + i*(lh + 8);
+            ctx.fillStyle = c; ctx.fillRect(bx + 20, ly, bw - 40, lh);
+            ctx.fillStyle = '#aaa'; ctx.font = '11px "Noto Sans SC"'; ctx.fillText(l, bx + bw + 4 - 100, ly + lh/2 + 4);
+        });
+        // plated hole
+        ctx.beginPath(); ctx.arc(cx, cy, 8, 0, Math.PI*2);
+        ctx.fillStyle = s.color; ctx.fill();
+        ctx.beginPath(); ctx.arc(cx, cy, 4, 0, Math.PI*2);
+        ctx.fillStyle = '#0d1b2a'; ctx.fill();
+        drawLabel(ctx, '镀铜过孔', cx, by + bh + 20, s.color);
+        break;
+    case 3: // 光刻
+        ctx.fillStyle = '#1a1a2e'; ctx.fillRect(bx, by, bw, bh);
+        // UV rays
+        for (let i = 0; i < 7; i++) {
+            const rx = bx + bw*0.15 + i * bw*0.12;
+            ctx.strokeStyle = '#ffd74060'; ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.moveTo(rx, by - 20); ctx.lineTo(rx, by + 15); ctx.stroke();
+        }
+        ctx.fillStyle = '#ffd74015'; ctx.fillRect(bx, by - 25, bw, 25);
+        drawLabel(ctx, 'UV 光源', cx, by - 32, '#ffd740');
+        // mask pattern
+        ctx.fillStyle = '#33333380'; ctx.fillRect(bx, by, bw, bh);
+        ctx.fillStyle = s.color + '50';
+        ctx.fillRect(bx + 20, by + 20, bw*0.35, 12);
+        ctx.fillRect(bx + 20, by + 40, bw*0.5, 8);
+        ctx.fillRect(bx + bw*0.6, by + 20, 8, bh - 40);
+        ctx.fillRect(bx + 20, by + bh - 30, bw*0.4, 10);
+        drawLabel(ctx, '曝光图形', cx, by + bh + 20, s.color);
+        break;
+    case 4: // 蚀刻
+        ctx.fillStyle = '#d4a57420'; ctx.fillRect(bx, by, bw, bh);
+        ctx.strokeStyle = '#2a3a2e'; ctx.lineWidth = 1; ctx.strokeRect(bx, by, bw, bh);
+        // traces that remain
+        ctx.fillStyle = '#d4a574';
+        ctx.fillRect(bx + 20, by + 20, bw*0.4, 6);
+        ctx.fillRect(bx + 20, by + 45, bw*0.55, 4);
+        ctx.fillRect(bx + bw*0.65, by + 15, 5, bh*0.6);
+        ctx.fillRect(bx + 15, by + bh*0.6, bw*0.5, 5);
+        // etch areas
+        ctx.fillStyle = s.color + '15'; ctx.fillRect(bx + 20, by + 70, bw - 40, 40);
+        drawLabel(ctx, '蚀刻后铜线', cx, by + bh + 20, s.color);
+        break;
+    case 5: // 阻焊层
+        ctx.fillStyle = '#0a2a1a'; ctx.fillRect(bx, by, bw, bh);
+        // solder mask (green)
+        ctx.fillStyle = '#16c79a25'; ctx.fillRect(bx, by, bw, bh);
+        // openings
+        const pads = [[0.2,0.3],[0.4,0.3],[0.6,0.3],[0.8,0.3],[0.2,0.7],[0.4,0.7],[0.6,0.7],[0.8,0.7]];
+        pads.forEach(([px,py]) => {
+            ctx.beginPath(); ctx.arc(bx + bw*px, by + bh*py, 8, 0, Math.PI*2);
+            ctx.fillStyle = '#d4a574'; ctx.fill();
+        });
+        ctx.strokeStyle = s.color; ctx.lineWidth = 2; ctx.strokeRect(bx, by, bw, bh);
+        drawLabel(ctx, '绿色阻焊 + 焊盘开窗', cx, by + bh + 20, s.color);
+        break;
+    case 6: // 丝印
+        ctx.fillStyle = '#0a2a1a'; ctx.fillRect(bx, by, bw, bh);
+        ctx.fillStyle = '#16c79a15'; ctx.fillRect(bx, by, bw, bh);
+        ctx.font = 'bold 11px "JetBrains Mono"'; ctx.fillStyle = '#fff';
+        const silks = ['R1','R2','C1','C2','U1','J1','D1','L1'];
+        silks.forEach((t,i) => {
+            ctx.fillText(t, bx + 20 + (i%4)*(bw*0.22), by + 35 + Math.floor(i/4)*bh*0.45);
+        });
+        ctx.font = '9px "Noto Sans SC"'; ctx.fillStyle = '#fff8';
+        ctx.fillText('PCB Rev 1.0', bx + bw - 80, by + bh - 10);
+        drawLabel(ctx, '白色丝印标识', cx, by + bh + 20, s.color);
+        break;
+    case 7: // 表面处理
+        ctx.fillStyle = '#0a2a1a'; ctx.fillRect(bx, by, bw, bh);
+        const finishes = [
+            { x: bx + bw*0.2, label: 'HASL', c: '#c0c0c0' },
+            { x: bx + bw*0.5, label: 'ENIG', c: '#ffd740' },
+            { x: bx + bw*0.8, label: 'OSP', c: '#a0d0a0' },
+        ];
+        finishes.forEach(f => {
+            ctx.beginPath(); ctx.roundRect(f.x - 25, cy - 30, 50, 60, 4);
+            ctx.fillStyle = f.c + '40'; ctx.fill(); ctx.strokeStyle = f.c; ctx.lineWidth = 2; ctx.stroke();
+            ctx.fillStyle = f.c; ctx.font = 'bold 12px "JetBrains Mono"'; ctx.textAlign = 'center';
+            ctx.fillText(f.label, f.x, cy + 50);
+        });
+        ctx.textAlign = 'left';
+        drawLabel(ctx, '三种常见表面处理', cx, by + bh + 20, s.color);
+        break;
+    case 8: // 电测
+        ctx.fillStyle = '#0d1b2a'; ctx.fillRect(bx, by, bw, bh);
+        ctx.strokeStyle = '#2a3a4e'; ctx.lineWidth = 1; ctx.strokeRect(bx, by, bw, bh);
+        // test points
+        const tps = [[0.15,0.2],[0.35,0.25],[0.6,0.2],[0.85,0.3],[0.2,0.6],[0.5,0.55],[0.75,0.65],[0.4,0.8],[0.8,0.85]];
+        tps.forEach(([tx,ty],i) => {
+            const px = bx + bw*tx, py = by + bh*ty;
+            ctx.beginPath(); ctx.arc(px, py, 5, 0, Math.PI*2);
+            ctx.fillStyle = i < 7 ? '#16c79a' : '#ff5252'; ctx.fill();
+            if (i === 7 || i === 8) {
+                ctx.strokeStyle = '#ff525280'; ctx.lineWidth = 2;
+                ctx.beginPath(); ctx.moveTo(px-7,py-7); ctx.lineTo(px+7,py+7); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(px+7,py-7); ctx.lineTo(px-7,py+7); ctx.stroke();
+            }
+        });
+        // flying probe lines
+        ctx.strokeStyle = s.color + '60'; ctx.lineWidth = 1; ctx.setLineDash([3,3]);
+        ctx.beginPath(); ctx.moveTo(bx+bw*0.15, by+bh*0.2); ctx.lineTo(bx+bw*0.35, by+bh*0.25); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(bx+bw*0.5, by+bh*0.55); ctx.lineTo(bx+bw*0.75, by+bh*0.65); ctx.stroke();
+        ctx.setLineDash([]);
+        drawLabel(ctx, '飞针测试 (绿=通过, 红=失败)', cx, by + bh + 20, s.color);
+        break;
+    case 9: // 外形加工
+        ctx.fillStyle = '#0d1b2a'; ctx.fillRect(bx, by, bw, bh);
+        // panel outline
+        ctx.strokeStyle = '#2a4a5e'; ctx.lineWidth = 1;
+        ctx.strokeRect(bx, by, bw, bh);
+        // V-cut lines
+        ctx.strokeStyle = s.color; ctx.lineWidth = 2; ctx.setLineDash([8,4]);
+        ctx.beginPath(); ctx.moveTo(bx + bw/2, by); ctx.lineTo(bx + bw/2, by + bh); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(bx, by + bh/2); ctx.lineTo(bx + bw, by + bh/2); ctx.stroke();
+        ctx.setLineDash([]);
+        // individual boards
+        ctx.fillStyle = '#16c79a10';
+        ctx.fillRect(bx + 4, by + 4, bw/2 - 8, bh/2 - 8);
+        ctx.fillRect(bx + bw/2 + 4, by + 4, bw/2 - 8, bh/2 - 8);
+        ctx.fillRect(bx + 4, by + bh/2 + 4, bw/2 - 8, bh/2 - 8);
+        ctx.fillRect(bx + bw/2 + 4, by + bh/2 + 4, bw/2 - 8, bh/2 - 8);
+        drawLabel(ctx, 'V-CUT 分板线', cx, by + bh + 20, s.color);
+        break;
+    }
+    ctx.restore();
+}
+
+function drawLabel(ctx, text, x, y, color) {
+    ctx.font = '12px "Noto Sans SC"'; ctx.fillStyle = color; ctx.textAlign = 'center';
+    ctx.fillText(text, x, y); ctx.textAlign = 'left';
+}
+
+// pipeline controls
+$('#pipePrev').onclick = () => goStep(pipeIdx - 1);
+$('#pipeNext').onclick = () => goStep(pipeIdx + 1);
+$('#pipePlay').onclick = () => {
+    if (pipeTimer) { clearInterval(pipeTimer); pipeTimer = null; $('#pipePlay').innerHTML = '&#9654;'; return; }
+    $('#pipePlay').innerHTML = '&#9646;&#9646;';
+    pipeTimer = setInterval(() => {
+        if (pipeIdx >= pipeSteps.length - 1) { clearInterval(pipeTimer); pipeTimer = null; $('#pipePlay').innerHTML = '&#9654;'; return; }
+        goStep(pipeIdx + 1);
+    }, 2200);
+};
+
+buildPipeline();
+goStep(0);
+// GSAP stagger entrance
+gsap.from('.pipe-step', { opacity: 0, y: 20, stagger: 0.08, duration: 0.5, ease: 'power2.out', delay: 0.2 });
+
+/* ================================================================
+   S2  —  Gerber 文件
+   ================================================================ */
+const gerberLayers = [
+    { id:'topCu',  name:'顶层铜',   color:'#ff4444', opacity:1, visible:true },
+    { id:'botCu',  name:'底层铜',   color:'#4444ff', opacity:1, visible:true },
+    { id:'topMask', name:'顶层阻焊', color:'#00aa44', opacity:0.6, visible:true },
+    { id:'botMask', name:'底层阻焊', color:'#006622', opacity:0.6, visible:true },
+    { id:'topSilk', name:'顶层丝印', color:'#ffffff', opacity:0.8, visible:true },
+    { id:'drill',   name:'钻孔文件', color:'#ffaa00', opacity:1, visible:true },
+];
+
+function buildGerberControls() {
+    const wrap = $('#gerberControls');
+    wrap.innerHTML = '';
+    gerberLayers.forEach(l => {
+        const el = document.createElement('div');
+        el.className = 'layer-toggle';
+        el.innerHTML = `
+            <div class="swatch" style="background:${l.color}"></div>
+            <label class="toggle" style="flex-shrink:0">
+                <input type="checkbox" ${l.visible?'checked':''} data-layer="${l.id}">
+                <div class="track"></div>
+            </label>
+            <span class="lname">${l.name}</span>
+            <input type="range" min="0" max="100" value="${l.opacity*100}" data-opacity="${l.id}" title="透明度">
+        `;
+        wrap.appendChild(el);
+        el.querySelector('input[type=checkbox]').addEventListener('change', e => {
+            l.visible = e.target.checked; drawGerber();
+        });
+        el.querySelector('input[type=range]').addEventListener('input', e => {
+            l.opacity = e.target.value / 100; drawGerber();
+        });
+    });
+}
+
+function drawGerber() {
+    const canvas = $('#gerberCanvas');
+    const wrap = $('#gerberWrap');
+    const ctx = sizeCanvas(canvas, wrap.clientWidth, wrap.clientHeight);
+    const W = wrap.clientWidth, H = wrap.clientHeight;
+    ctx.fillStyle = '#0a0a1a'; ctx.fillRect(0, 0, W, H);
+
+    // board area
+    const margin = 40;
+    const bw = W - margin*2, bh = H - margin*2;
+    const bx = margin, by = margin;
+
+    // draw board outline
+    ctx.strokeStyle = '#333'; ctx.lineWidth = 1;
+    ctx.strokeRect(bx, by, bw, bh);
+
+    gerberLayers.forEach(l => {
+        if (!l.visible) return;
+        ctx.save();
+        ctx.globalAlpha = l.opacity;
+        switch(l.id) {
+        case 'topCu':
+            ctx.strokeStyle = l.color; ctx.lineWidth = 3;
+            // traces
+            drawTrace(ctx, bx+30, by+40, bx+bw*0.4, by+40);
+            drawTrace(ctx, bx+bw*0.4, by+40, bx+bw*0.4, by+bh*0.5);
+            drawTrace(ctx, bx+30, by+bh*0.3, bx+bw*0.6, by+bh*0.3);
+            drawTrace(ctx, bx+bw*0.6, by+bh*0.3, bx+bw*0.6, by+bh*0.8);
+            drawTrace(ctx, bx+bw*0.2, by+bh*0.6, bx+bw*0.8, by+bh*0.6);
+            // pads
+            drawPad(ctx, bx+30, by+40, 8, l.color);
+            drawPad(ctx, bx+bw*0.4, by+bh*0.5, 8, l.color);
+            drawPad(ctx, bx+bw*0.6, by+bh*0.8, 8, l.color);
+            drawPad(ctx, bx+bw*0.8, by+bh*0.6, 10, l.color);
+            // IC footprint
+            drawICPad(ctx, bx+bw*0.75, by+bh*0.2, l.color);
+            break;
+        case 'botCu':
+            ctx.strokeStyle = l.color; ctx.lineWidth = 3;
+            drawTrace(ctx, bx+bw*0.1, by+bh*0.8, bx+bw*0.5, by+bh*0.8);
+            drawTrace(ctx, bx+bw*0.5, by+bh*0.8, bx+bw*0.5, by+bh*0.4);
+            drawTrace(ctx, bx+bw*0.3, by+bh*0.5, bx+bw*0.7, by+bh*0.9);
+            drawPad(ctx, bx+bw*0.1, by+bh*0.8, 8, l.color);
+            drawPad(ctx, bx+bw*0.5, by+bh*0.4, 8, l.color);
+            drawPad(ctx, bx+bw*0.7, by+bh*0.9, 8, l.color);
+            break;
+        case 'topMask':
+            ctx.fillStyle = l.color + '30';
+            ctx.fillRect(bx, by, bw, bh);
+            // openings (clear circles)
+            ctx.globalCompositeOperation = 'destination-out';
+            [[30,40],[bw*0.4,bh*0.5],[bw*0.6,bh*0.8],[bw*0.8,bh*0.6]].forEach(([ox,oy]) => {
+                ctx.beginPath(); ctx.arc(bx+ox, by+oy, 10, 0, Math.PI*2); ctx.fill();
+            });
+            // IC openings
+            for (let i = 0; i < 4; i++) {
+                ctx.beginPath(); ctx.arc(bx+bw*0.72 + i*8, by+bh*0.15, 3, 0, Math.PI*2); ctx.fill();
+                ctx.beginPath(); ctx.arc(bx+bw*0.72 + i*8, by+bh*0.27, 3, 0, Math.PI*2); ctx.fill();
+            }
+            ctx.globalCompositeOperation = 'source-over';
+            break;
+        case 'botMask':
+            ctx.fillStyle = l.color + '25';
+            ctx.fillRect(bx, by, bw, bh);
+            ctx.globalCompositeOperation = 'destination-out';
+            [[bw*0.1,bh*0.8],[bw*0.5,bh*0.4],[bw*0.7,bh*0.9]].forEach(([ox,oy]) => {
+                ctx.beginPath(); ctx.arc(bx+ox, by+oy, 10, 0, Math.PI*2); ctx.fill();
+            });
+            ctx.globalCompositeOperation = 'source-over';
+            break;
+        case 'topSilk':
+            ctx.fillStyle = l.color; ctx.font = 'bold 10px "JetBrains Mono"';
+            ctx.fillText('R1', bx + 15, by + 58);
+            ctx.fillText('C1', bx + bw*0.38, by + bh*0.5 + 20);
+            ctx.fillText('U1', bx + bw*0.72, by + bh*0.12);
+            ctx.fillText('J1', bx + bw*0.77, by + bh*0.6 + 18);
+            // component outlines
+            ctx.strokeStyle = l.color; ctx.lineWidth = 1;
+            ctx.strokeRect(bx + bw*0.7, by + bh*0.14, 35, 24);
+            ctx.fillStyle = l.color; ctx.font = '8px "Noto Sans SC"';
+            ctx.fillText('PCB v1.0', bx + bw - 60, by + bh - 8);
+            break;
+        case 'drill':
+            const drills = [[30,40],[bw*0.4,bh*0.5],[bw*0.6,bh*0.8],[bw*0.8,bh*0.6],[bw*0.1,bh*0.8],[bw*0.5,bh*0.4],[bw*0.7,bh*0.9],[bw*0.3,bh*0.45]];
+            drills.forEach(([dx,dy]) => {
+                ctx.beginPath(); ctx.arc(bx+dx, by+dy, 3, 0, Math.PI*2);
+                ctx.strokeStyle = l.color; ctx.lineWidth = 1.5; ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(bx+dx-5,by+dy); ctx.lineTo(bx+dx+5,by+dy); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(bx+dx,by+dy-5); ctx.lineTo(bx+dx,by+dy+5); ctx.stroke();
+            });
+            break;
+        }
+        ctx.restore();
+    });
+
+    // legend
+    ctx.font = '10px "Noto Sans SC"';
+    ctx.fillStyle = '#666';
+    ctx.fillText('各层叠加预览 — 切换开关与滑块控制可见性', bx, H - 10);
+}
+
+function drawTrace(ctx, x1, y1, x2, y2) {
+    ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+}
+function drawPad(ctx, x, y, r, color) {
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI*2);
+    ctx.fillStyle = color + '80'; ctx.fill();
+    ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.stroke();
+}
+function drawICPad(ctx, x, y, color) {
+    ctx.fillStyle = color + '30'; ctx.fillRect(x-2, y-2, 34, 28);
+    ctx.strokeStyle = color; ctx.lineWidth = 1; ctx.strokeRect(x-2, y-2, 34, 28);
+    for (let i = 0; i < 4; i++) {
+        ctx.fillStyle = color; ctx.fillRect(x + i*8, y - 6, 4, 4);
+        ctx.fillRect(x + i*8, y + 28, 4, 4);
+    }
+}
+
+buildGerberControls();
+drawGerber();
+window.addEventListener('resize', () => { drawGerber(); renderStepCanvas(); });
+
+/* ================================================================
+   S3  —  DFM 规则检查
+   ================================================================ */
+const dfmRules = [
+    { name:'走线过细', status:'fail', rule:'最小线宽 ≥ 6 mil (0.15mm)', value:'当前: 3 mil', fix:'加宽走线至 6 mil 以上，或选择高精度工艺板厂。', color:'#ff5252' },
+    { name:'间距不足', status:'fail', rule:'最小间距 ≥ 6 mil', value:'当前: 4 mil', fix:'增大走线间距，特别注意 BGA 出线区域。', color:'#ff5252' },
+    { name:'过孔钻径过小', status:'fail', rule:'过孔钻径 ≥ 0.2 mm', value:'当前: 0.1 mm', fix:'增大过孔孔径，或使用激光钻微孔（HDI 工艺）。', color:'#ffab40' },
+    { name:'酸蚀陷阱', status:'fail', rule:'铜皮内角 ≥ 90°', value:'当前: 锐角 45°', fix:'消除锐角铜皮夹角，使用圆弧过渡或钝角连接。', color:'#ff5252' },
+    { name:'铜箔碎片', status:'fail', rule:'最小铜箔宽度 ≥ 8 mil', value:'当前: 3 mil 碎铜', fix:'删除残余碎铜或将其连入相邻铜皮。', color:'#ffab40' },
+    { name:'缺少散热盘', status:'pass', rule:'大电流焊盘需花瓣形热释放', value:'已设置', fix:'为连接大面积铜皮的焊盘添加 thermal relief 连接。', color:'#16c79a' },
+];
+
+let activeDfm = 0;
+
+function buildDfmList() {
+    const list = $('#dfmList');
+    list.innerHTML = '';
+    dfmRules.forEach((r,i) => {
+        const el = document.createElement('div');
+        el.className = 'dfm-item' + (i === activeDfm ? ' active' : '');
+        el.innerHTML = `<div class="indicator ${r.status}"></div><span>${r.name}</span>`;
+        el.onclick = () => selectDfm(i);
+        list.appendChild(el);
+    });
+}
+
+function selectDfm(i) {
+    activeDfm = i;
+    $$('.dfm-item').forEach((el,j) => el.classList.toggle('active', j === i));
+    drawDfm();
+    renderDfmInfo();
+    gsap.from('#dfmPanel', { opacity: 0, x: 10, duration: 0.3 });
+}
+
+function renderDfmInfo() {
+    const r = dfmRules[activeDfm];
+    const statusBadge = r.status === 'pass'
+        ? '<span class="badge badge-green">通过</span>'
+        : '<span class="badge badge-orange">违规</span>';
+    $('#dfmInfo').innerHTML = `
+        <h3 style="color:${r.color}">${r.name} ${statusBadge}</h3>
+        <p><strong>规则:</strong> ${r.rule}</p>
+        <p><strong>检测值:</strong> <code>${r.value}</code></p>
+        <div class="info-box ${r.status==='pass'?'success':'warning'}">
+            <p><strong>修复建议:</strong> ${r.fix}</p>
+        </div>
+    `;
+}
+
+function drawDfm() {
+    const canvas = $('#dfmCanvas');
+    const parent = canvas.parentElement;
+    const ctx = sizeCanvas(canvas, parent.clientWidth - 48, 240);
+    const W = (parent.clientWidth - 48), H = 240;
+    ctx.fillStyle = '#0a0a1a'; ctx.fillRect(0, 0, W, H);
+
+    const cx = W/2, cy = H/2;
+    const r = dfmRules[activeDfm];
+
+    ctx.save();
+    switch(activeDfm) {
+    case 0: // trace too thin
+        ctx.strokeStyle = '#d4a574'; ctx.lineWidth = 6;
+        ctx.beginPath(); ctx.moveTo(40, cy); ctx.lineTo(cx-20, cy); ctx.stroke();
+        ctx.strokeStyle = r.color; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.moveTo(cx+20, cy); ctx.lineTo(W-40, cy); ctx.stroke();
+        drawLabel(ctx, '6 mil ✓', cx*0.4, cy-16, '#16c79a');
+        drawLabel(ctx, '3 mil ✗', cx*1.4, cy-16, r.color);
+        // dimension arrows
+        drawDimArrow(ctx, 40, cy+20, cx-20, cy+20, '0.15mm', '#16c79a');
+        drawDimArrow(ctx, cx+20, cy+20, W-40, cy+20, '0.08mm', r.color);
+        break;
+    case 1: // clearance
+        ctx.strokeStyle = '#d4a574'; ctx.lineWidth = 4;
+        ctx.beginPath(); ctx.moveTo(40, cy-20); ctx.lineTo(W-40, cy-20); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(40, cy+20); ctx.lineTo(W-40, cy+20); ctx.stroke();
+        // clearance marker
+        ctx.strokeStyle = r.color; ctx.lineWidth = 1; ctx.setLineDash([3,3]);
+        ctx.beginPath(); ctx.moveTo(cx, cy-16); ctx.lineTo(cx, cy+16); ctx.stroke();
+        ctx.setLineDash([]);
+        drawLabel(ctx, '间距 4 mil (不足!)', cx, cy+45, r.color);
+        // good example
+        ctx.strokeStyle = '#d4a57480'; ctx.lineWidth = 4;
+        ctx.beginPath(); ctx.moveTo(40, cy-60); ctx.lineTo(W-40, cy-60); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(40, cy-90); ctx.lineTo(W-40, cy-90); ctx.stroke();
+        drawLabel(ctx, '间距 8 mil ✓', cx, cy-100, '#16c79a');
+        break;
+    case 2: // via too small
+        ctx.beginPath(); ctx.arc(cx-60, cy, 12, 0, Math.PI*2);
+        ctx.strokeStyle = '#16c79a'; ctx.lineWidth = 2; ctx.stroke();
+        ctx.beginPath(); ctx.arc(cx-60, cy, 5, 0, Math.PI*2);
+        ctx.fillStyle = '#0a0a1a'; ctx.fill(); ctx.strokeStyle = '#16c79a'; ctx.stroke();
+        drawLabel(ctx, '∅0.2mm ✓', cx-60, cy+28, '#16c79a');
+
+        ctx.beginPath(); ctx.arc(cx+60, cy, 12, 0, Math.PI*2);
+        ctx.strokeStyle = r.color; ctx.lineWidth = 2; ctx.stroke();
+        ctx.beginPath(); ctx.arc(cx+60, cy, 2, 0, Math.PI*2);
+        ctx.fillStyle = '#0a0a1a'; ctx.fill(); ctx.strokeStyle = r.color; ctx.stroke();
+        drawLabel(ctx, '∅0.1mm ✗', cx+60, cy+28, r.color);
+        break;
+    case 3: // acid trap
+        // bad: acute angle
+        ctx.strokeStyle = r.color; ctx.lineWidth = 4;
+        ctx.beginPath(); ctx.moveTo(cx-80, cy+30); ctx.lineTo(cx, cy-30); ctx.lineTo(cx+10, cy+30); ctx.stroke();
+        ctx.fillStyle = r.color+'30';
+        ctx.beginPath(); ctx.moveTo(cx-80, cy+30); ctx.lineTo(cx, cy-30); ctx.lineTo(cx+10, cy+30); ctx.closePath(); ctx.fill();
+        drawLabel(ctx, '锐角铜皮 (酸液残留)', cx, cy+55, r.color);
+        // good: rounded
+        ctx.strokeStyle = '#16c79a'; ctx.lineWidth = 4;
+        ctx.beginPath(); ctx.moveTo(cx+80, cy+30); ctx.quadraticCurveTo(cx+130, cy-30, cx+180, cy+30); ctx.stroke();
+        drawLabel(ctx, '圆弧过渡 ✓', cx+130, cy+55, '#16c79a');
+        break;
+    case 4: // copper sliver
+        ctx.fillStyle = r.color+'40';
+        ctx.beginPath(); ctx.moveTo(cx-60, cy-40); ctx.lineTo(cx-57, cy+40); ctx.lineTo(cx-60, cy+40); ctx.closePath(); ctx.fill();
+        ctx.strokeStyle = r.color; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(cx-60, cy-40); ctx.lineTo(cx-57, cy+40); ctx.stroke();
+        drawLabel(ctx, '3 mil 碎铜 ✗', cx-60, cy+60, r.color);
+        // proper copper
+        ctx.fillStyle = '#16c79a30';
+        ctx.fillRect(cx+20, cy-30, 40, 60);
+        ctx.strokeStyle = '#16c79a'; ctx.lineWidth = 1; ctx.strokeRect(cx+20, cy-30, 40, 60);
+        drawLabel(ctx, '正常铜皮 ✓', cx+40, cy+60, '#16c79a');
+        break;
+    case 5: // thermal relief
+        ctx.beginPath(); ctx.arc(cx, cy, 30, 0, Math.PI*2);
+        ctx.fillStyle = '#d4a57420'; ctx.fill();
+        ctx.strokeStyle = '#16c79a'; ctx.lineWidth = 2; ctx.stroke();
+        // thermal spokes
+        for (let a = 0; a < 4; a++) {
+            const angle = a * Math.PI/2 + Math.PI/4;
+            ctx.strokeStyle = '#16c79a'; ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.moveTo(cx + Math.cos(angle)*12, cy + Math.sin(angle)*12);
+            ctx.lineTo(cx + Math.cos(angle)*28, cy + Math.sin(angle)*28);
+            ctx.stroke();
+        }
+        ctx.beginPath(); ctx.arc(cx, cy, 8, 0, Math.PI*2);
+        ctx.fillStyle = '#d4a574'; ctx.fill();
+        drawLabel(ctx, '花瓣形散热连接 ✓', cx, cy + 50, '#16c79a');
+        break;
+    }
+    ctx.restore();
+}
+
+function drawDimArrow(ctx, x1, y1, x2, y2, label, color) {
+    ctx.strokeStyle = color; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x1,y1-4); ctx.lineTo(x1,y1+4); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x2,y2-4); ctx.lineTo(x2,y2+4); ctx.stroke();
+    ctx.fillStyle = color; ctx.font = '10px "JetBrains Mono"'; ctx.textAlign = 'center';
+    ctx.fillText(label, (x1+x2)/2, y1 + 14); ctx.textAlign = 'left';
+}
+
+buildDfmList();
+selectDfm(0);
+
+/* ================================================================
+   S4  —  焊接工艺
+   ================================================================ */
+const solderData = {
+    reflow: {
+        title: '回流焊 (Reflow Soldering)',
+        desc: 'SMT 主流焊接方式。PCB 上印刷锡膏 → 贴片 → 经过回流炉四温区完成焊接。',
+        zones: [
+            { name:'预热区', temp: 180, time: 90, color:'#4fc3f7' },
+            { name:'恒温区', temp: 200, time: 60, color:'#ffab40' },
+            { name:'回流区', temp: 250, time: 45, color:'#ff5252' },
+            { name:'冷却区', temp: 100, time: 60, color:'#b388ff' },
+        ]
+    },
+    wave: {
+        title: '波峰焊 (Wave Soldering)',
+        desc: '适用于通孔元件和混装板。PCB 底面经过熔融焊锡波峰，完成全板焊接。',
+        zones: [
+            { name:'助焊剂', temp: 100, time: 30, color:'#4fc3f7' },
+            { name:'预热', temp: 130, time: 60, color:'#ffab40' },
+            { name:'焊接', temp: 260, time: 8, color:'#ff5252' },
+            { name:'冷却', temp: 80, time: 40, color:'#b388ff' },
+        ]
+    },
+    hand: {
+        title: '手工焊接 (Hand Soldering)',
+        desc: '适用于原型调试、返修。使用电烙铁点对点焊接，温度 300–380°C，每焊点 2–5 秒。',
+        zones: [
+            { name:'接触', temp: 200, time: 2, color:'#4fc3f7' },
+            { name:'加热', temp: 350, time: 3, color:'#ffab40' },
+            { name:'送锡', temp: 370, time: 2, color:'#ff5252' },
+            { name:'离开', temp: 100, time: 3, color:'#b388ff' },
+        ]
+    }
+};
+
+let activeSolder = 'reflow';
+let zoneTemps = {};
+
+function initZoneTemps() {
+    for (const key in solderData) {
+        zoneTemps[key] = solderData[key].zones.map(z => z.temp);
+    }
+}
+initZoneTemps();
+
+function buildSolderTabs() {
+    $$('.solder-tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            $$('.solder-tab').forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            activeSolder = tab.dataset.tab;
+            renderSolderContent();
+        });
+    });
+}
+
+function renderSolderContent() {
+    const d = solderData[activeSolder];
+    const temps = zoneTemps[activeSolder];
+    let html = `
+        <div class="card mb-2">
+            <h3>${d.title}</h3>
+            <p>${d.desc}</p>
+        </div>
+        <div class="profile-canvas-wrap"><canvas id="profileCanvas"></canvas></div>
+        <div class="zone-sliders">
+    `;
+    d.zones.forEach((z,i) => {
+        html += `
+            <div class="zone-slider card">
+                <label>${z.name} 温度</label>
+                <input type="range" min="50" max="350" value="${temps[i]}" data-zone="${i}">
+                <span class="val" id="zoneVal${i}">${temps[i]}°C</span>
+            </div>
+        `;
+    });
+    html += '</div>';
+    $('#solderContent').innerHTML = html;
+
+    // attach slider listeners
+    $$('.zone-slider input[type=range]').forEach(slider => {
+        slider.addEventListener('input', e => {
+            const zi = parseInt(e.target.dataset.zone);
+            zoneTemps[activeSolder][zi] = parseInt(e.target.value);
+            $(`#zoneVal${zi}`).textContent = e.target.value + '°C';
+            drawProfile();
+        });
+    });
+
+    drawProfile();
+}
+
+function drawProfile() {
+    const canvas = $('#profileCanvas');
+    if (!canvas) return;
+    const ctx = fitCanvas(canvas);
+    const W = canvas.width / dpr, H = canvas.height / dpr;
+    ctx.fillStyle = '#0a0a1a'; ctx.fillRect(0, 0, W, H);
+
+    const d = solderData[activeSolder];
+    const temps = zoneTemps[activeSolder];
+    const pad = { l: 60, r: 30, t: 30, b: 50 };
+    const gw = W - pad.l - pad.r, gh = H - pad.t - pad.b;
+
+    // axes
+    ctx.strokeStyle = '#333'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(pad.l, pad.t); ctx.lineTo(pad.l, H - pad.b); ctx.lineTo(W - pad.r, H - pad.b); ctx.stroke();
+
+    // Y axis labels (temp)
+    ctx.fillStyle = '#666'; ctx.font = '10px "JetBrains Mono"'; ctx.textAlign = 'right';
+    for (let t = 0; t <= 350; t += 50) {
+        const y = H - pad.b - (t / 350) * gh;
+        ctx.fillText(t + '°C', pad.l - 8, y + 3);
+        ctx.strokeStyle = '#1a1a2e'; ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(W - pad.r, y); ctx.stroke();
+    }
+
+    // build curve points
+    const totalTime = d.zones.reduce((s,z) => s + z.time, 0);
+    let points = [{x: pad.l, y: H - pad.b - (25/350)*gh}]; // start at room temp
+    let cumTime = 0;
+    d.zones.forEach((z,i) => {
+        cumTime += z.time;
+        const x = pad.l + (cumTime / totalTime) * gw;
+        const y = H - pad.b - (temps[i] / 350) * gh;
+        points.push({x, y});
+    });
+
+    // draw zone backgrounds
+    cumTime = 0;
+    d.zones.forEach((z,i) => {
+        const x1 = pad.l + (cumTime / totalTime) * gw;
+        cumTime += z.time;
+        const x2 = pad.l + (cumTime / totalTime) * gw;
+        ctx.fillStyle = z.color + '10';
+        ctx.fillRect(x1, pad.t, x2 - x1, gh);
+        // zone label
+        ctx.fillStyle = z.color; ctx.font = '10px "Noto Sans SC"'; ctx.textAlign = 'center';
+        ctx.fillText(z.name, (x1+x2)/2, H - pad.b + 18);
+        ctx.fillStyle = z.color + '80'; ctx.font = '9px "JetBrains Mono"';
+        ctx.fillText(z.time + 's', (x1+x2)/2, H - pad.b + 32);
+    });
+
+    // draw curve
+    ctx.beginPath(); ctx.moveTo(points[0].x, points[0].y);
+    for (let i = 1; i < points.length; i++) {
+        const prev = points[i-1], curr = points[i];
+        const cpx = (prev.x + curr.x) / 2;
+        ctx.bezierCurveTo(cpx, prev.y, cpx, curr.y, curr.x, curr.y);
+    }
+    ctx.strokeStyle = '#16c79a'; ctx.lineWidth = 3; ctx.stroke();
+
+    // draw points
+    points.forEach((p,i) => {
+        ctx.beginPath(); ctx.arc(p.x, p.y, 5, 0, Math.PI*2);
+        ctx.fillStyle = i === 0 ? '#666' : d.zones[i-1].color; ctx.fill();
+        ctx.strokeStyle = '#0a0a1a'; ctx.lineWidth = 2; ctx.stroke();
+        if (i > 0) {
+            ctx.fillStyle = '#e8e8e8'; ctx.font = 'bold 10px "JetBrains Mono"'; ctx.textAlign = 'center';
+            ctx.fillText(temps[i-1] + '°C', p.x, p.y - 12);
+        }
+    });
+
+    // liquidus line for reflow/wave
+    if (activeSolder === 'reflow' || activeSolder === 'wave') {
+        const liqTemp = 183;
+        const ly = H - pad.b - (liqTemp/350)*gh;
+        ctx.strokeStyle = '#ff525260'; ctx.lineWidth = 1; ctx.setLineDash([6,4]);
+        ctx.beginPath(); ctx.moveTo(pad.l, ly); ctx.lineTo(W - pad.r, ly); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = '#ff5252'; ctx.font = '9px "Noto Sans SC"'; ctx.textAlign = 'left';
+        ctx.fillText('液相线 183°C', pad.l + 4, ly - 4);
+    }
+
+    ctx.textAlign = 'left';
+}
+
+buildSolderTabs();
+renderSolderContent();
+
+/* Joint cross-sections */
+function drawJointGood() {
+    const canvas = $('#jointGood');
+    const ctx = sizeCanvas(canvas, canvas.parentElement.clientWidth, 140);
+    const W = canvas.parentElement.clientWidth, H = 140;
+    ctx.fillStyle = '#0a0a1a'; ctx.fillRect(0, 0, W, H);
+    const cx = W/2, pad_y = H*0.65;
+    // PCB
+    ctx.fillStyle = '#1a3a2e'; ctx.fillRect(0, pad_y, W, H - pad_y);
+    // pad
+    ctx.fillStyle = '#d4a574'; ctx.fillRect(cx-25, pad_y-3, 50, 6);
+    // solder fillet - good meniscus
+    ctx.beginPath();
+    ctx.moveTo(cx-22, pad_y);
+    ctx.quadraticCurveTo(cx-20, pad_y-25, cx-8, pad_y-35);
+    ctx.lineTo(cx+8, pad_y-35);
+    ctx.quadraticCurveTo(cx+20, pad_y-25, cx+22, pad_y);
+    ctx.closePath();
+    ctx.fillStyle = '#c0c0c0'; ctx.fill();
+    // component lead
+    ctx.fillStyle = '#888'; ctx.fillRect(cx-4, pad_y-55, 8, 55);
+    drawLabel(ctx, '浸润良好', cx, pad_y + 25, '#16c79a');
+}
+
+function drawJointCold() {
+    const canvas = $('#jointCold');
+    const ctx = sizeCanvas(canvas, canvas.parentElement.clientWidth, 140);
+    const W = canvas.parentElement.clientWidth, H = 140;
+    ctx.fillStyle = '#0a0a1a'; ctx.fillRect(0, 0, W, H);
+    const cx = W/2, pad_y = H*0.65;
+    ctx.fillStyle = '#1a3a2e'; ctx.fillRect(0, pad_y, W, H - pad_y);
+    ctx.fillStyle = '#d4a574'; ctx.fillRect(cx-25, pad_y-3, 50, 6);
+    // cold joint - blobby, not wetted
+    ctx.beginPath();
+    ctx.moveTo(cx-15, pad_y);
+    ctx.quadraticCurveTo(cx-18, pad_y-18, cx-10, pad_y-28);
+    ctx.quadraticCurveTo(cx, pad_y-38, cx+10, pad_y-28);
+    ctx.quadraticCurveTo(cx+18, pad_y-18, cx+15, pad_y);
+    ctx.closePath();
+    ctx.fillStyle = '#909090'; ctx.fill();
+    // rough surface
+    ctx.strokeStyle = '#70707080'; ctx.lineWidth = 0.5;
+    for (let i = 0; i < 5; i++) {
+        ctx.beginPath();
+        ctx.arc(cx - 8 + i*4, pad_y - 20 + (i%2)*6, 2, 0, Math.PI*2);
+        ctx.stroke();
+    }
+    ctx.fillStyle = '#888'; ctx.fillRect(cx-4, pad_y-55, 8, 55);
+    drawLabel(ctx, '表面粗糙/未浸润', cx, pad_y + 25, '#ffab40');
+}
+
+function drawJointBridge() {
+    const canvas = $('#jointBridge');
+    const ctx = sizeCanvas(canvas, canvas.parentElement.clientWidth, 140);
+    const W = canvas.parentElement.clientWidth, H = 140;
+    ctx.fillStyle = '#0a0a1a'; ctx.fillRect(0, 0, W, H);
+    const cx = W/2, pad_y = H*0.65;
+    ctx.fillStyle = '#1a3a2e'; ctx.fillRect(0, pad_y, W, H - pad_y);
+    // two pads
+    ctx.fillStyle = '#d4a574';
+    ctx.fillRect(cx-45, pad_y-3, 30, 6);
+    ctx.fillRect(cx+15, pad_y-3, 30, 6);
+    // bridge between them
+    ctx.fillStyle = '#c0c0c080';
+    ctx.fillRect(cx-15, pad_y-4, 30, 8);
+    // solder on both
+    ctx.beginPath();
+    ctx.moveTo(cx-42, pad_y);
+    ctx.quadraticCurveTo(cx-38, pad_y-20, cx-30, pad_y-28);
+    ctx.lineTo(cx-22, pad_y-28);
+    ctx.quadraticCurveTo(cx-15, pad_y-10, cx+15, pad_y-10);
+    ctx.quadraticCurveTo(cx+18, pad_y-28, cx+22, pad_y-28);
+    ctx.lineTo(cx+30, pad_y-28);
+    ctx.quadraticCurveTo(cx+38, pad_y-20, cx+42, pad_y);
+    ctx.closePath();
+    ctx.fillStyle = '#c0c0c0'; ctx.fill();
+    // leads
+    ctx.fillStyle = '#888';
+    ctx.fillRect(cx-33, pad_y-50, 6, 50);
+    ctx.fillRect(cx+27, pad_y-50, 6, 50);
+    drawLabel(ctx, '焊锡桥接短路', cx, pad_y + 25, '#ff5252');
+}
+
+drawJointGood(); drawJointCold(); drawJointBridge();
+
+/* ================================================================
+   S5  —  成本估算
+   ================================================================ */
+const costParams = [
+    { id:'size', label:'板面积 (cm²)', type:'range', min:1, max:200, value:25, step:1 },
+    { id:'layers', label:'层数', type:'range', min:1, max:16, value:2, step:1 },
+    { id:'qty', label:'数量 (pcs)', type:'range', min:5, max:5000, value:10, step:5 },
+    { id:'finish', label:'表面处理', type:'select', options:['HASL (喷锡)','ENIG (沉金)','OSP (有机膜)','沉锡','沉银'], value:'HASL (喷锡)' },
+    { id:'copper', label:'铜厚 (oz)', type:'range', min:0.5, max:4, value:1, step:0.5 },
+    { id:'trace', label:'最小线宽 (mil)', type:'range', min:3, max:20, value:6, step:1 },
+];
+
+const finishCostMult = { 'HASL (喷锡)':1.0, 'ENIG (沉金)':1.8, 'OSP (有机膜)':1.1, '沉锡':1.3, '沉银':1.5 };
+
+function buildCostInputs() {
+    const wrap = $('#costInputs');
+    wrap.innerHTML = '';
+    costParams.forEach(p => {
+        const div = document.createElement('div');
+        div.className = 'cost-field card';
+        if (p.type === 'range') {
+            div.innerHTML = `
+                <label>${p.label}: <span class="val-display" id="cv_${p.id}">${p.value}</span></label>
+                <input type="range" min="${p.min}" max="${p.max}" value="${p.value}" step="${p.step}" id="ci_${p.id}">
+            `;
+        } else {
+            div.innerHTML = `
+                <label>${p.label}</label>
+                <select id="ci_${p.id}">
+                    ${p.options.map(o => `<option ${o===p.value?'selected':''}>${o}</option>`).join('')}
+                </select>
+            `;
+        }
+        wrap.appendChild(div);
+    });
+    // listeners
+    costParams.forEach(p => {
+        const el = $(`#ci_${p.id}`);
+        el.addEventListener(p.type === 'range' ? 'input' : 'change', () => {
+            if (p.type === 'range') {
+                $(`#cv_${p.id}`).textContent = el.value;
+            }
+            calcCost();
+        });
+    });
+}
+
+function getVal(id) {
+    const el = $(`#ci_${id}`);
+    return el.tagName === 'SELECT' ? el.value : parseFloat(el.value);
+}
+
+function calcCost() {
+    const size = getVal('size');
+    const layers = getVal('layers');
+    const qty = getVal('qty');
+    const finish = getVal('finish');
+    const copper = getVal('copper');
+    const trace = getVal('trace');
+
+    // cost model (simplified relative pricing)
+    const baseCost = 0.5; // $/cm² base for 2L
+    const sizeCost = size * baseCost * 0.12;
+    const layerCost = layers <= 2 ? 1 : layers <= 4 ? 2.5 : layers <= 6 ? 5 : layers <= 8 ? 9 : layers * 1.5;
+    const finishMult = finishCostMult[finish] || 1;
+    const copperMult = copper <= 1 ? 1 : copper <= 2 ? 1.3 : 1.8;
+    const traceMult = trace <= 4 ? 1.8 : trace <= 6 ? 1.2 : 1;
+    const qtyDiscount = qty <= 10 ? 1 : qty <= 50 ? 0.6 : qty <= 200 ? 0.35 : qty <= 1000 ? 0.18 : 0.1;
+
+    const unitPrice = (sizeCost + layerCost) * finishMult * copperMult * traceMult * qtyDiscount;
+    const totalPrice = unitPrice * qty;
+
+    const breakdown = [
+        { label: '板面积', value: sizeCost * qtyDiscount, color: '#4fc3f7' },
+        { label: '层数', value: layerCost * qtyDiscount, color: '#b388ff' },
+        { label: '表面处理', value: (sizeCost + layerCost) * (finishMult - 1) * qtyDiscount, color: '#ffd740' },
+        { label: '铜厚', value: (sizeCost + layerCost) * (copperMult - 1) * qtyDiscount, color: '#ffab40' },
+        { label: '精度', value: (sizeCost + layerCost) * (traceMult - 1) * qtyDiscount, color: '#ff80ab' },
+    ];
+
+    const maxVal = Math.max(...breakdown.map(b => b.value), 0.01);
+
+    // render bars
+    let barsHtml = '';
+    breakdown.forEach(b => {
+        const pct = (b.value / maxVal) * 100;
+        barsHtml += `
+            <div class="cost-bar-row">
+                <span class="bar-label">${b.label}</span>
+                <div class="bar-track">
+                    <div class="bar-fill" style="width:${pct}%;background:${b.color}">¥${b.value.toFixed(2)}</div>
+                </div>
+            </div>
+        `;
+    });
+    $('#costBars').innerHTML = barsHtml;
+    $('#costTotal').innerHTML = `单价: ¥${unitPrice.toFixed(2)} &nbsp;|&nbsp; 总价: ¥${totalPrice.toFixed(2)} <span class="text-sm text-muted">(${qty} pcs)</span>`;
+
+    // tips
+    const tips = [];
+    if (layers > 4) tips.push('减少层数至 4 层以下可大幅降低成本。');
+    if (finish === 'ENIG (沉金)') tips.push('如无 BGA/金手指需求，HASL 或 OSP 成本更低。');
+    if (copper > 1) tips.push('降低铜厚至 1oz 适用于大多数信号板。');
+    if (trace < 6) tips.push('放宽最小线宽至 6mil+ 可选择更多板厂，降低加工溢价。');
+    if (size > 100) tips.push('优化板尺寸，减少废料可降低面积成本。');
+    if (qty < 50) tips.push('增加订购数量可享受批量折扣，单价显著下降。');
+    if (tips.length === 0) tips.push('当前参数已是较优组合，成本控制良好。');
+    $('#costTips').innerHTML = tips.map(t => `<li>${t}</li>`).join('');
+
+    // manufacturer comparison
+    const mfrs = [
+        { name:'嘉立创', mult: 1.0 },
+        { name:'捷配', mult: 1.05 },
+        { name:'华秋', mult: 1.1 },
+        { name:'深联', mult: 0.95 },
+    ];
+    let mfrHtml = '<h4 class="mt-2 mb-1">板厂参考 (相对系数)</h4>';
+    mfrs.forEach(m => {
+        const p = (unitPrice * m.mult).toFixed(2);
+        mfrHtml += `
+            <div class="cost-bar-row">
+                <span class="bar-label">${m.name}</span>
+                <div class="bar-track">
+                    <div class="bar-fill" style="width:${m.mult/1.2*100}%;background:var(--accent-green)">¥${p}</div>
+                </div>
+            </div>
+        `;
+    });
+    $('#costBars').innerHTML += mfrHtml;
+
+    // animate bars
+    gsap.from('.bar-fill', { width: 0, duration: 0.6, stagger: 0.05, ease: 'power2.out' });
+}
+
+buildCostInputs();
+calcCost();
+
+/* ================================================================
+   Resize handler & GSAP entrance animations
+   ================================================================ */
+let resizeTimer;
+window.addEventListener('resize', () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+        drawGerber();
+        renderStepCanvas();
+        drawDfm();
+        drawProfile();
+        drawJointGood(); drawJointCold(); drawJointBridge();
+    }, 150);
+});
+
+// Section entrance animation
+const observer = new IntersectionObserver(entries => {
+    entries.forEach(e => {
+        if (e.isIntersecting) {
+            gsap.from(e.target, { opacity: 0, y: 30, duration: 0.6, ease: 'power2.out' });
+            observer.unobserve(e.target);
+        }
+    });
+}, { threshold: 0.1 });
+
+$$('.section').forEach(s => observer.observe(s));
+
+})();
+</script>
+</body>
+</html>

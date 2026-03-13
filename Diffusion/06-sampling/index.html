@@ -1,0 +1,1284 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>采样方法 — Diffusion 扩散模型</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=JetBrains+Mono:wght@400;600&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+    <!-- KaTeX -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+    <!-- GSAP -->
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+    <!-- Shared styles -->
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+    <style>
+        /* ===== Page-specific styles ===== */
+        .canvas-wrap {
+            position: relative;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+        }
+        .canvas-wrap canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+        .timer-overlay {
+            position: absolute;
+            top: 0.75rem;
+            right: 0.75rem;
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            color: var(--accent-green);
+            background: rgba(26, 26, 46, 0.85);
+            padding: 0.3rem 0.7rem;
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border-color);
+        }
+        .status-overlay {
+            position: absolute;
+            top: 0.75rem;
+            left: 0.75rem;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            background: rgba(26, 26, 46, 0.85);
+            padding: 0.3rem 0.7rem;
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border-color);
+        }
+        .compare-canvas-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+        }
+        .compare-canvas-grid .canvas-wrap {
+            aspect-ratio: 1;
+        }
+        .compare-canvas-grid .canvas-label {
+            position: absolute;
+            bottom: 0.5rem;
+            left: 0.75rem;
+            font-size: 0.75rem;
+            font-family: var(--font-mono);
+            color: var(--accent-blue);
+            background: rgba(26, 26, 46, 0.85);
+            padding: 0.2rem 0.5rem;
+            border-radius: var(--radius-sm);
+        }
+        .eta-canvas-wrap {
+            position: relative;
+            width: 100%;
+            aspect-ratio: 2 / 1;
+        }
+        .metrics-bar {
+            display: flex;
+            gap: 1.5rem;
+            flex-wrap: wrap;
+            margin-top: 0.75rem;
+        }
+        .metric-item {
+            text-align: center;
+        }
+        .metric-item .metric-val {
+            font-family: var(--font-mono);
+            font-size: 1.3rem;
+            font-weight: 700;
+            color: var(--accent-green);
+        }
+        .metric-item .metric-label {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+        }
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 1rem;
+        }
+        .dashboard-grid .canvas-wrap {
+            aspect-ratio: 1;
+        }
+        .bar-chart-wrap {
+            width: 100%;
+            height: 220px;
+            position: relative;
+        }
+        .controls-row {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            flex-wrap: wrap;
+            margin-bottom: 1rem;
+        }
+        .trajectory-canvas-wrap {
+            position: relative;
+            width: 100%;
+            aspect-ratio: 1.5 / 1;
+        }
+        @media (max-width: 1024px) {
+            .dashboard-grid { grid-template-columns: 1fr 1fr; }
+            .compare-canvas-grid { grid-template-columns: 1fr 1fr; }
+        }
+        @media (max-width: 768px) {
+            .dashboard-grid { grid-template-columns: 1fr; }
+            .compare-canvas-grid { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="page-container">
+    <!-- ============ Header ============ -->
+    <header class="section" style="text-align:center; padding-top:1rem;">
+        <h1>06 — 采样方法</h1>
+        <p style="max-width:680px; margin:0 auto;">
+            从 DDPM 标准反向过程到 DDIM 加速采样，再到 DPM-Solver 高阶求解器 —— 探索如何用更少的步数生成高质量样本。
+        </p>
+    </header>
+
+    <!-- ============ Section 1: DDPM 采样回顾 ============ -->
+    <div class="section" id="sec-ddpm">
+        <div class="section-title">
+            <div class="icon">1</div>
+            <h2>DDPM 采样回顾</h2>
+        </div>
+        <div class="split-layout">
+            <div class="text-panel">
+                <p>DDPM 的标准反向过程需要从 \(T=1000\) 步纯噪声开始，逐步去噪：</p>
+                <div class="katex-display">$$x_{t-1} = \frac{1}{\sqrt{\alpha_t}}\left(x_t - \frac{1-\alpha_t}{\sqrt{1-\bar\alpha_t}}\epsilon_\theta(x_t, t)\right) + \sigma_t z$$</div>
+                <p>每一步都需要调用一次神经网络，因此 <strong>T=1000 步 = 1000 次网络推理</strong>，非常缓慢。</p>
+                <div class="info-box warning">
+                    <p><strong>瓶颈：</strong>实际生成一张 256x256 图像可能需要数十秒到数分钟。采样效率是扩散模型最大的挑战之一。</p>
+                </div>
+                <div class="controls-row mt-2">
+                    <button class="btn btn-primary" id="btn-ddpm-start">开始采样</button>
+                    <button class="btn" id="btn-ddpm-reset">重置</button>
+                </div>
+                <div class="metrics-bar" id="ddpm-metrics">
+                    <div class="metric-item">
+                        <div class="metric-val" id="ddpm-step-count">0</div>
+                        <div class="metric-label">当前步数</div>
+                    </div>
+                    <div class="metric-item">
+                        <div class="metric-val" id="ddpm-total-steps">1000</div>
+                        <div class="metric-label">总步数</div>
+                    </div>
+                    <div class="metric-item">
+                        <div class="metric-val" id="ddpm-progress">0%</div>
+                        <div class="metric-label">进度</div>
+                    </div>
+                </div>
+            </div>
+            <div class="viz-panel">
+                <div class="canvas-wrap" style="width:100%; aspect-ratio:1.5/1;">
+                    <canvas id="canvas-ddpm"></canvas>
+                    <div class="timer-overlay">步骤: <span id="ddpm-timer">0 / 1000</span></div>
+                    <div class="status-overlay" id="ddpm-status">等待开始...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============ Section 2: DDIM 加速 ============ -->
+    <div class="section" id="sec-ddim">
+        <div class="section-title">
+            <div class="icon">2</div>
+            <h2>DDIM 加速</h2>
+        </div>
+        <div class="text-panel mb-2">
+            <p>DDIM（Denoising Diffusion Implicit Models）的核心思想：<strong>跳步采样</strong>！</p>
+            <div class="katex-display">$$x_{\tau_{i-1}} = \sqrt{\bar\alpha_{\tau_{i-1}}}\underbrace{\left(\frac{x_{\tau_i} - \sqrt{1-\bar\alpha_{\tau_i}}\epsilon_\theta(x_{\tau_i}, \tau_i)}{\sqrt{\bar\alpha_{\tau_i}}}\right)}_{\text{预测的 }x_0} + \sqrt{1-\bar\alpha_{\tau_{i-1}} - \sigma_{\tau_i}^2}\cdot\epsilon_\theta(x_{\tau_i}, \tau_i) + \sigma_{\tau_i}\epsilon$$</div>
+            <p>非马尔可夫过程允许从 \(x_t\) 直接跳到 \(x_{t-k}\)，大幅减少采样步数。下面对比不同步数的采样结果：</p>
+            <div class="controls-row">
+                <button class="btn btn-primary" id="btn-ddim-run">运行对比</button>
+                <button class="btn" id="btn-ddim-reset">重置</button>
+            </div>
+        </div>
+        <div class="compare-canvas-grid">
+            <div class="canvas-wrap">
+                <canvas id="canvas-ddim-1000"></canvas>
+                <div class="canvas-label">T=1000 步 (DDPM)</div>
+                <div class="timer-overlay" id="ddim-timer-1000">0/1000</div>
+            </div>
+            <div class="canvas-wrap">
+                <canvas id="canvas-ddim-100"></canvas>
+                <div class="canvas-label">T=100 步</div>
+                <div class="timer-overlay" id="ddim-timer-100">0/100</div>
+            </div>
+            <div class="canvas-wrap">
+                <canvas id="canvas-ddim-50"></canvas>
+                <div class="canvas-label">T=50 步</div>
+                <div class="timer-overlay" id="ddim-timer-50">0/50</div>
+            </div>
+            <div class="canvas-wrap">
+                <canvas id="canvas-ddim-20"></canvas>
+                <div class="canvas-label">T=20 步</div>
+                <div class="timer-overlay" id="ddim-timer-20">0/20</div>
+            </div>
+        </div>
+        <div class="info-box success mt-2">
+            <p><strong>关键发现：</strong>DDIM 用 50 步就能达到接近 1000 步的质量，加速 20 倍！</p>
+        </div>
+    </div>
+
+    <!-- ============ Section 3: eta 参数探索 ============ -->
+    <div class="section" id="sec-eta">
+        <div class="section-title">
+            <div class="icon">3</div>
+            <h2>\(\eta\) 参数探索</h2>
+        </div>
+        <div class="split-layout">
+            <div class="text-panel">
+                <p>DDIM 的 \(\eta\) 参数控制采样中的随机性：</p>
+                <div class="katex-display">$$\sigma_t = \eta \cdot \sqrt{\frac{1-\bar\alpha_{t-1}}{1-\bar\alpha_t}} \cdot \sqrt{1 - \frac{\bar\alpha_t}{\bar\alpha_{t-1}}}$$</div>
+                <ul style="color: var(--text-secondary); margin-left: 1.2rem; margin-bottom: 1rem;">
+                    <li>\(\eta = 0\)：完全确定性，相同噪声 \(\to\) 相同结果</li>
+                    <li>\(\eta = 1\)：等价于 DDPM，完全随机</li>
+                    <li>\(0 < \eta < 1\)：介于两者之间</li>
+                </ul>
+                <div class="slider-group mb-2">
+                    <label>eta (\(\eta\)):</label>
+                    <input type="range" id="slider-eta" min="0" max="1" step="0.05" value="0">
+                    <span class="slider-value" id="eta-val">0.00</span>
+                </div>
+                <div class="controls-row">
+                    <button class="btn btn-primary" id="btn-eta-run">运行 5 次</button>
+                    <button class="btn" id="btn-eta-clear">清除</button>
+                </div>
+                <div class="info-box mt-2">
+                    <p>当 \(\eta=0\) 时，5 次运行将产生<strong>完全相同</strong>的轨迹；\(\eta\) 越大，轨迹差异越明显。</p>
+                </div>
+            </div>
+            <div class="viz-panel">
+                <div class="canvas-wrap eta-canvas-wrap">
+                    <canvas id="canvas-eta"></canvas>
+                    <div class="status-overlay" id="eta-status">调节 eta 后点击运行</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============ Section 4: DPM-Solver ============ -->
+    <div class="section" id="sec-dpm">
+        <div class="section-title">
+            <div class="icon">4</div>
+            <h2>DPM-Solver</h2>
+        </div>
+        <div class="split-layout">
+            <div class="text-panel">
+                <p>将反向扩散过程视为常微分方程（ODE）：</p>
+                <div class="katex-display">$$\frac{dx}{dt} = f(x, t)$$</div>
+                <p>不同的数值求解器精度不同：</p>
+                <ul style="color: var(--text-secondary); margin-left: 1.2rem; margin-bottom: 1rem;">
+                    <li><strong>Euler 方法</strong>（1 阶）：每步线性近似，需要很多步</li>
+                    <li><strong>DPM-Solver-2</strong>（2 阶）：利用中间点信息，更精确</li>
+                    <li><strong>DPM-Solver-3</strong>（3 阶）：高阶 Taylor 展开，极少步数</li>
+                </ul>
+                <div class="controls-row">
+                    <button class="btn btn-primary" id="btn-dpm-run">开始模拟</button>
+                    <button class="btn" id="btn-dpm-reset">重置</button>
+                </div>
+                <div class="legend mt-2">
+                    <div class="legend-item"><div class="swatch" style="background:var(--accent-red)"></div>Euler (100 步)</div>
+                    <div class="legend-item"><div class="swatch" style="background:var(--accent-blue)"></div>DPM-2 (20 步)</div>
+                    <div class="legend-item"><div class="swatch" style="background:var(--accent-green)"></div>DPM-3 (10 步)</div>
+                    <div class="legend-item"><div class="swatch" style="background:var(--accent-purple)"></div>真实轨迹</div>
+                </div>
+            </div>
+            <div class="viz-panel">
+                <div class="canvas-wrap trajectory-canvas-wrap">
+                    <canvas id="canvas-dpm"></canvas>
+                    <div class="status-overlay" id="dpm-status">点击开始模拟</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============ Section 5: 采样质量对比 ============ -->
+    <div class="section" id="sec-compare">
+        <div class="section-title">
+            <div class="icon">5</div>
+            <h2>采样质量对比</h2>
+        </div>
+        <p>使用不同采样方法从二维高斯混合分布中生成样本。比较分布匹配度和效率。</p>
+        <div class="controls-row">
+            <button class="btn btn-primary" id="btn-compare-run">生成样本</button>
+            <button class="btn" id="btn-compare-reset">重置</button>
+        </div>
+        <div class="dashboard-grid mt-2">
+            <div class="card" style="padding:0.75rem;">
+                <h4 style="text-align:center; margin-bottom:0.5rem; font-size:0.85rem;">DDPM (1000 步)</h4>
+                <div class="canvas-wrap" style="aspect-ratio:1;"><canvas id="canvas-cmp-ddpm"></canvas></div>
+                <div class="text-center mt-1">
+                    <span class="badge badge-green" id="badge-ddpm">--</span>
+                </div>
+            </div>
+            <div class="card" style="padding:0.75rem;">
+                <h4 style="text-align:center; margin-bottom:0.5rem; font-size:0.85rem;">DDIM (100 步)</h4>
+                <div class="canvas-wrap" style="aspect-ratio:1;"><canvas id="canvas-cmp-ddim100"></canvas></div>
+                <div class="text-center mt-1">
+                    <span class="badge badge-blue" id="badge-ddim100">--</span>
+                </div>
+            </div>
+            <div class="card" style="padding:0.75rem;">
+                <h4 style="text-align:center; margin-bottom:0.5rem; font-size:0.85rem;">DDIM (50 步)</h4>
+                <div class="canvas-wrap" style="aspect-ratio:1;"><canvas id="canvas-cmp-ddim50"></canvas></div>
+                <div class="text-center mt-1">
+                    <span class="badge badge-purple" id="badge-ddim50">--</span>
+                </div>
+            </div>
+            <div class="card" style="padding:0.75rem;">
+                <h4 style="text-align:center; margin-bottom:0.5rem; font-size:0.85rem;">DDIM (20 步)</h4>
+                <div class="canvas-wrap" style="aspect-ratio:1;"><canvas id="canvas-cmp-ddim20"></canvas></div>
+                <div class="text-center mt-1">
+                    <span class="badge badge-orange" id="badge-ddim20">--</span>
+                </div>
+            </div>
+        </div>
+        <!-- Bar chart -->
+        <div class="card mt-2">
+            <h4 style="margin-bottom:0.5rem;">质量与效率对比</h4>
+            <div class="bar-chart-wrap">
+                <canvas id="canvas-bar-chart"></canvas>
+            </div>
+        </div>
+    </div>
+
+</div><!-- .page-container -->
+
+<!-- Shared nav -->
+<script src="../shared/scripts/nav.js"></script>
+
+<script>
+// ============================================================
+// Utility: seeded PRNG for reproducibility
+// ============================================================
+class SeededRNG {
+    constructor(seed) { this.state = seed; }
+    next() {
+        this.state = (this.state * 1664525 + 1013904223) & 0xFFFFFFFF;
+        return (this.state >>> 0) / 0xFFFFFFFF;
+    }
+    gaussian() {
+        const u1 = this.next() || 1e-10;
+        const u2 = this.next();
+        return Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+    }
+}
+
+// ============================================================
+// Utility: 2D Gaussian mixture target distribution
+// ============================================================
+const TARGET_CENTERS = [
+    { x: -2.0, y: -2.0 },
+    { x:  2.0, y:  2.0 },
+    { x: -2.0, y:  2.0 },
+    { x:  2.0, y: -2.0 },
+];
+const TARGET_STD = 0.5;
+
+function sampleTarget(rng) {
+    const ci = Math.floor(rng.next() * TARGET_CENTERS.length);
+    const c = TARGET_CENTERS[ci];
+    return { x: c.x + rng.gaussian() * TARGET_STD, y: c.y + rng.gaussian() * TARGET_STD };
+}
+
+// ============================================================
+// Noise schedule helpers
+// ============================================================
+function buildSchedule(T) {
+    const betas = new Float64Array(T);
+    const alphas = new Float64Array(T);
+    const alphaBar = new Float64Array(T);
+    for (let t = 0; t < T; t++) {
+        betas[t] = 0.0001 + (0.02 - 0.0001) * t / (T - 1);
+        alphas[t] = 1 - betas[t];
+        alphaBar[t] = t === 0 ? alphas[0] : alphaBar[t - 1] * alphas[t];
+    }
+    return { betas, alphas, alphaBar, T };
+}
+
+function buildSubSchedule(fullSched, steps) {
+    const indices = [];
+    for (let i = 0; i < steps; i++) {
+        indices.push(Math.round(i * (fullSched.T - 1) / (steps - 1)));
+    }
+    const alphaBar = indices.map(i => fullSched.alphaBar[i]);
+    return { indices, alphaBar, steps };
+}
+
+// ============================================================
+// Simulated "denoiser": pretend neural network for 2D GMM
+// We know the score analytically for Gaussian mixture
+// ============================================================
+function predictedNoise(x, y, alphaBarT, rng) {
+    // Score of noisy distribution: weighted sum of Gaussian scores
+    const sqrtAB = Math.sqrt(alphaBarT);
+    const var_t = 1 - alphaBarT;
+    let scoreX = 0, scoreY = 0, totalW = 0;
+    for (const c of TARGET_CENTERS) {
+        const mx = sqrtAB * c.x;
+        const my = sqrtAB * c.y;
+        const dx = x - mx, dy = y - my;
+        const sigSq = alphaBarT * TARGET_STD * TARGET_STD + var_t;
+        const logW = -0.5 * (dx * dx + dy * dy) / sigSq;
+        const w = Math.exp(logW);
+        scoreX += w * (-dx / sigSq);
+        scoreY += w * (-dy / sigSq);
+        totalW += w;
+    }
+    if (totalW > 1e-30) { scoreX /= totalW; scoreY /= totalW; }
+    // eps = -sqrt(1 - alphaBar) * score
+    const sqrtVarT = Math.sqrt(var_t) || 1e-10;
+    return { ex: -sqrtVarT * scoreX, ey: -sqrtVarT * scoreY };
+}
+
+// ============================================================
+// DDPM reverse step
+// ============================================================
+function ddpmStep(x, y, t, sched, rng) {
+    const ab = sched.alphaBar[t];
+    const a = sched.alphas[t];
+    const beta = sched.betas[t];
+    const { ex, ey } = predictedNoise(x, y, ab, rng);
+    const sqrtA = Math.sqrt(a);
+    const coeff = beta / Math.sqrt(1 - ab);
+    let nx = (x - coeff * ex) / sqrtA;
+    let ny = (y - coeff * ey) / sqrtA;
+    if (t > 0) {
+        const sigma = Math.sqrt(beta);
+        nx += sigma * rng.gaussian();
+        ny += sigma * rng.gaussian();
+    }
+    return { x: nx, y: ny };
+}
+
+// ============================================================
+// DDIM reverse step
+// ============================================================
+function ddimStep(x, y, abCur, abPrev, eta, rng) {
+    const sqrtAbCur = Math.sqrt(abCur);
+    const sqrtOneMinusAbCur = Math.sqrt(1 - abCur);
+    const { ex, ey } = predictedNoise(x, y, abCur, rng);
+    // predicted x0
+    const x0x = (x - sqrtOneMinusAbCur * ex) / sqrtAbCur;
+    const x0y = (y - sqrtOneMinusAbCur * ey) / sqrtAbCur;
+    // sigma
+    const sigmaVal = eta * Math.sqrt((1 - abPrev) / (1 - abCur)) * Math.sqrt(1 - abCur / abPrev);
+    const dirCoeff = Math.sqrt(Math.max(0, 1 - abPrev - sigmaVal * sigmaVal));
+    const sqrtAbPrev = Math.sqrt(abPrev);
+    let nx = sqrtAbPrev * x0x + dirCoeff * ex;
+    let ny = sqrtAbPrev * x0y + dirCoeff * ey;
+    if (eta > 0) {
+        nx += sigmaVal * rng.gaussian();
+        ny += sigmaVal * rng.gaussian();
+    }
+    return { x: nx, y: ny };
+}
+
+// ============================================================
+// Canvas helpers
+// ============================================================
+function initCanvas(id, w, h) {
+    const c = document.getElementById(id);
+    const dpr = window.devicePixelRatio || 1;
+    const rect = c.parentElement.getBoundingClientRect();
+    const cw = w || rect.width;
+    const ch = h || rect.height;
+    c.width = cw * dpr;
+    c.height = ch * dpr;
+    c.style.width = cw + 'px';
+    c.style.height = ch + 'px';
+    const ctx = c.getContext('2d');
+    ctx.scale(dpr, dpr);
+    return { ctx, w: cw, h: ch };
+}
+
+function clearCanvas(ctx, w, h) {
+    ctx.fillStyle = '#16213e';
+    ctx.fillRect(0, 0, w, h);
+}
+
+// Map data coords to canvas coords (range ~ [-5, 5] -> canvas)
+function mapX(x, w) { return (x + 5) / 10 * w; }
+function mapY(y, h) { return (1 - (y + 5) / 10) * h; }
+
+function drawPoints(ctx, points, w, h, color, radius) {
+    ctx.fillStyle = color;
+    for (const p of points) {
+        const cx = mapX(p.x, w);
+        const cy = mapY(p.y, h);
+        ctx.beginPath();
+        ctx.arc(cx, cy, radius || 2.5, 0, Math.PI * 2);
+        ctx.fill();
+    }
+}
+
+function drawTargetGhosts(ctx, w, h) {
+    ctx.globalAlpha = 0.15;
+    for (const c of TARGET_CENTERS) {
+        const cx = mapX(c.x, w);
+        const cy = mapY(c.y, h);
+        const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, w * 0.08);
+        grad.addColorStop(0, '#16c79a');
+        grad.addColorStop(1, 'transparent');
+        ctx.fillStyle = grad;
+        ctx.fillRect(cx - w * 0.1, cy - h * 0.1, w * 0.2, h * 0.2);
+    }
+    ctx.globalAlpha = 1;
+}
+
+function drawAxes(ctx, w, h) {
+    ctx.strokeStyle = 'rgba(168,168,184,0.15)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(mapX(0, w), 0); ctx.lineTo(mapX(0, w), h);
+    ctx.moveTo(0, mapY(0, h)); ctx.lineTo(w, mapY(0, h));
+    ctx.stroke();
+}
+
+// ============================================================
+// Section 1: DDPM 采样回顾
+// ============================================================
+(() => {
+    let anim = null, running = false;
+    const FULL_T = 1000;
+    const sched = buildSchedule(FULL_T);
+    const N_POINTS = 200;
+
+    function run() {
+        if (running) return;
+        running = true;
+        const { ctx, w, h } = initCanvas('canvas-ddpm');
+        const rng = new SeededRNG(42);
+
+        // Start from noise
+        let points = [];
+        for (let i = 0; i < N_POINTS; i++) {
+            points.push({ x: rng.gaussian() * 3, y: rng.gaussian() * 3 });
+        }
+
+        let step = FULL_T - 1;
+        const stepEl = document.getElementById('ddpm-step-count');
+        const timerEl = document.getElementById('ddpm-timer');
+        const progressEl = document.getElementById('ddpm-progress');
+        const statusEl = document.getElementById('ddpm-status');
+        statusEl.textContent = '采样中...';
+
+        const stepsPerFrame = 10; // speed up visualization
+
+        function frame() {
+            if (step < 0) {
+                running = false;
+                statusEl.textContent = '完成!';
+                return;
+            }
+            for (let s = 0; s < stepsPerFrame && step >= 0; s++, step--) {
+                const newPoints = [];
+                for (const p of points) {
+                    newPoints.push(ddpmStep(p.x, p.y, step, sched, rng));
+                }
+                points = newPoints;
+            }
+            const done = FULL_T - 1 - step;
+            stepEl.textContent = done;
+            timerEl.textContent = done + ' / ' + FULL_T;
+            progressEl.textContent = Math.round(done / FULL_T * 100) + '%';
+
+            clearCanvas(ctx, w, h);
+            drawAxes(ctx, w, h);
+            drawTargetGhosts(ctx, w, h);
+            drawPoints(ctx, points, w, h, 'rgba(22,199,154,0.7)', 3);
+            anim = requestAnimationFrame(frame);
+        }
+
+        // initial draw
+        clearCanvas(ctx, w, h);
+        drawAxes(ctx, w, h);
+        drawPoints(ctx, points, w, h, 'rgba(255,82,82,0.5)', 2);
+        setTimeout(() => { anim = requestAnimationFrame(frame); }, 300);
+    }
+
+    function reset() {
+        if (anim) cancelAnimationFrame(anim);
+        running = false;
+        const { ctx, w, h } = initCanvas('canvas-ddpm');
+        clearCanvas(ctx, w, h);
+        drawAxes(ctx, w, h);
+        document.getElementById('ddpm-step-count').textContent = '0';
+        document.getElementById('ddpm-timer').textContent = '0 / 1000';
+        document.getElementById('ddpm-progress').textContent = '0%';
+        document.getElementById('ddpm-status').textContent = '等待开始...';
+    }
+
+    document.getElementById('btn-ddpm-start').addEventListener('click', run);
+    document.getElementById('btn-ddpm-reset').addEventListener('click', reset);
+
+    // init canvas
+    window.addEventListener('load', () => {
+        const { ctx, w, h } = initCanvas('canvas-ddpm');
+        clearCanvas(ctx, w, h);
+        drawAxes(ctx, w, h);
+        drawTargetGhosts(ctx, w, h);
+    });
+})();
+
+// ============================================================
+// Section 2: DDIM 加速
+// ============================================================
+(() => {
+    const configs = [
+        { id: '1000', steps: 1000, color: 'rgba(22,199,154,0.7)' },
+        { id: '100',  steps: 100,  color: 'rgba(79,195,247,0.7)' },
+        { id: '50',   steps: 50,   color: 'rgba(179,136,255,0.7)' },
+        { id: '20',   steps: 20,   color: 'rgba(255,171,64,0.7)' },
+    ];
+    const FULL_T = 1000;
+    const sched = buildSchedule(FULL_T);
+    const N_POINTS = 200;
+    let anims = [], runningState = false;
+
+    function run() {
+        if (runningState) return;
+        runningState = true;
+
+        const baseSeed = 123;
+        // Generate same starting noise
+        const startRng = new SeededRNG(baseSeed);
+        const startPoints = [];
+        for (let i = 0; i < N_POINTS; i++) {
+            startPoints.push({ x: startRng.gaussian() * 3, y: startRng.gaussian() * 3 });
+        }
+
+        configs.forEach(cfg => {
+            const { ctx, w, h } = initCanvas('canvas-ddim-' + cfg.id);
+            const sub = buildSubSchedule(sched, cfg.steps);
+            const rng = new SeededRNG(baseSeed + 1);
+            let points = startPoints.map(p => ({ ...p }));
+            let idx = sub.steps - 1;
+            const timerEl = document.getElementById('ddim-timer-' + cfg.id);
+            const stepsPerFrame = Math.max(1, Math.floor(cfg.steps / 100));
+
+            function frame() {
+                if (idx <= 0) return;
+                for (let s = 0; s < stepsPerFrame && idx > 0; s++, idx--) {
+                    const abCur = sub.alphaBar[idx];
+                    const abPrev = sub.alphaBar[idx - 1];
+                    const newPts = [];
+                    for (const p of points) {
+                        newPts.push(ddimStep(p.x, p.y, abCur, abPrev, 0, rng));
+                    }
+                    points = newPts;
+                }
+                const done = sub.steps - idx;
+                timerEl.textContent = done + '/' + cfg.steps;
+                clearCanvas(ctx, w, h);
+                drawAxes(ctx, w, h);
+                drawTargetGhosts(ctx, w, h);
+                drawPoints(ctx, points, w, h, cfg.color, 3);
+                const a = requestAnimationFrame(frame);
+                anims.push(a);
+            }
+
+            clearCanvas(ctx, w, h);
+            drawAxes(ctx, w, h);
+            drawPoints(ctx, points, w, h, 'rgba(255,82,82,0.4)', 2);
+            const a = requestAnimationFrame(frame);
+            anims.push(a);
+        });
+    }
+
+    function reset() {
+        anims.forEach(a => cancelAnimationFrame(a));
+        anims = [];
+        runningState = false;
+        configs.forEach(cfg => {
+            const { ctx, w, h } = initCanvas('canvas-ddim-' + cfg.id);
+            clearCanvas(ctx, w, h);
+            drawAxes(ctx, w, h);
+            document.getElementById('ddim-timer-' + cfg.id).textContent = '0/' + cfg.steps;
+        });
+    }
+
+    document.getElementById('btn-ddim-run').addEventListener('click', run);
+    document.getElementById('btn-ddim-reset').addEventListener('click', reset);
+
+    window.addEventListener('load', () => {
+        configs.forEach(cfg => {
+            const { ctx, w, h } = initCanvas('canvas-ddim-' + cfg.id);
+            clearCanvas(ctx, w, h);
+            drawAxes(ctx, w, h);
+            drawTargetGhosts(ctx, w, h);
+        });
+    });
+})();
+
+// ============================================================
+// Section 3: eta 参数探索
+// ============================================================
+(() => {
+    const STEPS = 50;
+    const FULL_T = 1000;
+    const sched = buildSchedule(FULL_T);
+    const sub = buildSubSchedule(sched, STEPS);
+    const N_POINTS = 150;
+    const RUNS = 5;
+    const RUN_COLORS = [
+        'rgba(22,199,154,0.6)',
+        'rgba(79,195,247,0.6)',
+        'rgba(179,136,255,0.6)',
+        'rgba(255,171,64,0.6)',
+        'rgba(255,82,82,0.6)',
+    ];
+
+    const sliderEl = document.getElementById('slider-eta');
+    const valEl = document.getElementById('eta-val');
+    sliderEl.addEventListener('input', () => {
+        valEl.textContent = parseFloat(sliderEl.value).toFixed(2);
+    });
+
+    let anim = null;
+
+    function run() {
+        if (anim) cancelAnimationFrame(anim);
+        const eta = parseFloat(sliderEl.value);
+        const { ctx, w, h } = initCanvas('canvas-eta');
+        const statusEl = document.getElementById('eta-status');
+        statusEl.textContent = 'eta = ' + eta.toFixed(2) + ' 运行中...';
+
+        // Same starting noise for all runs
+        const startRng = new SeededRNG(777);
+        const startPoints = [];
+        for (let i = 0; i < N_POINTS; i++) {
+            startPoints.push({ x: startRng.gaussian() * 3, y: startRng.gaussian() * 3 });
+        }
+
+        // Run all RUNS simultaneously
+        const allRuns = [];
+        for (let r = 0; r < RUNS; r++) {
+            allRuns.push({
+                points: startPoints.map(p => ({ ...p })),
+                rng: new SeededRNG(1000 + r * 1000), // different random seeds for noise
+                idx: sub.steps - 1,
+                done: false,
+            });
+        }
+
+        const stepsPerFrame = 3;
+
+        function frame() {
+            let allDone = true;
+            for (const run of allRuns) {
+                if (run.done) continue;
+                allDone = false;
+                for (let s = 0; s < stepsPerFrame && run.idx > 0; s++, run.idx--) {
+                    const abCur = sub.alphaBar[run.idx];
+                    const abPrev = sub.alphaBar[run.idx - 1];
+                    const newPts = [];
+                    for (const p of run.points) {
+                        newPts.push(ddimStep(p.x, p.y, abCur, abPrev, eta, run.rng));
+                    }
+                    run.points = newPts;
+                }
+                if (run.idx <= 0) run.done = true;
+            }
+
+            clearCanvas(ctx, w, h);
+            drawAxes(ctx, w, h);
+            drawTargetGhosts(ctx, w, h);
+            for (let r = 0; r < RUNS; r++) {
+                drawPoints(ctx, allRuns[r].points, w, h, RUN_COLORS[r], 2.5);
+            }
+
+            // Legend
+            ctx.font = '12px "Noto Sans SC", sans-serif';
+            for (let r = 0; r < RUNS; r++) {
+                ctx.fillStyle = RUN_COLORS[r].replace('0.6', '1');
+                ctx.fillRect(w - 100, 10 + r * 18, 10, 10);
+                ctx.fillStyle = '#a8a8b8';
+                ctx.fillText('运行 ' + (r + 1), w - 85, 20 + r * 18);
+            }
+
+            if (!allDone) {
+                anim = requestAnimationFrame(frame);
+            } else {
+                statusEl.textContent = 'eta = ' + eta.toFixed(2) + ' 完成';
+            }
+        }
+        anim = requestAnimationFrame(frame);
+    }
+
+    function clear() {
+        if (anim) cancelAnimationFrame(anim);
+        const { ctx, w, h } = initCanvas('canvas-eta');
+        clearCanvas(ctx, w, h);
+        drawAxes(ctx, w, h);
+        drawTargetGhosts(ctx, w, h);
+        document.getElementById('eta-status').textContent = '调节 eta 后点击运行';
+    }
+
+    document.getElementById('btn-eta-run').addEventListener('click', run);
+    document.getElementById('btn-eta-clear').addEventListener('click', clear);
+
+    window.addEventListener('load', () => {
+        const { ctx, w, h } = initCanvas('canvas-eta');
+        clearCanvas(ctx, w, h);
+        drawAxes(ctx, w, h);
+        drawTargetGhosts(ctx, w, h);
+    });
+})();
+
+// ============================================================
+// Section 4: DPM-Solver — ODE trajectory visualization
+// ============================================================
+(() => {
+    let anim = null;
+
+    // We'll trace a single point's trajectory through the reverse ODE
+    // using different solvers, shown in 2D data space
+    function run() {
+        if (anim) cancelAnimationFrame(anim);
+        const { ctx, w, h } = initCanvas('canvas-dpm');
+        const statusEl = document.getElementById('dpm-status');
+        statusEl.textContent = '模拟中...';
+
+        const FULL_T = 1000;
+        const sched = buildSchedule(FULL_T);
+
+        // Starting point (same noise)
+        const startX = 2.5, startY = -1.8;
+
+        // True trajectory: very fine-grained DDIM with eta=0, 1000 steps
+        const trueTraj = [{ x: startX, y: startY }];
+        let cx = startX, cy = startY;
+        const trueRng = new SeededRNG(999);
+        for (let t = FULL_T - 1; t > 0; t--) {
+            const ab = sched.alphaBar[t];
+            const abPrev = sched.alphaBar[t - 1];
+            const r = ddimStep(cx, cy, ab, abPrev, 0, trueRng);
+            cx = r.x; cy = r.y;
+            if (t % 10 === 0) trueTraj.push({ x: cx, y: cy });
+        }
+        trueTraj.push({ x: cx, y: cy });
+
+        // Euler: 100 steps
+        const eulerSub = buildSubSchedule(sched, 100);
+        const eulerTraj = [{ x: startX, y: startY }];
+        cx = startX; cy = startY;
+        const eulerRng = new SeededRNG(999);
+        for (let i = eulerSub.steps - 1; i > 0; i--) {
+            const ab = eulerSub.alphaBar[i];
+            const abPrev = eulerSub.alphaBar[i - 1];
+            const r = ddimStep(cx, cy, ab, abPrev, 0, eulerRng);
+            cx = r.x; cy = r.y;
+            eulerTraj.push({ x: cx, y: cy });
+        }
+
+        // DPM-2: 20 steps (simulate with sub-step correction)
+        const dpm2Sub = buildSubSchedule(sched, 20);
+        const dpm2Traj = [{ x: startX, y: startY }];
+        cx = startX; cy = startY;
+        const dpm2Rng = new SeededRNG(999);
+        for (let i = dpm2Sub.steps - 1; i > 0; i--) {
+            const ab = dpm2Sub.alphaBar[i];
+            const abPrev = dpm2Sub.alphaBar[i - 1];
+            // midpoint method
+            const abMid = Math.sqrt(ab * abPrev);
+            const mid = ddimStep(cx, cy, ab, abMid, 0, dpm2Rng);
+            const final_ = ddimStep(mid.x, mid.y, abMid, abPrev, 0, dpm2Rng);
+            cx = final_.x; cy = final_.y;
+            dpm2Traj.push({ x: cx, y: cy });
+        }
+
+        // DPM-3: 10 steps (simulate higher-order correction)
+        const dpm3Sub = buildSubSchedule(sched, 10);
+        const dpm3Traj = [{ x: startX, y: startY }];
+        cx = startX; cy = startY;
+        const dpm3Rng = new SeededRNG(999);
+        for (let i = dpm3Sub.steps - 1; i > 0; i--) {
+            const ab = dpm3Sub.alphaBar[i];
+            const abPrev = dpm3Sub.alphaBar[i - 1];
+            // 3rd order: two sub-steps
+            const ab1 = Math.pow(ab, 2/3) * Math.pow(abPrev, 1/3);
+            const ab2 = Math.pow(ab, 1/3) * Math.pow(abPrev, 2/3);
+            const s1 = ddimStep(cx, cy, ab, ab1, 0, dpm3Rng);
+            const s2 = ddimStep(s1.x, s1.y, ab1, ab2, 0, dpm3Rng);
+            const s3 = ddimStep(s2.x, s2.y, ab2, abPrev, 0, dpm3Rng);
+            cx = s3.x; cy = s3.y;
+            dpm3Traj.push({ x: cx, y: cy });
+        }
+
+        // Animate drawing
+        const trajectories = [
+            { traj: trueTraj, color: '#b388ff', lineW: 1.5, label: '真实轨迹', dotR: 0 },
+            { traj: eulerTraj, color: '#ff5252', lineW: 2, label: 'Euler (100步)', dotR: 3 },
+            { traj: dpm2Traj, color: '#4fc3f7', lineW: 2, label: 'DPM-2 (20步)', dotR: 4 },
+            { traj: dpm3Traj, color: '#16c79a', lineW: 2, label: 'DPM-3 (10步)', dotR: 5 },
+        ];
+
+        let drawIdx = 0;
+        const totalFrames = 120;
+
+        function drawTraj(t, path, color, lineW, dotR) {
+            const n = Math.min(path.length, Math.ceil(path.length * t));
+            if (n < 2) return;
+            ctx.strokeStyle = color;
+            ctx.lineWidth = lineW;
+            ctx.beginPath();
+            ctx.moveTo(mapX(path[0].x, w), mapY(path[0].y, h));
+            for (let i = 1; i < n; i++) {
+                ctx.lineTo(mapX(path[i].x, w), mapY(path[i].y, h));
+            }
+            ctx.stroke();
+            if (dotR > 0) {
+                ctx.fillStyle = color;
+                for (let i = 0; i < n; i++) {
+                    ctx.beginPath();
+                    ctx.arc(mapX(path[i].x, w), mapY(path[i].y, h), dotR, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            }
+        }
+
+        function frame() {
+            drawIdx++;
+            const t = Math.min(1, drawIdx / totalFrames);
+
+            clearCanvas(ctx, w, h);
+            drawAxes(ctx, w, h);
+            drawTargetGhosts(ctx, w, h);
+
+            for (const tr of trajectories) {
+                drawTraj(t, tr.traj, tr.color, tr.lineW, tr.dotR);
+            }
+
+            // Start marker
+            ctx.fillStyle = '#ffd740';
+            ctx.beginPath();
+            ctx.arc(mapX(startX, w), mapY(startY, h), 6, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = '#1a1a2e';
+            ctx.font = 'bold 8px JetBrains Mono';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('S', mapX(startX, w), mapY(startY, h));
+
+            if (t < 1) {
+                anim = requestAnimationFrame(frame);
+            } else {
+                statusEl.textContent = '完成';
+            }
+        }
+        anim = requestAnimationFrame(frame);
+    }
+
+    function reset() {
+        if (anim) cancelAnimationFrame(anim);
+        const { ctx, w, h } = initCanvas('canvas-dpm');
+        clearCanvas(ctx, w, h);
+        drawAxes(ctx, w, h);
+        drawTargetGhosts(ctx, w, h);
+        document.getElementById('dpm-status').textContent = '点击开始模拟';
+    }
+
+    document.getElementById('btn-dpm-run').addEventListener('click', run);
+    document.getElementById('btn-dpm-reset').addEventListener('click', reset);
+
+    window.addEventListener('load', () => {
+        const { ctx, w, h } = initCanvas('canvas-dpm');
+        clearCanvas(ctx, w, h);
+        drawAxes(ctx, w, h);
+        drawTargetGhosts(ctx, w, h);
+    });
+})();
+
+// ============================================================
+// Section 5: 采样质量对比 Dashboard
+// ============================================================
+(() => {
+    const FULL_T = 1000;
+    const sched = buildSchedule(FULL_T);
+    const N_POINTS = 300;
+    const N_TARGET = 500; // reference samples for distance
+
+    function generateSamples(steps, eta, seed) {
+        const rng = new SeededRNG(seed);
+        const startRng = new SeededRNG(seed);
+        const points = [];
+        for (let i = 0; i < N_POINTS; i++) {
+            points.push({ x: startRng.gaussian() * 3, y: startRng.gaussian() * 3 });
+        }
+
+        if (steps >= FULL_T) {
+            // DDPM full
+            let pts = points;
+            for (let t = FULL_T - 1; t >= 0; t--) {
+                const newPts = [];
+                for (const p of pts) {
+                    newPts.push(ddpmStep(p.x, p.y, t, sched, rng));
+                }
+                pts = newPts;
+            }
+            return pts;
+        } else {
+            // DDIM
+            const sub = buildSubSchedule(sched, steps);
+            let pts = points;
+            for (let i = sub.steps - 1; i > 0; i--) {
+                const newPts = [];
+                for (const p of pts) {
+                    newPts.push(ddimStep(p.x, p.y, sub.alphaBar[i], sub.alphaBar[i - 1], eta, rng));
+                }
+                pts = newPts;
+            }
+            return pts;
+        }
+    }
+
+    // Approximate MMD (Maximum Mean Discrepancy) as quality metric
+    function computeMMD(samples, targets) {
+        const sigma = 1.0;
+        function rbf(x1, y1, x2, y2) {
+            const d = (x1-x2)*(x1-x2) + (y1-y2)*(y1-y2);
+            return Math.exp(-d / (2 * sigma * sigma));
+        }
+        // subsample for speed
+        const ns = Math.min(samples.length, 100);
+        const nt = Math.min(targets.length, 100);
+        let kss = 0, ktt = 0, kst = 0;
+        for (let i = 0; i < ns; i++) {
+            for (let j = i+1; j < ns; j++) {
+                kss += rbf(samples[i].x, samples[i].y, samples[j].x, samples[j].y);
+            }
+        }
+        kss /= (ns * (ns - 1) / 2) || 1;
+        for (let i = 0; i < nt; i++) {
+            for (let j = i+1; j < nt; j++) {
+                ktt += rbf(targets[i].x, targets[i].y, targets[j].x, targets[j].y);
+            }
+        }
+        ktt /= (nt * (nt - 1) / 2) || 1;
+        for (let i = 0; i < ns; i++) {
+            for (let j = 0; j < nt; j++) {
+                kst += rbf(samples[i].x, samples[i].y, targets[j].x, targets[j].y);
+            }
+        }
+        kst /= (ns * nt) || 1;
+        return Math.max(0, kss + ktt - 2 * kst);
+    }
+
+    function run() {
+        // Generate target samples
+        const targetRng = new SeededRNG(5555);
+        const targets = [];
+        for (let i = 0; i < N_TARGET; i++) {
+            targets.push(sampleTarget(targetRng));
+        }
+
+        const methods = [
+            { id: 'ddpm', steps: 1000, eta: 1, label: 'DDPM-1000', color: 'rgba(22,199,154,0.6)', badge: 'badge-ddpm' },
+            { id: 'ddim100', steps: 100, eta: 0, label: 'DDIM-100', color: 'rgba(79,195,247,0.6)', badge: 'badge-ddim100' },
+            { id: 'ddim50', steps: 50, eta: 0, label: 'DDIM-50', color: 'rgba(179,136,255,0.6)', badge: 'badge-ddim50' },
+            { id: 'ddim20', steps: 20, eta: 0, label: 'DDIM-20', color: 'rgba(255,171,64,0.6)', badge: 'badge-ddim20' },
+        ];
+
+        const results = [];
+
+        for (const m of methods) {
+            const samples = generateSamples(m.steps, m.eta, 42);
+            const mmd = computeMMD(samples, targets);
+            results.push({ ...m, samples, mmd });
+
+            // Draw scatter
+            const canvasId = 'canvas-cmp-' + m.id;
+            const { ctx, w, h } = initCanvas(canvasId);
+            clearCanvas(ctx, w, h);
+            drawAxes(ctx, w, h);
+            drawTargetGhosts(ctx, w, h);
+            // Draw target faint
+            drawPoints(ctx, targets, w, h, 'rgba(168,168,184,0.15)', 1.5);
+            drawPoints(ctx, samples, w, h, m.color, 3);
+
+            // Update badge
+            document.getElementById(m.badge).textContent = 'MMD: ' + mmd.toFixed(4);
+        }
+
+        // Draw bar chart
+        drawBarChart(results);
+    }
+
+    function drawBarChart(results) {
+        const { ctx, w, h } = initCanvas('canvas-bar-chart');
+        clearCanvas(ctx, w, h);
+
+        const padding = { top: 30, bottom: 50, left: 60, right: 20 };
+        const chartW = w - padding.left - padding.right;
+        const chartH = h - padding.top - padding.bottom;
+
+        const barColors = ['#16c79a', '#4fc3f7', '#b388ff', '#ffab40'];
+        const barW = chartW / (results.length * 3);
+
+        // Two metrics: steps (scaled) and MMD (scaled)
+        const maxSteps = 1000;
+        const maxMMD = Math.max(...results.map(r => r.mmd)) * 1.3 || 0.1;
+
+        // Title
+        ctx.fillStyle = '#a8a8b8';
+        ctx.font = '13px "Noto Sans SC", sans-serif';
+        ctx.textAlign = 'center';
+
+        // Draw bars — left half: steps, right half: quality (1 - MMD normalized)
+        const groupW = chartW / results.length;
+
+        for (let i = 0; i < results.length; i++) {
+            const r = results[i];
+            const cx = padding.left + groupW * i + groupW / 2;
+
+            // Steps bar
+            const stepsH = (r.steps / maxSteps) * chartH * 0.9;
+            ctx.fillStyle = barColors[i];
+            ctx.globalAlpha = 0.6;
+            ctx.fillRect(cx - barW - 2, padding.top + chartH - stepsH, barW, stepsH);
+            ctx.globalAlpha = 1;
+
+            // MMD bar
+            const mmdH = (r.mmd / maxMMD) * chartH * 0.9;
+            ctx.fillStyle = barColors[i];
+            ctx.globalAlpha = 0.9;
+            ctx.fillRect(cx + 2, padding.top + chartH - mmdH, barW, mmdH);
+            ctx.globalAlpha = 1;
+
+            // Labels
+            ctx.fillStyle = '#a8a8b8';
+            ctx.font = '11px "Noto Sans SC", sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(r.label, cx, padding.top + chartH + 18);
+
+            // Values on bars
+            ctx.font = '10px "JetBrains Mono", monospace';
+            ctx.fillStyle = barColors[i];
+            ctx.fillText(r.steps + '步', cx - barW / 2 - 2, padding.top + chartH - stepsH - 5);
+            ctx.fillText(r.mmd.toFixed(4), cx + barW / 2 + 2, padding.top + chartH - mmdH - 5);
+        }
+
+        // Axes
+        ctx.strokeStyle = 'rgba(168,168,184,0.3)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(padding.left, padding.top);
+        ctx.lineTo(padding.left, padding.top + chartH);
+        ctx.lineTo(padding.left + chartW, padding.top + chartH);
+        ctx.stroke();
+
+        // Legend
+        ctx.font = '11px "Noto Sans SC", sans-serif';
+        ctx.fillStyle = '#6c6c7c';
+        ctx.globalAlpha = 0.7;
+        ctx.fillRect(padding.left + 10, padding.top + 5, 10, 10);
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = '#a8a8b8';
+        ctx.fillText('步数', padding.left + 25, padding.top + 14);
+        ctx.fillStyle = '#6c6c7c';
+        ctx.globalAlpha = 1;
+        ctx.fillRect(padding.left + 70, padding.top + 5, 10, 10);
+        ctx.fillStyle = '#a8a8b8';
+        ctx.fillText('MMD 距离 (越小越好)', padding.left + 85, padding.top + 14);
+
+        // Y-axis labels
+        ctx.fillStyle = '#6c6c7c';
+        ctx.font = '10px "JetBrains Mono", monospace';
+        ctx.textAlign = 'right';
+        for (let i = 0; i <= 4; i++) {
+            const y = padding.top + chartH - (i / 4) * chartH;
+            ctx.fillText((i / 4 * maxSteps).toFixed(0), padding.left - 5, y + 4);
+            ctx.strokeStyle = 'rgba(168,168,184,0.1)';
+            ctx.beginPath();
+            ctx.moveTo(padding.left, y);
+            ctx.lineTo(padding.left + chartW, y);
+            ctx.stroke();
+        }
+    }
+
+    function reset() {
+        const ids = ['canvas-cmp-ddpm', 'canvas-cmp-ddim100', 'canvas-cmp-ddim50', 'canvas-cmp-ddim20'];
+        ids.forEach(id => {
+            const { ctx, w, h } = initCanvas(id);
+            clearCanvas(ctx, w, h);
+            drawAxes(ctx, w, h);
+            drawTargetGhosts(ctx, w, h);
+        });
+        const { ctx, w, h } = initCanvas('canvas-bar-chart');
+        clearCanvas(ctx, w, h);
+        ['badge-ddpm', 'badge-ddim100', 'badge-ddim50', 'badge-ddim20'].forEach(id => {
+            document.getElementById(id).textContent = '--';
+        });
+    }
+
+    document.getElementById('btn-compare-run').addEventListener('click', run);
+    document.getElementById('btn-compare-reset').addEventListener('click', reset);
+
+    window.addEventListener('load', () => {
+        const ids = ['canvas-cmp-ddpm', 'canvas-cmp-ddim100', 'canvas-cmp-ddim50', 'canvas-cmp-ddim20'];
+        ids.forEach(id => {
+            const { ctx, w, h } = initCanvas(id);
+            clearCanvas(ctx, w, h);
+            drawAxes(ctx, w, h);
+            drawTargetGhosts(ctx, w, h);
+        });
+        const { ctx, w, h } = initCanvas('canvas-bar-chart');
+        clearCanvas(ctx, w, h);
+    });
+})();
+
+// ============================================================
+// KaTeX auto-render
+// ============================================================
+document.addEventListener('DOMContentLoaded', () => {
+    if (typeof renderMathInElement !== 'undefined') {
+        renderMathInElement(document.body, {
+            delimiters: [
+                { left: '$$', right: '$$', display: true },
+                { left: '\\(', right: '\\)', display: false },
+            ],
+            throwOnError: false,
+        });
+    }
+});
+
+// Also try after KaTeX loads (deferred)
+window.addEventListener('load', () => {
+    setTimeout(() => {
+        if (typeof renderMathInElement !== 'undefined') {
+            renderMathInElement(document.body, {
+                delimiters: [
+                    { left: '$$', right: '$$', display: true },
+                    { left: '\\(', right: '\\)', display: false },
+                ],
+                throwOnError: false,
+            });
+        }
+    }, 200);
+});
+
+// ============================================================
+// GSAP entrance animations
+// ============================================================
+window.addEventListener('load', () => {
+    gsap.from('.section', {
+        y: 40,
+        opacity: 0,
+        duration: 0.7,
+        stagger: 0.15,
+        ease: 'power2.out',
+    });
+});
+</script>
+</body>
+</html>

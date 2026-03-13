@@ -1,0 +1,1458 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>反向去噪 — Diffusion 扩散模型</title>
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+    <!-- KaTeX -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+
+    <!-- GSAP -->
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+
+    <!-- Shared styles -->
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+
+    <style>
+        /* ===== Page-specific styles ===== */
+        .page-header {
+            text-align: center;
+            padding: 2rem 0 1.5rem;
+        }
+        .page-header h1 {
+            font-size: 2.2rem;
+            background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .page-header .subtitle {
+            color: var(--text-muted);
+            font-size: 1rem;
+            margin-top: 0.25rem;
+        }
+
+        /* Canvas containers */
+        .canvas-wrap {
+            position: relative;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+        }
+        .canvas-wrap canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+        .canvas-label {
+            position: absolute;
+            top: 0.5rem;
+            left: 0.75rem;
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            font-family: var(--font-mono);
+            pointer-events: none;
+        }
+
+        /* Side-by-side forward/reverse */
+        .side-by-side {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+        }
+        .side-by-side .canvas-wrap {
+            height: 300px;
+        }
+
+        /* Derivation block */
+        .derivation-block {
+            background: rgba(15, 52, 96, 0.3);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1.25rem 1.5rem;
+            margin: 1rem 0;
+        }
+        .derivation-block .step-title {
+            font-size: 0.85rem;
+            color: var(--accent-purple);
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+        }
+
+        /* Posterior controls */
+        .posterior-controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1.5rem;
+            padding: 1rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            margin-top: 1rem;
+        }
+        .posterior-controls .slider-group {
+            flex: 1;
+            min-width: 200px;
+        }
+        .posterior-readout {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.75rem;
+            margin-top: 1rem;
+        }
+        .readout-card {
+            background: rgba(15, 52, 96, 0.4);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            padding: 0.75rem 1rem;
+            text-align: center;
+        }
+        .readout-card .label {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            margin-bottom: 0.25rem;
+        }
+        .readout-card .value {
+            font-family: var(--font-mono);
+            font-size: 1.1rem;
+            color: var(--accent-green);
+        }
+
+        /* Denoising animation */
+        .denoise-canvas-area {
+            height: 420px;
+        }
+        .denoise-info-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0.5rem 1rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-top: none;
+            border-radius: 0 0 var(--radius-md) var(--radius-md);
+            font-size: 0.8rem;
+        }
+        .denoise-info-bar .info-item {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            color: var(--text-secondary);
+        }
+        .denoise-info-bar .info-item .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+        }
+
+        /* Comparison canvases */
+        .compare-canvases {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+        }
+        .compare-canvases .canvas-wrap {
+            height: 340px;
+        }
+        .compare-label {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            padding: 0.5rem;
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+        .compare-label.eps-label { color: var(--accent-blue); }
+        .compare-label.x0-label { color: var(--accent-purple); }
+
+        /* Training loop */
+        .training-canvas-area {
+            height: 380px;
+        }
+        .loss-readout {
+            font-family: var(--font-mono);
+            font-size: 1rem;
+            color: var(--accent-orange);
+            text-align: center;
+            padding: 0.5rem;
+        }
+
+        /* Math highlight box */
+        .math-highlight {
+            background: rgba(22, 199, 154, 0.06);
+            border: 1px solid rgba(22, 199, 154, 0.2);
+            border-radius: var(--radius-md);
+            padding: 1rem 1.5rem;
+            margin: 1rem 0;
+            text-align: center;
+        }
+
+        /* Posterior canvas */
+        .posterior-canvas-area {
+            height: 280px;
+        }
+
+        @media (max-width: 768px) {
+            .side-by-side,
+            .compare-canvases {
+                grid-template-columns: 1fr;
+            }
+            .posterior-readout {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+
+<div class="page-container">
+    <!-- Header -->
+    <div class="page-header">
+        <h1>反向去噪过程</h1>
+        <p class="subtitle">Reverse Denoising Process — 从纯噪声中恢复数据</p>
+    </div>
+
+    <!-- ============ Section 1: 为什么能逆转？ ============ -->
+    <div class="section" id="sec-why-reverse">
+        <div class="section-title">
+            <div class="icon">1</div>
+            <h2>为什么能逆转？</h2>
+            <span class="badge badge-blue">直觉理解</span>
+        </div>
+
+        <p>
+            前向扩散过程每一步只加入少量噪声（\(\beta_t\) 很小），因此逆向条件分布
+            \(q(\mathbf{x}_{t-1}|\mathbf{x}_t)\) 也近似为高斯分布。这意味着我们可以用一个神经网络
+            来学习这个逆向分布的参数。
+        </p>
+
+        <div class="math-highlight">
+            $$p_\theta(\mathbf{x}_{t-1}|\mathbf{x}_t) = \mathcal{N}\!\bigl(\mathbf{x}_{t-1};\, \boldsymbol{\mu}_\theta(\mathbf{x}_t, t),\, \boldsymbol{\Sigma}_\theta(\mathbf{x}_t, t)\bigr)$$
+        </div>
+
+        <div class="info-box">
+            <p><strong>核心直觉：</strong>当每步噪声足够小时，逆向过程和前向过程具有相同的函数形式——都是高斯分布。我们只需要学习均值和方差即可。</p>
+        </div>
+
+        <p class="mt-2">下方左侧展示前向加噪（模糊化），右侧展示反向去噪（锐化恢复）。拖动滑块调节时间步：</p>
+
+        <div class="slider-group mt-1 mb-2" style="max-width:400px;">
+            <label>时间步 t</label>
+            <input type="range" id="fwdRevSlider" min="0" max="50" value="0">
+            <span class="slider-value" id="fwdRevValue">0</span>
+        </div>
+
+        <div class="side-by-side">
+            <div class="canvas-wrap">
+                <canvas id="forwardCanvas"></canvas>
+                <span class="canvas-label">前向加噪 q(x_t | x_0)</span>
+            </div>
+            <div class="canvas-wrap">
+                <canvas id="reverseCanvas"></canvas>
+                <span class="canvas-label">反向去噪 p_θ(x_{t-1} | x_t)</span>
+            </div>
+        </div>
+
+        <div class="legend mt-1">
+            <div class="legend-item">
+                <div class="swatch" style="background: var(--accent-blue);"></div>
+                <span>原始数据点</span>
+            </div>
+            <div class="legend-item">
+                <div class="swatch" style="background: var(--accent-orange);"></div>
+                <span>当前噪声分布</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============ Section 2: 后验分布推导 ============ -->
+    <div class="section" id="sec-posterior">
+        <div class="section-title">
+            <div class="icon">2</div>
+            <h2>后验分布推导</h2>
+            <span class="badge badge-purple">数学推导</span>
+        </div>
+
+        <p>
+            虽然 \(q(\mathbf{x}_{t-1}|\mathbf{x}_t)\) 不可解析求解，但如果已知 \(\mathbf{x}_0\)，
+            后验 \(q(\mathbf{x}_{t-1}|\mathbf{x}_t, \mathbf{x}_0)\) 是可以精确计算的高斯分布。
+        </p>
+
+        <div class="derivation-block">
+            <div class="step-title">步骤一：利用贝叶斯公式</div>
+            <p>$$q(\mathbf{x}_{t-1}|\mathbf{x}_t, \mathbf{x}_0) = \frac{q(\mathbf{x}_t|\mathbf{x}_{t-1}, \mathbf{x}_0)\, q(\mathbf{x}_{t-1}|\mathbf{x}_0)}{q(\mathbf{x}_t|\mathbf{x}_0)}$$</p>
+        </div>
+
+        <div class="derivation-block">
+            <div class="step-title">步骤二：代入高斯分布的表达式</div>
+            <p>每个条件分布都是高斯分布：</p>
+            <p>$$q(\mathbf{x}_t|\mathbf{x}_{t-1}) = \mathcal{N}(\mathbf{x}_t; \sqrt{1-\beta_t}\,\mathbf{x}_{t-1}, \beta_t \mathbf{I})$$</p>
+            <p>$$q(\mathbf{x}_{t-1}|\mathbf{x}_0) = \mathcal{N}(\mathbf{x}_{t-1}; \sqrt{\bar\alpha_{t-1}}\,\mathbf{x}_0, (1-\bar\alpha_{t-1})\mathbf{I})$$</p>
+        </div>
+
+        <div class="derivation-block">
+            <div class="step-title">步骤三：配方得到后验参数</div>
+            <p>$$q(\mathbf{x}_{t-1}|\mathbf{x}_t, \mathbf{x}_0) = \mathcal{N}(\mathbf{x}_{t-1};\, \tilde{\boldsymbol{\mu}}_t,\, \tilde\beta_t \mathbf{I})$$</p>
+        </div>
+
+        <div class="math-highlight">
+            $$\tilde{\boldsymbol{\mu}}_t = \frac{\sqrt{\bar\alpha_{t-1}}\,\beta_t}{1-\bar\alpha_t}\,\mathbf{x}_0 + \frac{\sqrt{\alpha_t}\,(1-\bar\alpha_{t-1})}{1-\bar\alpha_t}\,\mathbf{x}_t$$
+        </div>
+
+        <div class="math-highlight">
+            $$\tilde\beta_t = \frac{(1-\bar\alpha_{t-1})}{1-\bar\alpha_t}\,\beta_t$$
+        </div>
+
+        <p class="mt-2">调节参数，观察后验均值和方差如何随时间步变化：</p>
+
+        <div class="posterior-controls">
+            <div class="slider-group">
+                <label>时间步 t</label>
+                <input type="range" id="posteriorT" min="1" max="100" value="50">
+                <span class="slider-value" id="posteriorTValue">50</span>
+            </div>
+            <div class="slider-group">
+                <label>β 线性范围</label>
+                <input type="range" id="posteriorBeta" min="1" max="50" value="20" step="1">
+                <span class="slider-value" id="posteriorBetaValue">0.020</span>
+            </div>
+        </div>
+
+        <div class="posterior-readout">
+            <div class="readout-card">
+                <div class="label">后验均值系数 (x₀)</div>
+                <div class="value" id="readCoeffX0">—</div>
+            </div>
+            <div class="readout-card">
+                <div class="label">后验均值系数 (xₜ)</div>
+                <div class="value" id="readCoeffXt">—</div>
+            </div>
+            <div class="readout-card">
+                <div class="label">后验方差 β̃ₜ</div>
+                <div class="value" id="readBetaTilde">—</div>
+            </div>
+            <div class="readout-card">
+                <div class="label">累积信号保留 ᾱₜ</div>
+                <div class="value" id="readAlphaBar">—</div>
+            </div>
+        </div>
+
+        <div class="canvas-wrap posterior-canvas-area mt-2">
+            <canvas id="posteriorCanvas"></canvas>
+            <span class="canvas-label">后验分布 q(x_{t-1} | x_t, x_0) 的均值与方差</span>
+        </div>
+    </div>
+
+    <!-- ============ Section 3: 去噪动画 ============ -->
+    <div class="section" id="sec-denoise-anim">
+        <div class="section-title">
+            <div class="icon">3</div>
+            <h2>去噪动画</h2>
+            <span class="badge badge-green">交互动画</span>
+        </div>
+
+        <p>
+            从纯高斯噪声出发，逐步执行反向去噪。每一步中，模型预测噪声 \(\boldsymbol{\epsilon}_\theta\)，
+            然后从当前样本中减去，使数据点逐渐向有结构的分布靠拢。
+        </p>
+
+        <div class="info-box success">
+            <p>观察：在早期步骤（t 接近 T）中点几乎是随机的；随着 t 减小，数据结构逐渐浮现。</p>
+        </div>
+
+        <div class="canvas-wrap denoise-canvas-area">
+            <canvas id="denoiseCanvas"></canvas>
+            <span class="canvas-label" id="denoiseStepLabel">t = 50 / 50</span>
+        </div>
+
+        <div class="denoise-info-bar">
+            <div class="info-item">
+                <div class="dot" style="background: var(--accent-red);"></div>
+                <span>预测噪声 ε_θ</span>
+            </div>
+            <div class="info-item">
+                <div class="dot" style="background: var(--accent-green);"></div>
+                <span>去噪后位置</span>
+            </div>
+            <div class="info-item">
+                <div class="dot" style="background: var(--accent-blue);"></div>
+                <span>目标结构</span>
+            </div>
+        </div>
+
+        <div class="anim-controls mt-1">
+            <button class="btn btn-sm" id="denoiseReset" title="重置">&#8634;</button>
+            <button class="btn btn-sm btn-primary" id="denoisePlay" title="播放/暂停">&#9654;</button>
+            <button class="btn btn-sm" id="denoiseStep" title="单步">&#9199;</button>
+            <div class="progress-bar" id="denoiseProgress">
+                <div class="fill" id="denoiseProgressFill" style="width: 0%;"></div>
+            </div>
+            <span class="step-label" id="denoiseStepCounter">0 / 50</span>
+        </div>
+
+        <div class="slider-group mt-1" style="max-width: 300px;">
+            <label>动画速度</label>
+            <input type="range" id="denoiseSpeed" min="1" max="10" value="5">
+            <span class="slider-value" id="denoiseSpeedValue">5</span>
+        </div>
+    </div>
+
+    <!-- ============ Section 4: 噪声预测 vs x₀ 预测 ============ -->
+    <div class="section" id="sec-compare">
+        <div class="section-title">
+            <div class="icon">4</div>
+            <h2>噪声预测 vs x₀ 预测</h2>
+            <span class="badge badge-orange">对比分析</span>
+        </div>
+
+        <p>
+            模型有两种等价的预测目标。左侧：模型预测噪声 \(\boldsymbol{\epsilon}\)，然后通过公式计算
+            \(\mathbf{x}_{t-1}\)。右侧：模型直接预测 \(\mathbf{x}_0\)，再反推 \(\mathbf{x}_{t-1}\)。
+        </p>
+
+        <div class="derivation-block">
+            <div class="step-title">噪声预测参数化</div>
+            <p>$$\boldsymbol{\mu}_\theta(\mathbf{x}_t, t) = \frac{1}{\sqrt{\alpha_t}}\left(\mathbf{x}_t - \frac{\beta_t}{\sqrt{1-\bar\alpha_t}}\,\boldsymbol{\epsilon}_\theta(\mathbf{x}_t, t)\right)$$</p>
+        </div>
+
+        <div class="derivation-block">
+            <div class="step-title">x₀ 预测参数化</div>
+            <p>$$\hat{\mathbf{x}}_0 = f_\theta(\mathbf{x}_t, t), \quad \boldsymbol{\mu}_\theta = \frac{\sqrt{\bar\alpha_{t-1}}\,\beta_t}{1-\bar\alpha_t}\,\hat{\mathbf{x}}_0 + \frac{\sqrt{\alpha_t}(1-\bar\alpha_{t-1})}{1-\bar\alpha_t}\,\mathbf{x}_t$$</p>
+        </div>
+
+        <div class="info-box">
+            <p>两种参数化在数学上完全等价——因为 \(\mathbf{x}_0 = \frac{1}{\sqrt{\bar\alpha_t}}(\mathbf{x}_t - \sqrt{1-\bar\alpha_t}\,\boldsymbol{\epsilon})\)。</p>
+        </div>
+
+        <div class="flex items-center justify-center gap-md mb-2 mt-2">
+            <div class="btn-group">
+                <button class="btn btn-sm active" id="compareSync" data-mode="sync">同步播放</button>
+                <button class="btn btn-sm" id="compareIndep" data-mode="indep">独立播放</button>
+            </div>
+            <button class="btn btn-sm btn-primary" id="comparePlay">&#9654; 播放</button>
+            <button class="btn btn-sm" id="compareReset">&#8634; 重置</button>
+        </div>
+
+        <div class="compare-canvases">
+            <div>
+                <div class="compare-label eps-label">噪声预测 ε-prediction</div>
+                <div class="canvas-wrap" style="height:340px;">
+                    <canvas id="epsCanvas"></canvas>
+                </div>
+            </div>
+            <div>
+                <div class="compare-label x0-label">x₀ 预测 x₀-prediction</div>
+                <div class="canvas-wrap" style="height:340px;">
+                    <canvas id="x0Canvas"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <div class="anim-controls mt-1">
+            <div class="progress-bar" id="compareProgress">
+                <div class="fill" id="compareProgressFill" style="width: 0%;"></div>
+            </div>
+            <span class="step-label" id="compareStepCounter">0 / 50</span>
+        </div>
+    </div>
+
+    <!-- ============ Section 5: 训练目标 ============ -->
+    <div class="section" id="sec-training">
+        <div class="section-title">
+            <div class="icon">5</div>
+            <h2>训练目标</h2>
+            <span class="badge badge-green">可视化</span>
+        </div>
+
+        <p>
+            DDPM 的简化训练目标非常优雅：在每个训练步中，随机采样时间步 \(t\)，添加噪声得到
+            \(\mathbf{x}_t\)，然后让模型预测添加的噪声。损失函数就是预测噪声与真实噪声之间的均方误差。
+        </p>
+
+        <div class="math-highlight">
+            $$L_{\text{simple}} = \mathbb{E}_{t, \mathbf{x}_0, \boldsymbol{\epsilon}}\left[\left\| \boldsymbol{\epsilon} - \boldsymbol{\epsilon}_\theta\!\left(\sqrt{\bar\alpha_t}\,\mathbf{x}_0 + \sqrt{1-\bar\alpha_t}\,\boldsymbol{\epsilon},\, t\right) \right\|^2\right]$$
+        </div>
+
+        <div class="info-box success">
+            <p><strong>训练循环：</strong>采样 t → 采样噪声 ε → 构造 x_t → 模型预测 ε_θ → 计算 MSE → 梯度更新</p>
+        </div>
+
+        <div class="canvas-wrap training-canvas-area">
+            <canvas id="trainingCanvas"></canvas>
+            <span class="canvas-label">训练循环可视化</span>
+        </div>
+
+        <div class="loss-readout mt-1" id="lossReadout">MSE Loss: —</div>
+
+        <div class="anim-controls mt-1">
+            <button class="btn btn-sm" id="trainReset" title="重置">&#8634;</button>
+            <button class="btn btn-sm btn-primary" id="trainPlay" title="播放/暂停">&#9654;</button>
+            <button class="btn btn-sm" id="trainStep" title="单步采样">&#9199; 单步</button>
+            <div class="progress-bar" id="trainProgress">
+                <div class="fill" id="trainProgressFill" style="width: 0%;"></div>
+            </div>
+            <span class="step-label" id="trainStepCounter">第 0 步</span>
+        </div>
+    </div>
+
+</div><!-- .page-container -->
+
+<!-- Nav -->
+<script src="../shared/scripts/nav.js"></script>
+
+<script>
+// ===================================================================
+//  Utility: Gaussian random, schedule helpers
+// ===================================================================
+function randn() {
+    let u = 0, v = 0;
+    while (u === 0) u = Math.random();
+    while (v === 0) v = Math.random();
+    return Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
+}
+
+function linspace(a, b, n) {
+    const arr = [];
+    for (let i = 0; i < n; i++) arr.push(a + (b - a) * i / (n - 1));
+    return arr;
+}
+
+function linearBetaSchedule(T, betaStart, betaEnd) {
+    const betas = linspace(betaStart, betaEnd, T);
+    const alphas = betas.map(b => 1 - b);
+    const alphaBar = [];
+    let cum = 1;
+    for (let i = 0; i < T; i++) { cum *= alphas[i]; alphaBar.push(cum); }
+    return { betas, alphas, alphaBar };
+}
+
+function gaussianPDF(x, mu, sigma) {
+    const coeff = 1.0 / (sigma * Math.sqrt(2 * Math.PI));
+    return coeff * Math.exp(-0.5 * ((x - mu) / sigma) ** 2);
+}
+
+// ===================================================================
+//  Target shape: a smiley face made of 2D points
+// ===================================================================
+function generateSmileyPoints(n) {
+    const pts = [];
+    // head circle
+    const headN = Math.floor(n * 0.5);
+    for (let i = 0; i < headN; i++) {
+        const angle = (2 * Math.PI * i) / headN;
+        pts.push([Math.cos(angle) * 0.8, Math.sin(angle) * 0.8]);
+    }
+    // left eye
+    const eyeN = Math.floor(n * 0.1);
+    for (let i = 0; i < eyeN; i++) {
+        const a = (2 * Math.PI * i) / eyeN;
+        pts.push([-0.3 + Math.cos(a) * 0.1, 0.25 + Math.sin(a) * 0.12]);
+    }
+    // right eye
+    for (let i = 0; i < eyeN; i++) {
+        const a = (2 * Math.PI * i) / eyeN;
+        pts.push([0.3 + Math.cos(a) * 0.1, 0.25 + Math.sin(a) * 0.12]);
+    }
+    // smile arc
+    const smileN = n - pts.length;
+    for (let i = 0; i < smileN; i++) {
+        const a = Math.PI + (Math.PI * 0.8) * i / (smileN - 1) + Math.PI * 0.1;
+        pts.push([Math.cos(a) * 0.45, -0.15 + Math.sin(a) * 0.25]);
+    }
+    return pts;
+}
+
+// ===================================================================
+//  High-DPI Canvas Helpers
+// ===================================================================
+function setupCanvas(canvas, w, h) {
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = w * dpr;
+    canvas.height = h * dpr;
+    canvas.style.width = w + 'px';
+    canvas.style.height = h + 'px';
+    const ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+    return ctx;
+}
+
+function canvasDims(canvas) {
+    const rect = canvas.parentElement.getBoundingClientRect();
+    return { w: Math.floor(rect.width), h: Math.floor(rect.height) };
+}
+
+// Colors
+const COL = {
+    blue: '#4fc3f7', green: '#16c79a', orange: '#ffab40',
+    purple: '#b388ff', red: '#ff5252', yellow: '#ffd740',
+    pink: '#ff80ab', muted: '#6c6c7c', bg: '#16213e',
+    textPrimary: '#e8e8e8', textSecondary: '#a8a8b8'
+};
+
+// ===================================================================
+//  Section 1: Forward vs Reverse side-by-side
+// ===================================================================
+(function initSection1() {
+    const T = 50;
+    const numPts = 150;
+    const schedule = linearBetaSchedule(T, 0.0001, 0.02);
+    const targetPts = generateSmileyPoints(numPts);
+
+    // Pre-compute all noised versions
+    const fwdFrames = [targetPts.map(p => [...p])];
+    for (let t = 0; t < T; t++) {
+        const prev = fwdFrames[t];
+        const beta = schedule.betas[t];
+        const frame = prev.map(p => {
+            const scale = Math.sqrt(1 - beta);
+            return [
+                p[0] * scale + Math.sqrt(beta) * randn(),
+                p[1] * scale + Math.sqrt(beta) * randn()
+            ];
+        });
+        fwdFrames.push(frame);
+    }
+
+    // Reverse frames = reversed copy of forward (simulating perfect denoising)
+    const revFrames = fwdFrames.slice().reverse();
+
+    const slider = document.getElementById('fwdRevSlider');
+    const valLabel = document.getElementById('fwdRevValue');
+    const fwdCanvas = document.getElementById('forwardCanvas');
+    const revCanvas = document.getElementById('reverseCanvas');
+
+    function draw() {
+        const t = parseInt(slider.value);
+        valLabel.textContent = t;
+        [
+            { canvas: fwdCanvas, pts: fwdFrames[t], label: '前向 t=' + t },
+            { canvas: revCanvas, pts: revFrames[t], label: '反向 t=' + (T - t) }
+        ].forEach(({ canvas, pts }) => {
+            const { w, h } = canvasDims(canvas);
+            const ctx = setupCanvas(canvas, w, h);
+            ctx.clearRect(0, 0, w, h);
+
+            // Grid
+            ctx.strokeStyle = 'rgba(42,42,74,0.4)';
+            ctx.lineWidth = 0.5;
+            for (let gx = 0; gx <= w; gx += 40) {
+                ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, h); ctx.stroke();
+            }
+            for (let gy = 0; gy <= h; gy += 40) {
+                ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(w, gy); ctx.stroke();
+            }
+
+            // Points
+            const cx = w / 2, cy = h / 2;
+            const scale = Math.min(w, h) * 0.38;
+            // Draw target ghost
+            ctx.globalAlpha = 0.15;
+            targetPts.forEach(p => {
+                ctx.fillStyle = COL.blue;
+                ctx.beginPath();
+                ctx.arc(cx + p[0] * scale, cy - p[1] * scale, 2.5, 0, Math.PI * 2);
+                ctx.fill();
+            });
+            ctx.globalAlpha = 1;
+
+            // Draw current points
+            pts.forEach(p => {
+                ctx.fillStyle = COL.orange;
+                ctx.beginPath();
+                ctx.arc(cx + p[0] * scale, cy - p[1] * scale, 3, 0, Math.PI * 2);
+                ctx.fill();
+            });
+        });
+    }
+
+    slider.addEventListener('input', draw);
+    window.addEventListener('resize', draw);
+    draw();
+})();
+
+// ===================================================================
+//  Section 2: Posterior distribution interactive
+// ===================================================================
+(function initSection2() {
+    const tSlider = document.getElementById('posteriorT');
+    const tValue = document.getElementById('posteriorTValue');
+    const betaSlider = document.getElementById('posteriorBeta');
+    const betaValue = document.getElementById('posteriorBetaValue');
+    const canvas = document.getElementById('posteriorCanvas');
+
+    function update() {
+        const T = 100;
+        const t = parseInt(tSlider.value);
+        const betaMax = parseInt(betaSlider.value) / 1000;
+        tValue.textContent = t;
+        betaValue.textContent = betaMax.toFixed(3);
+
+        const sched = linearBetaSchedule(T, 0.0001, betaMax);
+        const alphaBar_t = sched.alphaBar[t - 1];
+        const alphaBar_tm1 = t >= 2 ? sched.alphaBar[t - 2] : 1.0;
+        const beta_t = sched.betas[t - 1];
+        const alpha_t = sched.alphas[t - 1];
+
+        const betaTilde = ((1 - alphaBar_tm1) / (1 - alphaBar_t)) * beta_t;
+        const coeffX0 = (Math.sqrt(alphaBar_tm1) * beta_t) / (1 - alphaBar_t);
+        const coeffXt = (Math.sqrt(alpha_t) * (1 - alphaBar_tm1)) / (1 - alphaBar_t);
+
+        document.getElementById('readCoeffX0').textContent = coeffX0.toFixed(4);
+        document.getElementById('readCoeffXt').textContent = coeffXt.toFixed(4);
+        document.getElementById('readBetaTilde').textContent = betaTilde.toFixed(6);
+        document.getElementById('readAlphaBar').textContent = alphaBar_t.toFixed(4);
+
+        // Draw posterior curve for all t
+        const { w, h } = canvasDims(canvas);
+        const ctx = setupCanvas(canvas, w, h);
+        ctx.clearRect(0, 0, w, h);
+
+        const pad = { l: 60, r: 20, t: 20, b: 40 };
+        const plotW = w - pad.l - pad.r;
+        const plotH = h - pad.t - pad.b;
+
+        // Compute betaTilde for all time steps
+        const allBetaTilde = [];
+        const allCoeffX0 = [];
+        const allCoeffXt = [];
+        for (let i = 1; i <= T; i++) {
+            const ab = sched.alphaBar[i - 1];
+            const abm1 = i >= 2 ? sched.alphaBar[i - 2] : 1.0;
+            const b = sched.betas[i - 1];
+            const a = sched.alphas[i - 1];
+            allBetaTilde.push(((1 - abm1) / (1 - ab)) * b);
+            allCoeffX0.push((Math.sqrt(abm1) * b) / (1 - ab));
+            allCoeffXt.push((Math.sqrt(a) * (1 - abm1)) / (1 - ab));
+        }
+
+        // Axes
+        ctx.strokeStyle = 'rgba(42,42,74,0.6)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(pad.l, pad.t);
+        ctx.lineTo(pad.l, pad.t + plotH);
+        ctx.lineTo(pad.l + plotW, pad.t + plotH);
+        ctx.stroke();
+
+        // X axis labels
+        ctx.fillStyle = COL.textSecondary;
+        ctx.font = '11px "JetBrains Mono"';
+        ctx.textAlign = 'center';
+        for (let i = 0; i <= T; i += 20) {
+            const x = pad.l + (i / T) * plotW;
+            ctx.fillText(i.toString(), x, pad.t + plotH + 18);
+        }
+        ctx.fillText('时间步 t', pad.l + plotW / 2, pad.t + plotH + 35);
+
+        // Draw three curves
+        const maxBT = Math.max(...allBetaTilde, 0.001);
+        const maxCX = Math.max(...allCoeffX0, ...allCoeffXt, 0.001);
+
+        function drawCurve(data, maxVal, color, label) {
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            data.forEach((v, i) => {
+                const x = pad.l + ((i + 1) / T) * plotW;
+                const y = pad.t + plotH - (v / maxVal) * plotH * 0.9;
+                if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+            });
+            ctx.stroke();
+        }
+
+        drawCurve(allBetaTilde, maxBT, COL.orange, 'β̃ₜ');
+        drawCurve(allCoeffX0, maxCX, COL.purple, 'coeff(x₀)');
+        drawCurve(allCoeffXt, maxCX, COL.blue, 'coeff(xₜ)');
+
+        // Current t marker
+        const markerX = pad.l + (t / T) * plotW;
+        ctx.strokeStyle = COL.green;
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([4, 3]);
+        ctx.beginPath();
+        ctx.moveTo(markerX, pad.t);
+        ctx.lineTo(markerX, pad.t + plotH);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = COL.green;
+        ctx.font = 'bold 11px "JetBrains Mono"';
+        ctx.fillText('t=' + t, markerX, pad.t - 5);
+
+        // Legend
+        const legendItems = [
+            { color: COL.orange, text: 'β̃ₜ (后验方差)' },
+            { color: COL.purple, text: '系数(x₀)' },
+            { color: COL.blue, text: '系数(xₜ)' }
+        ];
+        let lx = pad.l + plotW - 140;
+        legendItems.forEach((item, i) => {
+            const ly = pad.t + 12 + i * 16;
+            ctx.fillStyle = item.color;
+            ctx.fillRect(lx, ly - 4, 10, 3);
+            ctx.fillStyle = COL.textSecondary;
+            ctx.font = '10px "Noto Sans SC"';
+            ctx.textAlign = 'left';
+            ctx.fillText(item.text, lx + 14, ly);
+        });
+    }
+
+    tSlider.addEventListener('input', update);
+    betaSlider.addEventListener('input', update);
+    window.addEventListener('resize', update);
+    update();
+})();
+
+// ===================================================================
+//  Section 3: Denoising animation
+// ===================================================================
+(function initSection3() {
+    const T = 50;
+    const numPts = 200;
+    const schedule = linearBetaSchedule(T, 0.0001, 0.02);
+    const targetPts = generateSmileyPoints(numPts);
+
+    // Pre-compute forward path from x_0
+    const fwdFrames = [targetPts.map(p => [...p])];
+    for (let t = 0; t < T; t++) {
+        const prev = fwdFrames[t];
+        const beta = schedule.betas[t];
+        const frame = prev.map(p => [
+            p[0] * Math.sqrt(1 - beta) + Math.sqrt(beta) * randn(),
+            p[1] * Math.sqrt(1 - beta) + Math.sqrt(beta) * randn()
+        ]);
+        fwdFrames.push(frame);
+    }
+
+    // Noise that was added at each step (for visualization of ε)
+    const noisePerStep = [];
+    for (let t = 0; t < T; t++) {
+        const noise = fwdFrames[t].map((p, i) => [
+            fwdFrames[t + 1][i][0] - p[0] * Math.sqrt(1 - schedule.betas[t]),
+            fwdFrames[t + 1][i][1] - p[1] * Math.sqrt(1 - schedule.betas[t])
+        ]);
+        noisePerStep.push(noise);
+    }
+
+    let currentStep = T; // start at full noise
+    let currentPts = fwdFrames[T].map(p => [...p]);
+    let isPlaying = false;
+    let animId = null;
+
+    const canvas = document.getElementById('denoiseCanvas');
+    const playBtn = document.getElementById('denoisePlay');
+    const stepBtn = document.getElementById('denoiseStep');
+    const resetBtn = document.getElementById('denoiseReset');
+    const progressFill = document.getElementById('denoiseProgressFill');
+    const stepCounter = document.getElementById('denoiseStepCounter');
+    const stepLabel = document.getElementById('denoiseStepLabel');
+    const speedSlider = document.getElementById('denoiseSpeed');
+    const speedValue = document.getElementById('denoiseSpeedValue');
+
+    speedSlider.addEventListener('input', () => {
+        speedValue.textContent = speedSlider.value;
+    });
+
+    function draw(noiseVectors) {
+        const { w, h } = canvasDims(canvas);
+        const ctx = setupCanvas(canvas, w, h);
+        ctx.clearRect(0, 0, w, h);
+
+        const cx = w / 2, cy = h / 2;
+        const scale = Math.min(w, h) * 0.35;
+
+        // Ghost target
+        ctx.globalAlpha = 0.12;
+        targetPts.forEach(p => {
+            ctx.fillStyle = COL.blue;
+            ctx.beginPath();
+            ctx.arc(cx + p[0] * scale, cy - p[1] * scale, 2, 0, Math.PI * 2);
+            ctx.fill();
+        });
+        ctx.globalAlpha = 1;
+
+        // Noise vectors (if provided)
+        if (noiseVectors) {
+            ctx.strokeStyle = COL.red;
+            ctx.lineWidth = 1;
+            ctx.globalAlpha = 0.4;
+            currentPts.forEach((p, i) => {
+                const nx = noiseVectors[i][0];
+                const ny = noiseVectors[i][1];
+                const px = cx + p[0] * scale;
+                const py = cy - p[1] * scale;
+                ctx.beginPath();
+                ctx.moveTo(px, py);
+                ctx.lineTo(px + nx * scale * 3, py - ny * scale * 3);
+                ctx.stroke();
+            });
+            ctx.globalAlpha = 1;
+        }
+
+        // Current points
+        const progress = 1 - currentStep / T;
+        currentPts.forEach(p => {
+            const r = 2.5 + progress * 1.5;
+            ctx.fillStyle = currentStep === 0 ? COL.green : COL.orange;
+            ctx.beginPath();
+            ctx.arc(cx + p[0] * scale, cy - p[1] * scale, r, 0, Math.PI * 2);
+            ctx.fill();
+        });
+
+        // Step text in center top
+        ctx.fillStyle = COL.textSecondary;
+        ctx.font = '13px "JetBrains Mono"';
+        ctx.textAlign = 'center';
+        ctx.fillText(`t = ${currentStep} / ${T}`, w / 2, 24);
+
+        stepLabel.textContent = `t = ${currentStep} / ${T}`;
+        stepCounter.textContent = `${T - currentStep} / ${T}`;
+        progressFill.style.width = ((T - currentStep) / T * 100) + '%';
+    }
+
+    function denoiseOneStep() {
+        if (currentStep <= 0) return false;
+        const t = currentStep - 1; // index into schedule
+        const targetFrame = fwdFrames[t];
+
+        // Simulate denoising: interpolate towards target frame (with some remaining noise)
+        const noiseVecs = [];
+        currentPts = currentPts.map((p, i) => {
+            const dx = p[0] - targetFrame[i][0];
+            const dy = p[1] - targetFrame[i][1];
+            noiseVecs.push([dx, dy]);
+            // Move 80-100% of the way, small random perturbation
+            const factor = 0.9 + Math.random() * 0.1;
+            return [
+                p[0] - dx * factor,
+                p[1] - dy * factor
+            ];
+        });
+
+        currentStep--;
+        draw(noiseVecs);
+        return currentStep > 0;
+    }
+
+    function animLoop() {
+        if (!isPlaying) return;
+        const speed = parseInt(speedSlider.value);
+        const delay = Math.max(30, 300 - speed * 28);
+
+        if (denoiseOneStep()) {
+            animId = setTimeout(animLoop, delay);
+        } else {
+            isPlaying = false;
+            playBtn.innerHTML = '&#9654;';
+        }
+    }
+
+    playBtn.addEventListener('click', () => {
+        if (currentStep <= 0) {
+            resetState();
+        }
+        isPlaying = !isPlaying;
+        playBtn.innerHTML = isPlaying ? '&#9646;&#9646;' : '&#9654;';
+        if (isPlaying) animLoop();
+    });
+
+    stepBtn.addEventListener('click', () => {
+        isPlaying = false;
+        playBtn.innerHTML = '&#9654;';
+        denoiseOneStep();
+    });
+
+    function resetState() {
+        currentStep = T;
+        currentPts = fwdFrames[T].map(p => [...p]);
+        isPlaying = false;
+        playBtn.innerHTML = '&#9654;';
+        if (animId) clearTimeout(animId);
+        draw(null);
+    }
+
+    resetBtn.addEventListener('click', resetState);
+    window.addEventListener('resize', () => draw(null));
+    draw(null);
+})();
+
+// ===================================================================
+//  Section 4: ε-prediction vs x₀-prediction comparison
+// ===================================================================
+(function initSection4() {
+    const T = 50;
+    const numPts = 150;
+    const schedule = linearBetaSchedule(T, 0.0001, 0.02);
+    const targetPts = generateSmileyPoints(numPts);
+
+    // Build forward
+    const fwdFrames = [targetPts.map(p => [...p])];
+    for (let t = 0; t < T; t++) {
+        const prev = fwdFrames[t];
+        const beta = schedule.betas[t];
+        fwdFrames.push(prev.map(p => [
+            p[0] * Math.sqrt(1 - beta) + Math.sqrt(beta) * randn(),
+            p[1] * Math.sqrt(1 - beta) + Math.sqrt(beta) * randn()
+        ]));
+    }
+
+    let epsStep = T, x0Step = T;
+    let epsPts = fwdFrames[T].map(p => [...p]);
+    let x0Pts = fwdFrames[T].map(p => [...p]);
+    let isPlaying = false;
+    let syncMode = true;
+    let animId = null;
+
+    const epsCanvas = document.getElementById('epsCanvas');
+    const x0Canvas = document.getElementById('x0Canvas');
+    const playBtn = document.getElementById('comparePlay');
+    const resetBtn = document.getElementById('compareReset');
+    const syncBtn = document.getElementById('compareSync');
+    const indepBtn = document.getElementById('compareIndep');
+    const progressFill = document.getElementById('compareProgressFill');
+    const stepCounter = document.getElementById('compareStepCounter');
+
+    syncBtn.addEventListener('click', () => {
+        syncMode = true;
+        syncBtn.classList.add('active');
+        indepBtn.classList.remove('active');
+    });
+    indepBtn.addEventListener('click', () => {
+        syncMode = false;
+        indepBtn.classList.add('active');
+        syncBtn.classList.remove('active');
+    });
+
+    function drawCompareCanvas(canvas, pts, step, mode) {
+        const { w, h } = canvasDims(canvas);
+        const ctx = setupCanvas(canvas, w, h);
+        ctx.clearRect(0, 0, w, h);
+
+        const cx = w / 2, cy = h / 2;
+        const sc = Math.min(w, h) * 0.36;
+
+        // Ghost target
+        ctx.globalAlpha = 0.12;
+        targetPts.forEach(p => {
+            ctx.fillStyle = COL.blue;
+            ctx.beginPath();
+            ctx.arc(cx + p[0] * sc, cy - p[1] * sc, 2, 0, Math.PI * 2);
+            ctx.fill();
+        });
+        ctx.globalAlpha = 1;
+
+        // Points
+        const color = mode === 'eps' ? COL.blue : COL.purple;
+        pts.forEach(p => {
+            ctx.fillStyle = step === 0 ? COL.green : color;
+            ctx.beginPath();
+            ctx.arc(cx + p[0] * sc, cy - p[1] * sc, 3, 0, Math.PI * 2);
+            ctx.fill();
+        });
+
+        // Step label
+        ctx.fillStyle = COL.textSecondary;
+        ctx.font = '12px "JetBrains Mono"';
+        ctx.textAlign = 'center';
+        ctx.fillText(`t = ${step}`, w / 2, h - 12);
+
+        // Mode label
+        if (mode === 'eps' && step > 0 && step < T) {
+            ctx.fillStyle = COL.red;
+            ctx.font = '10px "JetBrains Mono"';
+            ctx.fillText('减去预测噪声 ε_θ', w / 2, 18);
+        } else if (mode === 'x0' && step > 0 && step < T) {
+            ctx.fillStyle = COL.purple;
+            ctx.font = '10px "JetBrains Mono"';
+            ctx.fillText('由预测 x̂₀ 反推', w / 2, 18);
+        }
+    }
+
+    function stepOne(pts, step) {
+        if (step <= 0) return { pts, step };
+        const t = step - 1;
+        const target = fwdFrames[t];
+        const newPts = pts.map((p, i) => {
+            const dx = p[0] - target[i][0];
+            const dy = p[1] - target[i][1];
+            return [p[0] - dx * 0.92, p[1] - dy * 0.92];
+        });
+        return { pts: newPts, step: step - 1 };
+    }
+
+    function drawAll() {
+        drawCompareCanvas(epsCanvas, epsPts, epsStep, 'eps');
+        drawCompareCanvas(x0Canvas, x0Pts, x0Step, 'x0');
+        const avgStep = syncMode ? epsStep : Math.min(epsStep, x0Step);
+        progressFill.style.width = ((T - avgStep) / T * 100) + '%';
+        stepCounter.textContent = `${T - avgStep} / ${T}`;
+    }
+
+    function animLoop() {
+        if (!isPlaying) return;
+        const epsResult = stepOne(epsPts, epsStep);
+        epsPts = epsResult.pts;
+        epsStep = epsResult.step;
+
+        if (syncMode) {
+            const x0Result = stepOne(x0Pts, x0Step);
+            x0Pts = x0Result.pts;
+            x0Step = x0Result.step;
+        }
+
+        drawAll();
+
+        if ((syncMode && epsStep <= 0) || (!syncMode && epsStep <= 0 && x0Step <= 0)) {
+            isPlaying = false;
+            playBtn.innerHTML = '&#9654; 播放';
+            return;
+        }
+
+        animId = setTimeout(animLoop, 120);
+    }
+
+    playBtn.addEventListener('click', () => {
+        if (epsStep <= 0 && x0Step <= 0) resetState();
+        isPlaying = !isPlaying;
+        playBtn.innerHTML = isPlaying ? '&#9646;&#9646; 暂停' : '&#9654; 播放';
+        if (isPlaying) animLoop();
+    });
+
+    function resetState() {
+        epsStep = T; x0Step = T;
+        epsPts = fwdFrames[T].map(p => [...p]);
+        x0Pts = fwdFrames[T].map(p => [...p]);
+        isPlaying = false;
+        playBtn.innerHTML = '&#9654; 播放';
+        if (animId) clearTimeout(animId);
+        drawAll();
+    }
+
+    resetBtn.addEventListener('click', resetState);
+    window.addEventListener('resize', drawAll);
+    drawAll();
+})();
+
+// ===================================================================
+//  Section 5: Training objective visualization
+// ===================================================================
+(function initSection5() {
+    const T = 50;
+    const numPts = 120;
+    const schedule = linearBetaSchedule(T, 0.0001, 0.02);
+    const targetPts = generateSmileyPoints(numPts);
+
+    let trainStepNum = 0;
+    let isPlaying = false;
+    let animId = null;
+    let lossHistory = [];
+    const maxHistory = 80;
+
+    const canvas = document.getElementById('trainingCanvas');
+    const playBtn = document.getElementById('trainPlay');
+    const stepBtn = document.getElementById('trainStep');
+    const resetBtn = document.getElementById('trainReset');
+    const progressFill = document.getElementById('trainProgressFill');
+    const stepCounter = document.getElementById('trainStepCounter');
+    const lossReadout = document.getElementById('lossReadout');
+
+    // Current "model" state: starts predicting random noise, improves
+    let modelSkill = 0; // 0 = random, 1 = perfect
+
+    function doTrainingStep() {
+        trainStepNum++;
+        modelSkill = Math.min(1, modelSkill + 0.015 + Math.random() * 0.01);
+
+        // Sample random t
+        const t = Math.floor(Math.random() * T);
+        const alphaBar = schedule.alphaBar[t];
+
+        // Sample x0 (a target point)
+        const x0Idx = Math.floor(Math.random() * numPts);
+        const x0 = targetPts[x0Idx];
+
+        // Sample true noise
+        const epsTrue = [randn(), randn()];
+
+        // Construct xt = sqrt(alpha_bar)*x0 + sqrt(1-alpha_bar)*eps
+        const sqrtAB = Math.sqrt(alphaBar);
+        const sqrtOneMinusAB = Math.sqrt(1 - alphaBar);
+        const xt = [
+            sqrtAB * x0[0] + sqrtOneMinusAB * epsTrue[0],
+            sqrtAB * x0[1] + sqrtOneMinusAB * epsTrue[1]
+        ];
+
+        // Model prediction (improves with modelSkill)
+        const epsPred = [
+            epsTrue[0] * modelSkill + randn() * (1 - modelSkill),
+            epsTrue[1] * modelSkill + randn() * (1 - modelSkill)
+        ];
+
+        // MSE
+        const mse = ((epsTrue[0] - epsPred[0]) ** 2 + (epsTrue[1] - epsPred[1]) ** 2) / 2;
+        lossHistory.push(mse);
+        if (lossHistory.length > maxHistory) lossHistory.shift();
+
+        return { t, x0, xt, epsTrue, epsPred, mse };
+    }
+
+    function draw(stepData) {
+        const { w, h } = canvasDims(canvas);
+        const ctx = setupCanvas(canvas, w, h);
+        ctx.clearRect(0, 0, w, h);
+
+        const pad = { l: 20, r: 20, t: 20, b: 40 };
+
+        // Left half: data visualization
+        const halfW = w * 0.55;
+        const vizCX = halfW / 2;
+        const vizCY = (h - pad.b) / 2 + pad.t;
+        const sc = Math.min(halfW, h - pad.t - pad.b) * 0.32;
+
+        // Draw target ghost
+        ctx.globalAlpha = 0.1;
+        targetPts.forEach(p => {
+            ctx.fillStyle = COL.blue;
+            ctx.beginPath();
+            ctx.arc(vizCX + p[0] * sc, vizCY - p[1] * sc, 2, 0, Math.PI * 2);
+            ctx.fill();
+        });
+        ctx.globalAlpha = 1;
+
+        if (stepData) {
+            const { x0, xt, epsTrue, epsPred, t, mse } = stepData;
+
+            // x0
+            ctx.fillStyle = COL.green;
+            ctx.beginPath();
+            ctx.arc(vizCX + x0[0] * sc, vizCY - x0[1] * sc, 6, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = COL.textSecondary;
+            ctx.font = '10px "JetBrains Mono"';
+            ctx.textAlign = 'left';
+            ctx.fillText('x₀', vizCX + x0[0] * sc + 8, vizCY - x0[1] * sc - 4);
+
+            // xt
+            ctx.fillStyle = COL.orange;
+            ctx.beginPath();
+            ctx.arc(vizCX + xt[0] * sc, vizCY - xt[1] * sc, 6, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillText('xₜ (t=' + t + ')', vizCX + xt[0] * sc + 8, vizCY - xt[1] * sc - 4);
+
+            // True noise vector from xt
+            ctx.strokeStyle = COL.red;
+            ctx.lineWidth = 2;
+            ctx.globalAlpha = 0.7;
+            ctx.beginPath();
+            ctx.moveTo(vizCX + xt[0] * sc, vizCY - xt[1] * sc);
+            ctx.lineTo(vizCX + xt[0] * sc + epsTrue[0] * sc * 0.5,
+                       vizCY - xt[1] * sc - epsTrue[1] * sc * 0.5);
+            ctx.stroke();
+            ctx.globalAlpha = 1;
+
+            // Predicted noise vector
+            ctx.strokeStyle = COL.yellow;
+            ctx.lineWidth = 2;
+            ctx.setLineDash([4, 3]);
+            ctx.beginPath();
+            ctx.moveTo(vizCX + xt[0] * sc, vizCY - xt[1] * sc);
+            ctx.lineTo(vizCX + xt[0] * sc + epsPred[0] * sc * 0.5,
+                       vizCY - xt[1] * sc - epsPred[1] * sc * 0.5);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            // Arrow from x0 to xt (noising direction)
+            ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([3, 4]);
+            ctx.beginPath();
+            ctx.moveTo(vizCX + x0[0] * sc, vizCY - x0[1] * sc);
+            ctx.lineTo(vizCX + xt[0] * sc, vizCY - xt[1] * sc);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            // Legend at bottom of viz
+            const lgY = h - 16;
+            ctx.font = '10px "Noto Sans SC"';
+            ctx.textAlign = 'left';
+
+            ctx.fillStyle = COL.red;
+            ctx.fillRect(pad.l, lgY - 4, 10, 3);
+            ctx.fillStyle = COL.textSecondary;
+            ctx.fillText('真实噪声 ε', pad.l + 14, lgY);
+
+            ctx.fillStyle = COL.yellow;
+            ctx.fillRect(pad.l + 100, lgY - 4, 10, 3);
+            ctx.fillStyle = COL.textSecondary;
+            ctx.fillText('预测噪声 ε_θ', pad.l + 114, lgY);
+
+            lossReadout.textContent = `MSE Loss: ${mse.toFixed(4)} | 模型技能: ${(modelSkill * 100).toFixed(0)}%`;
+        }
+
+        // Right half: loss curve
+        const chartL = halfW + 30;
+        const chartW = w - chartL - pad.r;
+        const chartT = pad.t + 10;
+        const chartH = h - pad.t - pad.b - 20;
+
+        // Chart background
+        ctx.fillStyle = 'rgba(15,52,96,0.3)';
+        ctx.fillRect(chartL, chartT, chartW, chartH);
+
+        // Chart border
+        ctx.strokeStyle = 'rgba(42,42,74,0.6)';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(chartL, chartT, chartW, chartH);
+
+        // Chart title
+        ctx.fillStyle = COL.textSecondary;
+        ctx.font = '11px "Noto Sans SC"';
+        ctx.textAlign = 'center';
+        ctx.fillText('训练损失曲线', chartL + chartW / 2, chartT - 3);
+
+        if (lossHistory.length > 1) {
+            const maxLoss = Math.max(...lossHistory, 0.5);
+
+            // Horizontal grid lines
+            ctx.strokeStyle = 'rgba(42,42,74,0.4)';
+            ctx.lineWidth = 0.5;
+            for (let i = 1; i <= 4; i++) {
+                const gy = chartT + (i / 5) * chartH;
+                ctx.beginPath();
+                ctx.moveTo(chartL, gy);
+                ctx.lineTo(chartL + chartW, gy);
+                ctx.stroke();
+            }
+
+            // Loss curve
+            ctx.strokeStyle = COL.orange;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            lossHistory.forEach((v, i) => {
+                const x = chartL + (i / (maxHistory - 1)) * chartW;
+                const y = chartT + chartH - (v / maxLoss) * chartH * 0.9;
+                if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+            });
+            ctx.stroke();
+
+            // Moving average
+            if (lossHistory.length > 5) {
+                ctx.strokeStyle = COL.green;
+                ctx.lineWidth = 2;
+                ctx.globalAlpha = 0.8;
+                ctx.beginPath();
+                const windowSize = 5;
+                for (let i = windowSize - 1; i < lossHistory.length; i++) {
+                    let avg = 0;
+                    for (let j = 0; j < windowSize; j++) avg += lossHistory[i - j];
+                    avg /= windowSize;
+                    const x = chartL + (i / (maxHistory - 1)) * chartW;
+                    const y = chartT + chartH - (avg / maxLoss) * chartH * 0.9;
+                    if (i === windowSize - 1) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+                }
+                ctx.stroke();
+                ctx.globalAlpha = 1;
+            }
+
+            // Y axis label
+            ctx.fillStyle = COL.muted;
+            ctx.font = '9px "JetBrains Mono"';
+            ctx.textAlign = 'right';
+            ctx.fillText(maxLoss.toFixed(2), chartL - 4, chartT + 10);
+            ctx.fillText('0', chartL - 4, chartT + chartH);
+        }
+
+        stepCounter.textContent = `第 ${trainStepNum} 步`;
+        progressFill.style.width = Math.min(100, modelSkill * 100) + '%';
+    }
+
+    function doStep() {
+        const data = doTrainingStep();
+        draw(data);
+    }
+
+    function animLoop() {
+        if (!isPlaying) return;
+        doStep();
+        if (modelSkill >= 1) {
+            isPlaying = false;
+            playBtn.innerHTML = '&#9654;';
+            return;
+        }
+        animId = setTimeout(animLoop, 200);
+    }
+
+    playBtn.addEventListener('click', () => {
+        if (modelSkill >= 1) resetState();
+        isPlaying = !isPlaying;
+        playBtn.innerHTML = isPlaying ? '&#9646;&#9646;' : '&#9654;';
+        if (isPlaying) animLoop();
+    });
+
+    stepBtn.addEventListener('click', () => {
+        isPlaying = false;
+        playBtn.innerHTML = '&#9654;';
+        doStep();
+    });
+
+    function resetState() {
+        trainStepNum = 0;
+        modelSkill = 0;
+        lossHistory = [];
+        isPlaying = false;
+        playBtn.innerHTML = '&#9654;';
+        if (animId) clearTimeout(animId);
+        lossReadout.textContent = 'MSE Loss: —';
+        draw(null);
+    }
+
+    resetBtn.addEventListener('click', resetState);
+    window.addEventListener('resize', () => draw(null));
+    draw(null);
+})();
+
+// ===================================================================
+//  KaTeX auto-render
+// ===================================================================
+document.addEventListener('DOMContentLoaded', () => {
+    if (typeof renderMathInElement !== 'undefined') {
+        renderMathInElement(document.body, {
+            delimiters: [
+                { left: '$$', right: '$$', display: true },
+                { left: '\\(', right: '\\)', display: false },
+                { left: '\\[', right: '\\]', display: true }
+            ],
+            throwOnError: false
+        });
+    }
+});
+
+// Re-render math after a short delay (CDN defer)
+window.addEventListener('load', () => {
+    setTimeout(() => {
+        if (typeof renderMathInElement !== 'undefined') {
+            renderMathInElement(document.body, {
+                delimiters: [
+                    { left: '$$', right: '$$', display: true },
+                    { left: '\\(', right: '\\)', display: false },
+                    { left: '\\[', right: '\\]', display: true }
+                ],
+                throwOnError: false
+            });
+        }
+    }, 500);
+});
+</script>
+
+</body>
+</html>

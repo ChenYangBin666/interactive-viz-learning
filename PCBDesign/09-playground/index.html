@@ -1,0 +1,2131 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>游乐场 — PCB 设计</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js" defer></script>
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+    <style>
+        /* ========== Playground Layout ========== */
+        .playground-wrap {
+            display: grid;
+            grid-template-columns: 260px 1fr 280px;
+            grid-template-rows: 1fr auto;
+            gap: 0;
+            height: calc(100vh - var(--header-height));
+            margin-top: var(--header-height);
+            overflow: hidden;
+        }
+
+        /* ========== Left Panel ========== */
+        .panel-left {
+            background: var(--bg-secondary);
+            border-right: 1px solid var(--border-color);
+            overflow-y: auto;
+            padding: 0;
+        }
+
+        .panel-section {
+            border-bottom: 1px solid var(--border-color);
+            padding: 0.75rem 1rem;
+        }
+
+        .panel-section-title {
+            font-size: 0.75rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            color: var(--accent-green);
+            margin-bottom: 0.5rem;
+            letter-spacing: 0.05em;
+        }
+
+        .param-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 0.4rem;
+        }
+
+        .param-row label {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            white-space: nowrap;
+        }
+
+        .param-row input[type="number"],
+        .param-row select {
+            width: 72px;
+            padding: 0.2rem 0.35rem;
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            color: var(--text-primary);
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            text-align: right;
+        }
+
+        .param-row select {
+            width: 80px;
+            text-align: left;
+        }
+
+        .param-row input[type="number"]:focus,
+        .param-row select:focus {
+            outline: none;
+            border-color: var(--accent-green);
+        }
+
+        /* Tool buttons grid */
+        .tool-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 4px;
+        }
+
+        .tool-btn {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 2px;
+            padding: 0.5rem 0.25rem;
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            color: var(--text-secondary);
+            font-size: 0.7rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-family: inherit;
+        }
+
+        .tool-btn .tool-icon {
+            font-size: 1.3rem;
+            line-height: 1;
+        }
+
+        .tool-btn:hover {
+            border-color: var(--accent-blue);
+            color: var(--text-primary);
+            background: rgba(79, 195, 247, 0.08);
+        }
+
+        .tool-btn.active {
+            border-color: var(--accent-green);
+            color: var(--accent-green);
+            background: rgba(22, 199, 154, 0.12);
+        }
+
+        /* Layer indicators */
+        .layer-row {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.3rem 0.4rem;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background 0.15s;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+        }
+
+        .layer-row:hover { background: rgba(255,255,255,0.04); }
+
+        .layer-row.active {
+            background: rgba(22, 199, 154, 0.1);
+            color: var(--text-primary);
+        }
+
+        .layer-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+
+        .layer-vis-toggle {
+            margin-left: auto;
+            font-size: 0.7rem;
+            opacity: 0.5;
+            cursor: pointer;
+        }
+
+        .layer-vis-toggle.hidden-layer { opacity: 0.2; text-decoration: line-through; }
+
+        /* Trace width slider */
+        .trace-width-group {
+            margin-top: 0.4rem;
+        }
+
+        .trace-width-group .slider-row {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .trace-width-group input[type="range"] {
+            flex: 1;
+            height: 4px;
+        }
+
+        .trace-width-group .tw-val {
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            color: var(--accent-green);
+            min-width: 40px;
+            text-align: right;
+        }
+
+        /* ========== Center Canvas ========== */
+        .panel-center {
+            position: relative;
+            background: #0d1117;
+            overflow: hidden;
+            cursor: crosshair;
+        }
+
+        #pcbCanvas {
+            display: block;
+        }
+
+        .coord-display {
+            position: absolute;
+            bottom: 8px;
+            left: 8px;
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            background: rgba(26, 26, 46, 0.85);
+            padding: 3px 8px;
+            border-radius: 4px;
+            pointer-events: none;
+            z-index: 5;
+        }
+
+        .zoom-display {
+            position: absolute;
+            bottom: 8px;
+            right: 8px;
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            background: rgba(26, 26, 46, 0.85);
+            padding: 3px 8px;
+            border-radius: 4px;
+            pointer-events: none;
+            z-index: 5;
+        }
+
+        .tool-hint {
+            position: absolute;
+            top: 8px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 0.8rem;
+            color: var(--accent-yellow);
+            background: rgba(26, 26, 46, 0.9);
+            padding: 4px 12px;
+            border-radius: 4px;
+            border: 1px solid rgba(255, 215, 64, 0.3);
+            pointer-events: none;
+            z-index: 5;
+            white-space: nowrap;
+        }
+
+        /* ========== Right Panel ========== */
+        .panel-right {
+            background: var(--bg-secondary);
+            border-left: 1px solid var(--border-color);
+            overflow-y: auto;
+            padding: 0;
+        }
+
+        .info-section {
+            border-bottom: 1px solid var(--border-color);
+            padding: 0.75rem 1rem;
+        }
+
+        .info-section-title {
+            font-size: 0.75rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            color: var(--accent-blue);
+            margin-bottom: 0.5rem;
+            letter-spacing: 0.05em;
+        }
+
+        .info-kv {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.8rem;
+            margin-bottom: 0.25rem;
+        }
+
+        .info-kv .ik { color: var(--text-muted); }
+        .info-kv .iv { color: var(--text-primary); font-family: var(--font-mono); }
+
+        .stat-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 6px;
+        }
+
+        .stat-box {
+            background: var(--bg-primary);
+            border-radius: var(--radius-sm);
+            padding: 0.4rem 0.6rem;
+            text-align: center;
+        }
+
+        .stat-box .sv {
+            font-family: var(--font-mono);
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: var(--accent-green);
+        }
+
+        .stat-box .sl {
+            font-size: 0.65rem;
+            color: var(--text-muted);
+        }
+
+        /* Net list */
+        .net-list {
+            max-height: 120px;
+            overflow-y: auto;
+        }
+
+        .net-item {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            font-size: 0.75rem;
+            padding: 0.2rem 0;
+            color: var(--text-secondary);
+        }
+
+        .net-color {
+            width: 8px;
+            height: 8px;
+            border-radius: 2px;
+            flex-shrink: 0;
+        }
+
+        /* DRC results */
+        .drc-list {
+            max-height: 140px;
+            overflow-y: auto;
+        }
+
+        .drc-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 0.4rem;
+            font-size: 0.75rem;
+            padding: 0.3rem 0.4rem;
+            margin-bottom: 2px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+
+        .drc-item:hover { background: rgba(255,255,255,0.04); }
+
+        .drc-item.error { color: var(--accent-red); }
+        .drc-item.warning { color: var(--accent-orange); }
+        .drc-item.pass { color: var(--accent-green); }
+
+        .drc-icon { flex-shrink: 0; }
+
+        /* Impedance calculator */
+        .impedance-form {
+            display: grid;
+            grid-template-columns: auto 1fr;
+            gap: 4px 8px;
+            align-items: center;
+            font-size: 0.8rem;
+        }
+
+        .impedance-form label {
+            color: var(--text-muted);
+            text-align: right;
+        }
+
+        .impedance-form input {
+            width: 100%;
+            padding: 0.2rem 0.35rem;
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            color: var(--text-primary);
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+        }
+
+        .impedance-form input:focus {
+            outline: none;
+            border-color: var(--accent-green);
+        }
+
+        .impedance-result {
+            margin-top: 0.5rem;
+            padding: 0.4rem 0.6rem;
+            background: var(--bg-primary);
+            border-radius: 4px;
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            text-align: center;
+        }
+
+        .impedance-result .katex { font-size: 1em; }
+
+        /* Cost estimator */
+        .cost-row {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.78rem;
+            padding: 0.15rem 0;
+        }
+
+        .cost-row .cl { color: var(--text-muted); }
+        .cost-row .cv { color: var(--text-primary); font-family: var(--font-mono); }
+
+        .cost-total {
+            border-top: 1px solid var(--border-color);
+            margin-top: 0.4rem;
+            padding-top: 0.4rem;
+            font-weight: 700;
+            font-size: 0.9rem;
+        }
+
+        .cost-total .cv { color: var(--accent-green); }
+
+        /* ========== Bottom Bar ========== */
+        .bottom-bar {
+            grid-column: 1 / -1;
+            background: var(--bg-secondary);
+            border-top: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0.4rem 1rem;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+
+        .bottom-actions {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+        }
+
+        .bottom-bar .btn {
+            padding: 0.35rem 0.75rem;
+            font-size: 0.78rem;
+        }
+
+        .layer-toggles {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+        }
+
+        .layer-toggle-chip {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            cursor: pointer;
+            padding: 0.2rem 0.5rem;
+            border-radius: 9999px;
+            border: 1px solid var(--border-color);
+            transition: all 0.2s;
+            user-select: none;
+        }
+
+        .layer-toggle-chip.visible {
+            border-color: var(--accent-green);
+            color: var(--text-primary);
+        }
+
+        .layer-toggle-chip .ltc-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+        }
+
+        /* ========== Responsive ========== */
+        @media (max-width: 1100px) {
+            .playground-wrap {
+                grid-template-columns: 220px 1fr 240px;
+            }
+        }
+
+        @media (max-width: 860px) {
+            .playground-wrap {
+                grid-template-columns: 1fr;
+                grid-template-rows: auto 400px auto auto;
+                height: auto;
+                min-height: calc(100vh - var(--header-height));
+            }
+            .panel-left, .panel-right { max-height: 300px; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="playground-wrap">
+    <!-- ==================== Left Panel ==================== -->
+    <aside class="panel-left">
+        <!-- Board Settings -->
+        <div class="panel-section">
+            <div class="panel-section-title">板卡设置</div>
+            <div class="param-row">
+                <label>宽度 (mil)</label>
+                <input type="number" id="boardW" value="3000" min="500" max="20000" step="100">
+            </div>
+            <div class="param-row">
+                <label>高度 (mil)</label>
+                <input type="number" id="boardH" value="2000" min="500" max="20000" step="100">
+            </div>
+            <div class="param-row">
+                <label>层数</label>
+                <select id="layerCount">
+                    <option value="2">2 层</option>
+                    <option value="4" selected>4 层</option>
+                    <option value="6">6 层</option>
+                </select>
+            </div>
+            <div class="param-row">
+                <label>栅格 (mil)</label>
+                <select id="gridSize">
+                    <option value="25">25</option>
+                    <option value="50" selected>50</option>
+                    <option value="100">100</option>
+                </select>
+            </div>
+        </div>
+
+        <!-- Component Tools -->
+        <div class="panel-section">
+            <div class="panel-section-title">元件工具</div>
+            <div class="tool-grid">
+                <button class="tool-btn" data-tool="select">
+                    <span class="tool-icon">🔍</span>选择
+                </button>
+                <button class="tool-btn" data-tool="resistor">
+                    <span class="tool-icon">⟜</span>电阻
+                </button>
+                <button class="tool-btn" data-tool="capacitor">
+                    <span class="tool-icon">⟞</span>电容
+                </button>
+                <button class="tool-btn" data-tool="ic-dip8">
+                    <span class="tool-icon">▦</span>IC DIP-8
+                </button>
+                <button class="tool-btn" data-tool="ic-dip16">
+                    <span class="tool-icon">▧</span>IC DIP-16
+                </button>
+                <button class="tool-btn" data-tool="connector">
+                    <span class="tool-icon">⊞</span>连接器
+                </button>
+                <button class="tool-btn" data-tool="via">
+                    <span class="tool-icon">◎</span>过孔
+                </button>
+                <button class="tool-btn" data-tool="trace">
+                    <span class="tool-icon">╲</span>走线
+                </button>
+            </div>
+        </div>
+
+        <!-- Trace Settings -->
+        <div class="panel-section">
+            <div class="panel-section-title">走线设置</div>
+            <div class="trace-width-group">
+                <div class="param-row">
+                    <label>线宽</label>
+                    <span class="tw-val" id="twLabel">10 mil</span>
+                </div>
+                <div class="slider-row">
+                    <input type="range" id="traceWidth" min="6" max="50" value="10" step="1">
+                </div>
+            </div>
+            <div class="param-row" style="margin-top:0.5rem">
+                <label>45° 约束</label>
+                <label class="toggle">
+                    <input type="checkbox" id="snap45" checked>
+                    <span class="track"></span>
+                </label>
+            </div>
+        </div>
+
+        <!-- Layer Selection -->
+        <div class="panel-section">
+            <div class="panel-section-title">层选择</div>
+            <div id="layerList">
+                <div class="layer-row active" data-layer="top-cu">
+                    <span class="layer-dot" style="background:#ff4444"></span>
+                    顶层铜箔
+                    <span class="layer-vis-toggle" data-vis="top-cu" title="切换可见性">👁</span>
+                </div>
+                <div class="layer-row" data-layer="bot-cu">
+                    <span class="layer-dot" style="background:#4488ff"></span>
+                    底层铜箔
+                    <span class="layer-vis-toggle" data-vis="bot-cu" title="切换可见性">👁</span>
+                </div>
+                <div class="layer-row" data-layer="top-silk">
+                    <span class="layer-dot" style="background:#ffff88"></span>
+                    顶层丝印
+                    <span class="layer-vis-toggle" data-vis="top-silk" title="切换可见性">👁</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- DRC Settings -->
+        <div class="panel-section">
+            <div class="panel-section-title">DRC 设置</div>
+            <div class="param-row">
+                <label>最小线宽 (mil)</label>
+                <input type="number" id="drcMinTrace" value="6" min="3" max="20">
+            </div>
+            <div class="param-row">
+                <label>最小间距 (mil)</label>
+                <input type="number" id="drcMinClear" value="6" min="3" max="20">
+            </div>
+            <div class="param-row">
+                <label>最小孔径 (mil)</label>
+                <input type="number" id="drcMinDrill" value="8" min="4" max="30">
+            </div>
+        </div>
+    </aside>
+
+    <!-- ==================== Center Canvas ==================== -->
+    <main class="panel-center" id="canvasWrap">
+        <canvas id="pcbCanvas"></canvas>
+        <div class="coord-display" id="coordDisplay">X: 0 mil (0.00 mm) &nbsp; Y: 0 mil (0.00 mm)</div>
+        <div class="zoom-display" id="zoomDisplay">100%</div>
+        <div class="tool-hint" id="toolHint">选择工具以开始</div>
+    </main>
+
+    <!-- ==================== Right Panel ==================== -->
+    <aside class="panel-right">
+        <!-- Selected Component Info -->
+        <div class="info-section">
+            <div class="info-section-title">选中元件</div>
+            <div id="selInfo">
+                <p class="text-sm text-muted" style="margin:0">未选中任何元件</p>
+            </div>
+        </div>
+
+        <!-- Board Statistics -->
+        <div class="info-section">
+            <div class="info-section-title">板卡统计</div>
+            <div class="stat-grid" id="statsGrid">
+                <div class="stat-box"><div class="sv" id="statComps">0</div><div class="sl">元件数</div></div>
+                <div class="stat-box"><div class="sv" id="statVias">0</div><div class="sl">过孔数</div></div>
+                <div class="stat-box"><div class="sv" id="statTraceLen">0</div><div class="sl">走线 (mil)</div></div>
+                <div class="stat-box"><div class="sv" id="statNets">0</div><div class="sl">网络数</div></div>
+            </div>
+        </div>
+
+        <!-- Net List -->
+        <div class="info-section">
+            <div class="info-section-title">网络列表</div>
+            <div class="net-list" id="netList">
+                <p class="text-sm text-muted" style="margin:0">暂无网络</p>
+            </div>
+        </div>
+
+        <!-- DRC Results -->
+        <div class="info-section">
+            <div class="info-section-title">DRC 结果</div>
+            <div class="drc-list" id="drcList">
+                <p class="text-sm text-muted" style="margin:0">点击"运行 DRC"检查</p>
+            </div>
+        </div>
+
+        <!-- Impedance Calculator -->
+        <div class="info-section">
+            <div class="info-section-title">阻抗计算器</div>
+            <div class="impedance-form">
+                <label>W (mil)</label>
+                <input type="number" id="impW" value="10" min="1" max="200" step="0.5">
+                <label>H (mil)</label>
+                <input type="number" id="impH" value="8" min="1" max="200" step="0.5">
+                <label>εr</label>
+                <input type="number" id="impEr" value="4.3" min="1" max="12" step="0.1">
+                <label>T (mil)</label>
+                <input type="number" id="impT" value="1.4" min="0.1" max="10" step="0.1">
+            </div>
+            <div class="impedance-result" id="impResult">Z₀ = —</div>
+        </div>
+
+        <!-- Cost Estimator -->
+        <div class="info-section">
+            <div class="info-section-title">成本估算</div>
+            <div id="costEstimate">
+                <div class="cost-row"><span class="cl">基板面积</span><span class="cv" id="costArea">—</span></div>
+                <div class="cost-row"><span class="cl">层数加成</span><span class="cv" id="costLayer">—</span></div>
+                <div class="cost-row"><span class="cl">过孔加工</span><span class="cv" id="costVia">—</span></div>
+                <div class="cost-row"><span class="cl">元件焊接</span><span class="cv" id="costComp">—</span></div>
+                <div class="cost-row cost-total"><span class="cl">预估总价</span><span class="cv" id="costTotal">—</span></div>
+            </div>
+        </div>
+    </aside>
+
+    <!-- ==================== Bottom Bar ==================== -->
+    <div class="bottom-bar">
+        <div class="bottom-actions">
+            <button class="btn btn-primary" id="btnDRC">运行 DRC</button>
+            <button class="btn" id="btnClear">清空画板</button>
+            <button class="btn" id="btnExport">导出网表</button>
+            <button class="btn" id="btnUndo" title="撤销">↩ 撤销</button>
+            <button class="btn" id="btnRedo" title="重做">↪ 重做</button>
+        </div>
+        <div class="layer-toggles" id="layerToggles">
+            <span class="text-sm text-muted">层可见性:</span>
+            <span class="layer-toggle-chip visible" data-ltc="top-cu"><span class="ltc-dot" style="background:#ff4444"></span>顶铜</span>
+            <span class="layer-toggle-chip visible" data-ltc="bot-cu"><span class="ltc-dot" style="background:#4488ff"></span>底铜</span>
+            <span class="layer-toggle-chip visible" data-ltc="top-silk"><span class="ltc-dot" style="background:#ffff88"></span>丝印</span>
+        </div>
+    </div>
+</div>
+
+<!-- ==================== Export Modal ==================== -->
+<div id="exportModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:2000;display:none;align-items:center;justify-content:center">
+    <div style="background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:var(--radius-md);padding:1.5rem;width:90%;max-width:600px;max-height:80vh;overflow:auto">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+            <h3 style="margin:0">网表导出</h3>
+            <button class="btn btn-sm" id="closeModal">关闭</button>
+        </div>
+        <pre id="netlistOutput" style="background:var(--bg-primary);padding:1rem;border-radius:var(--radius-sm);font-family:var(--font-mono);font-size:0.8rem;color:var(--accent-green);overflow:auto;max-height:400px;white-space:pre-wrap"></pre>
+        <button class="btn btn-primary btn-sm" id="copyNetlist" style="margin-top:0.75rem">复制到剪贴板</button>
+    </div>
+</div>
+
+<script src="../shared/scripts/nav.js"></script>
+<script>
+/* ================================================================
+   PCB 游乐场 — 完整交互式 PCB 设计沙箱
+   ================================================================ */
+(() => {
+'use strict';
+
+/* ---------- Constants ---------- */
+const LAYER_COLORS = {
+    'top-cu':   { stroke: '#ff4444', fill: 'rgba(255,68,68,0.15)',   name: '顶层铜箔' },
+    'bot-cu':   { stroke: '#4488ff', fill: 'rgba(68,136,255,0.15)', name: '底层铜箔' },
+    'top-silk': { stroke: '#ffff88', fill: 'rgba(255,255,136,0.08)', name: '顶层丝印' }
+};
+
+const COMP_DEFS = {
+    resistor:   { label: '电阻',   w: 120, h: 50,  pads: [{x:0,y:25},{x:120,y:25}], ref: 'R' },
+    capacitor:  { label: '电容',   w: 100, h: 60,  pads: [{x:0,y:30},{x:100,y:30}], ref: 'C' },
+    'ic-dip8':  { label: 'DIP-8',  w: 200, h: 180, pads: [], ref: 'U', pinCount: 8 },
+    'ic-dip16': { label: 'DIP-16', w: 200, h: 380, pads: [], ref: 'U', pinCount: 16 },
+    connector:  { label: '连接器', w: 160, h: 80,  pads: [{x:20,y:40},{x:60,y:40},{x:100,y:40},{x:140,y:40}], ref: 'J' },
+};
+
+/* Build DIP pads dynamically */
+function buildDIPPads(count) {
+    const pads = [];
+    const half = count / 2;
+    const pitch = 100; // 100 mil
+    for (let i = 0; i < half; i++) {
+        pads.push({ x: 0, y: 40 + i * pitch });
+        pads.push({ x: 200, y: 40 + i * pitch });
+    }
+    return pads;
+}
+COMP_DEFS['ic-dip8'].pads  = buildDIPPads(8);
+COMP_DEFS['ic-dip16'].pads = buildDIPPads(16);
+COMP_DEFS['ic-dip8'].h  = 40 + 3 * 100 + 40;
+COMP_DEFS['ic-dip16'].h = 40 + 7 * 100 + 40;
+
+/* ---------- State ---------- */
+const state = {
+    boardW: 3000,
+    boardH: 2000,
+    layerCount: 4,
+    gridSize: 50,
+    currentTool: 'select',
+    currentLayer: 'top-cu',
+    traceWidth: 10,
+    snap45: true,
+    zoom: 1,
+    panX: 0,
+    panY: 0,
+    components: [],
+    traces: [],
+    vias: [],
+    nets: [],
+    selectedId: null,
+    dragging: null,
+    dragOffX: 0,
+    dragOffY: 0,
+    traceInProgress: null,  // { layer, width, points: [{x,y}] }
+    layerVisibility: { 'top-cu': true, 'bot-cu': true, 'top-silk': true },
+    undoStack: [],
+    redoStack: [],
+    refCounters: { R: 0, C: 0, U: 0, J: 0, V: 0 },
+    isPanning: false,
+    panStartX: 0,
+    panStartY: 0,
+    panStartPanX: 0,
+    panStartPanY: 0,
+    nextId: 1,
+    drcResults: [],
+    hoverPad: null,
+};
+
+/* ---------- DOM refs ---------- */
+const canvas    = document.getElementById('pcbCanvas');
+const ctx       = canvas.getContext('2d');
+const wrap      = document.getElementById('canvasWrap');
+const coordDisp = document.getElementById('coordDisplay');
+const zoomDisp  = document.getElementById('zoomDisplay');
+const toolHint  = document.getElementById('toolHint');
+
+/* ---------- Helpers ---------- */
+function milToMm(mil) { return (mil * 0.0254).toFixed(2); }
+function snap(v, grid) { return Math.round(v / grid) * grid; }
+
+function snap45Angle(dx, dy) {
+    const angle = Math.atan2(dy, dx);
+    const snapped = Math.round(angle / (Math.PI / 4)) * (Math.PI / 4);
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    return { x: Math.round(Math.cos(snapped) * dist), y: Math.round(Math.sin(snapped) * dist) };
+}
+
+function genId() { return state.nextId++; }
+
+function deepCloneState() {
+    return {
+        components: JSON.parse(JSON.stringify(state.components)),
+        traces:     JSON.parse(JSON.stringify(state.traces)),
+        vias:       JSON.parse(JSON.stringify(state.vias)),
+        refCounters: { ...state.refCounters },
+        nextId: state.nextId,
+    };
+}
+
+function pushUndo() {
+    state.undoStack.push(deepCloneState());
+    state.redoStack = [];
+    if (state.undoStack.length > 50) state.undoStack.shift();
+}
+
+function restoreSnapshot(snap) {
+    state.components  = snap.components;
+    state.traces      = snap.traces;
+    state.vias        = snap.vias;
+    state.refCounters = snap.refCounters;
+    state.nextId      = snap.nextId;
+    state.selectedId  = null;
+    state.traceInProgress = null;
+    updateAll();
+}
+
+/* ---------- Canvas to Board coords ---------- */
+function screenToBoard(sx, sy) {
+    const rect = canvas.getBoundingClientRect();
+    const cx = sx - rect.left;
+    const cy = sy - rect.top;
+    const bx = (cx - state.panX) / state.zoom;
+    const by = (cy - state.panY) / state.zoom;
+    return { x: bx, y: by };
+}
+
+function boardToScreen(bx, by) {
+    return { x: bx * state.zoom + state.panX, y: by * state.zoom + state.panY };
+}
+
+/* ---------- Resize ---------- */
+function resizeCanvas() {
+    const r = wrap.getBoundingClientRect();
+    canvas.width  = r.width * devicePixelRatio;
+    canvas.height = r.height * devicePixelRatio;
+    canvas.style.width  = r.width + 'px';
+    canvas.style.height = r.height + 'px';
+    ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+    render();
+}
+
+/* ---------- Render ---------- */
+function render() {
+    const cw = canvas.width / devicePixelRatio;
+    const ch = canvas.height / devicePixelRatio;
+
+    ctx.clearRect(0, 0, cw, ch);
+    ctx.save();
+    ctx.translate(state.panX, state.panY);
+    ctx.scale(state.zoom, state.zoom);
+
+    drawBoard(cw, ch);
+    drawGrid();
+
+    // Draw traces per layer (bottom first)
+    const layerOrder = ['bot-cu', 'top-cu', 'top-silk'];
+    for (const layer of layerOrder) {
+        if (!state.layerVisibility[layer]) continue;
+        drawTracesForLayer(layer);
+    }
+
+    // Draw vias
+    drawVias();
+
+    // Draw components
+    for (const comp of state.components) {
+        if (!state.layerVisibility[comp.layer]) continue;
+        drawComponent(comp);
+    }
+
+    // Trace in progress
+    if (state.traceInProgress && state.traceInProgress.points.length > 0) {
+        drawTraceInProgress();
+    }
+
+    // Hover pad highlight
+    if (state.hoverPad) {
+        const { comp, padIdx } = state.hoverPad;
+        const pad = comp.pads[padIdx];
+        const px = comp.x + pad.x;
+        const py = comp.y + pad.y;
+        ctx.beginPath();
+        ctx.arc(px, py, 18, 0, Math.PI * 2);
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([4, 3]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+    }
+
+    ctx.restore();
+}
+
+function drawBoard() {
+    // Board background — classic PCB green
+    ctx.fillStyle = '#1a5c2a';
+    ctx.fillRect(0, 0, state.boardW, state.boardH);
+
+    // Board outline
+    ctx.strokeStyle = '#3a8c4a';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(0, 0, state.boardW, state.boardH);
+}
+
+function drawGrid() {
+    const g = state.gridSize;
+    if (g * state.zoom < 5) return; // Don't draw tiny grids
+
+    ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+    ctx.lineWidth = 0.5;
+
+    for (let x = 0; x <= state.boardW; x += g) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, state.boardH);
+        ctx.stroke();
+    }
+    for (let y = 0; y <= state.boardH; y += g) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(state.boardW, y);
+        ctx.stroke();
+    }
+
+    // Major grid every 5
+    const mg = g * 5;
+    if (mg * state.zoom >= 25) {
+        ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+        ctx.lineWidth = 0.8;
+        for (let x = 0; x <= state.boardW; x += mg) {
+            ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, state.boardH); ctx.stroke();
+        }
+        for (let y = 0; y <= state.boardH; y += mg) {
+            ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(state.boardW, y); ctx.stroke();
+        }
+    }
+}
+
+function drawTracesForLayer(layer) {
+    const col = LAYER_COLORS[layer];
+    for (const t of state.traces) {
+        if (t.layer !== layer) continue;
+        if (t.points.length < 2) continue;
+        ctx.beginPath();
+        ctx.moveTo(t.points[0].x, t.points[0].y);
+        for (let i = 1; i < t.points.length; i++) {
+            ctx.lineTo(t.points[i].x, t.points[i].y);
+        }
+        ctx.strokeStyle = col.stroke;
+        ctx.lineWidth = t.width;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.globalAlpha = 0.85;
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+    }
+}
+
+function drawVias() {
+    for (const v of state.vias) {
+        // Outer ring
+        ctx.beginPath();
+        ctx.arc(v.x, v.y, v.outerR, 0, Math.PI * 2);
+        ctx.fillStyle = '#aaa';
+        ctx.fill();
+        // Drill hole
+        ctx.beginPath();
+        ctx.arc(v.x, v.y, v.drillR, 0, Math.PI * 2);
+        ctx.fillStyle = '#1a5c2a';
+        ctx.fill();
+        // Annular ring highlight
+        ctx.beginPath();
+        ctx.arc(v.x, v.y, v.outerR, 0, Math.PI * 2);
+        ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+
+        if (v.id === state.selectedId) {
+            ctx.beginPath();
+            ctx.arc(v.x, v.y, v.outerR + 5, 0, Math.PI * 2);
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([4, 3]);
+            ctx.stroke();
+            ctx.setLineDash([]);
+        }
+    }
+}
+
+function drawComponent(comp) {
+    const col = LAYER_COLORS[comp.layer];
+    const sel = comp.id === state.selectedId;
+
+    ctx.save();
+    ctx.translate(comp.x, comp.y);
+
+    // Body
+    ctx.fillStyle = col.fill;
+    ctx.strokeStyle = sel ? '#ffffff' : col.stroke;
+    ctx.lineWidth = sel ? 2 : 1.2;
+
+    if (comp.type === 'resistor') {
+        drawResistor(comp, col);
+    } else if (comp.type === 'capacitor') {
+        drawCapacitor(comp, col);
+    } else if (comp.type.startsWith('ic-dip')) {
+        drawIC(comp, col, sel);
+    } else if (comp.type === 'connector') {
+        drawConnector(comp, col);
+    }
+
+    // Pads
+    for (let i = 0; i < comp.pads.length; i++) {
+        const p = comp.pads[i];
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 12, 0, Math.PI * 2);
+        ctx.fillStyle = '#cc9944';
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 6, 0, Math.PI * 2);
+        ctx.fillStyle = '#1a5c2a';
+        ctx.fill();
+    }
+
+    // Reference designator (silk layer)
+    if (state.layerVisibility['top-silk'] && comp.layer === 'top-cu') {
+        ctx.fillStyle = LAYER_COLORS['top-silk'].stroke;
+        ctx.font = '14px JetBrains Mono, monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'bottom';
+        ctx.fillText(comp.ref, comp.w / 2, -4);
+    }
+
+    // Selection box
+    if (sel) {
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([5, 4]);
+        ctx.strokeRect(-8, -20, comp.w + 16, comp.h + 28);
+        ctx.setLineDash([]);
+    }
+
+    ctx.restore();
+}
+
+function drawResistor(comp, col) {
+    const w = comp.w, h = comp.h;
+    // Body rectangle
+    ctx.fillRect(25, 5, w - 50, h - 10);
+    ctx.strokeRect(25, 5, w - 50, h - 10);
+    // Lead lines
+    ctx.beginPath();
+    ctx.moveTo(0, h / 2); ctx.lineTo(25, h / 2);
+    ctx.moveTo(w - 25, h / 2); ctx.lineTo(w, h / 2);
+    ctx.stroke();
+    // Bands
+    const bandColors = ['#ff4444', '#884400', '#ff8800', '#ccaa00'];
+    for (let i = 0; i < 4; i++) {
+        ctx.fillStyle = bandColors[i];
+        ctx.fillRect(35 + i * 15, 8, 8, h - 16);
+    }
+}
+
+function drawCapacitor(comp, col) {
+    const w = comp.w, h = comp.h;
+    // Lead lines
+    ctx.beginPath();
+    ctx.moveTo(0, h / 2); ctx.lineTo(w * 0.35, h / 2);
+    ctx.moveTo(w * 0.65, h / 2); ctx.lineTo(w, h / 2);
+    ctx.stroke();
+    // Plates
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(w * 0.35, 6); ctx.lineTo(w * 0.35, h - 6);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(w * 0.65, 6); ctx.lineTo(w * 0.65, h - 6);
+    ctx.stroke();
+    ctx.lineWidth = 1.2;
+}
+
+function drawIC(comp, col, sel) {
+    const w = comp.w, h = comp.h;
+    // Body
+    ctx.fillRect(20, 0, w - 40, h);
+    ctx.strokeRect(20, 0, w - 40, h);
+    // Notch
+    ctx.beginPath();
+    ctx.arc(w / 2, 0, 12, 0, Math.PI);
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.fill();
+    ctx.strokeStyle = sel ? '#fff' : col.stroke;
+    ctx.stroke();
+    // Pin 1 dot
+    ctx.beginPath();
+    ctx.arc(35, 25, 4, 0, Math.PI * 2);
+    ctx.fillStyle = '#fff';
+    ctx.globalAlpha = 0.5;
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    // Pin numbers
+    ctx.fillStyle = 'rgba(255,255,255,0.4)';
+    ctx.font = '9px JetBrains Mono, monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const half = comp.pinCount / 2;
+    for (let i = 0; i < half; i++) {
+        ctx.fillText(String(i + 1), 12, 40 + i * 100);
+        ctx.fillText(String(comp.pinCount - i), w - 12, 40 + i * 100);
+    }
+}
+
+function drawConnector(comp, col) {
+    const w = comp.w, h = comp.h;
+    ctx.fillRect(0, 10, w, h - 20);
+    ctx.strokeRect(0, 10, w, h - 20);
+    // Housing detail
+    ctx.fillStyle = 'rgba(255,255,255,0.05)';
+    ctx.fillRect(5, 15, w - 10, h - 30);
+}
+
+function drawTraceInProgress() {
+    const tip = state.traceInProgress;
+    const col = LAYER_COLORS[tip.layer];
+    ctx.beginPath();
+    ctx.moveTo(tip.points[0].x, tip.points[0].y);
+    for (let i = 1; i < tip.points.length; i++) {
+        ctx.lineTo(tip.points[i].x, tip.points[i].y);
+    }
+    ctx.strokeStyle = col.stroke;
+    ctx.lineWidth = tip.width;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.globalAlpha = 0.6;
+    ctx.setLineDash([6, 4]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.globalAlpha = 1;
+}
+
+/* ---------- Hit Testing ---------- */
+function hitTestComponents(bx, by) {
+    for (let i = state.components.length - 1; i >= 0; i--) {
+        const c = state.components[i];
+        if (bx >= c.x && bx <= c.x + c.w && by >= c.y && by <= c.y + c.h) {
+            return c;
+        }
+    }
+    return null;
+}
+
+function hitTestVias(bx, by) {
+    for (let i = state.vias.length - 1; i >= 0; i--) {
+        const v = state.vias[i];
+        const dx = bx - v.x, dy = by - v.y;
+        if (dx * dx + dy * dy <= v.outerR * v.outerR + 100) return v;
+    }
+    return null;
+}
+
+function findPadAt(bx, by, threshold) {
+    const t = threshold || 20;
+    for (const comp of state.components) {
+        for (let pi = 0; pi < comp.pads.length; pi++) {
+            const px = comp.x + comp.pads[pi].x;
+            const py = comp.y + comp.pads[pi].y;
+            const dx = bx - px, dy = by - py;
+            if (dx * dx + dy * dy <= t * t) {
+                return { comp, padIdx: pi, x: px, y: py };
+            }
+        }
+    }
+    return null;
+}
+
+/* ---------- Placing Components ---------- */
+function placeComponent(type, bx, by) {
+    const def = COMP_DEFS[type];
+    if (!def) return;
+    pushUndo();
+    state.refCounters[def.ref]++;
+    const comp = {
+        id: genId(),
+        type,
+        x: snap(bx - def.w / 2, state.gridSize),
+        y: snap(by - def.h / 2, state.gridSize),
+        w: def.w,
+        h: def.h,
+        pads: JSON.parse(JSON.stringify(def.pads)),
+        ref: def.ref + state.refCounters[def.ref],
+        layer: state.currentLayer === 'top-silk' ? 'top-cu' : state.currentLayer,
+        value: type === 'resistor' ? '10kΩ' : type === 'capacitor' ? '100nF' : '',
+        pinCount: def.pinCount || def.pads.length,
+    };
+    state.components.push(comp);
+    state.selectedId = comp.id;
+    updateAll();
+}
+
+function placeVia(bx, by) {
+    pushUndo();
+    state.refCounters.V++;
+    const v = {
+        id: genId(),
+        x: snap(bx, state.gridSize),
+        y: snap(by, state.gridSize),
+        outerR: 20,
+        drillR: 8,
+        ref: 'V' + state.refCounters.V,
+    };
+    state.vias.push(v);
+    updateAll();
+}
+
+/* ---------- Trace Routing ---------- */
+function startTrace(bx, by) {
+    const padHit = findPadAt(bx, by, 25);
+    const sx = padHit ? padHit.x : snap(bx, state.gridSize);
+    const sy = padHit ? padHit.y : snap(by, state.gridSize);
+    state.traceInProgress = {
+        layer: state.currentLayer === 'top-silk' ? 'top-cu' : state.currentLayer,
+        width: state.traceWidth,
+        points: [{ x: sx, y: sy }],
+        startPad: padHit || null,
+    };
+}
+
+function addTracePoint(bx, by) {
+    if (!state.traceInProgress) return;
+    const last = state.traceInProgress.points[state.traceInProgress.points.length - 1];
+
+    let nx, ny;
+    const padHit = findPadAt(bx, by, 25);
+    if (padHit) {
+        nx = padHit.x;
+        ny = padHit.y;
+    } else {
+        nx = snap(bx, state.gridSize);
+        ny = snap(by, state.gridSize);
+    }
+
+    if (state.snap45) {
+        const d = snap45Angle(nx - last.x, ny - last.y);
+        nx = last.x + d.x;
+        ny = last.y + d.y;
+        if (padHit) { nx = padHit.x; ny = padHit.y; }
+    }
+
+    state.traceInProgress.points.push({ x: nx, y: ny });
+
+    // If hit a pad, finish trace
+    if (padHit) {
+        finishTrace(padHit);
+    }
+}
+
+function finishTrace(endPad) {
+    if (!state.traceInProgress || state.traceInProgress.points.length < 2) {
+        state.traceInProgress = null;
+        return;
+    }
+    pushUndo();
+    const trace = {
+        id: genId(),
+        layer: state.traceInProgress.layer,
+        width: state.traceInProgress.width,
+        points: [...state.traceInProgress.points],
+        startPad: state.traceInProgress.startPad,
+        endPad: endPad || null,
+    };
+    state.traces.push(trace);
+    state.traceInProgress = null;
+    detectNets();
+    updateAll();
+}
+
+/* ---------- Net Detection ---------- */
+function detectNets() {
+    // Simple union-find based net detection via pad connections
+    const padKey = (comp, pi) => comp.id + ':' + pi;
+    const parent = {};
+    const find = (a) => { while (parent[a] && parent[a] !== a) a = parent[a]; return a; };
+    const union = (a, b) => { parent[find(a)] = find(b); };
+
+    // Initialize each pad
+    for (const c of state.components) {
+        for (let i = 0; i < c.pads.length; i++) {
+            const k = padKey(c, i);
+            parent[k] = k;
+        }
+    }
+
+    // Union pads connected by traces
+    for (const t of state.traces) {
+        if (t.startPad && t.endPad) {
+            const k1 = padKey(t.startPad.comp, t.startPad.padIdx);
+            const k2 = padKey(t.endPad.comp, t.endPad.padIdx);
+            if (parent[k1] !== undefined && parent[k2] !== undefined) {
+                union(k1, k2);
+            }
+        }
+    }
+
+    // Group into nets
+    const netMap = {};
+    for (const k of Object.keys(parent)) {
+        const root = find(k);
+        if (!netMap[root]) netMap[root] = [];
+        netMap[root].push(k);
+    }
+
+    state.nets = Object.values(netMap).filter(n => n.length > 1);
+}
+
+/* ---------- DRC ---------- */
+function runDRC() {
+    state.drcResults = [];
+    const minTrace = parseFloat(document.getElementById('drcMinTrace').value) || 6;
+    const minClear = parseFloat(document.getElementById('drcMinClear').value) || 6;
+    const minDrill = parseFloat(document.getElementById('drcMinDrill').value) || 8;
+
+    // Check trace widths
+    for (const t of state.traces) {
+        if (t.width < minTrace) {
+            state.drcResults.push({
+                type: 'error',
+                msg: `走线 ${t.id} 线宽 ${t.width} mil < 最小 ${minTrace} mil`,
+                loc: t.points[0],
+            });
+        }
+    }
+
+    // Check via drill sizes
+    for (const v of state.vias) {
+        if (v.drillR * 2 < minDrill) {
+            state.drcResults.push({
+                type: 'error',
+                msg: `过孔 ${v.ref} 孔径 ${v.drillR * 2} mil < 最小 ${minDrill} mil`,
+                loc: { x: v.x, y: v.y },
+            });
+        }
+    }
+
+    // Check component clearances
+    for (let i = 0; i < state.components.length; i++) {
+        const a = state.components[i];
+        for (let j = i + 1; j < state.components.length; j++) {
+            const b = state.components[j];
+            if (a.layer !== b.layer) continue;
+            const overlapX = Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x));
+            const overlapY = Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y));
+            if (overlapX > 0 && overlapY > 0) {
+                state.drcResults.push({
+                    type: 'error',
+                    msg: `${a.ref} 与 ${b.ref} 重叠`,
+                    loc: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 },
+                });
+            } else {
+                // Check clearance
+                const gapX = Math.max(0, Math.max(a.x, b.x) - Math.min(a.x + a.w, b.x + b.w));
+                const gapY = Math.max(0, Math.max(a.y, b.y) - Math.min(a.y + a.h, b.y + b.h));
+                const gap = Math.sqrt(gapX * gapX + gapY * gapY);
+                if (gap > 0 && gap < minClear) {
+                    state.drcResults.push({
+                        type: 'warning',
+                        msg: `${a.ref} 与 ${b.ref} 间距 ${gap.toFixed(1)} mil < ${minClear} mil`,
+                        loc: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 },
+                    });
+                }
+            }
+        }
+    }
+
+    // Check components within board bounds
+    for (const c of state.components) {
+        if (c.x < 0 || c.y < 0 || c.x + c.w > state.boardW || c.y + c.h > state.boardH) {
+            state.drcResults.push({
+                type: 'warning',
+                msg: `${c.ref} 超出板卡边界`,
+                loc: { x: c.x, y: c.y },
+            });
+        }
+    }
+
+    // Check trace-to-trace clearance on same layer
+    for (let i = 0; i < state.traces.length; i++) {
+        for (let j = i + 1; j < state.traces.length; j++) {
+            const a = state.traces[i], b = state.traces[j];
+            if (a.layer !== b.layer) continue;
+            // Simple segment-to-segment distance check on first segments
+            if (a.points.length >= 2 && b.points.length >= 2) {
+                const d = segSegDist(
+                    a.points[0], a.points[1],
+                    b.points[0], b.points[1]
+                );
+                const needed = (a.width + b.width) / 2 + minClear;
+                if (d < needed && d > 0) {
+                    state.drcResults.push({
+                        type: 'warning',
+                        msg: `走线间距 ${d.toFixed(1)} mil < ${minClear} mil`,
+                        loc: a.points[0],
+                    });
+                }
+            }
+        }
+    }
+
+    if (state.drcResults.length === 0) {
+        state.drcResults.push({ type: 'pass', msg: '全部检查通过！无违规项', loc: null });
+    }
+
+    updateDRCPanel();
+    render();
+
+    // Flash animation
+    if (typeof gsap !== 'undefined') {
+        gsap.fromTo('#drcList', { opacity: 0, y: 6 }, { opacity: 1, y: 0, duration: 0.3 });
+    }
+}
+
+function segSegDist(p1, p2, p3, p4) {
+    // Approximate: point-to-segment min distance
+    function ptSegDist(p, a, b) {
+        const dx = b.x - a.x, dy = b.y - a.y;
+        const lenSq = dx * dx + dy * dy;
+        if (lenSq === 0) return Math.sqrt((p.x - a.x) ** 2 + (p.y - a.y) ** 2);
+        let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / lenSq;
+        t = Math.max(0, Math.min(1, t));
+        const proj = { x: a.x + t * dx, y: a.y + t * dy };
+        return Math.sqrt((p.x - proj.x) ** 2 + (p.y - proj.y) ** 2);
+    }
+    return Math.min(
+        ptSegDist(p1, p3, p4), ptSegDist(p2, p3, p4),
+        ptSegDist(p3, p1, p2), ptSegDist(p4, p1, p2)
+    );
+}
+
+/* ---------- Impedance Calculator ---------- */
+function calcImpedance() {
+    const W  = parseFloat(document.getElementById('impW').value)  || 10;
+    const H  = parseFloat(document.getElementById('impH').value)  || 8;
+    const Er = parseFloat(document.getElementById('impEr').value) || 4.3;
+    const T  = parseFloat(document.getElementById('impT').value)  || 1.4;
+
+    // Microstrip impedance formula (IPC-2141)
+    const We = W + (T / Math.PI) * Math.log(4 * Math.E / Math.sqrt((T / H) ** 2 + (T / (W * Math.PI + 1.1 * T * Math.PI)) ** 2));
+    const Eeff = (Er + 1) / 2 + ((Er - 1) / 2) * (1 / Math.sqrt(1 + 12 * H / We));
+    let Z0;
+    if (We / H <= 1) {
+        Z0 = (60 / Math.sqrt(Eeff)) * Math.log((8 * H / We) + (We / (4 * H)));
+    } else {
+        Z0 = (120 * Math.PI) / (Math.sqrt(Eeff) * (We / H + 1.393 + 0.667 * Math.log(We / H + 1.444)));
+    }
+
+    const el = document.getElementById('impResult');
+    if (typeof katex !== 'undefined') {
+        katex.render(`Z_0 = ${Z0.toFixed(2)} \\;\\Omega`, el, { throwOnError: false });
+    } else {
+        el.textContent = `Z₀ = ${Z0.toFixed(2)} Ω`;
+    }
+}
+
+/* ---------- Cost Estimator ---------- */
+function updateCostEstimate() {
+    const areaInSqMm = (state.boardW * 0.0254) * (state.boardH * 0.0254);
+    const areaInSqCm = areaInSqMm / 100;
+
+    const layerMult = { 2: 1, 4: 1.8, 6: 2.6 };
+    const mult = layerMult[state.layerCount] || 1;
+
+    const baseCost = areaInSqCm * 0.12;
+    const layerCost = baseCost * (mult - 1);
+    const viaCost = state.vias.length * 0.05;
+    const compCost = state.components.length * 0.30;
+    const total = baseCost + layerCost + viaCost + compCost;
+
+    document.getElementById('costArea').textContent  = `¥${baseCost.toFixed(2)}`;
+    document.getElementById('costLayer').textContent  = `¥${layerCost.toFixed(2)}`;
+    document.getElementById('costVia').textContent   = `¥${viaCost.toFixed(2)}`;
+    document.getElementById('costComp').textContent  = `¥${compCost.toFixed(2)}`;
+    document.getElementById('costTotal').textContent = `¥${total.toFixed(2)}`;
+}
+
+/* ---------- UI Updates ---------- */
+function updateAll() {
+    render();
+    updateSelectionInfo();
+    updateStats();
+    updateNetList();
+    updateCostEstimate();
+    calcImpedance();
+}
+
+function updateSelectionInfo() {
+    const el = document.getElementById('selInfo');
+    const comp = state.components.find(c => c.id === state.selectedId);
+    if (!comp) {
+        const via = state.vias.find(v => v.id === state.selectedId);
+        if (via) {
+            el.innerHTML = `
+                <div class="info-kv"><span class="ik">类型</span><span class="iv">过孔</span></div>
+                <div class="info-kv"><span class="ik">编号</span><span class="iv">${via.ref}</span></div>
+                <div class="info-kv"><span class="ik">位置</span><span class="iv">(${via.x}, ${via.y})</span></div>
+                <div class="info-kv"><span class="ik">外径</span><span class="iv">${via.outerR * 2} mil</span></div>
+                <div class="info-kv"><span class="ik">孔径</span><span class="iv">${via.drillR * 2} mil</span></div>
+            `;
+        } else {
+            el.innerHTML = '<p class="text-sm text-muted" style="margin:0">未选中任何元件</p>';
+        }
+        return;
+    }
+    const def = COMP_DEFS[comp.type];
+    el.innerHTML = `
+        <div class="info-kv"><span class="ik">编号</span><span class="iv">${comp.ref}</span></div>
+        <div class="info-kv"><span class="ik">类型</span><span class="iv">${def.label}</span></div>
+        ${comp.value ? `<div class="info-kv"><span class="ik">值</span><span class="iv">${comp.value}</span></div>` : ''}
+        <div class="info-kv"><span class="ik">引脚数</span><span class="iv">${comp.pinCount}</span></div>
+        <div class="info-kv"><span class="ik">层</span><span class="iv">${LAYER_COLORS[comp.layer].name}</span></div>
+        <div class="info-kv"><span class="ik">位置</span><span class="iv">(${comp.x}, ${comp.y})</span></div>
+        <div class="info-kv"><span class="ik">尺寸</span><span class="iv">${comp.w}×${comp.h} mil</span></div>
+    `;
+}
+
+function updateStats() {
+    document.getElementById('statComps').textContent = state.components.length;
+    document.getElementById('statVias').textContent = state.vias.length;
+    document.getElementById('statNets').textContent = state.nets.length;
+
+    let totalLen = 0;
+    for (const t of state.traces) {
+        for (let i = 1; i < t.points.length; i++) {
+            const dx = t.points[i].x - t.points[i - 1].x;
+            const dy = t.points[i].y - t.points[i - 1].y;
+            totalLen += Math.sqrt(dx * dx + dy * dy);
+        }
+    }
+    document.getElementById('statTraceLen').textContent = Math.round(totalLen);
+}
+
+function updateNetList() {
+    const el = document.getElementById('netList');
+    if (state.nets.length === 0) {
+        el.innerHTML = '<p class="text-sm text-muted" style="margin:0">暂无网络</p>';
+        return;
+    }
+    const netColors = ['#ff5252', '#4fc3f7', '#b388ff', '#ffab40', '#16c79a', '#ff80ab'];
+    el.innerHTML = state.nets.map((net, i) => {
+        const col = netColors[i % netColors.length];
+        const pads = net.map(k => {
+            const [cid, pi] = k.split(':');
+            const comp = state.components.find(c => c.id === parseInt(cid));
+            return comp ? `${comp.ref}.${parseInt(pi) + 1}` : k;
+        }).join(', ');
+        return `<div class="net-item"><span class="net-color" style="background:${col}"></span>NET${i + 1}: ${pads}</div>`;
+    }).join('');
+}
+
+function updateDRCPanel() {
+    const el = document.getElementById('drcList');
+    if (state.drcResults.length === 0) {
+        el.innerHTML = '<p class="text-sm text-muted" style="margin:0">点击"运行 DRC"检查</p>';
+        return;
+    }
+    el.innerHTML = state.drcResults.map(r => {
+        const icon = r.type === 'error' ? '✖' : r.type === 'warning' ? '⚠' : '✔';
+        return `<div class="drc-item ${r.type}" data-locx="${r.loc ? r.loc.x : ''}" data-locy="${r.loc ? r.loc.y : ''}"><span class="drc-icon">${icon}</span>${r.msg}</div>`;
+    }).join('');
+
+    // Click-to-highlight DRC items
+    el.querySelectorAll('.drc-item').forEach(item => {
+        item.addEventListener('click', () => {
+            const lx = parseFloat(item.dataset.locx);
+            const ly = parseFloat(item.dataset.locy);
+            if (!isNaN(lx) && !isNaN(ly)) {
+                panToBoard(lx, ly);
+            }
+        });
+    });
+}
+
+function panToBoard(bx, by) {
+    const cw = canvas.width / devicePixelRatio;
+    const ch = canvas.height / devicePixelRatio;
+    if (typeof gsap !== 'undefined') {
+        gsap.to(state, {
+            panX: cw / 2 - bx * state.zoom,
+            panY: ch / 2 - by * state.zoom,
+            duration: 0.4,
+            ease: 'power2.out',
+            onUpdate: render,
+        });
+    } else {
+        state.panX = cw / 2 - bx * state.zoom;
+        state.panY = ch / 2 - by * state.zoom;
+        render();
+    }
+}
+
+function updateToolHint() {
+    const hints = {
+        select:    '点击选择元件 / 拖拽移动',
+        resistor:  '点击画板放置电阻',
+        capacitor: '点击画板放置电容',
+        'ic-dip8': '点击画板放置 DIP-8 IC',
+        'ic-dip16':'点击画板放置 DIP-16 IC',
+        connector: '点击画板放置连接器',
+        via:       '点击画板放置过孔',
+        trace:     '点击焊盘开始走线，再次点击添加拐点，点击焊盘结束',
+    };
+    toolHint.textContent = hints[state.currentTool] || '';
+}
+
+/* ---------- Export Netlist ---------- */
+function exportNetlist() {
+    let text = '# PCB 网表导出\n';
+    text += `# 日期: ${new Date().toLocaleString('zh-CN')}\n`;
+    text += `# 板卡: ${state.boardW} × ${state.boardH} mil, ${state.layerCount} 层\n\n`;
+
+    text += '## 元件列表\n';
+    for (const c of state.components) {
+        const def = COMP_DEFS[c.type];
+        text += `${c.ref.padEnd(8)} ${def.label.padEnd(10)} ${c.type.padEnd(12)} 层:${LAYER_COLORS[c.layer].name}  位置:(${c.x}, ${c.y})`;
+        if (c.value) text += `  值:${c.value}`;
+        text += '\n';
+    }
+
+    text += '\n## 过孔列表\n';
+    for (const v of state.vias) {
+        text += `${v.ref.padEnd(8)} 位置:(${v.x}, ${v.y})  孔径:${v.drillR * 2}mil  外径:${v.outerR * 2}mil\n`;
+    }
+
+    text += '\n## 网络列表\n';
+    if (state.nets.length === 0) {
+        text += '(无网络连接)\n';
+    } else {
+        state.nets.forEach((net, i) => {
+            const pads = net.map(k => {
+                const [cid, pi] = k.split(':');
+                const comp = state.components.find(c => c.id === parseInt(cid));
+                return comp ? `${comp.ref}.${parseInt(pi) + 1}` : k;
+            }).join(' ');
+            text += `NET${i + 1}: ${pads}\n`;
+        });
+    }
+
+    text += `\n## 走线列表 (共 ${state.traces.length} 条)\n`;
+    for (const t of state.traces) {
+        const pts = t.points.map(p => `(${p.x},${p.y})`).join(' → ');
+        text += `ID:${t.id}  层:${LAYER_COLORS[t.layer].name}  宽:${t.width}mil  ${pts}\n`;
+    }
+
+    text += `\n## 统计\n`;
+    text += `元件数: ${state.components.length}\n`;
+    text += `过孔数: ${state.vias.length}\n`;
+    text += `网络数: ${state.nets.length}\n`;
+    text += `走线段: ${state.traces.length}\n`;
+
+    return text;
+}
+
+/* ---------- Event Handlers: Tools ---------- */
+document.querySelectorAll('.tool-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        state.currentTool = btn.dataset.tool;
+        // Cancel trace in progress when switching away
+        if (state.currentTool !== 'trace' && state.traceInProgress) {
+            finishTrace(null);
+        }
+        updateToolHint();
+        wrap.style.cursor = state.currentTool === 'select' ? 'default' : 'crosshair';
+    });
+});
+
+/* ---------- Event Handlers: Layer Selection ---------- */
+document.querySelectorAll('#layerList .layer-row').forEach(row => {
+    row.addEventListener('click', (e) => {
+        if (e.target.classList.contains('layer-vis-toggle')) return;
+        document.querySelectorAll('#layerList .layer-row').forEach(r => r.classList.remove('active'));
+        row.classList.add('active');
+        state.currentLayer = row.dataset.layer;
+    });
+});
+
+document.querySelectorAll('.layer-vis-toggle').forEach(toggle => {
+    toggle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const layer = toggle.dataset.vis;
+        state.layerVisibility[layer] = !state.layerVisibility[layer];
+        toggle.classList.toggle('hidden-layer', !state.layerVisibility[layer]);
+        // Also sync bottom bar chips
+        const chip = document.querySelector(`.layer-toggle-chip[data-ltc="${layer}"]`);
+        if (chip) chip.classList.toggle('visible', state.layerVisibility[layer]);
+        render();
+    });
+});
+
+/* ---------- Event Handlers: Layer Toggle Chips (bottom bar) ---------- */
+document.querySelectorAll('.layer-toggle-chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+        const layer = chip.dataset.ltc;
+        state.layerVisibility[layer] = !state.layerVisibility[layer];
+        chip.classList.toggle('visible', state.layerVisibility[layer]);
+        // Sync left panel
+        const toggle = document.querySelector(`.layer-vis-toggle[data-vis="${layer}"]`);
+        if (toggle) toggle.classList.toggle('hidden-layer', !state.layerVisibility[layer]);
+        render();
+    });
+});
+
+/* ---------- Event Handlers: Canvas ---------- */
+canvas.addEventListener('mousedown', (e) => {
+    if (e.button === 1) {
+        // Middle click — pan
+        e.preventDefault();
+        state.isPanning = true;
+        state.panStartX = e.clientX;
+        state.panStartY = e.clientY;
+        state.panStartPanX = state.panX;
+        state.panStartPanY = state.panY;
+        wrap.style.cursor = 'grabbing';
+        return;
+    }
+
+    if (e.button !== 0) return;
+
+    const { x: bx, y: by } = screenToBoard(e.clientX, e.clientY);
+
+    switch (state.currentTool) {
+        case 'select': {
+            const comp = hitTestComponents(bx, by);
+            const via = hitTestVias(bx, by);
+            if (comp) {
+                state.selectedId = comp.id;
+                state.dragging = comp;
+                state.dragOffX = bx - comp.x;
+                state.dragOffY = by - comp.y;
+                wrap.style.cursor = 'move';
+            } else if (via) {
+                state.selectedId = via.id;
+                state.dragging = via;
+                state.dragOffX = bx - via.x;
+                state.dragOffY = by - via.y;
+                wrap.style.cursor = 'move';
+            } else {
+                state.selectedId = null;
+                state.dragging = null;
+            }
+            updateAll();
+            break;
+        }
+        case 'resistor':
+        case 'capacitor':
+        case 'ic-dip8':
+        case 'ic-dip16':
+        case 'connector':
+            placeComponent(state.currentTool, bx, by);
+            break;
+        case 'via':
+            placeVia(bx, by);
+            break;
+        case 'trace':
+            if (!state.traceInProgress) {
+                startTrace(bx, by);
+            } else {
+                addTracePoint(bx, by);
+            }
+            render();
+            break;
+    }
+});
+
+canvas.addEventListener('mousemove', (e) => {
+    const { x: bx, y: by } = screenToBoard(e.clientX, e.clientY);
+
+    // Coordinate display
+    const snBx = snap(bx, state.gridSize);
+    const snBy = snap(by, state.gridSize);
+    coordDisp.textContent = `X: ${snBx} mil (${milToMm(snBx)} mm)   Y: ${snBy} mil (${milToMm(snBy)} mm)`;
+
+    // Panning
+    if (state.isPanning) {
+        state.panX = state.panStartPanX + (e.clientX - state.panStartX);
+        state.panY = state.panStartPanY + (e.clientY - state.panStartY);
+        render();
+        return;
+    }
+
+    // Dragging component/via
+    if (state.dragging) {
+        const obj = state.dragging;
+        if (obj.pads !== undefined) {
+            // Component
+            pushUndo();
+            state.undoStack.pop(); // Don't fill undo with every pixel
+            obj.x = snap(bx - state.dragOffX, state.gridSize);
+            obj.y = snap(by - state.dragOffY, state.gridSize);
+        } else {
+            // Via
+            obj.x = snap(bx - state.dragOffX, state.gridSize);
+            obj.y = snap(by - state.dragOffY, state.gridSize);
+        }
+        updateAll();
+        return;
+    }
+
+    // Hover pad detection for trace mode
+    if (state.currentTool === 'trace') {
+        state.hoverPad = findPadAt(bx, by, 25);
+    } else {
+        state.hoverPad = null;
+    }
+
+    // Trace in progress — preview
+    if (state.traceInProgress && state.traceInProgress.points.length > 0) {
+        const last = state.traceInProgress.points[state.traceInProgress.points.length - 1];
+        let nx = snap(bx, state.gridSize);
+        let ny = snap(by, state.gridSize);
+        if (state.snap45) {
+            const d = snap45Angle(nx - last.x, ny - last.y);
+            nx = last.x + d.x;
+            ny = last.y + d.y;
+        }
+        // Temporarily add preview point
+        const preview = [...state.traceInProgress.points, { x: nx, y: ny }];
+        const saved = state.traceInProgress.points;
+        state.traceInProgress.points = preview;
+        render();
+        state.traceInProgress.points = saved;
+        return;
+    }
+
+    render();
+});
+
+canvas.addEventListener('mouseup', (e) => {
+    if (e.button === 1) {
+        state.isPanning = false;
+        wrap.style.cursor = state.currentTool === 'select' ? 'default' : 'crosshair';
+        return;
+    }
+    if (state.dragging) {
+        pushUndo();
+        state.dragging = null;
+        wrap.style.cursor = state.currentTool === 'select' ? 'default' : 'crosshair';
+        detectNets();
+        updateAll();
+    }
+});
+
+// Double click to finish trace
+canvas.addEventListener('dblclick', () => {
+    if (state.traceInProgress) {
+        finishTrace(null);
+    }
+});
+
+// Escape to cancel trace or deselect
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+        if (state.traceInProgress) {
+            state.traceInProgress = null;
+            render();
+        } else {
+            state.selectedId = null;
+            updateAll();
+        }
+    }
+    if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (state.selectedId && state.currentTool === 'select') {
+            pushUndo();
+            state.components = state.components.filter(c => c.id !== state.selectedId);
+            state.vias = state.vias.filter(v => v.id !== state.selectedId);
+            // Remove traces associated
+            state.traces = state.traces.filter(t => {
+                if (t.startPad && t.startPad.comp && t.startPad.comp.id === state.selectedId) return false;
+                if (t.endPad && t.endPad.comp && t.endPad.comp.id === state.selectedId) return false;
+                return true;
+            });
+            state.selectedId = null;
+            detectNets();
+            updateAll();
+        }
+    }
+    // Ctrl+Z / Ctrl+Shift+Z
+    if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        doUndo();
+    }
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'Z' || (e.key === 'z' && e.shiftKey))) {
+        e.preventDefault();
+        doRedo();
+    }
+});
+
+// Zoom with scroll
+canvas.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+
+    const prevZoom = state.zoom;
+    const delta = e.deltaY > 0 ? 0.9 : 1.1;
+    state.zoom = Math.max(0.1, Math.min(5, state.zoom * delta));
+
+    // Zoom towards cursor
+    state.panX = mx - (mx - state.panX) * (state.zoom / prevZoom);
+    state.panY = my - (my - state.panY) * (state.zoom / prevZoom);
+
+    zoomDisp.textContent = `${Math.round(state.zoom * 100)}%`;
+    render();
+}, { passive: false });
+
+// Prevent context menu on canvas
+canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+
+/* ---------- Event Handlers: Board Settings ---------- */
+document.getElementById('boardW').addEventListener('change', function () {
+    state.boardW = Math.max(500, parseInt(this.value) || 3000);
+    this.value = state.boardW;
+    updateAll();
+});
+
+document.getElementById('boardH').addEventListener('change', function () {
+    state.boardH = Math.max(500, parseInt(this.value) || 2000);
+    this.value = state.boardH;
+    updateAll();
+});
+
+document.getElementById('layerCount').addEventListener('change', function () {
+    state.layerCount = parseInt(this.value);
+    updateCostEstimate();
+});
+
+document.getElementById('gridSize').addEventListener('change', function () {
+    state.gridSize = parseInt(this.value);
+    render();
+});
+
+/* ---------- Event Handlers: Trace Width ---------- */
+const twSlider = document.getElementById('traceWidth');
+const twLabel  = document.getElementById('twLabel');
+twSlider.addEventListener('input', function () {
+    state.traceWidth = parseInt(this.value);
+    twLabel.textContent = `${state.traceWidth} mil`;
+});
+
+document.getElementById('snap45').addEventListener('change', function () {
+    state.snap45 = this.checked;
+});
+
+/* ---------- Event Handlers: Impedance ---------- */
+['impW', 'impH', 'impEr', 'impT'].forEach(id => {
+    document.getElementById(id).addEventListener('input', calcImpedance);
+});
+
+/* ---------- Event Handlers: Bottom Actions ---------- */
+document.getElementById('btnDRC').addEventListener('click', runDRC);
+
+document.getElementById('btnClear').addEventListener('click', () => {
+    if (!confirm('确定清空画板上的所有元件、走线和过孔吗？')) return;
+    pushUndo();
+    state.components = [];
+    state.traces = [];
+    state.vias = [];
+    state.nets = [];
+    state.selectedId = null;
+    state.traceInProgress = null;
+    state.refCounters = { R: 0, C: 0, U: 0, J: 0, V: 0 };
+    state.drcResults = [];
+    updateDRCPanel();
+    updateAll();
+});
+
+document.getElementById('btnExport').addEventListener('click', () => {
+    const text = exportNetlist();
+    document.getElementById('netlistOutput').textContent = text;
+    const modal = document.getElementById('exportModal');
+    modal.style.display = 'flex';
+});
+
+document.getElementById('closeModal').addEventListener('click', () => {
+    document.getElementById('exportModal').style.display = 'none';
+});
+
+document.getElementById('exportModal').addEventListener('click', (e) => {
+    if (e.target === document.getElementById('exportModal')) {
+        document.getElementById('exportModal').style.display = 'none';
+    }
+});
+
+document.getElementById('copyNetlist').addEventListener('click', () => {
+    const text = document.getElementById('netlistOutput').textContent;
+    navigator.clipboard.writeText(text).then(() => {
+        const btn = document.getElementById('copyNetlist');
+        btn.textContent = '已复制!';
+        setTimeout(() => { btn.textContent = '复制到剪贴板'; }, 1500);
+    });
+});
+
+function doUndo() {
+    if (state.undoStack.length === 0) return;
+    state.redoStack.push(deepCloneState());
+    restoreSnapshot(state.undoStack.pop());
+}
+
+function doRedo() {
+    if (state.redoStack.length === 0) return;
+    state.undoStack.push(deepCloneState());
+    restoreSnapshot(state.redoStack.pop());
+}
+
+document.getElementById('btnUndo').addEventListener('click', doUndo);
+document.getElementById('btnRedo').addEventListener('click', doRedo);
+
+/* ---------- Initial Setup ---------- */
+function init() {
+    resizeCanvas();
+
+    // Center board in viewport
+    const cw = canvas.width / devicePixelRatio;
+    const ch = canvas.height / devicePixelRatio;
+    const scaleX = (cw - 80) / state.boardW;
+    const scaleY = (ch - 80) / state.boardH;
+    state.zoom = Math.min(scaleX, scaleY, 1);
+    state.panX = (cw - state.boardW * state.zoom) / 2;
+    state.panY = (ch - state.boardH * state.zoom) / 2;
+    zoomDisp.textContent = `${Math.round(state.zoom * 100)}%`;
+
+    // Place some demo components
+    pushUndo();
+    state.refCounters.U = 1;
+    state.refCounters.R = 2;
+    state.refCounters.C = 1;
+
+    state.components.push({
+        id: genId(), type: 'ic-dip8', x: 600, y: 400,
+        w: COMP_DEFS['ic-dip8'].w, h: COMP_DEFS['ic-dip8'].h,
+        pads: JSON.parse(JSON.stringify(COMP_DEFS['ic-dip8'].pads)),
+        ref: 'U1', layer: 'top-cu', value: 'NE555', pinCount: 8,
+    });
+
+    state.components.push({
+        id: genId(), type: 'resistor', x: 1100, y: 500,
+        w: COMP_DEFS.resistor.w, h: COMP_DEFS.resistor.h,
+        pads: JSON.parse(JSON.stringify(COMP_DEFS.resistor.pads)),
+        ref: 'R1', layer: 'top-cu', value: '10kΩ', pinCount: 2,
+    });
+
+    state.components.push({
+        id: genId(), type: 'resistor', x: 1100, y: 650,
+        w: COMP_DEFS.resistor.w, h: COMP_DEFS.resistor.h,
+        pads: JSON.parse(JSON.stringify(COMP_DEFS.resistor.pads)),
+        ref: 'R2', layer: 'top-cu', value: '4.7kΩ', pinCount: 2,
+    });
+
+    state.components.push({
+        id: genId(), type: 'capacitor', x: 350, y: 600,
+        w: COMP_DEFS.capacitor.w, h: COMP_DEFS.capacitor.h,
+        pads: JSON.parse(JSON.stringify(COMP_DEFS.capacitor.pads)),
+        ref: 'C1', layer: 'top-cu', value: '100nF', pinCount: 2,
+    });
+
+    // Demo traces
+    state.traces.push({
+        id: genId(), layer: 'top-cu', width: 10,
+        points: [
+            { x: 800, y: 440 }, { x: 1100, y: 440 }, { x: 1100, y: 525 }
+        ],
+        startPad: null, endPad: null,
+    });
+
+    state.traces.push({
+        id: genId(), layer: 'top-cu', width: 10,
+        points: [
+            { x: 800, y: 540 }, { x: 950, y: 540 }, { x: 950, y: 675 }, { x: 1100, y: 675 }
+        ],
+        startPad: null, endPad: null,
+    });
+
+    // Demo via
+    state.vias.push({
+        id: genId(), x: 950, y: 800, outerR: 20, drillR: 8, ref: 'V1',
+    });
+    state.refCounters.V = 1;
+
+    detectNets();
+    updateAll();
+    updateToolHint();
+
+    // Entrance animation
+    if (typeof gsap !== 'undefined') {
+        gsap.from('.panel-left', { x: -260, opacity: 0, duration: 0.5, ease: 'power2.out' });
+        gsap.from('.panel-right', { x: 280, opacity: 0, duration: 0.5, ease: 'power2.out', delay: 0.1 });
+        gsap.from('.bottom-bar', { y: 40, opacity: 0, duration: 0.4, ease: 'power2.out', delay: 0.2 });
+        gsap.from('#pcbCanvas', { opacity: 0, duration: 0.6, delay: 0.15 });
+    }
+}
+
+window.addEventListener('resize', resizeCanvas);
+let _inited = false;
+function safeInit() { if (!_inited) { _inited = true; init(); } }
+document.addEventListener('DOMContentLoaded', safeInit);
+if (document.readyState === 'complete' || document.readyState === 'interactive') {
+    setTimeout(safeInit, 10);
+}
+
+})();
+</script>
+</body>
+</html>

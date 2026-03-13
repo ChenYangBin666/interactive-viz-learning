@@ -1,0 +1,1272 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>原理图基础 — PCB 设计</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+SC:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+    <style>
+        /* ===== Module-specific Styles ===== */
+        .symbol-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 1rem;
+        }
+        @media (max-width: 768px) { .symbol-grid { grid-template-columns: repeat(2, 1fr); } }
+
+        .symbol-card {
+            position: relative;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            cursor: pointer;
+            transition: all 0.3s;
+            overflow: hidden;
+        }
+        .symbol-card:hover, .symbol-card.active {
+            border-color: var(--accent-green);
+            box-shadow: var(--shadow-glow);
+        }
+        .symbol-card canvas {
+            display: block;
+            width: 100%;
+            height: 120px;
+        }
+        .symbol-card .label {
+            padding: 0.5rem 0.75rem;
+            font-size: 0.85rem;
+            text-align: center;
+            color: var(--text-secondary);
+            border-top: 1px solid var(--border-color);
+        }
+        .symbol-card.active .label {
+            color: var(--accent-green);
+            font-weight: 600;
+        }
+
+        .symbol-detail {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1.5rem;
+            margin-top: 1.5rem;
+            display: none;
+        }
+        .symbol-detail.visible { display: block; }
+        .symbol-detail h4 { color: var(--accent-green); margin-bottom: 0.75rem; }
+        .symbol-detail .detail-row {
+            display: flex; justify-content: space-between; padding: 0.4rem 0;
+            border-bottom: 1px solid rgba(42,42,74,0.3); font-size: 0.9rem;
+        }
+        .symbol-detail .detail-row:last-child { border-bottom: none; }
+        .detail-label { color: var(--text-muted); }
+        .detail-value { color: var(--text-primary); font-family: var(--font-mono); }
+
+        /* Section 2: Rules */
+        .rules-canvas-wrap {
+            position: relative;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+        }
+        .rules-canvas-wrap canvas { display: block; width: 100%; height: 420px; }
+
+        .rule-list {
+            display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-top: 1rem;
+        }
+        .rule-item {
+            display: flex; align-items: center; gap: 0.5rem;
+            padding: 0.6rem 0.8rem; border-radius: var(--radius-sm);
+            background: var(--bg-secondary); border: 1px solid var(--border-color);
+            font-size: 0.85rem; cursor: pointer; transition: all 0.2s;
+        }
+        .rule-item:hover, .rule-item.active {
+            border-color: var(--accent-green); background: rgba(22,199,154,0.08);
+        }
+        .rule-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+
+        /* Section 3: Netlist */
+        .netlist-wrap { display: grid; grid-template-columns: 1.2fr 1fr; gap: 1.5rem; }
+        @media (max-width: 900px) { .netlist-wrap { grid-template-columns: 1fr; } }
+        .netlist-canvas-wrap {
+            background: var(--bg-secondary); border: 1px solid var(--border-color);
+            border-radius: var(--radius-md); overflow: hidden;
+        }
+        .netlist-canvas-wrap canvas { display: block; width: 100%; height: 350px; }
+        .netlist-output {
+            background: var(--bg-secondary); border: 1px solid var(--border-color);
+            border-radius: var(--radius-md); padding: 1rem; font-family: var(--font-mono);
+            font-size: 0.82rem; line-height: 1.8; color: var(--text-secondary);
+            max-height: 350px; overflow-y: auto;
+        }
+        .netlist-output .net-line { padding: 2px 6px; border-radius: 3px; transition: background 0.2s; cursor: default; }
+        .netlist-output .net-line.hl { background: rgba(22,199,154,0.15); color: var(--accent-green); }
+
+        /* Section 4: Hierarchy */
+        .hier-canvas-wrap {
+            background: var(--bg-secondary); border: 1px solid var(--border-color);
+            border-radius: var(--radius-md); overflow: hidden;
+        }
+        .hier-canvas-wrap canvas { display: block; width: 100%; height: 480px; }
+        .hier-breadcrumb {
+            display: flex; align-items: center; gap: 0.4rem; padding: 0.75rem 1rem;
+            border-bottom: 1px solid var(--border-color); font-size: 0.85rem;
+        }
+        .hier-crumb { color: var(--accent-blue); cursor: pointer; }
+        .hier-crumb:hover { color: var(--accent-green); }
+        .hier-crumb.current { color: var(--accent-green); font-weight: 600; cursor: default; }
+        .hier-sep { color: var(--text-muted); }
+
+        /* Section 5: LED */
+        .led-layout { display: grid; grid-template-columns: 1.3fr 1fr; gap: 1.5rem; align-items: start; }
+        @media (max-width: 900px) { .led-layout { grid-template-columns: 1fr; } }
+        .led-canvas-wrap {
+            background: var(--bg-secondary); border: 1px solid var(--border-color);
+            border-radius: var(--radius-md); overflow: hidden;
+        }
+        .led-canvas-wrap canvas { display: block; width: 100%; height: 420px; }
+        .led-controls {
+            background: var(--bg-secondary); border: 1px solid var(--border-color);
+            border-radius: var(--radius-md); padding: 1.25rem;
+        }
+        .led-controls .control-group { margin-bottom: 1.25rem; }
+        .led-controls .control-group:last-child { margin-bottom: 0; }
+        .led-controls label { display: block; font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.4rem; }
+        .led-readout {
+            display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-top: 1rem;
+        }
+        .readout-item {
+            background: rgba(15,52,96,0.4); border-radius: var(--radius-sm); padding: 0.75rem;
+            text-align: center;
+        }
+        .readout-item .val { font-family: var(--font-mono); font-size: 1.3rem; color: var(--accent-green); font-weight: 700; }
+        .readout-item .unit { font-size: 0.8rem; color: var(--text-muted); margin-top: 0.2rem; }
+        .led-formula {
+            margin-top: 1rem; padding: 1rem; background: rgba(15,52,96,0.4);
+            border-radius: var(--radius-sm); text-align: center;
+        }
+
+        select {
+            background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm); padding: 0.4rem 0.8rem; font-family: inherit;
+            font-size: 0.85rem; cursor: pointer; outline: none; transition: border-color 0.2s;
+        }
+        select:focus { border-color: var(--accent-green); }
+    </style>
+</head>
+<body>
+
+<div class="page-container">
+    <!-- ===== Hero ===== -->
+    <header style="text-align:center; margin-bottom:2.5rem;">
+        <h1>原理图基础</h1>
+        <p style="max-width:640px; margin:0 auto;">理解电路原理图是 PCB 设计的第一步。本模块涵盖标准电路符号、绘图规范、<br>网表生成、层次化设计，以及一个完整的 LED 驱动电路实战练习。</p>
+    </header>
+
+    <!-- ==================== 1. 电路符号认知 ==================== -->
+    <section class="section" id="sec-symbols">
+        <div class="section-title">
+            <span class="icon">1</span>
+            <h2>电路符号认知</h2>
+        </div>
+        <p>点击下方任意符号卡片，查看其 IEEE 标准名称与典型参数范围。</p>
+        <div class="symbol-grid" id="symbolGrid"></div>
+        <div class="symbol-detail" id="symbolDetail"></div>
+    </section>
+
+    <!-- ==================== 2. 原理图绘制规则 ==================== -->
+    <section class="section" id="sec-rules">
+        <div class="section-title">
+            <span class="icon">2</span>
+            <h2>原理图绘制规则</h2>
+        </div>
+        <p>使用下方按钮在"正确"与"错误"示例之间切换，理解原理图绘制的基本规范。</p>
+        <div style="margin-bottom:1rem;">
+            <div class="btn-group">
+                <button class="btn active" id="btnRuleCorrect" onclick="RulesDemo.setMode(true)">正确</button>
+                <button class="btn" id="btnRuleWrong" onclick="RulesDemo.setMode(false)">错误</button>
+            </div>
+        </div>
+        <div class="rules-canvas-wrap">
+            <canvas id="rulesCanvas"></canvas>
+        </div>
+        <div class="rule-list" id="ruleList"></div>
+    </section>
+
+    <!-- ==================== 3. 网表生成 ==================== -->
+    <section class="section" id="sec-netlist">
+        <div class="section-title">
+            <span class="icon">3</span>
+            <h2>网表生成</h2>
+        </div>
+        <p>左侧展示一个简单 RC 低通滤波器电路，点击"生成网表"观察原理图到网表的映射关系。鼠标悬停于网表行可高亮对应元件。</p>
+        <div class="netlist-wrap">
+            <div class="netlist-canvas-wrap">
+                <canvas id="netlistCanvas"></canvas>
+                <div style="padding:0.75rem; text-align:center;">
+                    <button class="btn btn-primary" id="btnGenNetlist" onclick="NetlistDemo.generate()">生成网表</button>
+                    <button class="btn" onclick="NetlistDemo.reset()" style="margin-left:0.5rem;">重置</button>
+                </div>
+            </div>
+            <div class="netlist-output" id="netlistOutput">
+                <span style="color:var(--text-muted);">点击"生成网表"按钮...</span>
+            </div>
+        </div>
+    </section>
+
+    <!-- ==================== 4. 层次化设计 ==================== -->
+    <section class="section" id="sec-hierarchy">
+        <div class="section-title">
+            <span class="icon">4</span>
+            <h2>层次化设计</h2>
+        </div>
+        <p>点击模块方块可"进入"子图，查看内部原理图细节。面包屑导航可返回上层。</p>
+        <div class="hier-canvas-wrap">
+            <div class="hier-breadcrumb" id="hierBreadcrumb"></div>
+            <canvas id="hierCanvas"></canvas>
+        </div>
+    </section>
+
+    <!-- ==================== 5. 实战：LED 驱动电路 ==================== -->
+    <section class="section" id="sec-led">
+        <div class="section-title">
+            <span class="icon">5</span>
+            <h2>实战：LED 驱动电路</h2>
+        </div>
+        <p>调整电阻值和 LED 颜色，观察电流、功耗和 LED 亮度的实时变化。</p>
+        <div class="led-layout">
+            <div class="led-canvas-wrap">
+                <canvas id="ledCanvas"></canvas>
+            </div>
+            <div class="led-controls">
+                <div class="control-group">
+                    <label>供电电压 VCC</label>
+                    <div class="slider-group">
+                        <span class="slider-value" id="vccVal">5.0V</span>
+                        <input type="range" id="vccSlider" min="3" max="12" step="0.1" value="5">
+                    </div>
+                </div>
+                <div class="control-group">
+                    <label>限流电阻 R</label>
+                    <div class="slider-group">
+                        <span class="slider-value" id="resVal">220Ω</span>
+                        <input type="range" id="resSlider" min="10" max="1000" step="10" value="220">
+                    </div>
+                </div>
+                <div class="control-group">
+                    <label>LED 颜色（正向压降 Vf）</label>
+                    <select id="ledColor">
+                        <option value="1.8" data-color="#ff3333">红色 — Vf ≈ 1.8V</option>
+                        <option value="2.0" data-color="#ffaa00">橙色 — Vf ≈ 2.0V</option>
+                        <option value="2.1" data-color="#ffdd00">黄色 — Vf ≈ 2.1V</option>
+                        <option value="2.2" data-color="#33cc33" selected>绿色 — Vf ≈ 2.2V</option>
+                        <option value="3.0" data-color="#3399ff">蓝色 — Vf ≈ 3.0V</option>
+                        <option value="3.2" data-color="#eeeeff">白色 — Vf ≈ 3.2V</option>
+                    </select>
+                </div>
+                <div class="led-readout">
+                    <div class="readout-item">
+                        <div class="val" id="readCurrent">--</div>
+                        <div class="unit">电流 (mA)</div>
+                    </div>
+                    <div class="readout-item">
+                        <div class="val" id="readPowerR">--</div>
+                        <div class="unit">电阻功耗 (mW)</div>
+                    </div>
+                    <div class="readout-item">
+                        <div class="val" id="readPowerLED">--</div>
+                        <div class="unit">LED 功耗 (mW)</div>
+                    </div>
+                    <div class="readout-item">
+                        <div class="val" id="readPowerTotal">--</div>
+                        <div class="unit">总功耗 (mW)</div>
+                    </div>
+                </div>
+                <div class="led-formula" id="ledFormula"></div>
+            </div>
+        </div>
+    </section>
+</div>
+
+<!-- ===== CDN Scripts ===== -->
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/gsap.min.js"></script>
+<script src="../shared/scripts/nav.js"></script>
+
+<script>
+/* ================================================================
+   Utility Helpers
+   ================================================================ */
+function dpr() { return window.devicePixelRatio || 1; }
+function sizeCanvas(canvas, w, h) {
+    const r = dpr();
+    canvas.width = w * r; canvas.height = h * r;
+    canvas.style.width = w + 'px'; canvas.style.height = h + 'px';
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(r, 0, 0, r, 0, 0);
+    return ctx;
+}
+function getCanvasSize(canvas) {
+    return { w: canvas.clientWidth, h: canvas.clientHeight };
+}
+const C = {
+    green: '#16c79a', blue: '#4fc3f7', purple: '#b388ff', orange: '#ffab40',
+    red: '#ff5252', yellow: '#ffd740', white: '#e8e8e8', muted: '#6c6c7c',
+    wire: '#4fc3f7', bg: '#16213e', grid: 'rgba(42,42,74,0.35)', border: '#2a2a4a'
+};
+
+function drawGrid(ctx, w, h, step = 20) {
+    ctx.strokeStyle = C.grid; ctx.lineWidth = 0.5;
+    for (let x = 0; x <= w; x += step) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke(); }
+    for (let y = 0; y <= h; y += step) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); }
+}
+
+/* ================================================================
+   1. 电路符号认知
+   ================================================================ */
+const SymbolsDemo = (() => {
+    const symbols = [
+        { id: 'resistor', name: '电阻', ieee: 'Resistor', params: '1Ω ~ 10MΩ', desc: '锯齿形（美标）/ 矩形（IEC）表示。限制电流、分压。' },
+        { id: 'capacitor', name: '电容', ieee: 'Capacitor', params: '1pF ~ 10000μF', desc: '两平行线表示，极性电容有弧线标注。储能、滤波、耦合。' },
+        { id: 'inductor', name: '电感', ieee: 'Inductor', params: '1nH ~ 100mH', desc: '弧线/螺旋线圈表示。储能、滤波、EMI 抑制。' },
+        { id: 'diode', name: '二极管', ieee: 'Diode', params: 'Vf: 0.3~3.5V', desc: '三角形+竖线表示。单向导通，整流与保护。' },
+        { id: 'bjt', name: 'BJT', ieee: 'Bipolar Junction Transistor', params: 'hFE: 10~800', desc: 'NPN/PNP 晶体管。放大与开关。' },
+        { id: 'mosfet', name: 'MOSFET', ieee: 'MOS Field-Effect Transistor', params: 'Vgs(th): 1~5V', desc: 'N/P 沟道场效应管。低功耗开关。' },
+        { id: 'ic', name: '集成电路', ieee: 'Integrated Circuit', params: '多引脚封装', desc: '矩形方框+引脚标注。代表功能模块。' },
+        { id: 'gnd_vcc', name: 'GND / VCC', ieee: 'Ground & Supply', params: '0V / 3.3~12V', desc: '地符号（三横线）与电源符号（箭头或横线）。' }
+    ];
+
+    let activeIdx = -1;
+
+    function drawSymbol(ctx, id, w, h, highlight) {
+        const cx = w / 2, cy = h / 2;
+        ctx.clearRect(0, 0, w, h);
+        ctx.strokeStyle = highlight ? C.green : C.blue;
+        ctx.lineWidth = highlight ? 2.5 : 2;
+        ctx.fillStyle = highlight ? C.green : C.blue;
+        ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+
+        switch (id) {
+            case 'resistor': {
+                const x0 = cx - 35, x1 = cx + 35;
+                ctx.beginPath(); ctx.moveTo(x0 - 15, cy); ctx.lineTo(x0, cy);
+                const seg = 70 / 6;
+                for (let i = 0; i < 6; i++) {
+                    ctx.lineTo(x0 + seg * i + seg * 0.25, cy - 10);
+                    ctx.lineTo(x0 + seg * i + seg * 0.75, cy + 10);
+                    ctx.lineTo(x0 + seg * (i + 1), cy);
+                }
+                ctx.lineTo(x1 + 15, cy); ctx.stroke();
+                break;
+            }
+            case 'capacitor': {
+                ctx.beginPath(); ctx.moveTo(cx - 25, cy); ctx.lineTo(cx - 5, cy); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(cx - 5, cy - 18); ctx.lineTo(cx - 5, cy + 18); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(cx + 5, cy - 18); ctx.lineTo(cx + 5, cy + 18); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(cx + 5, cy); ctx.lineTo(cx + 25, cy); ctx.stroke();
+                ctx.font = '10px JetBrains Mono'; ctx.fillText('+', cx - 18, cy - 12);
+                break;
+            }
+            case 'inductor': {
+                ctx.beginPath(); ctx.moveTo(cx - 35, cy); ctx.lineTo(cx - 25, cy); ctx.stroke();
+                for (let i = 0; i < 4; i++) {
+                    ctx.beginPath();
+                    ctx.arc(cx - 18 + i * 12, cy, 6, Math.PI, 0, false);
+                    ctx.stroke();
+                }
+                ctx.beginPath(); ctx.moveTo(cx + 25, cy); ctx.lineTo(cx + 35, cy); ctx.stroke();
+                break;
+            }
+            case 'diode': {
+                ctx.beginPath(); ctx.moveTo(cx - 25, cy); ctx.lineTo(cx - 8, cy); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(cx - 8, cy - 14); ctx.lineTo(cx - 8, cy + 14); ctx.lineTo(cx + 12, cy); ctx.closePath(); ctx.fill();
+                ctx.beginPath(); ctx.moveTo(cx + 12, cy - 14); ctx.lineTo(cx + 12, cy + 14); ctx.lineWidth = 2.5; ctx.stroke();
+                ctx.lineWidth = 2;
+                ctx.beginPath(); ctx.moveTo(cx + 12, cy); ctx.lineTo(cx + 30, cy); ctx.stroke();
+                break;
+            }
+            case 'bjt': {
+                ctx.beginPath(); ctx.moveTo(cx - 20, cy - 25); ctx.lineTo(cx - 20, cy + 25); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(cx - 35, cy); ctx.lineTo(cx - 20, cy); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(cx - 20, cy - 10); ctx.lineTo(cx + 10, cy - 25); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(cx - 20, cy + 10); ctx.lineTo(cx + 10, cy + 25); ctx.stroke();
+                // arrow on emitter
+                const ax = cx + 10, ay = cy + 25;
+                ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(ax - 8, ay - 4); ctx.lineTo(ax - 4, ay - 10); ctx.closePath(); ctx.fill();
+                ctx.font = '10px sans-serif';
+                ctx.fillText('B', cx - 42, cy + 4);
+                ctx.fillText('C', cx + 14, cy - 22);
+                ctx.fillText('E', cx + 14, cy + 30);
+                break;
+            }
+            case 'mosfet': {
+                ctx.beginPath(); ctx.moveTo(cx - 20, cy - 25); ctx.lineTo(cx - 20, cy + 25); ctx.lineWidth = 3; ctx.stroke(); ctx.lineWidth = 2;
+                ctx.beginPath(); ctx.moveTo(cx - 35, cy); ctx.lineTo(cx - 24, cy); ctx.stroke();
+                // source/drain lines
+                for (const dy of [-15, 0, 15]) {
+                    ctx.beginPath(); ctx.moveTo(cx - 14, cy + dy - 5); ctx.lineTo(cx - 14, cy + dy + 5); ctx.stroke();
+                }
+                ctx.beginPath(); ctx.moveTo(cx - 14, cy - 15); ctx.lineTo(cx + 10, cy - 15); ctx.lineTo(cx + 10, cy - 28); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(cx - 14, cy + 15); ctx.lineTo(cx + 10, cy + 15); ctx.lineTo(cx + 10, cy + 28); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(cx - 14, cy); ctx.lineTo(cx + 10, cy + 15); ctx.stroke();
+                // arrow
+                ctx.beginPath(); ctx.moveTo(cx - 5, cy); ctx.lineTo(cx - 14, cy - 4); ctx.lineTo(cx - 14, cy + 4); ctx.closePath(); ctx.fill();
+                ctx.font = '10px sans-serif';
+                ctx.fillText('G', cx - 44, cy + 4);
+                ctx.fillText('D', cx + 14, cy - 22);
+                ctx.fillText('S', cx + 14, cy + 32);
+                break;
+            }
+            case 'ic': {
+                ctx.strokeRect(cx - 28, cy - 22, 56, 44);
+                ctx.font = '11px JetBrains Mono'; ctx.textAlign = 'center';
+                ctx.fillText('IC', cx, cy + 4); ctx.textAlign = 'start';
+                for (let i = 0; i < 3; i++) {
+                    const py = cy - 14 + i * 14;
+                    ctx.beginPath(); ctx.moveTo(cx - 40, py); ctx.lineTo(cx - 28, py); ctx.stroke();
+                    ctx.beginPath(); ctx.moveTo(cx + 28, py); ctx.lineTo(cx + 40, py); ctx.stroke();
+                }
+                break;
+            }
+            case 'gnd_vcc': {
+                // VCC
+                ctx.beginPath(); ctx.moveTo(cx - 20, cy - 20); ctx.lineTo(cx - 20, cy - 35); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(cx - 32, cy - 35); ctx.lineTo(cx - 8, cy - 35); ctx.stroke();
+                ctx.font = '10px JetBrains Mono'; ctx.fillText('VCC', cx - 36, cy - 40);
+                // GND
+                ctx.beginPath(); ctx.moveTo(cx + 20, cy + 5); ctx.lineTo(cx + 20, cy + 18); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(cx + 8, cy + 18); ctx.lineTo(cx + 32, cy + 18); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(cx + 12, cy + 24); ctx.lineTo(cx + 28, cy + 24); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(cx + 16, cy + 30); ctx.lineTo(cx + 24, cy + 30); ctx.stroke();
+                ctx.fillText('GND', cx + 6, cy + 44);
+                break;
+            }
+        }
+    }
+
+    function init() {
+        const grid = document.getElementById('symbolGrid');
+        symbols.forEach((s, i) => {
+            const card = document.createElement('div');
+            card.className = 'symbol-card';
+            card.dataset.idx = i;
+            card.innerHTML = `<canvas id="symCvs${i}"></canvas><div class="label">${s.name}</div>`;
+            card.addEventListener('click', () => select(i));
+            card.addEventListener('mouseenter', () => { if (activeIdx !== i) highlight(i, true); });
+            card.addEventListener('mouseleave', () => { if (activeIdx !== i) highlight(i, false); });
+            grid.appendChild(card);
+        });
+        requestAnimationFrame(renderAll);
+    }
+
+    function renderAll() {
+        symbols.forEach((s, i) => {
+            const cvs = document.getElementById('symCvs' + i);
+            const { w, h } = getCanvasSize(cvs);
+            const ctx = sizeCanvas(cvs, w, h);
+            drawGrid(ctx, w, h, 20);
+            drawSymbol(ctx, s.id, w, h, activeIdx === i);
+        });
+    }
+
+    function highlight(idx, on) {
+        const cvs = document.getElementById('symCvs' + idx);
+        const { w, h } = getCanvasSize(cvs);
+        const ctx = sizeCanvas(cvs, w, h);
+        drawGrid(ctx, w, h, 20);
+        drawSymbol(ctx, symbols[idx].id, w, h, on);
+    }
+
+    function select(idx) {
+        const prev = activeIdx;
+        activeIdx = idx;
+        document.querySelectorAll('.symbol-card').forEach((c, i) => c.classList.toggle('active', i === idx));
+        if (prev >= 0) highlight(prev, false);
+        highlight(idx, true);
+        showDetail(idx);
+    }
+
+    function showDetail(idx) {
+        const s = symbols[idx];
+        const el = document.getElementById('symbolDetail');
+        el.innerHTML = `
+            <h4>${s.name}（${s.ieee}）</h4>
+            <div class="detail-row"><span class="detail-label">IEEE 标准名称</span><span class="detail-value">${s.ieee}</span></div>
+            <div class="detail-row"><span class="detail-label">典型参数范围</span><span class="detail-value">${s.params}</span></div>
+            <div class="detail-row"><span class="detail-label">说明</span><span class="detail-value" style="text-align:right;max-width:340px;">${s.desc}</span></div>
+        `;
+        el.classList.add('visible');
+        gsap.from(el, { opacity: 0, y: 10, duration: 0.35, ease: 'power2.out' });
+    }
+
+    return { init, renderAll };
+})();
+
+/* ================================================================
+   2. 原理图绘制规则
+   ================================================================ */
+const RulesDemo = (() => {
+    let correct = true;
+    const rules = [
+        { label: '信号流向 左→右', color: C.green },
+        { label: '电源在上，地在下', color: C.blue },
+        { label: '避免四线交叉', color: C.purple },
+        { label: '连接点用圆点标注', color: C.orange }
+    ];
+    let activeRule = -1;
+
+    function init() {
+        const list = document.getElementById('ruleList');
+        rules.forEach((r, i) => {
+            const el = document.createElement('div');
+            el.className = 'rule-item';
+            el.innerHTML = `<span class="rule-dot" style="background:${r.color}"></span>${r.label}`;
+            el.addEventListener('click', () => { activeRule = activeRule === i ? -1 : i; draw(); updateRuleItems(); });
+            list.appendChild(el);
+        });
+        draw();
+    }
+
+    function updateRuleItems() {
+        document.querySelectorAll('.rule-item').forEach((el, i) => el.classList.toggle('active', i === activeRule));
+    }
+
+    function setMode(isCorrect) {
+        correct = isCorrect;
+        document.getElementById('btnRuleCorrect').classList.toggle('active', isCorrect);
+        document.getElementById('btnRuleWrong').classList.toggle('active', !isCorrect);
+        draw();
+    }
+
+    function draw() {
+        const cvs = document.getElementById('rulesCanvas');
+        const { w, h } = getCanvasSize(cvs);
+        const ctx = sizeCanvas(cvs, w, h);
+        drawGrid(ctx, w, h, 20);
+
+        ctx.font = '13px Noto Sans SC, sans-serif';
+        ctx.textBaseline = 'middle';
+
+        if (correct) drawCorrect(ctx, w, h);
+        else drawWrong(ctx, w, h);
+
+        // mode label
+        ctx.font = 'bold 14px Noto Sans SC'; ctx.textAlign = 'right';
+        ctx.fillStyle = correct ? C.green : C.red;
+        ctx.fillText(correct ? '正确示例' : '错误示例', w - 16, 24);
+        ctx.textAlign = 'start';
+    }
+
+    function drawCorrect(ctx, w, h) {
+        const mx = w / 2, my = h / 2;
+
+        // VCC at top
+        ctx.strokeStyle = C.blue; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(mx, 40); ctx.lineTo(mx, 70); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(mx - 18, 40); ctx.lineTo(mx + 18, 40); ctx.stroke();
+        ctx.fillStyle = C.blue; ctx.font = '12px JetBrains Mono';
+        ctx.fillText('VCC', mx - 14, 32);
+
+        // Signal flow left to right
+        ctx.strokeStyle = C.green; ctx.lineWidth = 2;
+        // Input label
+        ctx.fillStyle = C.green; ctx.font = '12px Noto Sans SC';
+        ctx.fillText('输入', 40, my);
+        // wire from left
+        ctx.beginPath(); ctx.moveTo(80, my); ctx.lineTo(160, my); ctx.stroke();
+
+        // Resistor box
+        ctx.strokeStyle = C.wire; ctx.lineWidth = 2;
+        ctx.strokeRect(160, my - 15, 60, 30);
+        ctx.fillStyle = C.white; ctx.font = '11px JetBrains Mono'; ctx.textAlign = 'center';
+        ctx.fillText('R1', 190, my + 4); ctx.textAlign = 'start';
+
+        // wire to capacitor
+        ctx.strokeStyle = C.green;
+        ctx.beginPath(); ctx.moveTo(220, my); ctx.lineTo(300, my); ctx.stroke();
+
+        // junction dot
+        ctx.fillStyle = C.orange;
+        ctx.beginPath(); ctx.arc(300, my, 4, 0, Math.PI * 2); ctx.fill();
+
+        // Capacitor
+        ctx.strokeStyle = C.wire; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(300, my); ctx.lineTo(300, my + 30); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(288, my + 30); ctx.lineTo(312, my + 30); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(288, my + 38); ctx.lineTo(312, my + 38); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(300, my + 38); ctx.lineTo(300, my + 65); ctx.stroke();
+        ctx.fillStyle = C.white; ctx.font = '11px JetBrains Mono';
+        ctx.fillText('C1', 316, my + 38);
+
+        // wire to output
+        ctx.strokeStyle = C.green;
+        ctx.beginPath(); ctx.moveTo(300, my); ctx.lineTo(400, my); ctx.stroke();
+        ctx.fillStyle = C.green; ctx.font = '12px Noto Sans SC';
+        ctx.fillText('输出', 410, my);
+
+        // GND at bottom
+        ctx.strokeStyle = C.blue;
+        const gy = my + 65;
+        ctx.beginPath(); ctx.moveTo(300, gy); ctx.lineTo(300, gy + 12); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(288, gy + 12); ctx.lineTo(312, gy + 12); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(292, gy + 17); ctx.lineTo(308, gy + 17); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(296, gy + 22); ctx.lineTo(304, gy + 22); ctx.stroke();
+        ctx.fillStyle = C.blue; ctx.font = '12px JetBrains Mono';
+        ctx.fillText('GND', 314, gy + 22);
+
+        // VCC to R1 connection
+        ctx.strokeStyle = C.blue;
+        ctx.beginPath(); ctx.moveTo(mx, 70); ctx.lineTo(mx, my - 40); ctx.stroke();
+
+        // Power arrow
+        drawArrow(ctx, mx, my - 40, mx, my - 50, C.blue);
+
+        // annotation highlights if rule selected
+        if (activeRule === 0) drawAnnotation(ctx, 80, my - 30, 400, my - 30, '信号流向', C.green);
+        if (activeRule === 1) drawAnnotation(ctx, mx + 30, 40, mx + 30, gy + 22, '电源→地', C.blue);
+        if (activeRule === 2) { ctx.fillStyle = C.purple; ctx.font = '11px Noto Sans SC'; ctx.fillText('无四线交叉', 340, my - 40); }
+        if (activeRule === 3) { ctx.strokeStyle = C.orange; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(300, my, 10, 0, Math.PI * 2); ctx.stroke(); ctx.fillStyle = C.orange; ctx.font = '11px Noto Sans SC'; ctx.fillText('连接点', 314, my - 10); }
+    }
+
+    function drawWrong(ctx, w, h) {
+        const mx = w / 2, my = h / 2;
+
+        ctx.globalAlpha = 0.9;
+
+        // Signal flow goes right to left (wrong)
+        ctx.fillStyle = C.red; ctx.font = '12px Noto Sans SC';
+        ctx.fillText('输出', 40, my);
+        ctx.fillText('输入', w - 80, my);
+
+        ctx.strokeStyle = '#884444'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(80, my); ctx.lineTo(160, my); ctx.stroke();
+        ctx.strokeRect(160, my - 15, 60, 30);
+        ctx.fillStyle = C.white; ctx.font = '11px JetBrains Mono'; ctx.textAlign = 'center';
+        ctx.fillText('R1', 190, my + 4); ctx.textAlign = 'start';
+        ctx.strokeStyle = '#884444';
+        ctx.beginPath(); ctx.moveTo(220, my); ctx.lineTo(w - 90, my); ctx.stroke();
+
+        // GND at top (wrong)
+        ctx.strokeStyle = '#884444';
+        ctx.beginPath(); ctx.moveTo(mx, 40); ctx.lineTo(mx, 70); ctx.stroke();
+        ctx.fillStyle = C.red; ctx.font = '12px JetBrains Mono';
+        ctx.fillText('GND', mx - 16, 32);
+        ctx.beginPath(); ctx.moveTo(mx - 18, 40); ctx.lineTo(mx + 18, 40); ctx.stroke();
+
+        // VCC at bottom (wrong)
+        const gy = my + 80;
+        ctx.fillText('VCC', mx - 16, gy + 20);
+        ctx.beginPath(); ctx.moveTo(mx - 18, gy + 10); ctx.lineTo(mx + 18, gy + 10); ctx.stroke();
+
+        // 4-way junction (wrong)
+        const jx = 300, jy = my;
+        ctx.strokeStyle = '#884444';
+        ctx.beginPath(); ctx.moveTo(jx, jy - 40); ctx.lineTo(jx, jy + 40); ctx.stroke();
+        // No dot at junction
+        ctx.strokeStyle = C.red; ctx.setLineDash([4, 3]);
+        ctx.beginPath(); ctx.arc(jx, jy, 12, 0, Math.PI * 2); ctx.stroke();
+        ctx.setLineDash([]);
+
+        // X marks
+        ctx.strokeStyle = C.red; ctx.lineWidth = 2.5;
+        const marks = [[60, my - 20], [mx - 30, 50], [jx - 16, jy - 16]];
+        marks.forEach(([x, y]) => {
+            ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + 16, y + 16); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(x + 16, y); ctx.lineTo(x, y + 16); ctx.stroke();
+        });
+
+        // wrong annotations
+        ctx.font = '11px Noto Sans SC'; ctx.fillStyle = C.red;
+        ctx.fillText('信号方向反了', 60, my + 36);
+        ctx.fillText('电源/地位置颠倒', mx + 24, 54);
+        ctx.fillText('四线交叉且无连接点标注', jx + 16, jy - 20);
+
+        ctx.globalAlpha = 1;
+    }
+
+    function drawArrow(ctx, x1, y1, x2, y2, color) {
+        ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+        const angle = Math.atan2(y2 - y1, x2 - x1);
+        ctx.beginPath();
+        ctx.moveTo(x2, y2);
+        ctx.lineTo(x2 - 8 * Math.cos(angle - 0.4), y2 - 8 * Math.sin(angle - 0.4));
+        ctx.lineTo(x2 - 8 * Math.cos(angle + 0.4), y2 - 8 * Math.sin(angle + 0.4));
+        ctx.closePath(); ctx.fill();
+    }
+
+    function drawAnnotation(ctx, x1, y1, x2, y2, text, color) {
+        ctx.strokeStyle = color; ctx.setLineDash([5, 4]); ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+        ctx.setLineDash([]);
+        drawArrow(ctx, x1, y1, x2, y2, color);
+        ctx.fillStyle = color; ctx.font = '11px Noto Sans SC';
+        ctx.fillText(text, (x1 + x2) / 2 + 6, (y1 + y2) / 2 - 6);
+    }
+
+    return { init, setMode, draw };
+})();
+
+/* ================================================================
+   3. 网表生成
+   ================================================================ */
+const NetlistDemo = (() => {
+    let generated = false;
+    let hlComp = null;
+
+    const comps = [
+        { ref: 'R1', type: 'Resistor', value: '1kΩ', x: 180, y: 160, w: 60, h: 24, nets: ['IN', 'MID'] },
+        { ref: 'C1', type: 'Capacitor', value: '100nF', x: 320, y: 200, w: 24, h: 50, nets: ['MID', 'GND'] }
+    ];
+    const nets = [
+        { name: 'IN', desc: '输入网络', comps: ['R1 pin1'] },
+        { name: 'MID', desc: '中间节点', comps: ['R1 pin2', 'C1 pin1'] },
+        { name: 'GND', desc: '接地网络', comps: ['C1 pin2'] },
+        { name: 'OUT', desc: '输出网络', comps: ['C1 pin1 (= MID)'] }
+    ];
+
+    function init() { draw(); }
+
+    function draw() {
+        const cvs = document.getElementById('netlistCanvas');
+        const { w, h } = getCanvasSize(cvs);
+        const ctx = sizeCanvas(cvs, w, h);
+        drawGrid(ctx, w, h, 20);
+
+        const ox = (w - 480) / 2, oy = 20;
+        ctx.save(); ctx.translate(ox, oy);
+
+        ctx.font = '12px Noto Sans SC'; ctx.fillStyle = C.white;
+        ctx.fillText('RC 低通滤波器', 160, 20);
+
+        // VCC symbol
+        ctx.strokeStyle = C.blue; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(60, 60); ctx.lineTo(60, 45); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(48, 45); ctx.lineTo(72, 45); ctx.stroke();
+        ctx.fillStyle = C.blue; ctx.font = '11px JetBrains Mono'; ctx.fillText('IN', 45, 38);
+
+        // Wire down to junction
+        ctx.strokeStyle = C.wire; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(60, 60); ctx.lineTo(60, 140); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(60, 140); ctx.lineTo(160, 140); ctx.stroke();
+
+        // R1
+        const r = comps[0];
+        const rhl = hlComp === 'R1';
+        ctx.strokeStyle = rhl ? C.green : C.wire; ctx.lineWidth = rhl ? 3 : 2;
+        ctx.strokeRect(160, 128, 80, 24);
+        ctx.fillStyle = rhl ? C.green : C.white; ctx.font = '11px JetBrains Mono'; ctx.textAlign = 'center';
+        ctx.fillText('R1  1kΩ', 200, 144); ctx.textAlign = 'start';
+
+        // Wire R1 to junction
+        ctx.strokeStyle = C.wire; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(240, 140); ctx.lineTo(320, 140); ctx.stroke();
+
+        // Junction dot
+        ctx.fillStyle = C.orange;
+        ctx.beginPath(); ctx.arc(320, 140, 4, 0, Math.PI * 2); ctx.fill();
+
+        // C1
+        const chl = hlComp === 'C1';
+        ctx.strokeStyle = chl ? C.green : C.wire; ctx.lineWidth = chl ? 3 : 2;
+        ctx.beginPath(); ctx.moveTo(320, 140); ctx.lineTo(320, 180); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(306, 180); ctx.lineTo(334, 180); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(306, 190); ctx.lineTo(334, 190); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(320, 190); ctx.lineTo(320, 230); ctx.stroke();
+        ctx.fillStyle = chl ? C.green : C.white; ctx.font = '11px JetBrains Mono';
+        ctx.fillText('C1', 340, 180);
+        ctx.fillText('100nF', 340, 195);
+
+        // Output wire
+        ctx.strokeStyle = C.wire; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(320, 140); ctx.lineTo(420, 140); ctx.stroke();
+        ctx.fillStyle = C.green; ctx.font = '12px Noto Sans SC';
+        ctx.fillText('OUT', 425, 144);
+
+        // GND
+        ctx.strokeStyle = C.blue;
+        const gy = 230;
+        ctx.beginPath(); ctx.moveTo(320, gy); ctx.lineTo(320, gy + 12); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(308, gy + 12); ctx.lineTo(332, gy + 12); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(312, gy + 17); ctx.lineTo(328, gy + 17); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(316, gy + 22); ctx.lineTo(324, gy + 22); ctx.stroke();
+        ctx.fillStyle = C.blue; ctx.font = '11px JetBrains Mono';
+        ctx.fillText('GND', 336, gy + 22);
+
+        // Net labels
+        if (generated) {
+            ctx.font = '10px JetBrains Mono';
+            ctx.fillStyle = hlComp === 'NET_IN' ? C.green : C.yellow;
+            ctx.fillText('NET: IN', 70, 100);
+            ctx.fillStyle = hlComp === 'NET_MID' ? C.green : C.yellow;
+            ctx.fillText('NET: MID', 270, 120);
+            ctx.fillStyle = hlComp === 'NET_GND' ? C.green : C.yellow;
+            ctx.fillText('NET: GND', 336, gy + 2);
+            ctx.fillStyle = hlComp === 'NET_OUT' ? C.green : C.yellow;
+            ctx.fillText('NET: OUT', 375, 126);
+        }
+
+        ctx.restore();
+    }
+
+    function generate() {
+        generated = true;
+        draw();
+        const out = document.getElementById('netlistOutput');
+        out.innerHTML = '';
+
+        const lines = [
+            { text: '* RC Low-Pass Filter Netlist', comp: null },
+            { text: '', comp: null },
+            { text: '.component R1 Resistor 1kΩ', comp: 'R1' },
+            { text: '  .pin 1 -> NET: IN', comp: 'NET_IN' },
+            { text: '  .pin 2 -> NET: MID', comp: 'NET_MID' },
+            { text: '', comp: null },
+            { text: '.component C1 Capacitor 100nF', comp: 'C1' },
+            { text: '  .pin 1 -> NET: MID', comp: 'NET_MID' },
+            { text: '  .pin 2 -> NET: GND', comp: 'NET_GND' },
+            { text: '', comp: null },
+            { text: '.net IN   (R1.1)', comp: 'NET_IN' },
+            { text: '.net MID  (R1.2, C1.1, OUT)', comp: 'NET_MID' },
+            { text: '.net GND  (C1.2)', comp: 'NET_GND' },
+            { text: '.net OUT  (MID)', comp: 'NET_OUT' },
+            { text: '', comp: null },
+            { text: '.end', comp: null }
+        ];
+
+        lines.forEach((l, i) => {
+            const span = document.createElement('div');
+            span.className = 'net-line';
+            span.textContent = l.text || '\u00A0';
+            if (l.comp) {
+                span.addEventListener('mouseenter', () => { hlComp = l.comp; span.classList.add('hl'); draw(); });
+                span.addEventListener('mouseleave', () => { hlComp = null; span.classList.remove('hl'); draw(); });
+            }
+            span.style.opacity = '0';
+            out.appendChild(span);
+            gsap.to(span, { opacity: 1, delay: i * 0.07, duration: 0.3 });
+        });
+    }
+
+    function reset() {
+        generated = false;
+        hlComp = null;
+        document.getElementById('netlistOutput').innerHTML = '<span style="color:var(--text-muted);">点击"生成网表"按钮...</span>';
+        draw();
+    }
+
+    return { init, draw, generate, reset };
+})();
+
+/* ================================================================
+   4. 层次化设计
+   ================================================================ */
+const HierDemo = (() => {
+    let level = 'top'; // 'top' | 'power' | 'signal' | 'mcu'
+    const blocks = {
+        top: [
+            { id: 'power', label: '电源模块', x: 0.1, y: 0.3, w: 0.2, h: 0.35, color: C.orange },
+            { id: 'mcu', label: 'MCU 核心', x: 0.4, y: 0.25, w: 0.22, h: 0.45, color: C.blue },
+            { id: 'signal', label: '信号调理', x: 0.72, y: 0.3, w: 0.2, h: 0.35, color: C.purple }
+        ]
+    };
+
+    function init() { updateBreadcrumb(); draw(); setupEvents(); }
+
+    function updateBreadcrumb() {
+        const bc = document.getElementById('hierBreadcrumb');
+        let html = `<span class="hier-crumb ${level === 'top' ? 'current' : ''}" onclick="HierDemo.goTo('top')">顶层设计</span>`;
+        if (level !== 'top') {
+            const names = { power: '电源模块', mcu: 'MCU 核心', signal: '信号调理' };
+            html += `<span class="hier-sep">›</span><span class="hier-crumb current">${names[level]}</span>`;
+        }
+        bc.innerHTML = html;
+    }
+
+    function goTo(lv) {
+        level = lv;
+        updateBreadcrumb();
+        draw();
+    }
+
+    function draw() {
+        const cvs = document.getElementById('hierCanvas');
+        const { w, h } = getCanvasSize(cvs);
+        const ctx = sizeCanvas(cvs, w, h);
+        drawGrid(ctx, w, h, 20);
+
+        if (level === 'top') drawTopLevel(ctx, w, h);
+        else drawSubSheet(ctx, w, h, level);
+    }
+
+    function drawTopLevel(ctx, w, h) {
+        ctx.font = 'bold 14px Noto Sans SC'; ctx.fillStyle = C.white; ctx.textAlign = 'center';
+        ctx.fillText('顶层方框图', w / 2, 30); ctx.textAlign = 'start';
+
+        blocks.top.forEach(b => {
+            const bx = b.x * w, by = b.y * h, bw = b.w * w, bh = b.h * h;
+            // shadow
+            ctx.fillStyle = 'rgba(0,0,0,0.2)';
+            ctx.fillRect(bx + 4, by + 4, bw, bh);
+            // block
+            ctx.fillStyle = b.color + '22';
+            ctx.fillRect(bx, by, bw, bh);
+            ctx.strokeStyle = b.color; ctx.lineWidth = 2;
+            ctx.strokeRect(bx, by, bw, bh);
+            // label
+            ctx.fillStyle = b.color; ctx.font = 'bold 13px Noto Sans SC'; ctx.textAlign = 'center';
+            ctx.fillText(b.label, bx + bw / 2, by + bh / 2 - 8);
+            ctx.fillStyle = C.muted; ctx.font = '11px Noto Sans SC';
+            ctx.fillText('点击进入 →', bx + bw / 2, by + bh / 2 + 12);
+            ctx.textAlign = 'start';
+
+            // hierarchical pins
+            ctx.fillStyle = b.color;
+            const pinR = 4;
+            ctx.beginPath(); ctx.arc(bx, by + bh * 0.3, pinR, 0, Math.PI * 2); ctx.fill();
+            ctx.beginPath(); ctx.arc(bx, by + bh * 0.7, pinR, 0, Math.PI * 2); ctx.fill();
+            ctx.beginPath(); ctx.arc(bx + bw, by + bh * 0.3, pinR, 0, Math.PI * 2); ctx.fill();
+            ctx.beginPath(); ctx.arc(bx + bw, by + bh * 0.7, pinR, 0, Math.PI * 2); ctx.fill();
+        });
+
+        // connection wires between blocks
+        const b0 = blocks.top[0], b1 = blocks.top[1], b2 = blocks.top[2];
+        ctx.strokeStyle = C.wire; ctx.lineWidth = 2;
+        // power -> mcu
+        ctx.beginPath();
+        ctx.moveTo((b0.x + b0.w) * w, (b0.y + b0.h * 0.3) * h);
+        ctx.lineTo(b1.x * w, (b1.y + b1.h * 0.3) * h);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo((b0.x + b0.w) * w, (b0.y + b0.h * 0.7) * h);
+        ctx.lineTo(b1.x * w, (b1.y + b1.h * 0.7) * h);
+        ctx.stroke();
+        // mcu -> signal
+        ctx.beginPath();
+        ctx.moveTo((b1.x + b1.w) * w, (b1.y + b1.h * 0.3) * h);
+        ctx.lineTo(b2.x * w, (b2.y + b2.h * 0.3) * h);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo((b1.x + b1.w) * w, (b1.y + b1.h * 0.7) * h);
+        ctx.lineTo(b2.x * w, (b2.y + b2.h * 0.7) * h);
+        ctx.stroke();
+
+        // wire labels
+        ctx.font = '10px JetBrains Mono'; ctx.fillStyle = C.yellow;
+        ctx.fillText('VCC_3V3', ((b0.x + b0.w) * w + b1.x * w) / 2 - 20, (b0.y + b0.h * 0.3) * h - 8);
+        ctx.fillText('GND', ((b0.x + b0.w) * w + b1.x * w) / 2 - 8, (b0.y + b0.h * 0.7) * h - 8);
+        ctx.fillText('SPI_CLK', ((b1.x + b1.w) * w + b2.x * w) / 2 - 22, (b1.y + b1.h * 0.3) * h - 8);
+        ctx.fillText('SPI_DATA', ((b1.x + b1.w) * w + b2.x * w) / 2 - 24, (b1.y + b1.h * 0.7) * h - 8);
+    }
+
+    function drawSubSheet(ctx, w, h, id) {
+        const names = { power: '电源模块', mcu: 'MCU 核心', signal: '信号调理' };
+        const colors = { power: C.orange, mcu: C.blue, signal: C.purple };
+        const col = colors[id];
+
+        ctx.font = 'bold 14px Noto Sans SC'; ctx.fillStyle = col; ctx.textAlign = 'center';
+        ctx.fillText(`子图：${names[id]}`, w / 2, 30); ctx.textAlign = 'start';
+
+        // sheet border
+        const mx = 40, my = 50, sw = w - 80, sh = h - 80;
+        ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.setLineDash([6, 4]);
+        ctx.strokeRect(mx, my, sw, sh);
+        ctx.setLineDash([]);
+
+        // hierarchical pins on left edge
+        ctx.fillStyle = col; ctx.font = '11px JetBrains Mono';
+        const lpins = id === 'power' ? ['VIN', 'EN'] : id === 'mcu' ? ['VCC', 'GND'] : ['SPI_CLK', 'SPI_DATA'];
+        const rpins = id === 'power' ? ['VCC_3V3', 'GND'] : id === 'mcu' ? ['SPI_CLK', 'SPI_DATA'] : ['ADC_OUT', 'STATUS'];
+
+        lpins.forEach((p, i) => {
+            const py = my + sh * 0.3 + i * sh * 0.35;
+            ctx.beginPath(); ctx.arc(mx, py, 5, 0, Math.PI * 2); ctx.fill();
+            ctx.fillText(p, mx + 12, py + 4);
+            ctx.strokeStyle = C.wire; ctx.lineWidth = 1.5;
+            ctx.beginPath(); ctx.moveTo(mx, py); ctx.lineTo(mx + 60, py); ctx.stroke();
+        });
+        rpins.forEach((p, i) => {
+            const py = my + sh * 0.3 + i * sh * 0.35;
+            ctx.beginPath(); ctx.arc(mx + sw, py, 5, 0, Math.PI * 2); ctx.fill();
+            ctx.textAlign = 'right';
+            ctx.fillText(p, mx + sw - 12, py + 4);
+            ctx.textAlign = 'start';
+            ctx.strokeStyle = C.wire; ctx.lineWidth = 1.5;
+            ctx.beginPath(); ctx.moveTo(mx + sw, py); ctx.lineTo(mx + sw - 60, py); ctx.stroke();
+        });
+
+        // internal components
+        ctx.fillStyle = col + '33'; ctx.strokeStyle = col; ctx.lineWidth = 1.5;
+        if (id === 'power') {
+            // LDO regulator
+            const rx = mx + sw * 0.3, ry = my + sh * 0.3;
+            ctx.strokeRect(rx, ry, 120, 60);
+            ctx.fillRect(rx, ry, 120, 60);
+            ctx.fillStyle = col; ctx.font = 'bold 12px JetBrains Mono'; ctx.textAlign = 'center';
+            ctx.fillText('LDO', rx + 60, ry + 25);
+            ctx.font = '10px Noto Sans SC';
+            ctx.fillText('AMS1117-3.3', rx + 60, ry + 45);
+            ctx.textAlign = 'start';
+            // decoupling caps
+            ctx.strokeStyle = col;
+            ctx.strokeRect(rx - 40, ry + 80, 40, 30);
+            ctx.fillStyle = col; ctx.font = '10px JetBrains Mono';
+            ctx.fillText('C_in', rx - 35, ry + 100);
+            ctx.strokeRect(rx + 120, ry + 80, 40, 30);
+            ctx.fillText('C_out', rx + 125, ry + 100);
+        } else if (id === 'mcu') {
+            const rx = mx + sw * 0.25, ry = my + sh * 0.2;
+            ctx.strokeRect(rx, ry, 160, 100);
+            ctx.fillRect(rx, ry, 160, 100);
+            ctx.fillStyle = col; ctx.font = 'bold 12px JetBrains Mono'; ctx.textAlign = 'center';
+            ctx.fillText('STM32F103', rx + 80, ry + 35);
+            ctx.font = '10px Noto Sans SC';
+            ctx.fillText('ARM Cortex-M3', rx + 80, ry + 55);
+            ctx.fillText('48-pin LQFP', rx + 80, ry + 75);
+            ctx.textAlign = 'start';
+            // crystal
+            ctx.strokeRect(rx + 40, ry + 120, 80, 30);
+            ctx.fillStyle = col; ctx.font = '10px JetBrains Mono'; ctx.textAlign = 'center';
+            ctx.fillText('Y1 8MHz', rx + 80, ry + 140); ctx.textAlign = 'start';
+        } else {
+            const rx = mx + sw * 0.25, ry = my + sh * 0.2;
+            ctx.strokeRect(rx, ry, 140, 70);
+            ctx.fillRect(rx, ry, 140, 70);
+            ctx.fillStyle = col; ctx.font = 'bold 12px JetBrains Mono'; ctx.textAlign = 'center';
+            ctx.fillText('OpAmp', rx + 70, ry + 30);
+            ctx.font = '10px Noto Sans SC';
+            ctx.fillText('信号放大 / 滤波', rx + 70, ry + 50);
+            ctx.textAlign = 'start';
+            // resistor network
+            ctx.strokeRect(rx + 20, ry + 90, 100, 25);
+            ctx.fillStyle = col; ctx.font = '10px JetBrains Mono'; ctx.textAlign = 'center';
+            ctx.fillText('R_fb / R_g', rx + 70, ry + 107); ctx.textAlign = 'start';
+        }
+
+        // hint
+        ctx.fillStyle = C.muted; ctx.font = '11px Noto Sans SC'; ctx.textAlign = 'center';
+        ctx.fillText('层次化引脚连接至上层网络', w / 2, h - 20);
+        ctx.textAlign = 'start';
+    }
+
+    function setupEvents() {
+        const cvs = document.getElementById('hierCanvas');
+        cvs.addEventListener('click', (e) => {
+            if (level !== 'top') return;
+            const rect = cvs.getBoundingClientRect();
+            const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+            const w = cvs.clientWidth, h = cvs.clientHeight;
+            for (const b of blocks.top) {
+                const bx = b.x * w, by = b.y * h, bw = b.w * w, bh = b.h * h;
+                if (mx >= bx && mx <= bx + bw && my >= by && my <= by + bh) {
+                    goTo(b.id);
+                    return;
+                }
+            }
+        });
+        cvs.style.cursor = 'pointer';
+    }
+
+    return { init, goTo, draw };
+})();
+
+/* ================================================================
+   5. 实战：LED 驱动电路
+   ================================================================ */
+const LEDDemo = (() => {
+    function init() {
+        document.getElementById('vccSlider').addEventListener('input', update);
+        document.getElementById('resSlider').addEventListener('input', update);
+        document.getElementById('ledColor').addEventListener('change', update);
+        update();
+        renderFormula();
+    }
+
+    function getParams() {
+        const vcc = parseFloat(document.getElementById('vccSlider').value);
+        const r = parseFloat(document.getElementById('resSlider').value);
+        const sel = document.getElementById('ledColor');
+        const vf = parseFloat(sel.value);
+        const color = sel.options[sel.selectedIndex].dataset.color;
+        return { vcc, r, vf, color };
+    }
+
+    function update() {
+        const { vcc, r, vf, color } = getParams();
+        document.getElementById('vccVal').textContent = vcc.toFixed(1) + 'V';
+        document.getElementById('resVal').textContent = r + 'Ω';
+
+        const vr = Math.max(0, vcc - vf);
+        const i = vr / r; // Amps
+        const imA = i * 1000;
+        const pR = i * i * r * 1000; // mW
+        const pLED = vf * i * 1000;
+        const pTot = pR + pLED;
+
+        document.getElementById('readCurrent').textContent = imA.toFixed(1);
+        document.getElementById('readPowerR').textContent = pR.toFixed(1);
+        document.getElementById('readPowerLED').textContent = pLED.toFixed(1);
+        document.getElementById('readPowerTotal').textContent = pTot.toFixed(1);
+
+        // color coding for dangerous current
+        const curEl = document.getElementById('readCurrent');
+        curEl.style.color = imA > 20 ? C.red : imA < 2 ? C.muted : C.green;
+
+        draw(vcc, r, vf, i, color);
+    }
+
+    function draw(vcc, r, vf, current, ledColor) {
+        const cvs = document.getElementById('ledCanvas');
+        const { w, h } = getCanvasSize(cvs);
+        const ctx = sizeCanvas(cvs, w, h);
+        drawGrid(ctx, w, h, 20);
+
+        const cx = w / 2, startY = 50, endY = h - 50;
+        const brightness = Math.min(1, Math.max(0, (current * 1000) / 20));
+
+        // VCC
+        ctx.strokeStyle = C.blue; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(cx - 20, startY); ctx.lineTo(cx + 20, startY); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(cx, startY); ctx.lineTo(cx, startY + 30); ctx.stroke();
+        ctx.fillStyle = C.blue; ctx.font = 'bold 12px JetBrains Mono'; ctx.textAlign = 'center';
+        ctx.fillText(`VCC = ${vcc.toFixed(1)}V`, cx, startY - 10);
+
+        // Wire to resistor
+        ctx.strokeStyle = C.wire; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(cx, startY + 30); ctx.lineTo(cx, startY + 60); ctx.stroke();
+
+        // Resistor (zigzag)
+        const ry = startY + 60;
+        ctx.strokeStyle = C.wire; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(cx, ry);
+        const segH = 80 / 6;
+        for (let i = 0; i < 6; i++) {
+            ctx.lineTo(cx - 14, ry + segH * i + segH * 0.25);
+            ctx.lineTo(cx + 14, ry + segH * i + segH * 0.75);
+            ctx.lineTo(cx, ry + segH * (i + 1));
+        }
+        ctx.stroke();
+        ctx.fillStyle = C.white; ctx.font = '11px JetBrains Mono';
+        ctx.fillText(`R = ${r}Ω`, cx + 24, ry + 40);
+
+        // Voltage across R annotation
+        const vrVal = Math.max(0, vcc - vf);
+        ctx.fillStyle = C.yellow; ctx.font = '10px JetBrains Mono';
+        ctx.fillText(`Vr = ${vrVal.toFixed(2)}V`, cx - 60, ry + 40);
+
+        // Wire to LED
+        const ledY = ry + 85;
+        ctx.strokeStyle = C.wire; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(cx, ry + 80); ctx.lineTo(cx, ledY); ctx.stroke();
+
+        // LED (triangle + line)
+        ctx.strokeStyle = ledColor; ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(cx - 16, ledY);
+        ctx.lineTo(cx + 16, ledY);
+        ctx.lineTo(cx, ledY + 30);
+        ctx.closePath();
+        ctx.fillStyle = ledColor + Math.round(brightness * 180 + 40).toString(16).padStart(2, '0');
+        ctx.fill(); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(cx - 16, ledY + 32); ctx.lineTo(cx + 16, ledY + 32); ctx.lineWidth = 3; ctx.stroke();
+
+        // LED glow effect
+        if (brightness > 0.05) {
+            const grad = ctx.createRadialGradient(cx, ledY + 15, 5, cx, ledY + 15, 40 * brightness);
+            grad.addColorStop(0, ledColor + Math.round(brightness * 100).toString(16).padStart(2, '0'));
+            grad.addColorStop(1, 'transparent');
+            ctx.fillStyle = grad;
+            ctx.beginPath(); ctx.arc(cx, ledY + 15, 45 * brightness, 0, Math.PI * 2); ctx.fill();
+
+            // Light rays
+            ctx.strokeStyle = ledColor + '44';
+            ctx.lineWidth = 1;
+            for (let a = -0.6; a <= 0.6; a += 0.3) {
+                const rx = cx + 20 + Math.cos(a - Math.PI / 4) * 20 * brightness;
+                const ryy = ledY + 10 + Math.sin(a - Math.PI / 4) * 20 * brightness;
+                ctx.beginPath(); ctx.moveTo(cx + 18, ledY + 10);
+                ctx.lineTo(rx + 10, ryy - 5);
+                ctx.stroke();
+            }
+        }
+
+        ctx.lineWidth = 2;
+        ctx.fillStyle = C.white; ctx.font = '11px JetBrains Mono';
+        ctx.fillText(`Vf = ${vf.toFixed(1)}V`, cx + 24, ledY + 20);
+
+        // Current arrow
+        const imA = current * 1000;
+        ctx.strokeStyle = C.green; ctx.lineWidth = 1.5;
+        const arrowX = cx - 45;
+        ctx.beginPath(); ctx.moveTo(arrowX, startY + 40); ctx.lineTo(arrowX, ledY + 20); ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(arrowX, ledY + 20);
+        ctx.lineTo(arrowX - 5, ledY + 12);
+        ctx.lineTo(arrowX + 5, ledY + 12);
+        ctx.closePath(); ctx.fillStyle = C.green; ctx.fill();
+        ctx.font = '10px JetBrains Mono'; ctx.textAlign = 'center';
+        ctx.fillText(`${imA.toFixed(1)}mA`, arrowX, startY + 30);
+        ctx.textAlign = 'center';
+
+        // Wire to GND
+        ctx.strokeStyle = C.wire; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(cx, ledY + 32); ctx.lineTo(cx, endY - 20); ctx.stroke();
+
+        // GND symbol
+        ctx.strokeStyle = C.blue; ctx.lineWidth = 2;
+        const gy = endY - 20;
+        ctx.beginPath(); ctx.moveTo(cx - 16, gy); ctx.lineTo(cx + 16, gy); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(cx - 10, gy + 6); ctx.lineTo(cx + 10, gy + 6); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(cx - 4, gy + 12); ctx.lineTo(cx + 4, gy + 12); ctx.stroke();
+        ctx.fillStyle = C.blue; ctx.font = 'bold 12px JetBrains Mono';
+        ctx.fillText('GND', cx, endY + 6);
+
+        // Warning if Vcc <= Vf
+        if (vcc <= vf) {
+            ctx.fillStyle = C.red; ctx.font = 'bold 13px Noto Sans SC';
+            ctx.fillText('VCC ≤ Vf，LED 不导通！', cx, h / 2 + 60);
+        }
+
+        ctx.textAlign = 'start';
+    }
+
+    function renderFormula() {
+        const el = document.getElementById('ledFormula');
+        katex.render('I = \\frac{V_{CC} - V_f}{R}, \\quad P_R = I^2 R, \\quad P_{LED} = V_f \\cdot I', el, {
+            displayMode: true,
+            throwOnError: false
+        });
+    }
+
+    return { init, update };
+})();
+
+/* ================================================================
+   Init & Resize
+   ================================================================ */
+function initAll() {
+    SymbolsDemo.init();
+    RulesDemo.init();
+    NetlistDemo.init();
+    HierDemo.init();
+    LEDDemo.init();
+}
+
+function onResize() {
+    SymbolsDemo.renderAll();
+    RulesDemo.draw();
+    NetlistDemo.draw();
+    HierDemo.draw();
+    LEDDemo.update();
+}
+
+window.addEventListener('DOMContentLoaded', initAll);
+window.addEventListener('resize', () => { clearTimeout(window._rsz); window._rsz = setTimeout(onResize, 150); });
+</script>
+</body>
+</html>

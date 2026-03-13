@@ -1,0 +1,1350 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>布线 — PCB 设计</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+SC:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+    <style>
+        .canvas-wrap { position: relative; width: 100%; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-md); overflow: hidden; }
+        .canvas-wrap canvas { display: block; width: 100%; cursor: crosshair; }
+        .controls-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; padding: 0.75rem 1rem; background: rgba(15,52,96,0.4); border-top: 1px solid var(--border-color); }
+        .controls-bar label { font-size: 0.82rem; color: var(--text-secondary); white-space: nowrap; }
+        .status-bar { font-family: var(--font-mono); font-size: 0.78rem; color: var(--accent-green); padding: 0.4rem 1rem; background: rgba(22,199,154,0.06); border-top: 1px solid var(--border-color); min-height: 1.8rem; }
+        .calc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
+        .calc-input-group { display: flex; flex-direction: column; gap: 0.4rem; }
+        .calc-input-group label { font-size: 0.82rem; color: var(--text-secondary); }
+        .calc-input-group input[type="number"],
+        .calc-input-group select { width: 100%; padding: 0.5rem 0.75rem; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: var(--radius-sm); color: var(--text-primary); font-family: var(--font-mono); font-size: 0.9rem; }
+        .calc-input-group input:focus, .calc-input-group select:focus { outline: none; border-color: var(--accent-green); }
+        .calc-result { padding: 1.2rem; background: rgba(22,199,154,0.08); border: 1px solid rgba(22,199,154,0.25); border-radius: var(--radius-md); text-align: center; }
+        .calc-result .big-num { font-family: var(--font-mono); font-size: 2rem; font-weight: 700; color: var(--accent-green); }
+        .calc-result .unit { font-size: 1rem; color: var(--text-secondary); margin-left: 0.3rem; }
+        .topo-card { padding: 1rem; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-md); cursor: pointer; transition: all 0.2s; }
+        .topo-card:hover, .topo-card.active { border-color: var(--accent-green); box-shadow: var(--shadow-glow); }
+        .topo-card h4 { color: var(--accent-green); margin-bottom: 0.3rem; }
+        .topo-card p { font-size: 0.82rem; margin-bottom: 0; }
+        .metric-row { display: flex; gap: 1rem; flex-wrap: wrap; margin-top: 0.75rem; }
+        .metric { padding: 0.5rem 0.8rem; background: var(--bg-primary); border-radius: var(--radius-sm); border: 1px solid var(--border-color); font-family: var(--font-mono); font-size: 0.82rem; }
+        .metric .val { color: var(--accent-green); font-weight: 600; }
+        @media (max-width: 900px) { .calc-grid { grid-template-columns: 1fr; } }
+    </style>
+</head>
+<body>
+<div class="page-container">
+    <!-- ==================== Section 1: 走线基础 ==================== -->
+    <div class="section" id="sec-basics">
+        <div class="section-title">
+            <div class="icon">1</div>
+            <h2>走线基础</h2>
+            <span class="badge badge-green">交互演示</span>
+        </div>
+        <p>PCB 走线是将原理图中的电气连接转化为铜箔走线的过程。走线的拐角方式直接影响信号完整性和制造良率。点击两个焊盘即可在它们之间自动布线，切换模式观察不同拐角的区别。</p>
+        <div class="split-layout">
+            <div class="text-panel">
+                <div class="info-box">
+                    <p><strong>操作方法：</strong>在画布上点击第一个焊盘作为起点，再点击第二个焊盘作为终点，走线将自动生成。</p>
+                </div>
+                <h3 class="mt-2">走线模式</h3>
+                <div class="btn-group mt-1" id="routeModeBtns">
+                    <button class="btn active" data-mode="45">45° 推荐</button>
+                    <button class="btn" data-mode="90">90° 避免</button>
+                    <button class="btn" data-mode="arc">弧形</button>
+                </div>
+                <div class="mt-2" id="modeExplanation">
+                    <div class="info-box success" id="explain45">
+                        <p><strong>45° 走线：</strong>行业标准做法。避免了尖锐拐角，信号反射最小，酸蚀均匀，推荐用于所有设计。</p>
+                    </div>
+                    <div class="info-box warning hidden" id="explain90">
+                        <p><strong>90° 走线 — 为什么要避免？</strong></p>
+                        <p>1. <strong>阻抗不连续：</strong>90° 拐角处走线有效宽度增大为 √2 倍，导致阻抗突变。</p>
+                        <p>2. <strong>酸液陷阱：</strong>内角处蚀刻液不易流通，可能导致过度腐蚀或残留。</p>
+                    </div>
+                    <div class="info-box hidden" id="explainArc">
+                        <p><strong>弧形走线：</strong>阻抗最平滑过渡，适用于射频 (RF) 和高速信号。制造精度要求较高。</p>
+                    </div>
+                </div>
+                <div class="slider-group mt-2">
+                    <label>走线宽度</label>
+                    <input type="range" id="traceWidthSlider" min="2" max="20" value="8">
+                    <span class="slider-value" id="traceWidthVal">8 mil</span>
+                </div>
+                <button class="btn btn-sm mt-2" id="clearRoutesBtn">清除走线</button>
+            </div>
+            <div class="viz-panel">
+                <div class="canvas-wrap">
+                    <canvas id="routingCanvas" width="700" height="500"></canvas>
+                    <div class="status-bar" id="routingStatus">点击一个焊盘开始布线</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== Section 2: 走线宽度计算 ==================== -->
+    <div class="section" id="sec-width">
+        <div class="section-title">
+            <div class="icon">2</div>
+            <h2>走线宽度计算</h2>
+            <span class="badge badge-blue">IPC-2221</span>
+        </div>
+        <p>根据 IPC-2221 标准，走线宽度由载流量、铜箔厚度和允许温升共同决定。合理的走线宽度是确保电气可靠性的基础。</p>
+        <div class="split-layout">
+            <div class="text-panel">
+                <div class="card">
+                    <h4>IPC-2221 公式</h4>
+                    <div id="ipcFormula" class="mt-1"></div>
+                    <p class="text-sm text-muted mt-1">其中 A = 截面积 (mil²)，I = 电流 (A)，ΔT = 温升 (°C)，k/b/c 为经验系数。</p>
+                </div>
+                <div class="calc-grid mt-2">
+                    <div class="calc-input-group">
+                        <label>电流 (A)</label>
+                        <input type="number" id="calcCurrent" value="1" min="0.1" max="30" step="0.1">
+                    </div>
+                    <div class="calc-input-group">
+                        <label>铜箔厚度 (oz)</label>
+                        <select id="calcCopper">
+                            <option value="0.5">0.5 oz (17.5 μm)</option>
+                            <option value="1" selected>1 oz (35 μm)</option>
+                            <option value="2">2 oz (70 μm)</option>
+                            <option value="3">3 oz (105 μm)</option>
+                        </select>
+                    </div>
+                    <div class="calc-input-group">
+                        <label>允许温升 (°C)</label>
+                        <input type="number" id="calcTempRise" value="10" min="1" max="100" step="1">
+                    </div>
+                    <div class="calc-input-group">
+                        <label>层类型</label>
+                        <select id="calcLayer">
+                            <option value="external" selected>外层</option>
+                            <option value="internal">内层</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="calc-result mt-2">
+                    <div>推荐走线宽度</div>
+                    <div class="big-num" id="calcResultWidth">10.3</div>
+                    <span class="unit">mil</span>
+                    <div class="text-sm text-muted mt-1" id="calcResultMM">≈ 0.262 mm</div>
+                </div>
+            </div>
+            <div class="viz-panel">
+                <div class="canvas-wrap">
+                    <canvas id="crossSectionCanvas" width="700" height="450"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== Section 3: 差分对布线 ==================== -->
+    <div class="section" id="sec-diff">
+        <div class="section-title">
+            <div class="icon">3</div>
+            <h2>差分对布线</h2>
+            <span class="badge badge-purple">信号完整性</span>
+        </div>
+        <p>差分信号使用一对互补信号传输数据，具有出色的抗干扰能力。差分对的间距和耦合方式直接影响差分阻抗。</p>
+        <div class="split-layout">
+            <div class="text-panel">
+                <div class="btn-group" id="couplingBtns">
+                    <button class="btn active" data-coupling="tight">紧耦合</button>
+                    <button class="btn" data-coupling="loose">松耦合</button>
+                </div>
+                <div class="slider-group mt-2">
+                    <label>线间距</label>
+                    <input type="range" id="diffSpacing" min="4" max="30" value="8">
+                    <span class="slider-value" id="diffSpacingVal">8 mil</span>
+                </div>
+                <div class="slider-group mt-1">
+                    <label>走线宽度</label>
+                    <input type="range" id="diffWidth" min="3" max="15" value="5">
+                    <span class="slider-value" id="diffWidthVal">5 mil</span>
+                </div>
+                <div class="metric-row" id="diffMetrics">
+                    <div class="metric">Z<sub>diff</sub> ≈ <span class="val" id="diffImpedance">90</span> Ω</div>
+                    <div class="metric">耦合系数 <span class="val" id="couplingCoeff">0.15</span></div>
+                </div>
+                <div class="info-box mt-2">
+                    <p><strong>等长匹配：</strong>差分对的两根走线长度必须严格一致。使用蛇形补偿来消除长度差。</p>
+                </div>
+                <label class="toggle mt-1" title="显示电场线">
+                    <input type="checkbox" id="showFieldLines" checked>
+                    <span class="track"></span>
+                </label>
+                <span class="text-sm text-muted" style="margin-left:0.5rem">显示电场线</span>
+            </div>
+            <div class="viz-panel">
+                <div class="canvas-wrap">
+                    <canvas id="diffPairCanvas" width="700" height="500"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== Section 4: 蛇形等长 ==================== -->
+    <div class="section" id="sec-meander">
+        <div class="section-title">
+            <div class="icon">4</div>
+            <h2>蛇形等长</h2>
+            <span class="badge badge-orange">时序匹配</span>
+        </div>
+        <p>在高速总线设计中（如 DDR、LVDS），同组信号的走线长度差必须控制在严格范围内。蛇形走线通过增加弯折来补偿较短的走线，使其与最长走线匹配。</p>
+        <div class="split-layout">
+            <div class="text-panel">
+                <div class="slider-group">
+                    <label>蛇形振幅</label>
+                    <input type="range" id="meanderAmp" min="10" max="80" value="30">
+                    <span class="slider-value" id="meanderAmpVal">30 mil</span>
+                </div>
+                <div class="slider-group mt-1">
+                    <label>蛇形周期</label>
+                    <input type="range" id="meanderPeriod" min="20" max="100" value="50">
+                    <span class="slider-value" id="meanderPeriodVal">50 mil</span>
+                </div>
+                <div class="metric-row" id="meanderMetrics">
+                    <div class="metric">走线 A <span class="val" id="traceLenA">0</span> mil</div>
+                    <div class="metric">走线 B <span class="val" id="traceLenB">0</span> mil</div>
+                    <div class="metric">差值 <span class="val" id="traceLenDiff">0</span> mil</div>
+                </div>
+                <div class="metric-row">
+                    <div class="metric">传播延迟差 <span class="val" id="propDelay">0</span> ps</div>
+                </div>
+                <div class="info-box mt-2">
+                    <p><strong>设计规则：</strong>DDR3 数据组内长度差通常要求 ≤ 25 mil (约 5 ps)，DDR4 要求更严格。</p>
+                </div>
+            </div>
+            <div class="viz-panel">
+                <div class="canvas-wrap">
+                    <canvas id="meanderCanvas" width="700" height="500"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== Section 5: 拓扑结构 ==================== -->
+    <div class="section" id="sec-topo">
+        <div class="section-title">
+            <div class="icon">5</div>
+            <h2>拓扑结构</h2>
+            <span class="badge badge-blue">多点网络</span>
+        </div>
+        <p>当一个网络需要连接多个器件时，不同的布线拓扑会影响信号的到达时间和完整性。选择合适的拓扑是高速设计的关键。</p>
+        <div class="compare-grid cols-4 mb-2" id="topoCards">
+            <div class="topo-card active" data-topo="star">
+                <h4>星形</h4>
+                <p>从驱动器到每个接收器独立走线，等长设计</p>
+            </div>
+            <div class="topo-card" data-topo="daisy">
+                <h4>菊花链</h4>
+                <p>驱动器串联连接各接收器，最后端接</p>
+            </div>
+            <div class="topo-card" data-topo="tbranch">
+                <h4>T 型分支</h4>
+                <p>主干线上分出支线到各接收器</p>
+            </div>
+            <div class="topo-card" data-topo="flyby">
+                <h4>飞越式</h4>
+                <p>信号依次经过各接收器，DDR 时钟常用</p>
+            </div>
+        </div>
+        <div class="split-layout">
+            <div class="text-panel">
+                <div class="info-box" id="topoInfo">
+                    <p><strong>星形拓扑：</strong>所有接收器同时收到信号。需要等长布线，占用较大面积。适用于时钟分配网络。</p>
+                </div>
+                <div class="metric-row" id="topoMetrics">
+                    <div class="metric">R1 延迟 <span class="val" id="topoDelay1">2.0</span> ns</div>
+                    <div class="metric">R2 延迟 <span class="val" id="topoDelay2">2.0</span> ns</div>
+                    <div class="metric">R3 延迟 <span class="val" id="topoDelay3">2.0</span> ns</div>
+                </div>
+                <button class="btn btn-primary btn-sm mt-2" id="topoAnimateBtn">播放信号传播</button>
+            </div>
+            <div class="viz-panel">
+                <div class="canvas-wrap">
+                    <canvas id="topoCanvas" width="700" height="460"></canvas>
+                    <div class="status-bar" id="topoStatus">选择拓扑结构观察信号传播</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+<script src="../shared/scripts/nav.js"></script>
+<script>
+/* ================================================================
+   Module 04 — 布线 (Routing)
+   ================================================================ */
+(() => {
+'use strict';
+
+/* ---------- helpers ---------- */
+const $ = s => document.querySelector(s);
+const $$ = s => [...document.querySelectorAll(s)];
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+const lerp = (a, b, t) => a + (b - a) * t;
+const dist = (a, b) => Math.hypot(b.x - a.x, b.y - a.y);
+const TAU = Math.PI * 2;
+const PI = Math.PI;
+
+const COLORS = {
+    trace: '#16c79a', traceWarn: '#ff5252', traceArc: '#4fc3f7',
+    pad: '#ffab40', padHover: '#ffd740', grid: 'rgba(42,42,74,0.5)',
+    copper: '#d4883a', substrate: '#2a6040', soldermask: '#1a4030',
+    field: 'rgba(179,136,255,0.35)', diffP: '#4fc3f7', diffN: '#ff80ab',
+    signal: '#ffd740', bg: '#16213e'
+};
+
+function initCanvas(id) {
+    const c = document.getElementById(id);
+    const dpr = window.devicePixelRatio || 1;
+    const rect = c.getBoundingClientRect();
+    c.width = rect.width * dpr;
+    c.height = rect.height * dpr;
+    const ctx = c.getContext('2d');
+    ctx.scale(dpr, dpr);
+    c.style.width = rect.width + 'px';
+    c.style.height = rect.height + 'px';
+    return { c, ctx, w: rect.width, h: rect.height };
+}
+
+function drawGrid(ctx, w, h, step = 20) {
+    ctx.strokeStyle = COLORS.grid;
+    ctx.lineWidth = 0.5;
+    for (let x = 0; x <= w; x += step) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke(); }
+    for (let y = 0; y <= h; y += step) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); }
+}
+
+/* ================================================================
+   SECTION 1: 走线基础
+   ================================================================ */
+const S1 = (() => {
+    let cv, ctx, W, H;
+    const pads = [];
+    const routes = [];
+    let selectedPad = null;
+    let hoveredPad = null;
+    let mode = '45';
+    let traceWidth = 8;
+
+    function initPads() {
+        const positions = [
+            {x:80,y:80},{x:200,y:60},{x:350,y:100},{x:500,y:70},{x:620,y:90},
+            {x:100,y:200},{x:260,y:220},{x:420,y:180},{x:560,y:210},
+            {x:80,y:340},{x:220,y:360},{x:380,y:320},{x:530,y:350},{x:640,y:300},
+            {x:160,y:440},{x:320,y:420},{x:480,y:440},{x:600,y:420}
+        ];
+        pads.length = 0;
+        positions.forEach((p, i) => pads.push({ ...p, r: 12, id: i }));
+    }
+
+    function getRoute(a, b, m) {
+        const pts = [];
+        pts.push({ x: a.x, y: a.y });
+        const dx = b.x - a.x, dy = b.y - a.y;
+        if (m === '45') {
+            const adx = Math.abs(dx), ady = Math.abs(dy);
+            const diag = Math.min(adx, ady);
+            if (adx > ady) {
+                pts.push({ x: a.x + (dx > 0 ? adx - diag : -(adx - diag)), y: a.y });
+                pts.push({ x: b.x, y: b.y });
+            } else {
+                pts.push({ x: a.x, y: a.y + (dy > 0 ? ady - diag : -(ady - diag)) });
+                pts.push({ x: b.x, y: b.y });
+            }
+        } else if (m === '90') {
+            const mx = a.x + dx * 0.5;
+            pts.push({ x: mx, y: a.y });
+            pts.push({ x: mx, y: b.y });
+            pts.push({ x: b.x, y: b.y });
+        } else {
+            pts.push({ x: b.x, y: b.y });
+        }
+        return pts;
+    }
+
+    function drawRoute(pts, m, tw, warn) {
+        ctx.save();
+        ctx.lineWidth = tw * 0.4;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.strokeStyle = warn ? COLORS.traceWarn : (m === 'arc' ? COLORS.traceArc : COLORS.trace);
+        ctx.shadowColor = ctx.strokeStyle;
+        ctx.shadowBlur = 6;
+
+        if (m === 'arc' && pts.length === 2) {
+            const a = pts[0], b = pts[1];
+            const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+            const dx = b.x - a.x, dy = b.y - a.y;
+            const nx = -dy * 0.3, ny = dx * 0.3;
+            ctx.beginPath();
+            ctx.moveTo(a.x, a.y);
+            ctx.quadraticCurveTo(mx + nx, my + ny, b.x, b.y);
+            ctx.stroke();
+        } else {
+            ctx.beginPath();
+            ctx.moveTo(pts[0].x, pts[0].y);
+            for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+            ctx.stroke();
+        }
+        ctx.restore();
+
+        /* draw 90° problem indicators */
+        if (m === '90' && pts.length >= 3) {
+            for (let i = 1; i < pts.length - 1; i++) {
+                ctx.save();
+                ctx.fillStyle = 'rgba(255,82,82,0.25)';
+                ctx.beginPath();
+                ctx.arc(pts[i].x, pts[i].y, tw * 0.8, 0, TAU);
+                ctx.fill();
+                ctx.strokeStyle = COLORS.traceWarn;
+                ctx.lineWidth = 1;
+                ctx.setLineDash([3, 3]);
+                ctx.stroke();
+                ctx.restore();
+                /* acid trap label */
+                ctx.fillStyle = COLORS.traceWarn;
+                ctx.font = '10px "JetBrains Mono"';
+                ctx.fillText('酸液陷阱', pts[i].x + 10, pts[i].y - 8);
+            }
+        }
+    }
+
+    function draw() {
+        ctx.clearRect(0, 0, W, H);
+        ctx.fillStyle = COLORS.bg;
+        ctx.fillRect(0, 0, W, H);
+        drawGrid(ctx, W, H);
+
+        /* routes */
+        routes.forEach(r => {
+            const pts = getRoute(r.a, r.b, r.mode);
+            drawRoute(pts, r.mode, r.tw, r.mode === '90');
+        });
+
+        /* pads */
+        pads.forEach(p => {
+            const isSel = selectedPad && selectedPad.id === p.id;
+            const isHov = hoveredPad && hoveredPad.id === p.id;
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.r, 0, TAU);
+            ctx.fillStyle = isSel ? COLORS.padHover : (isHov ? COLORS.padHover : COLORS.pad);
+            ctx.shadowColor = isSel ? COLORS.padHover : 'transparent';
+            ctx.shadowBlur = isSel ? 12 : 0;
+            ctx.fill();
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+            ctx.restore();
+            /* drill hole */
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, 3, 0, TAU);
+            ctx.fillStyle = COLORS.bg;
+            ctx.fill();
+        });
+    }
+
+    function hitPad(mx, my) {
+        for (const p of pads) if (dist(p, { x: mx, y: my }) < p.r + 4) return p;
+        return null;
+    }
+
+    function init() {
+        ({ c: cv, ctx, w: W, h: H } = initCanvas('routingCanvas'));
+        initPads();
+
+        cv.addEventListener('mousemove', e => {
+            const rect = cv.getBoundingClientRect();
+            const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+            hoveredPad = hitPad(mx, my);
+            cv.style.cursor = hoveredPad ? 'pointer' : 'crosshair';
+            draw();
+        });
+
+        cv.addEventListener('click', e => {
+            const rect = cv.getBoundingClientRect();
+            const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+            const p = hitPad(mx, my);
+            if (!p) return;
+            if (!selectedPad) {
+                selectedPad = p;
+                $('#routingStatus').textContent = `起点: Pad ${p.id} — 请点击终点焊盘`;
+            } else if (p.id !== selectedPad.id) {
+                routes.push({ a: selectedPad, b: p, mode, tw: traceWidth });
+                $('#routingStatus').textContent = `已连接 Pad ${selectedPad.id} → Pad ${p.id} (${mode === '45' ? '45°' : mode === '90' ? '90°' : '弧形'})`;
+                selectedPad = null;
+            }
+            draw();
+        });
+
+        $$('#routeModeBtns .btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                $$('#routeModeBtns .btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                mode = btn.dataset.mode;
+                $('#explain45').classList.toggle('hidden', mode !== '45');
+                $('#explain90').classList.toggle('hidden', mode !== '90');
+                $('#explainArc').classList.toggle('hidden', mode !== 'arc');
+            });
+        });
+
+        $('#traceWidthSlider').addEventListener('input', e => {
+            traceWidth = +e.target.value;
+            $('#traceWidthVal').textContent = traceWidth + ' mil';
+        });
+
+        $('#clearRoutesBtn').addEventListener('click', () => {
+            routes.length = 0;
+            selectedPad = null;
+            $('#routingStatus').textContent = '已清除所有走线';
+            draw();
+        });
+
+        draw();
+    }
+
+    return { init };
+})();
+
+/* ================================================================
+   SECTION 2: 走线宽度计算
+   ================================================================ */
+const S2 = (() => {
+    let cv, ctx, W, H;
+
+    const coeffs = {
+        external: { k: 0.048, b: 0.44, c: 0.725 },
+        internal: { k: 0.024, b: 0.44, c: 0.725 }
+    };
+
+    function calcWidth(I, copperOz, dT, layer) {
+        const { k, b, c } = coeffs[layer];
+        const A = (I / (k * Math.pow(dT, b))) ** (1 / c);  // mil^2
+        const thickness = copperOz * 1.378;  // mil
+        const width = A / thickness;  // mil
+        return { width: Math.max(width, 1), area: A, thickness };
+    }
+
+    function drawCrossSection(width, thickness) {
+        ctx.clearRect(0, 0, W, H);
+        ctx.fillStyle = COLORS.bg;
+        ctx.fillRect(0, 0, W, H);
+
+        const cx = W / 2, cy = H / 2;
+        const scale = 3;
+        const tw = clamp(width * scale, 40, 300);
+        const th = clamp(thickness * scale * 8, 8, 40);
+
+        /* substrate */
+        const subH = 120;
+        ctx.fillStyle = COLORS.substrate;
+        ctx.fillRect(cx - 200, cy - subH / 2, 400, subH);
+        ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(cx - 200, cy - subH / 2, 400, subH);
+
+        /* substrate label */
+        ctx.fillStyle = 'rgba(255,255,255,0.4)';
+        ctx.font = '12px "Noto Sans SC"';
+        ctx.textAlign = 'center';
+        ctx.fillText('FR-4 基板', cx, cy + 5);
+
+        /* copper trace on top */
+        const traceY = cy - subH / 2 - th;
+        ctx.fillStyle = COLORS.copper;
+        ctx.shadowColor = 'rgba(212,136,58,0.5)';
+        ctx.shadowBlur = 10;
+        ctx.beginPath();
+        ctx.moveTo(cx - tw / 2 - 3, cy - subH / 2);
+        ctx.lineTo(cx - tw / 2 + 2, traceY);
+        ctx.lineTo(cx + tw / 2 - 2, traceY);
+        ctx.lineTo(cx + tw / 2 + 3, cy - subH / 2);
+        ctx.closePath();
+        ctx.fill();
+        ctx.shadowBlur = 0;
+
+        /* soldermask */
+        ctx.fillStyle = COLORS.soldermask;
+        ctx.globalAlpha = 0.5;
+        ctx.fillRect(cx - 200, traceY - 8, 400, 8);
+        ctx.fillRect(cx - 200, cy + subH / 2, 400, 8);
+        ctx.globalAlpha = 1;
+
+        /* bottom copper (ground plane) */
+        ctx.fillStyle = 'rgba(212,136,58,0.6)';
+        const botY = cy + subH / 2;
+        ctx.fillRect(cx - 190, botY, 380, th * 0.6);
+
+        /* dimension lines */
+        ctx.strokeStyle = COLORS.trace;
+        ctx.fillStyle = COLORS.trace;
+        ctx.lineWidth = 1;
+        ctx.setLineDash([4, 3]);
+        const dimY = traceY - 30;
+        ctx.beginPath();
+        ctx.moveTo(cx - tw / 2 + 2, traceY);
+        ctx.lineTo(cx - tw / 2 + 2, dimY);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(cx + tw / 2 - 2, traceY);
+        ctx.lineTo(cx + tw / 2 - 2, dimY);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        /* width arrow */
+        ctx.beginPath();
+        ctx.moveTo(cx - tw / 2 + 2, dimY + 5);
+        ctx.lineTo(cx + tw / 2 - 2, dimY + 5);
+        ctx.stroke();
+        /* arrowheads */
+        [cx - tw / 2 + 2, cx + tw / 2 - 2].forEach((ax, i) => {
+            ctx.beginPath();
+            const dir = i === 0 ? 1 : -1;
+            ctx.moveTo(ax, dimY + 5);
+            ctx.lineTo(ax + dir * 6, dimY + 2);
+            ctx.lineTo(ax + dir * 6, dimY + 8);
+            ctx.closePath();
+            ctx.fill();
+        });
+        ctx.font = '13px "JetBrains Mono"';
+        ctx.textAlign = 'center';
+        ctx.fillText(width.toFixed(1) + ' mil', cx, dimY - 2);
+
+        /* thickness dimension */
+        ctx.setLineDash([4, 3]);
+        const tdx = cx + tw / 2 + 30;
+        ctx.beginPath(); ctx.moveTo(cx + tw / 2, traceY); ctx.lineTo(tdx + 10, traceY); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(cx + tw / 2 + 3, cy - subH / 2); ctx.lineTo(tdx + 10, cy - subH / 2); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.beginPath(); ctx.moveTo(tdx, traceY); ctx.lineTo(tdx, cy - subH / 2); ctx.stroke();
+        ctx.font = '11px "JetBrains Mono"';
+        ctx.textAlign = 'left';
+        ctx.fillText((width > 0 ? thickness.toFixed(1) : '0') + ' mil', tdx + 14, (traceY + cy - subH / 2) / 2 + 4);
+
+        /* labels */
+        ctx.font = '12px "Noto Sans SC"';
+        ctx.textAlign = 'center';
+        ctx.fillStyle = COLORS.copper;
+        ctx.fillText('铜箔走线', cx, traceY - 40);
+        ctx.fillStyle = 'rgba(212,136,58,0.6)';
+        ctx.fillText('铜箔接地层', cx, botY + th * 0.6 + 20);
+        ctx.fillStyle = COLORS.soldermask;
+        ctx.fillText('阻焊层', cx - 160, traceY - 12);
+
+        /* current density visual */
+        ctx.fillStyle = 'rgba(255,215,64,0.08)';
+        ctx.fillRect(cx - tw / 2 + 5, traceY + 2, tw - 10, th - 4);
+        const arrows = Math.floor(tw / 30);
+        ctx.strokeStyle = 'rgba(255,215,64,0.4)';
+        ctx.lineWidth = 1.5;
+        for (let i = 0; i < arrows; i++) {
+            const ax = cx - tw / 2 + 15 + (i / arrows) * (tw - 30);
+            const ay = traceY + th / 2;
+            ctx.beginPath(); ctx.moveTo(ax - 8, ay); ctx.lineTo(ax + 8, ay); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(ax + 8, ay); ctx.lineTo(ax + 3, ay - 3); ctx.moveTo(ax + 8, ay); ctx.lineTo(ax + 3, ay + 3); ctx.stroke();
+        }
+    }
+
+    function update() {
+        const I = +$('#calcCurrent').value || 1;
+        const copperOz = +$('#calcCopper').value;
+        const dT = +$('#calcTempRise').value || 10;
+        const layer = $('#calcLayer').value;
+        const { width, area, thickness } = calcWidth(I, copperOz, dT, layer);
+        $('#calcResultWidth').textContent = width.toFixed(1);
+        $('#calcResultMM').textContent = `≈ ${(width * 0.0254).toFixed(3)} mm | 截面积: ${area.toFixed(1)} mil²`;
+        drawCrossSection(width, thickness);
+    }
+
+    function init() {
+        ({ c: cv, ctx, w: W, h: H } = initCanvas('crossSectionCanvas'));
+        /* KaTeX formula */
+        katex.render(
+            'A = \\left(\\frac{I}{k \\cdot \\Delta T^{b}}\\right)^{\\frac{1}{c}}, \\quad W = \\frac{A}{t}',
+            $('#ipcFormula'), { displayMode: true }
+        );
+        ['calcCurrent', 'calcCopper', 'calcTempRise', 'calcLayer'].forEach(id => {
+            $('#' + id).addEventListener('input', update);
+            $('#' + id).addEventListener('change', update);
+        });
+        update();
+    }
+
+    return { init };
+})();
+
+/* ================================================================
+   SECTION 3: 差分对布线
+   ================================================================ */
+const S3 = (() => {
+    let cv, ctx, W, H;
+    let spacing = 8, traceW = 5;
+    let coupling = 'tight';
+    let showField = true;
+    let animPhase = 0;
+    let animId;
+
+    function calcImpedance(w, s) {
+        const z0 = 60 * Math.log(2 * 1.0 / (0.8 * w * 0.0254)) / Math.sqrt(4.2);
+        const kc = Math.exp(-2.0 * s / w);
+        const zdiff = 2 * z0 * (1 - 0.48 * kc);
+        return { zdiff: clamp(zdiff, 40, 200), kc: clamp(kc, 0, 1) };
+    }
+
+    function draw() {
+        ctx.clearRect(0, 0, W, H);
+        ctx.fillStyle = COLORS.bg;
+        ctx.fillRect(0, 0, W, H);
+        drawGrid(ctx, W, H);
+
+        const cy = H / 2;
+        const scale = 1.8;
+        const sw = traceW * scale;
+        const ss = spacing * scale;
+        const totalH = sw * 2 + ss;
+        const y1 = cy - totalH / 2;
+        const y2 = cy + totalH / 2 - sw;
+
+        /* draw reference traces */
+        const startX = 60, endX = W - 60;
+
+        /* serpentine for length matching at end */
+        const serpStart = endX - 120;
+        const serpAmp = 15;
+        const serpPer = 30;
+
+        /* positive trace */
+        ctx.save();
+        ctx.strokeStyle = COLORS.diffP;
+        ctx.lineWidth = sw;
+        ctx.lineCap = 'round';
+        ctx.shadowColor = COLORS.diffP;
+        ctx.shadowBlur = 6;
+        ctx.beginPath();
+        ctx.moveTo(startX, y1 + sw / 2);
+        ctx.lineTo(serpStart, y1 + sw / 2);
+        /* small serpentine for length matching */
+        let sx = serpStart;
+        for (let i = 0; i < 3; i++) {
+            ctx.lineTo(sx + serpPer * 0.25, y1 + sw / 2 - serpAmp);
+            ctx.lineTo(sx + serpPer * 0.75, y1 + sw / 2 + serpAmp);
+            ctx.lineTo(sx + serpPer, y1 + sw / 2);
+            sx += serpPer;
+        }
+        ctx.lineTo(endX, y1 + sw / 2);
+        ctx.stroke();
+        ctx.restore();
+
+        /* negative trace */
+        ctx.save();
+        ctx.strokeStyle = COLORS.diffN;
+        ctx.lineWidth = sw;
+        ctx.lineCap = 'round';
+        ctx.shadowColor = COLORS.diffN;
+        ctx.shadowBlur = 6;
+        ctx.beginPath();
+        ctx.moveTo(startX, y2 + sw / 2);
+        ctx.lineTo(endX, y2 + sw / 2);
+        ctx.stroke();
+        ctx.restore();
+
+        /* labels */
+        ctx.fillStyle = COLORS.diffP;
+        ctx.font = '13px "JetBrains Mono"';
+        ctx.textAlign = 'right';
+        ctx.fillText('D+', startX - 10, y1 + sw / 2 + 4);
+        ctx.fillStyle = COLORS.diffN;
+        ctx.fillText('D-', startX - 10, y2 + sw / 2 + 4);
+
+        /* electric field lines */
+        if (showField) {
+            ctx.save();
+            ctx.strokeStyle = COLORS.field;
+            ctx.lineWidth = 1;
+            const fieldCount = Math.floor((endX - startX - 100) / 30);
+            for (let i = 0; i < fieldCount; i++) {
+                const fx = startX + 30 + i * 30;
+                if (fx > serpStart - 10) continue;
+                const fy1 = y1 + sw;
+                const fy2 = y2;
+                /* curved field lines */
+                for (let j = -1; j <= 1; j += 2) {
+                    ctx.beginPath();
+                    ctx.moveTo(fx, fy1);
+                    const cpx = fx + j * ss * 0.7;
+                    ctx.quadraticCurveTo(cpx, (fy1 + fy2) / 2, fx, fy2);
+                    ctx.stroke();
+                    /* small arrows */
+                    const midY = (fy1 + fy2) / 2;
+                    const midX = (fx + cpx) / 2;
+                    ctx.beginPath();
+                    ctx.moveTo(midX, midY - 3);
+                    ctx.lineTo(midX, midY + 3);
+                    ctx.lineTo(midX + (j > 0 ? -4 : 4), midY);
+                    ctx.closePath();
+                    ctx.fillStyle = COLORS.field;
+                    ctx.fill();
+                }
+            }
+            ctx.restore();
+        }
+
+        /* spacing dimension */
+        const dimX = endX + 20;
+        ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+        ctx.fillStyle = 'rgba(255,255,255,0.6)';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([3, 3]);
+        ctx.beginPath(); ctx.moveTo(endX - 20, y1 + sw); ctx.lineTo(dimX + 5, y1 + sw); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(endX - 20, y2); ctx.lineTo(dimX + 5, y2); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.beginPath(); ctx.moveTo(dimX, y1 + sw); ctx.lineTo(dimX, y2); ctx.stroke();
+        ctx.font = '11px "JetBrains Mono"';
+        ctx.textAlign = 'left';
+        ctx.fillText(spacing + ' mil', dimX + 8, (y1 + sw + y2) / 2 + 4);
+
+        /* coupling label */
+        ctx.fillStyle = COLORS.trace;
+        ctx.font = '13px "Noto Sans SC"';
+        ctx.textAlign = 'center';
+        ctx.fillText(coupling === 'tight' ? '紧耦合 — 间距小，抗干扰强' : '松耦合 — 间距大，走线灵活', W / 2, 30);
+
+        /* animated signal propagation */
+        animPhase += 0.03;
+        const sigLen = 60;
+        const sigX = startX + ((animPhase * 200) % (endX - startX));
+        if (sigX < endX - 10) {
+            ctx.save();
+            ctx.globalAlpha = 0.7;
+            ctx.fillStyle = 'rgba(255,215,64,0.4)';
+            ctx.beginPath();
+            ctx.arc(sigX, y1 + sw / 2, sw * 0.8, 0, TAU);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.arc(sigX, y2 + sw / 2, sw * 0.8, 0, TAU);
+            ctx.fill();
+            ctx.restore();
+        }
+
+        animId = requestAnimationFrame(draw);
+    }
+
+    function update() {
+        const { zdiff, kc } = calcImpedance(traceW, spacing);
+        $('#diffImpedance').textContent = zdiff.toFixed(0);
+        $('#couplingCoeff').textContent = kc.toFixed(2);
+    }
+
+    function init() {
+        ({ c: cv, ctx, w: W, h: H } = initCanvas('diffPairCanvas'));
+
+        $$('#couplingBtns .btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                $$('#couplingBtns .btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                coupling = btn.dataset.coupling;
+                if (coupling === 'tight') {
+                    spacing = 6; $('#diffSpacing').value = 6; $('#diffSpacingVal').textContent = '6 mil';
+                } else {
+                    spacing = 20; $('#diffSpacing').value = 20; $('#diffSpacingVal').textContent = '20 mil';
+                }
+                update();
+            });
+        });
+
+        $('#diffSpacing').addEventListener('input', e => {
+            spacing = +e.target.value;
+            $('#diffSpacingVal').textContent = spacing + ' mil';
+            coupling = spacing <= 12 ? 'tight' : 'loose';
+            $$('#couplingBtns .btn').forEach(b => b.classList.toggle('active', b.dataset.coupling === coupling));
+            update();
+        });
+
+        $('#diffWidth').addEventListener('input', e => {
+            traceW = +e.target.value;
+            $('#diffWidthVal').textContent = traceW + ' mil';
+            update();
+        });
+
+        $('#showFieldLines').addEventListener('change', e => { showField = e.target.checked; });
+
+        update();
+        draw();
+    }
+
+    return { init };
+})();
+
+/* ================================================================
+   SECTION 4: 蛇形等长
+   ================================================================ */
+const S4 = (() => {
+    let cv, ctx, W, H;
+    let amp = 30, period = 50;
+    let animPhase = 0;
+    let animId;
+    const baseLenA = 600; /* reference trace is longer */
+
+    function calcSerpentineLength(straightLen, ampVal, periodVal, numBends) {
+        /* approximate length of serpentine: each bend adds ~2*amp extra */
+        let extra = 0;
+        for (let i = 0; i < numBends; i++) {
+            extra += 2 * Math.sqrt(ampVal * ampVal + (periodVal / 4) * (periodVal / 4)) - periodVal / 2;
+        }
+        return straightLen + extra;
+    }
+
+    function draw() {
+        ctx.clearRect(0, 0, W, H);
+        ctx.fillStyle = COLORS.bg;
+        ctx.fillRect(0, 0, W, H);
+        drawGrid(ctx, W, H);
+
+        const startX = 50, endX = W - 50;
+        const yA = H * 0.3, yB = H * 0.65;
+        const traceLen = endX - startX;
+
+        /* Trace A — longer reference, straight with gentle bends */
+        ctx.save();
+        ctx.strokeStyle = COLORS.diffP;
+        ctx.lineWidth = 4;
+        ctx.lineCap = 'round';
+        ctx.shadowColor = COLORS.diffP;
+        ctx.shadowBlur = 5;
+        ctx.beginPath();
+        ctx.moveTo(startX, yA);
+        /* add a small detour to make it longer */
+        ctx.lineTo(startX + traceLen * 0.3, yA);
+        ctx.lineTo(startX + traceLen * 0.35, yA - 30);
+        ctx.lineTo(startX + traceLen * 0.55, yA - 30);
+        ctx.lineTo(startX + traceLen * 0.6, yA);
+        ctx.lineTo(endX, yA);
+        ctx.stroke();
+        ctx.restore();
+
+        /* Trace B — shorter base with serpentine added */
+        ctx.save();
+        ctx.strokeStyle = COLORS.diffN;
+        ctx.lineWidth = 4;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.shadowColor = COLORS.diffN;
+        ctx.shadowBlur = 5;
+        ctx.beginPath();
+        ctx.moveTo(startX, yB);
+
+        const serpStart = startX + traceLen * 0.2;
+        const serpEnd = startX + traceLen * 0.75;
+        ctx.lineTo(serpStart, yB);
+
+        /* serpentine bends */
+        const serpLen = serpEnd - serpStart;
+        const numBends = Math.max(1, Math.floor(serpLen / period));
+        let sx = serpStart;
+        for (let i = 0; i < numBends && sx + period <= serpEnd; i++) {
+            const dir = i % 2 === 0 ? -1 : 1;
+            ctx.lineTo(sx + period * 0.15, yB + dir * amp);
+            ctx.lineTo(sx + period * 0.85, yB + dir * amp);
+            ctx.lineTo(sx + period, yB);
+            sx += period;
+        }
+
+        ctx.lineTo(endX, yB);
+        ctx.stroke();
+        ctx.restore();
+
+        /* labels */
+        ctx.font = '13px "Noto Sans SC"';
+        ctx.fillStyle = COLORS.diffP;
+        ctx.textAlign = 'left';
+        ctx.fillText('走线 A（参考，较长）', startX, yA - 45);
+        ctx.fillStyle = COLORS.diffN;
+        ctx.fillText('走线 B（蛇形补偿）', startX, yB - amp - 20);
+
+        /* calculate lengths */
+        const detourExtra = 2 * Math.sqrt(30 * 30 + (traceLen * 0.05) * (traceLen * 0.05));
+        const lenA = traceLen + detourExtra;
+        let lenB = (serpStart - startX) + (endX - sx);
+        for (let i = 0; i < numBends && (serpStart + (i + 1) * period) <= serpEnd; i++) {
+            lenB += period * 0.3 + 2 * Math.sqrt(amp * amp + (period * 0.35) * (period * 0.35));
+        }
+
+        const diff = Math.abs(lenA - lenB);
+        const delayPs = diff * 0.17; /* ~170 ps/inch = 0.17 ps/mil approx */
+
+        $('#traceLenA').textContent = lenA.toFixed(0);
+        $('#traceLenB').textContent = lenB.toFixed(0);
+        $('#traceLenDiff').textContent = diff.toFixed(0);
+        $('#propDelay').textContent = delayPs.toFixed(1);
+
+        /* color the diff based on acceptable range */
+        const diffEl = $('#traceLenDiff');
+        diffEl.style.color = diff < 30 ? '#16c79a' : diff < 80 ? '#ffab40' : '#ff5252';
+
+        /* animated signal pulse */
+        animPhase += 0.008;
+        const pulsePos = (animPhase % 1);
+        const pxA = startX + pulsePos * traceLen;
+        const pxB = startX + pulsePos * traceLen;
+
+        ctx.save();
+        ctx.globalAlpha = 0.6;
+        if (pxA < endX) {
+            ctx.fillStyle = 'rgba(255,215,64,0.5)';
+            ctx.beginPath(); ctx.arc(pxA, yA, 6, 0, TAU); ctx.fill();
+        }
+        if (pxB < endX) {
+            ctx.fillStyle = 'rgba(255,215,64,0.5)';
+            ctx.beginPath(); ctx.arc(pxB, yB, 6, 0, TAU); ctx.fill();
+        }
+        ctx.restore();
+
+        /* length visualization bars */
+        const barY = H - 40;
+        const barScale = (W - 120) / Math.max(lenA, lenB);
+        ctx.fillStyle = 'rgba(79,195,247,0.3)';
+        ctx.fillRect(60, barY - 12, lenA * barScale, 10);
+        ctx.fillStyle = 'rgba(255,128,171,0.3)';
+        ctx.fillRect(60, barY + 4, lenB * barScale, 10);
+        ctx.font = '10px "JetBrains Mono"';
+        ctx.fillStyle = COLORS.diffP;
+        ctx.textAlign = 'left';
+        ctx.fillText('A', 45, barY - 4);
+        ctx.fillStyle = COLORS.diffN;
+        ctx.fillText('B', 45, barY + 12);
+
+        animId = requestAnimationFrame(draw);
+    }
+
+    function init() {
+        ({ c: cv, ctx, w: W, h: H } = initCanvas('meanderCanvas'));
+
+        $('#meanderAmp').addEventListener('input', e => {
+            amp = +e.target.value;
+            $('#meanderAmpVal').textContent = amp + ' mil';
+        });
+
+        $('#meanderPeriod').addEventListener('input', e => {
+            period = +e.target.value;
+            $('#meanderPeriodVal').textContent = period + ' mil';
+        });
+
+        draw();
+    }
+
+    return { init };
+})();
+
+/* ================================================================
+   SECTION 5: 拓扑结构
+   ================================================================ */
+const S5 = (() => {
+    let cv, ctx, W, H;
+    let topo = 'star';
+    let animProgress = 0;
+    let isAnimating = false;
+    let animId;
+
+    const topoInfo = {
+        star: { text: '星形拓扑：所有接收器同时收到信号。需要等长布线，占用较大面积。适用于时钟分配网络。', delays: [2.0, 2.0, 2.0] },
+        daisy: { text: '菊花链拓扑：信号依次到达各接收器。布线简单，但末端反射需要端接电阻。适用于低速总线。', delays: [1.5, 3.0, 4.5] },
+        tbranch: { text: 'T 型分支拓扑：主干线上分出支路。分支点处阻抗不匹配会导致反射。需要仔细计算匹配电阻。', delays: [2.0, 2.5, 2.5] },
+        flyby: { text: '飞越式拓扑：信号依次经过各接收器，每个接收器有固定延迟。DDR3/4 时钟/地址总线的标准拓扑。', delays: [1.2, 2.4, 3.6] }
+    };
+
+    function getNodes() {
+        const driver = { x: 80, y: H / 2, label: '驱动器', color: COLORS.trace };
+        const r1 = { x: W - 120, y: 80, label: 'R1', color: '#4fc3f7' };
+        const r2 = { x: W - 120, y: H / 2, label: 'R2', color: '#b388ff' };
+        const r3 = { x: W - 120, y: H - 80, label: 'R3', color: '#ff80ab' };
+        return { driver, receivers: [r1, r2, r3] };
+    }
+
+    function getRoutes(t, nodes) {
+        const { driver: d, receivers: [r1, r2, r3] } = nodes;
+        if (t === 'star') return [
+            [d, { x: d.x + 60, y: d.y }, { x: d.x + 120, y: r1.y + 30 }, r1],
+            [d, { x: d.x + 60, y: d.y }, r2],
+            [d, { x: d.x + 60, y: d.y }, { x: d.x + 120, y: r3.y - 30 }, r3]
+        ];
+        if (t === 'daisy') return [
+            [d, { x: d.x + 100, y: d.y }, { x: r1.x - 60, y: r1.y }, r1,
+             { x: r1.x + 20, y: r1.y }, { x: r1.x + 20, y: r2.y }, r2,
+             { x: r2.x + 20, y: r2.y }, { x: r2.x + 20, y: r3.y }, r3]
+        ];
+        if (t === 'tbranch') {
+            const mx = (d.x + r2.x) / 2 + 40;
+            return [
+                [d, { x: mx, y: d.y }],
+                [{ x: mx, y: d.y }, { x: mx, y: r1.y }, r1],
+                [{ x: mx, y: d.y }, r2],
+                [{ x: mx, y: d.y }, { x: mx, y: r3.y }, r3]
+            ];
+        }
+        /* flyby */
+        return [
+            [d, { x: d.x + 80, y: d.y }, { x: r1.x - 50, y: r1.y }, r1],
+            [{ x: r1.x - 50, y: r1.y }, { x: r1.x - 50, y: r2.y }, r2],
+            [{ x: r1.x - 50, y: r2.y }, { x: r1.x - 50, y: r3.y }, r3]
+        ];
+    }
+
+    function totalRouteLen(route) {
+        let len = 0;
+        for (let i = 1; i < route.length; i++) len += dist(route[i - 1], route[i]);
+        return len;
+    }
+
+    function pointOnRoute(route, frac) {
+        const tLen = totalRouteLen(route);
+        let target = frac * tLen;
+        for (let i = 1; i < route.length; i++) {
+            const segLen = dist(route[i - 1], route[i]);
+            if (target <= segLen) {
+                const t = target / segLen;
+                return { x: lerp(route[i - 1].x, route[i].x, t), y: lerp(route[i - 1].y, route[i].y, t) };
+            }
+            target -= segLen;
+        }
+        return route[route.length - 1];
+    }
+
+    function draw() {
+        ctx.clearRect(0, 0, W, H);
+        ctx.fillStyle = COLORS.bg;
+        ctx.fillRect(0, 0, W, H);
+        drawGrid(ctx, W, H);
+
+        const nodes = getNodes();
+        const routes = getRoutes(topo, nodes);
+
+        /* draw routes */
+        routes.forEach(route => {
+            ctx.save();
+            ctx.strokeStyle = 'rgba(22,199,154,0.5)';
+            ctx.lineWidth = 3;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.beginPath();
+            ctx.moveTo(route[0].x, route[0].y);
+            for (let i = 1; i < route.length; i++) ctx.lineTo(route[i].x, route[i].y);
+            ctx.stroke();
+
+            /* animated signal propagation */
+            if (isAnimating && animProgress > 0) {
+                const routeLen = totalRouteLen(route);
+                const allRouteLen = routes.reduce((s, r) => Math.max(s, totalRouteLen(r)), 0);
+                const frac = clamp(animProgress * allRouteLen / routeLen, 0, 1);
+                ctx.strokeStyle = COLORS.signal;
+                ctx.lineWidth = 4;
+                ctx.shadowColor = COLORS.signal;
+                ctx.shadowBlur = 8;
+                ctx.beginPath();
+                ctx.moveTo(route[0].x, route[0].y);
+                for (let i = 1; i < route.length; i++) {
+                    const segStart = (() => { let l = 0; for (let j = 1; j < i; j++) l += dist(route[j-1], route[j]); return l / routeLen; })();
+                    const segEnd = (() => { let l = 0; for (let j = 1; j <= i; j++) l += dist(route[j-1], route[j]); return l / routeLen; })();
+                    if (frac >= segEnd) {
+                        ctx.lineTo(route[i].x, route[i].y);
+                    } else if (frac > segStart) {
+                        const t = (frac - segStart) / (segEnd - segStart);
+                        ctx.lineTo(lerp(route[i-1].x, route[i].x, t), lerp(route[i-1].y, route[i].y, t));
+                    }
+                }
+                ctx.stroke();
+
+                /* pulse dot */
+                const pt = pointOnRoute(route, Math.min(frac, 1));
+                ctx.beginPath();
+                ctx.arc(pt.x, pt.y, 5, 0, TAU);
+                ctx.fillStyle = COLORS.signal;
+                ctx.fill();
+            }
+            ctx.restore();
+        });
+
+        /* draw nodes */
+        /* driver */
+        const d = nodes.driver;
+        ctx.save();
+        ctx.fillStyle = COLORS.trace;
+        ctx.shadowColor = COLORS.trace;
+        ctx.shadowBlur = 10;
+        ctx.beginPath();
+        ctx.moveTo(d.x - 15, d.y - 20);
+        ctx.lineTo(d.x + 20, d.y);
+        ctx.lineTo(d.x - 15, d.y + 20);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+        ctx.fillStyle = '#fff';
+        ctx.font = '12px "Noto Sans SC"';
+        ctx.textAlign = 'center';
+        ctx.fillText(d.label, d.x, d.y + 35);
+
+        /* receivers */
+        nodes.receivers.forEach((r, i) => {
+            ctx.save();
+            ctx.fillStyle = r.color;
+            ctx.shadowColor = r.color;
+            ctx.shadowBlur = 8;
+            ctx.fillRect(r.x - 15, r.y - 15, 30, 30);
+            ctx.restore();
+            ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(r.x - 15, r.y - 15, 30, 30);
+            ctx.fillStyle = '#fff';
+            ctx.font = 'bold 12px "JetBrains Mono"';
+            ctx.textAlign = 'center';
+            ctx.fillText(r.label, r.x, r.y + 5);
+
+            /* show arrival indicator when animating */
+            if (isAnimating) {
+                const allRouteLen = routes.reduce((s, rt) => Math.max(s, totalRouteLen(rt)), 0);
+                const relevantRoute = topo === 'daisy' ? routes[0] : routes[Math.min(i, routes.length - 1)];
+                const routeLen = totalRouteLen(relevantRoute);
+                const frac = animProgress * allRouteLen / routeLen;
+                if (frac >= 1) {
+                    ctx.fillStyle = 'rgba(22,199,154,0.7)';
+                    ctx.font = '10px "JetBrains Mono"';
+                    ctx.fillText('ARRIVED', r.x, r.y + 30);
+                }
+            }
+        });
+
+        /* waveform mini-display */
+        const waveW = 140, waveH = 40;
+        nodes.receivers.forEach((r, i) => {
+            const wx = r.x - waveW - 30;
+            const wy = r.y - waveH / 2;
+            ctx.fillStyle = 'rgba(15,52,96,0.8)';
+            ctx.fillRect(wx, wy, waveW, waveH);
+            ctx.strokeStyle = 'rgba(42,42,74,0.8)';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(wx, wy, waveW, waveH);
+
+            /* draw signal waveform with delay */
+            const delay = topoInfo[topo].delays[i];
+            const delayFrac = delay / 5;
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(wx, wy, waveW, waveH);
+            ctx.clip();
+            ctx.strokeStyle = r.color;
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            const baseline = wy + waveH * 0.7;
+            const high = wy + waveH * 0.2;
+            ctx.moveTo(wx, baseline);
+            const edgeX = wx + delayFrac * waveW;
+            ctx.lineTo(edgeX, baseline);
+            if (edgeX < wx + waveW) {
+                ctx.lineTo(edgeX + 3, high);
+                ctx.lineTo(wx + waveW, high);
+            }
+            ctx.stroke();
+
+            /* ringing/overshoot for tbranch */
+            if (topo === 'tbranch' && i > 0) {
+                ctx.strokeStyle = 'rgba(255,82,82,0.5)';
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                const ringStart = edgeX + 3;
+                ctx.moveTo(ringStart, high);
+                for (let t = 0; t < 30; t += 2) {
+                    const rx = ringStart + t;
+                    if (rx > wx + waveW) break;
+                    const ringAmp = 6 * Math.exp(-t / 10) * Math.sin(t * 0.8);
+                    ctx.lineTo(rx, high + ringAmp);
+                }
+                ctx.stroke();
+            }
+            ctx.restore();
+        });
+
+        if (isAnimating) {
+            animProgress += 0.005;
+            if (animProgress > 1.3) {
+                isAnimating = false;
+                animProgress = 0;
+                $('#topoAnimateBtn').textContent = '播放信号传播';
+                $('#topoStatus').textContent = '信号传播完成';
+            }
+            animId = requestAnimationFrame(draw);
+        }
+    }
+
+    function selectTopo(t) {
+        topo = t;
+        $$('.topo-card').forEach(c => c.classList.toggle('active', c.dataset.topo === t));
+        const info = topoInfo[t];
+        $('#topoInfo').innerHTML = `<p>${info.text}</p>`;
+        info.delays.forEach((d, i) => {
+            $(`#topoDelay${i + 1}`).textContent = d.toFixed(1);
+        });
+        isAnimating = false;
+        animProgress = 0;
+        draw();
+    }
+
+    function init() {
+        ({ c: cv, ctx, w: W, h: H } = initCanvas('topoCanvas'));
+
+        $$('.topo-card').forEach(card => {
+            card.addEventListener('click', () => selectTopo(card.dataset.topo));
+        });
+
+        $('#topoAnimateBtn').addEventListener('click', () => {
+            if (isAnimating) {
+                isAnimating = false;
+                animProgress = 0;
+                $('#topoAnimateBtn').textContent = '播放信号传播';
+                draw();
+            } else {
+                isAnimating = true;
+                animProgress = 0;
+                $('#topoAnimateBtn').textContent = '停止';
+                $('#topoStatus').textContent = '信号正在传播...';
+                draw();
+            }
+        });
+
+        selectTopo('star');
+    }
+
+    return { init };
+})();
+
+/* ================================================================
+   BOOT
+   ================================================================ */
+document.addEventListener('DOMContentLoaded', () => {
+    S1.init();
+    S2.init();
+    S3.init();
+    S4.init();
+    S5.init();
+
+    /* re-init canvases on resize */
+    let resizeTimer;
+    window.addEventListener('resize', () => {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(() => {
+            S1.init();
+            S2.init();
+            S3.init();
+            S4.init();
+            S5.init();
+        }, 250);
+    });
+});
+
+})();
+</script>
+</body>
+</html>

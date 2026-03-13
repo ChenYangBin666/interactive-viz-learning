@@ -1,0 +1,1355 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>噪声调度 — Diffusion 扩散模型</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- KaTeX -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+    <!-- GSAP -->
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+    <!-- Local shared -->
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+    <style>
+        /* ===== Page-specific styles ===== */
+        .chart-container {
+            position: relative;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+        }
+        .chart-container canvas {
+            display: block;
+            width: 100%;
+            cursor: crosshair;
+        }
+        .controls-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1rem;
+            align-items: center;
+            padding: 0.75rem 1rem;
+            background: rgba(15, 52, 96, 0.3);
+            border-top: 1px solid var(--border-color);
+        }
+        .controls-row .slider-group {
+            flex: 1;
+            min-width: 180px;
+        }
+        .formula-box {
+            background: rgba(15, 52, 96, 0.4);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1rem 1.2rem;
+            margin: 0.75rem 0;
+        }
+        .formula-box .label {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            margin-bottom: 0.4rem;
+        }
+        .side-by-side {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5rem;
+        }
+        @media (max-width: 900px) {
+            .side-by-side { grid-template-columns: 1fr; }
+        }
+        .cloud-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 0.75rem;
+        }
+        .cloud-cell {
+            text-align: center;
+        }
+        .cloud-cell canvas {
+            display: block;
+            margin: 0 auto;
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border-color);
+        }
+        .cloud-cell .label {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            font-family: var(--font-mono);
+            margin-top: 0.3rem;
+        }
+        .schedule-legend {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1rem;
+            padding: 0.5rem 0;
+        }
+        .schedule-legend .leg-item {
+            display: flex;
+            align-items: center;
+            gap: 0.35rem;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            cursor: pointer;
+            user-select: none;
+            transition: opacity 0.2s;
+        }
+        .schedule-legend .leg-item.disabled { opacity: 0.35; }
+        .schedule-legend .leg-swatch {
+            width: 20px;
+            height: 3px;
+            border-radius: 2px;
+        }
+        .curve-selector {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+        .curve-selector .btn.active {
+            background: rgba(22, 199, 154, 0.25);
+            border-color: var(--accent-green);
+            color: var(--accent-green);
+        }
+        .draw-instructions {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            padding: 0.5rem 0;
+        }
+        .snr-tooltip {
+            position: absolute;
+            background: var(--bg-card);
+            border: 1px solid var(--accent-green);
+            border-radius: var(--radius-sm);
+            padding: 0.4rem 0.7rem;
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            color: var(--text-primary);
+            pointer-events: none;
+            z-index: 50;
+            white-space: nowrap;
+            opacity: 0;
+            transition: opacity 0.15s;
+        }
+    </style>
+</head>
+<body>
+    <div class="page-container">
+
+        <!-- ===== Header ===== -->
+        <header class="section" style="text-align:center; padding-top:1rem;">
+            <h1>03 — 噪声调度</h1>
+            <p style="max-width:640px; margin:0 auto;">扩散模型的核心设计选择之一：如何在 T 步内安排噪声的增长速度？不同的 $\beta_t$ 调度策略会显著影响生成质量与训练稳定性。</p>
+        </header>
+
+        <!-- ===== Section 1: β_t 调度策略 ===== -->
+        <section class="section" id="sec-schedules">
+            <div class="section-title">
+                <div class="icon">1</div>
+                <h2>$\beta_t$ 调度策略对比</h2>
+            </div>
+
+            <div class="split-layout">
+                <div class="text-panel">
+                    <p>在扩散模型中，$\beta_t$ 控制每一步添加噪声的方差。由此派生出：</p>
+                    <div class="formula-box">
+                        <div class="label">核心量</div>
+                        $$\alpha_t = 1 - \beta_t, \qquad \bar{\alpha}_t = \prod_{s=1}^{t} \alpha_s$$
+                    </div>
+                    <p>$\bar{\alpha}_t$ 直接决定了第 $t$ 步的信噪比：值越小，数据中的信号越少、噪声越多。</p>
+
+                    <div class="formula-box">
+                        <div class="label">线性调度 (Linear)</div>
+                        $$\beta_t = \beta_1 + \frac{t-1}{T-1}(\beta_T - \beta_1)$$
+                    </div>
+                    <div class="formula-box">
+                        <div class="label">余弦调度 (Cosine)</div>
+                        $$\bar{\alpha}_t = \frac{f(t)}{f(0)},\quad f(t) = \cos\!\Big(\frac{t/T + s}{1+s}\cdot\frac{\pi}{2}\Big)^2$$
+                    </div>
+                    <div class="formula-box">
+                        <div class="label">Sigmoid 调度</div>
+                        $$\beta_t = \sigma\!\Big(-6 + 12\cdot\frac{t}{T}\Big)\cdot(\beta_T - \beta_1) + \beta_1$$
+                    </div>
+
+                    <div class="mt-2">
+                        <h4>显示曲线</h4>
+                        <div class="curve-selector mt-1">
+                            <button class="btn btn-sm active" data-curve="beta">$\beta_t$</button>
+                            <button class="btn btn-sm active" data-curve="alpha">$\alpha_t$</button>
+                            <button class="btn btn-sm active" data-curve="alpha_bar">$\bar{\alpha}_t$</button>
+                        </div>
+                    </div>
+
+                    <div class="schedule-legend mt-2">
+                        <div class="leg-item" data-sched="linear"><span class="leg-swatch" style="background:var(--accent-blue)"></span>线性</div>
+                        <div class="leg-item" data-sched="cosine"><span class="leg-swatch" style="background:var(--accent-green)"></span>余弦</div>
+                        <div class="leg-item" data-sched="sigmoid"><span class="leg-swatch" style="background:var(--accent-purple)"></span>Sigmoid</div>
+                    </div>
+                </div>
+
+                <div class="viz-panel">
+                    <div class="chart-container">
+                        <canvas id="chartMain" height="380"></canvas>
+                        <div class="snr-tooltip" id="tipMain"></div>
+                        <div class="controls-row">
+                            <div class="slider-group">
+                                <label>$\beta_{start}$</label>
+                                <input type="range" id="sliderBetaStart" min="0.00001" max="0.001" step="0.00001" value="0.0001">
+                                <span class="slider-value" id="valBetaStart">1e-4</span>
+                            </div>
+                            <div class="slider-group">
+                                <label>$\beta_{end}$</label>
+                                <input type="range" id="sliderBetaEnd" min="0.005" max="0.1" step="0.001" value="0.02">
+                                <span class="slider-value" id="valBetaEnd">0.02</span>
+                            </div>
+                            <div class="slider-group">
+                                <label>$T$</label>
+                                <input type="range" id="sliderT" min="50" max="2000" step="50" value="1000">
+                                <span class="slider-value" id="valT">1000</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ===== Section 2: 线性调度深入 ===== -->
+        <section class="section" id="sec-linear">
+            <div class="section-title">
+                <div class="icon">2</div>
+                <h2>线性调度深入</h2>
+            </div>
+
+            <p>线性调度是 DDPM 原始论文采用的策略：$\beta_t$ 从 $\beta_1 = 10^{-4}$ 线性增至 $\beta_T = 0.02$。</p>
+
+            <div class="info-box warning mt-1 mb-2">
+                <p><strong>问题：</strong>$\bar{\alpha}_t$ 在前期下降过快，意味着大量信号在早期步骤就被破坏；而后期下降趋缓，浪费了宝贵的去噪步数。</p>
+            </div>
+
+            <div class="chart-container" style="margin-bottom:1.5rem;">
+                <canvas id="chartLinearAlphaBar" height="260"></canvas>
+            </div>
+
+            <h4>不同时间步的点云分布</h4>
+            <p class="text-sm text-muted">观察一个 2D 高斯分布（"Swiss Roll"形状）在线性调度下各时间步的噪声程度。</p>
+            <div class="anim-controls mt-1 mb-2">
+                <button class="btn btn-sm btn-primary" id="btnLinearPlay">播放</button>
+                <div class="progress-bar" id="pbarLinear"><div class="fill" style="width:0%"></div></div>
+                <span class="step-label" id="lblLinearStep">t = 0</span>
+            </div>
+            <div class="cloud-grid" id="cloudLinear"></div>
+        </section>
+
+        <!-- ===== Section 3: 余弦调度 ===== -->
+        <section class="section" id="sec-cosine">
+            <div class="section-title">
+                <div class="icon">3</div>
+                <h2>余弦调度</h2>
+            </div>
+
+            <p>由 <em>Improved DDPM</em>（Nichol & Dhariwal, 2021）提出。核心思路：直接设计 $\bar{\alpha}_t$ 曲线，使噪声在整个扩散过程中更均匀地增加。</p>
+
+            <div class="formula-box">
+                <div class="label">余弦调度定义</div>
+                $$\bar{\alpha}_t = \frac{f(t)}{f(0)},\quad f(t) = \cos\!\Big(\frac{t/T + s}{1+s}\cdot\frac{\pi}{2}\Big)^2, \quad s=0.008$$
+            </div>
+
+            <div class="info-box success mt-1 mb-2">
+                <p><strong>优势：</strong>余弦调度让 $\bar{\alpha}_t$ 呈近线性下降，使得每一步对信号的破坏速率更加均匀，避免早期信号快速丢失。</p>
+            </div>
+
+            <h4>线性 vs 余弦：并排对比</h4>
+            <div class="side-by-side mt-1">
+                <div>
+                    <h4 class="text-center" style="color:var(--accent-blue)">线性调度</h4>
+                    <div class="cloud-grid" id="cloudCompLinear"></div>
+                </div>
+                <div>
+                    <h4 class="text-center" style="color:var(--accent-green)">余弦调度</h4>
+                    <div class="cloud-grid" id="cloudCompCosine"></div>
+                </div>
+            </div>
+            <div class="anim-controls mt-1">
+                <button class="btn btn-sm btn-primary" id="btnCompPlay">播放对比</button>
+                <div class="progress-bar" id="pbarComp"><div class="fill" style="width:0%"></div></div>
+                <span class="step-label" id="lblCompStep">t = 0</span>
+            </div>
+        </section>
+
+        <!-- ===== Section 4: 信噪比与调度 ===== -->
+        <section class="section" id="sec-snr">
+            <div class="section-title">
+                <div class="icon">4</div>
+                <h2>信噪比（SNR）与调度</h2>
+            </div>
+
+            <div class="split-layout">
+                <div class="text-panel">
+                    <p>信噪比定义为：</p>
+                    <div class="formula-box">
+                        <div class="label">Signal-to-Noise Ratio</div>
+                        $$\text{SNR}(t) = \frac{\bar{\alpha}_t}{1 - \bar{\alpha}_t}$$
+                    </div>
+                    <p>在对数尺度上观察 SNR，可以直观看出不同调度策略对信息保留的差异。</p>
+                    <p>理想的调度应该使 $\log\text{SNR}$ 在时间维度上<strong>均匀分布</strong>，余弦调度在这方面表现优于线性调度。</p>
+
+                    <div class="info-box mt-1">
+                        <p><strong>交互提示：</strong>将鼠标悬停在 SNR 曲线上，可以查看对应时间步的 SNR 值，并观察右侧的噪声数据可视化。</p>
+                    </div>
+                </div>
+
+                <div class="viz-panel">
+                    <div class="chart-container">
+                        <canvas id="chartSNR" height="340"></canvas>
+                        <div class="snr-tooltip" id="tipSNR"></div>
+                    </div>
+                    <div class="mt-1" style="text-align:center;">
+                        <canvas id="canvasSNRCloud" width="200" height="200" style="border:1px solid var(--border-color); border-radius:var(--radius-sm);"></canvas>
+                        <div class="text-sm text-muted mt-1" id="lblSNRCloud">移动鼠标查看对应噪声</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ===== Section 5: 自定义调度实验 ===== -->
+        <section class="section" id="sec-custom">
+            <div class="section-title">
+                <div class="icon">5</div>
+                <h2>自定义调度实验</h2>
+            </div>
+
+            <p>在下方画布上点击来定义你自己的 $\beta_t$ 曲线！系统会自动计算 $\bar{\alpha}_t$、SNR 并显示 2D 扩散效果。</p>
+
+            <div class="draw-instructions">点击画布添加控制点（最少2个），拖拽已有点调整位置。右键点击删除控制点。</div>
+
+            <div class="side-by-side mt-1">
+                <div>
+                    <h4>绘制 $\beta_t$ 曲线</h4>
+                    <div class="chart-container">
+                        <canvas id="canvasCustomDraw" height="280"></canvas>
+                    </div>
+                    <div class="flex gap-sm mt-1">
+                        <button class="btn btn-sm" id="btnCustomReset">清空</button>
+                        <button class="btn btn-sm" id="btnCustomPresetLinear">预设：线性</button>
+                        <button class="btn btn-sm" id="btnCustomPresetCosine">预设：余弦</button>
+                    </div>
+                </div>
+                <div>
+                    <h4>$\bar{\alpha}_t$ 与 $\log\text{SNR}$</h4>
+                    <div class="chart-container">
+                        <canvas id="canvasCustomResult" height="280"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <h4 class="mt-2">自定义调度下的 2D 扩散</h4>
+            <div class="anim-controls mt-1 mb-1">
+                <button class="btn btn-sm btn-primary" id="btnCustomPlay">播放</button>
+                <div class="progress-bar" id="pbarCustom"><div class="fill" style="width:0%"></div></div>
+                <span class="step-label" id="lblCustomStep">t = 0</span>
+            </div>
+            <div class="cloud-grid" id="cloudCustom"></div>
+        </section>
+
+    </div>
+
+    <!-- Nav -->
+    <script src="../shared/scripts/nav.js"></script>
+    <script>
+    /* ===============================================================
+       噪声调度 — Interactive Visualization
+       =============================================================== */
+    (() => {
+    'use strict';
+
+    // ── Utility: DPR-aware canvas setup ──
+    function setupCanvas(canvas, w, h) {
+        const dpr = window.devicePixelRatio || 1;
+        canvas.width = w * dpr;
+        canvas.height = h * dpr;
+        canvas.style.width = w + 'px';
+        canvas.style.height = h + 'px';
+        const ctx = canvas.getContext('2d');
+        ctx.scale(dpr, dpr);
+        return ctx;
+    }
+
+    function getCanvasSize(canvas) {
+        return { w: parseInt(canvas.style.width) || canvas.clientWidth, h: parseInt(canvas.style.height) || canvas.clientHeight };
+    }
+
+    // ── Color palette ──
+    const COLORS = {
+        linear: '#4fc3f7',
+        cosine: '#16c79a',
+        sigmoid: '#b388ff',
+        beta: 'rgba(255,171,64,0.9)',
+        alpha: 'rgba(79,195,247,0.9)',
+        alpha_bar: 'rgba(22,199,154,0.9)',
+        grid: 'rgba(42,42,74,0.5)',
+        axis: '#6c6c7c',
+        text: '#a8a8b8',
+        dot: '#4fc3f7',
+        dotFaded: 'rgba(79,195,247,0.5)',
+    };
+
+    // ── Schedule computations ──
+    function linearSchedule(T, betaStart, betaEnd) {
+        const betas = [];
+        for (let t = 0; t < T; t++) betas.push(betaStart + (betaEnd - betaStart) * t / (T - 1));
+        return betas;
+    }
+
+    function cosineSchedule(T, s = 0.008) {
+        const f = t => Math.cos((t / T + s) / (1 + s) * Math.PI / 2) ** 2;
+        const f0 = f(0);
+        const alpha_bars = [];
+        for (let t = 0; t <= T; t++) alpha_bars.push(Math.max(f(t) / f0, 1e-6));
+        // Derive betas from alpha_bars
+        const betas = [];
+        for (let t = 1; t <= T; t++) {
+            let b = 1 - alpha_bars[t] / alpha_bars[t - 1];
+            betas.push(Math.min(Math.max(b, 1e-6), 0.999));
+        }
+        return betas;
+    }
+
+    function sigmoidSchedule(T, betaStart, betaEnd) {
+        const sigmoid = x => 1 / (1 + Math.exp(-x));
+        const betas = [];
+        for (let t = 0; t < T; t++) {
+            const x = -6 + 12 * t / (T - 1);
+            betas.push(sigmoid(x) * (betaEnd - betaStart) + betaStart);
+        }
+        return betas;
+    }
+
+    function computeAlphas(betas) {
+        return betas.map(b => 1 - b);
+    }
+
+    function computeAlphaBar(alphas) {
+        const bars = [alphas[0]];
+        for (let i = 1; i < alphas.length; i++) bars.push(bars[i - 1] * alphas[i]);
+        return bars;
+    }
+
+    function computeSNR(alphaBars) {
+        return alphaBars.map(ab => ab / Math.max(1 - ab, 1e-10));
+    }
+
+    // ── Chart drawing helpers ──
+    const PAD = { top: 30, right: 20, bottom: 40, left: 55 };
+
+    function drawGrid(ctx, W, H, yTicks, yLabel, xLabel, logScale = false) {
+        ctx.clearRect(0, 0, W, H);
+        ctx.fillStyle = '#16213e';
+        ctx.fillRect(0, 0, W, H);
+
+        const plotW = W - PAD.left - PAD.right;
+        const plotH = H - PAD.top - PAD.bottom;
+
+        // Grid lines
+        ctx.strokeStyle = COLORS.grid;
+        ctx.lineWidth = 1;
+        yTicks.forEach(tick => {
+            const yNorm = logScale
+                ? (tick - yTicks[yTicks.length - 1]) / (yTicks[0] - yTicks[yTicks.length - 1])
+                : (tick - yTicks[yTicks.length - 1]) / (yTicks[0] - yTicks[yTicks.length - 1]);
+            const y = PAD.top + plotH * (1 - yNorm);
+            ctx.beginPath();
+            ctx.moveTo(PAD.left, y);
+            ctx.lineTo(PAD.left + plotW, y);
+            ctx.stroke();
+            // Label
+            ctx.fillStyle = COLORS.text;
+            ctx.font = '11px "JetBrains Mono", monospace';
+            ctx.textAlign = 'right';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(typeof tick === 'number' ? (Math.abs(tick) >= 100 ? tick.toFixed(0) : tick.toPrecision(3)) : tick, PAD.left - 6, y);
+        });
+
+        // Axes
+        ctx.strokeStyle = COLORS.axis;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(PAD.left, PAD.top);
+        ctx.lineTo(PAD.left, PAD.top + plotH);
+        ctx.lineTo(PAD.left + plotW, PAD.top + plotH);
+        ctx.stroke();
+
+        // X label
+        ctx.fillStyle = COLORS.text;
+        ctx.font = '12px "Noto Sans SC", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        ctx.fillText(xLabel || '时间步 t', PAD.left + plotW / 2, PAD.top + plotH + 20);
+
+        // Y label
+        ctx.save();
+        ctx.translate(14, PAD.top + plotH / 2);
+        ctx.rotate(-Math.PI / 2);
+        ctx.fillText(yLabel || '', 0, 0);
+        ctx.restore();
+
+        return { plotW, plotH };
+    }
+
+    function plotCurve(ctx, data, T, yMin, yMax, plotW, plotH, color, lineWidth = 2) {
+        ctx.save();
+        ctx.translate(PAD.left, PAD.top);
+        ctx.strokeStyle = color;
+        ctx.lineWidth = lineWidth;
+        ctx.beginPath();
+        for (let i = 0; i < data.length; i++) {
+            const x = (i / (T - 1)) * plotW;
+            const y = plotH * (1 - (data[i] - yMin) / (yMax - yMin));
+            if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+        ctx.restore();
+    }
+
+    // ── Swiss Roll / 2D point cloud generation ──
+    function generateSwissRoll(n = 300) {
+        const points = [];
+        for (let i = 0; i < n; i++) {
+            const t = 1.5 * Math.PI * (1 + 2 * Math.random());
+            const x = t * Math.cos(t) * 0.05;
+            const y = t * Math.sin(t) * 0.05;
+            points.push([x, y]);
+        }
+        return points;
+    }
+
+    function addNoiseToPoints(points, alphaBar) {
+        const sqrtAB = Math.sqrt(Math.max(alphaBar, 0));
+        const sqrtNoise = Math.sqrt(Math.max(1 - alphaBar, 0));
+        return points.map(([x, y]) => {
+            const nx = (Math.random() + Math.random() + Math.random() - 1.5) * 0.816; // approx N(0,1)
+            const ny = (Math.random() + Math.random() + Math.random() - 1.5) * 0.816;
+            return [sqrtAB * x + sqrtNoise * nx * 0.35, sqrtAB * y + sqrtNoise * ny * 0.35];
+        });
+    }
+
+    function boxMuller() {
+        const u1 = Math.random(), u2 = Math.random();
+        return Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+    }
+
+    function addNoiseAccurate(points, alphaBar) {
+        const sqrtAB = Math.sqrt(Math.max(alphaBar, 0));
+        const sqrtNoise = Math.sqrt(Math.max(1 - alphaBar, 0));
+        return points.map(([x, y]) => [
+            sqrtAB * x + sqrtNoise * boxMuller() * 0.35,
+            sqrtAB * y + sqrtNoise * boxMuller() * 0.35
+        ]);
+    }
+
+    function drawPointCloud(canvas, points, size, color) {
+        const w = size, h = size;
+        const dpr = window.devicePixelRatio || 1;
+        canvas.width = w * dpr;
+        canvas.height = h * dpr;
+        canvas.style.width = w + 'px';
+        canvas.style.height = h + 'px';
+        const ctx = canvas.getContext('2d');
+        ctx.scale(dpr, dpr);
+        ctx.fillStyle = '#16213e';
+        ctx.fillRect(0, 0, w, h);
+        const cx = w / 2, cy = h / 2;
+        const scale = w * 0.7;
+        points.forEach(([x, y]) => {
+            const px = cx + x * scale;
+            const py = cy + y * scale;
+            ctx.fillStyle = color || COLORS.dot;
+            ctx.globalAlpha = 0.7;
+            ctx.beginPath();
+            ctx.arc(px, py, 1.8, 0, Math.PI * 2);
+            ctx.fill();
+        });
+        ctx.globalAlpha = 1;
+    }
+
+    // ── State ──
+    let params = {
+        betaStart: 0.0001,
+        betaEnd: 0.02,
+        T: 1000,
+    };
+    let visibleCurves = { beta: true, alpha: true, alpha_bar: true };
+    let visibleScheds = { linear: true, cosine: true, sigmoid: true };
+    const basePoints = generateSwissRoll(350);
+
+    // ── Section 1: Main comparison chart ──
+    const chartMain = document.getElementById('chartMain');
+    const tipMain = document.getElementById('tipMain');
+
+    function drawMainChart() {
+        const W = chartMain.parentElement.clientWidth;
+        const H = 380;
+        const ctx = setupCanvas(chartMain, W, H);
+        const { T, betaStart, betaEnd } = params;
+
+        // Compute schedules
+        const scheds = {
+            linear: linearSchedule(T, betaStart, betaEnd),
+            cosine: cosineSchedule(T),
+            sigmoid: sigmoidSchedule(T, betaStart, betaEnd),
+        };
+
+        // For each schedule compute alpha, alpha_bar
+        const data = {};
+        for (const [name, betas] of Object.entries(scheds)) {
+            const alphas = computeAlphas(betas);
+            const alphaBars = computeAlphaBar(alphas);
+            data[name] = { betas, alphas, alphaBars };
+        }
+
+        // Determine y range
+        let yMin = 0, yMax = 1;
+        if (visibleCurves.beta && !visibleCurves.alpha && !visibleCurves.alpha_bar) {
+            yMax = betaEnd * 1.5;
+        }
+
+        const yTicks = [];
+        const nTicks = 6;
+        for (let i = 0; i <= nTicks; i++) yTicks.push(yMin + (yMax - yMin) * i / nTicks);
+        yTicks.reverse();
+
+        const { plotW, plotH } = drawGrid(ctx, W, H, yTicks, '值', '时间步 t');
+
+        // Plot each visible combination
+        const lineStyles = {
+            beta: { dash: [], width: 1.5 },
+            alpha: { dash: [6, 4], width: 1.5 },
+            alpha_bar: { dash: [], width: 2.5 },
+        };
+        const schedColors = { linear: COLORS.linear, cosine: COLORS.cosine, sigmoid: COLORS.sigmoid };
+
+        for (const sName of ['linear', 'cosine', 'sigmoid']) {
+            if (!visibleScheds[sName]) continue;
+            const d = data[sName];
+            const color = schedColors[sName];
+
+            if (visibleCurves.beta) {
+                ctx.setLineDash(lineStyles.beta.dash);
+                plotCurve(ctx, d.betas, T, yMin, yMax, plotW, plotH, color, lineStyles.beta.width);
+            }
+            if (visibleCurves.alpha) {
+                ctx.setLineDash(lineStyles.alpha.dash);
+                plotCurve(ctx, d.alphas, T, yMin, yMax, plotW, plotH, color, lineStyles.alpha.width);
+            }
+            if (visibleCurves.alpha_bar) {
+                ctx.setLineDash(lineStyles.alpha_bar.dash);
+                plotCurve(ctx, d.alphaBars, T, yMin, yMax, plotW, plotH, color, lineStyles.alpha_bar.width);
+            }
+        }
+        ctx.setLineDash([]);
+
+        // Legend in top-right
+        ctx.font = '11px "Noto Sans SC", sans-serif';
+        let ly = PAD.top + 8;
+        if (visibleCurves.beta) { ctx.fillStyle = COLORS.text; ctx.fillText('— β_t (实线细)', PAD.left + plotW - 120, ly); ly += 16; }
+        if (visibleCurves.alpha) { ctx.fillStyle = COLORS.text; ctx.fillText('--- α_t (虚线)', PAD.left + plotW - 120, ly); ly += 16; }
+        if (visibleCurves.alpha_bar) { ctx.fillStyle = COLORS.text; ctx.fillText('━ ᾱ_t (粗实线)', PAD.left + plotW - 120, ly); }
+
+        // Store for hover
+        chartMain._data = data;
+        chartMain._plotW = plotW;
+        chartMain._plotH = plotH;
+    }
+
+    // Hover on main chart
+    chartMain.addEventListener('mousemove', e => {
+        const rect = chartMain.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        const data = chartMain._data;
+        if (!data) return;
+        const plotW = chartMain._plotW, plotH = chartMain._plotH;
+        const tNorm = (x - PAD.left) / plotW;
+        if (tNorm < 0 || tNorm > 1) { tipMain.style.opacity = 0; return; }
+        const T = params.T;
+        const tIdx = Math.min(Math.floor(tNorm * T), T - 1);
+        let text = `t=${tIdx}`;
+        for (const sName of ['linear', 'cosine', 'sigmoid']) {
+            if (!visibleScheds[sName]) continue;
+            const d = data[sName];
+            const ab = d.alphaBars[tIdx];
+            text += ` | ${sName}: ᾱ=${ab.toFixed(4)}`;
+        }
+        tipMain.textContent = text;
+        tipMain.style.opacity = 1;
+        tipMain.style.left = Math.min(x, rect.width - tipMain.offsetWidth - 10) + 'px';
+        tipMain.style.top = (y - 30) + 'px';
+    });
+    chartMain.addEventListener('mouseleave', () => { tipMain.style.opacity = 0; });
+
+    // Curve selector buttons
+    document.querySelectorAll('.curve-selector .btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const curve = btn.dataset.curve;
+            btn.classList.toggle('active');
+            visibleCurves[curve] = btn.classList.contains('active');
+            drawMainChart();
+        });
+    });
+
+    // Schedule legend toggles
+    document.querySelectorAll('.schedule-legend .leg-item').forEach(item => {
+        item.addEventListener('click', () => {
+            const sched = item.dataset.sched;
+            item.classList.toggle('disabled');
+            visibleScheds[sched] = !item.classList.contains('disabled');
+            drawMainChart();
+        });
+    });
+
+    // Sliders
+    const sliderBetaStart = document.getElementById('sliderBetaStart');
+    const sliderBetaEnd = document.getElementById('sliderBetaEnd');
+    const sliderT = document.getElementById('sliderT');
+    const valBetaStart = document.getElementById('valBetaStart');
+    const valBetaEnd = document.getElementById('valBetaEnd');
+    const valT = document.getElementById('valT');
+
+    function updateParams() {
+        params.betaStart = parseFloat(sliderBetaStart.value);
+        params.betaEnd = parseFloat(sliderBetaEnd.value);
+        params.T = parseInt(sliderT.value);
+        valBetaStart.textContent = params.betaStart.toExponential(1);
+        valBetaEnd.textContent = params.betaEnd.toFixed(3);
+        valT.textContent = params.T;
+        drawMainChart();
+    }
+
+    sliderBetaStart.addEventListener('input', updateParams);
+    sliderBetaEnd.addEventListener('input', updateParams);
+    sliderT.addEventListener('input', updateParams);
+
+    // ── Section 2: Linear deep dive ──
+    function drawLinearAlphaBarChart() {
+        const canvas = document.getElementById('chartLinearAlphaBar');
+        const W = canvas.parentElement.clientWidth;
+        const H = 260;
+        const ctx = setupCanvas(canvas, W, H);
+        const T = 1000;
+        const betas = linearSchedule(T, 0.0001, 0.02);
+        const alphas = computeAlphas(betas);
+        const alphaBars = computeAlphaBar(alphas);
+
+        const yTicks = [1, 0.8, 0.6, 0.4, 0.2, 0].reverse();
+        const { plotW, plotH } = drawGrid(ctx, W, H, [1, 0.8, 0.6, 0.4, 0.2, 0], 'ᾱ_t', '时间步 t (T=1000)');
+
+        // Shade the "too fast" and "too slow" regions
+        ctx.save();
+        ctx.translate(PAD.left, PAD.top);
+        // Early region - fast drop
+        ctx.fillStyle = 'rgba(255,82,82,0.08)';
+        ctx.fillRect(0, 0, plotW * 0.3, plotH);
+        ctx.fillStyle = 'rgba(255,171,64,0.08)';
+        ctx.fillRect(plotW * 0.7, 0, plotW * 0.3, plotH);
+        ctx.restore();
+
+        // Labels for regions
+        ctx.font = '11px "Noto Sans SC", sans-serif';
+        ctx.fillStyle = 'rgba(255,82,82,0.6)';
+        ctx.textAlign = 'center';
+        ctx.fillText('下降过快', PAD.left + plotW * 0.15, PAD.top + 16);
+        ctx.fillStyle = 'rgba(255,171,64,0.6)';
+        ctx.fillText('下降过慢', PAD.left + plotW * 0.85, PAD.top + 16);
+
+        ctx.setLineDash([]);
+        plotCurve(ctx, alphaBars, T, 0, 1, plotW, plotH, COLORS.linear, 2.5);
+    }
+
+    // Point cloud strip for linear schedule
+    const cloudLinearContainer = document.getElementById('cloudLinear');
+    const CLOUD_STEPS = [0, 50, 100, 200, 400, 600, 800, 999];
+    let linearAnimId = null;
+
+    function drawLinearClouds(upToIdx = CLOUD_STEPS.length) {
+        cloudLinearContainer.innerHTML = '';
+        const T = 1000;
+        const betas = linearSchedule(T, 0.0001, 0.02);
+        const alphas = computeAlphas(betas);
+        const alphaBars = computeAlphaBar(alphas);
+
+        for (let i = 0; i < Math.min(upToIdx, CLOUD_STEPS.length); i++) {
+            const step = CLOUD_STEPS[i];
+            const cell = document.createElement('div');
+            cell.className = 'cloud-cell';
+            const cvs = document.createElement('canvas');
+            cell.appendChild(cvs);
+            const lbl = document.createElement('div');
+            lbl.className = 'label';
+            lbl.textContent = `t=${step}  ᾱ=${(step === 0 ? 1 : alphaBars[step - 1]).toFixed(3)}`;
+            cell.appendChild(lbl);
+            cloudLinearContainer.appendChild(cell);
+
+            const ab = step === 0 ? 1 : alphaBars[step - 1];
+            const noisy = addNoiseAccurate(basePoints, ab);
+            drawPointCloud(cvs, noisy, 140, COLORS.linear);
+        }
+    }
+
+    document.getElementById('btnLinearPlay').addEventListener('click', function () {
+        if (linearAnimId) return;
+        let idx = 0;
+        const pbar = document.getElementById('pbarLinear').querySelector('.fill');
+        const lbl = document.getElementById('lblLinearStep');
+        const animate = () => {
+            idx++;
+            drawLinearClouds(idx);
+            pbar.style.width = (idx / CLOUD_STEPS.length * 100) + '%';
+            lbl.textContent = `t = ${CLOUD_STEPS[Math.min(idx - 1, CLOUD_STEPS.length - 1)]}`;
+            if (idx <= CLOUD_STEPS.length) {
+                linearAnimId = setTimeout(animate, 400);
+            } else {
+                linearAnimId = null;
+            }
+        };
+        drawLinearClouds(0);
+        animate();
+    });
+
+    // ── Section 3: Cosine comparison ──
+    const COMP_STEPS = [0, 100, 250, 500, 750, 999];
+
+    function drawComparisonClouds(upToIdx = COMP_STEPS.length) {
+        const contLinear = document.getElementById('cloudCompLinear');
+        const contCosine = document.getElementById('cloudCompCosine');
+        contLinear.innerHTML = '';
+        contCosine.innerHTML = '';
+        const T = 1000;
+        const betasLin = linearSchedule(T, 0.0001, 0.02);
+        const betasCos = cosineSchedule(T);
+        const abLin = computeAlphaBar(computeAlphas(betasLin));
+        const abCos = computeAlphaBar(computeAlphas(betasCos));
+
+        for (let i = 0; i < Math.min(upToIdx, COMP_STEPS.length); i++) {
+            const step = COMP_STEPS[i];
+            // Linear
+            const cellL = document.createElement('div');
+            cellL.className = 'cloud-cell';
+            const cvsL = document.createElement('canvas');
+            cellL.appendChild(cvsL);
+            const lblL = document.createElement('div');
+            lblL.className = 'label';
+            const abLVal = step === 0 ? 1 : abLin[step - 1];
+            lblL.textContent = `t=${step}`;
+            cellL.appendChild(lblL);
+            contLinear.appendChild(cellL);
+            drawPointCloud(cvsL, addNoiseAccurate(basePoints, abLVal), 120, COLORS.linear);
+
+            // Cosine
+            const cellC = document.createElement('div');
+            cellC.className = 'cloud-cell';
+            const cvsC = document.createElement('canvas');
+            cellC.appendChild(cvsC);
+            const lblC = document.createElement('div');
+            lblC.className = 'label';
+            const abCVal = step === 0 ? 1 : abCos[step - 1];
+            lblC.textContent = `t=${step}`;
+            cellC.appendChild(lblC);
+            contCosine.appendChild(cellC);
+            drawPointCloud(cvsC, addNoiseAccurate(basePoints, abCVal), 120, COLORS.cosine);
+        }
+    }
+
+    let compAnimId = null;
+    document.getElementById('btnCompPlay').addEventListener('click', function () {
+        if (compAnimId) return;
+        let idx = 0;
+        const pbar = document.getElementById('pbarComp').querySelector('.fill');
+        const lbl = document.getElementById('lblCompStep');
+        const animate = () => {
+            idx++;
+            drawComparisonClouds(idx);
+            pbar.style.width = (idx / COMP_STEPS.length * 100) + '%';
+            lbl.textContent = `t = ${COMP_STEPS[Math.min(idx - 1, COMP_STEPS.length - 1)]}`;
+            if (idx <= COMP_STEPS.length) {
+                compAnimId = setTimeout(animate, 500);
+            } else {
+                compAnimId = null;
+            }
+        };
+        drawComparisonClouds(0);
+        animate();
+    });
+
+    // ── Section 4: SNR chart ──
+    const chartSNR = document.getElementById('chartSNR');
+    const tipSNR = document.getElementById('tipSNR');
+    const canvasSNRCloud = document.getElementById('canvasSNRCloud');
+
+    function drawSNRChart() {
+        const W = chartSNR.parentElement.clientWidth;
+        const H = 340;
+        const ctx = setupCanvas(chartSNR, W, H);
+        const T = 1000;
+
+        const scheds = {
+            linear: linearSchedule(T, 0.0001, 0.02),
+            cosine: cosineSchedule(T),
+            sigmoid: sigmoidSchedule(T, 0.0001, 0.02),
+        };
+
+        const snrData = {};
+        const logSNRData = {};
+        for (const [name, betas] of Object.entries(scheds)) {
+            const ab = computeAlphaBar(computeAlphas(betas));
+            const snr = computeSNR(ab);
+            snrData[name] = { ab, snr };
+            logSNRData[name] = snr.map(s => Math.log10(Math.max(s, 1e-10)));
+        }
+
+        // Y range for log SNR
+        let allLogSNR = [];
+        Object.values(logSNRData).forEach(d => allLogSNR = allLogSNR.concat(d));
+        const logMin = Math.floor(Math.min(...allLogSNR));
+        const logMax = Math.ceil(Math.max(...allLogSNR));
+
+        const yTicks = [];
+        for (let v = logMax; v >= logMin; v--) yTicks.push(v);
+
+        const { plotW, plotH } = drawGrid(ctx, W, H, yTicks, 'log₁₀(SNR)', '时间步 t');
+
+        const schedColors = { linear: COLORS.linear, cosine: COLORS.cosine, sigmoid: COLORS.sigmoid };
+        for (const [name, logSNR] of Object.entries(logSNRData)) {
+            ctx.setLineDash([]);
+            plotCurve(ctx, logSNR, T, logMin, logMax, plotW, plotH, schedColors[name], 2);
+        }
+
+        // Store for hover
+        chartSNR._snrData = snrData;
+        chartSNR._logSNRData = logSNRData;
+        chartSNR._plotW = plotW;
+        chartSNR._plotH = plotH;
+        chartSNR._logMin = logMin;
+        chartSNR._logMax = logMax;
+        chartSNR._T = T;
+
+        // Draw legend
+        ctx.font = '11px "Noto Sans SC", sans-serif';
+        let ly = PAD.top + 10;
+        for (const name of ['linear', 'cosine', 'sigmoid']) {
+            ctx.fillStyle = schedColors[name];
+            ctx.fillRect(PAD.left + 10, ly - 4, 16, 3);
+            ctx.fillStyle = COLORS.text;
+            ctx.textAlign = 'left';
+            ctx.fillText(name === 'linear' ? '线性' : name === 'cosine' ? '余弦' : 'Sigmoid', PAD.left + 30, ly);
+            ly += 18;
+        }
+    }
+
+    chartSNR.addEventListener('mousemove', e => {
+        const rect = chartSNR.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const data = chartSNR._snrData;
+        if (!data) return;
+        const plotW = chartSNR._plotW;
+        const T = chartSNR._T;
+        const tNorm = (x - PAD.left) / plotW;
+        if (tNorm < 0 || tNorm > 1) { tipSNR.style.opacity = 0; return; }
+        const tIdx = Math.min(Math.floor(tNorm * T), T - 1);
+
+        let text = `t=${tIdx}`;
+        for (const sName of ['linear', 'cosine', 'sigmoid']) {
+            const snr = data[sName].snr[tIdx];
+            text += ` | ${sName}: SNR=${snr.toFixed(2)}`;
+        }
+        tipSNR.textContent = text;
+        tipSNR.style.opacity = 1;
+        tipSNR.style.left = Math.min(x, rect.width - tipSNR.offsetWidth - 10) + 'px';
+        tipSNR.style.top = '4px';
+
+        // Draw corresponding noisy cloud (use cosine schedule)
+        const ab = data.cosine.ab[tIdx];
+        const noisy = addNoiseAccurate(basePoints, ab);
+        drawPointCloud(canvasSNRCloud, noisy, 200, COLORS.cosine);
+        document.getElementById('lblSNRCloud').textContent = `t=${tIdx}  ᾱ=${ab.toFixed(4)}  SNR=${data.cosine.snr[tIdx].toFixed(2)}`;
+    });
+    chartSNR.addEventListener('mouseleave', () => { tipSNR.style.opacity = 0; });
+
+    // ── Section 5: Custom schedule ──
+    const canvasCustomDraw = document.getElementById('canvasCustomDraw');
+    const canvasCustomResult = document.getElementById('canvasCustomResult');
+    let customPoints = []; // [{x: 0..1, y: 0..1}] representing (t/T, beta_normalized)
+    let draggingIdx = -1;
+    const CUSTOM_BETA_MAX = 0.1;
+    const CUSTOM_T = 200; // smaller T for custom playground
+
+    function customBetasFromPoints() {
+        if (customPoints.length < 2) return null;
+        // Sort by x
+        const sorted = [...customPoints].sort((a, b) => a.x - b.x);
+        // Interpolate to CUSTOM_T steps
+        const betas = [];
+        for (let i = 0; i < CUSTOM_T; i++) {
+            const t = i / (CUSTOM_T - 1);
+            // Find surrounding points
+            let left = sorted[0], right = sorted[sorted.length - 1];
+            for (let j = 0; j < sorted.length - 1; j++) {
+                if (sorted[j].x <= t && sorted[j + 1].x >= t) {
+                    left = sorted[j];
+                    right = sorted[j + 1];
+                    break;
+                }
+            }
+            const dx = right.x - left.x;
+            const frac = dx > 0 ? (t - left.x) / dx : 0;
+            const betaNorm = left.y + frac * (right.y - left.y);
+            betas.push(Math.max(betaNorm * CUSTOM_BETA_MAX, 1e-6));
+        }
+        return betas;
+    }
+
+    function drawCustomDrawCanvas() {
+        const W = canvasCustomDraw.parentElement.clientWidth;
+        const H = 280;
+        const ctx = setupCanvas(canvasCustomDraw, W, H);
+        const plotW = W - PAD.left - PAD.right;
+        const plotH = H - PAD.top - PAD.bottom;
+
+        // Grid
+        const yTicks = [0, 0.02, 0.04, 0.06, 0.08, 0.1].reverse();
+        drawGrid(ctx, W, H, yTicks, 'β_t', 't/T');
+
+        // Draw interpolated curve
+        const betas = customBetasFromPoints();
+        if (betas) {
+            plotCurve(ctx, betas, CUSTOM_T, 0, CUSTOM_BETA_MAX, plotW, plotH, COLORS.beta, 2);
+        }
+
+        // Draw control points
+        ctx.save();
+        ctx.translate(PAD.left, PAD.top);
+        customPoints.forEach((pt, idx) => {
+            const px = pt.x * plotW;
+            const py = plotH * (1 - pt.y);
+            ctx.beginPath();
+            ctx.arc(px, py, 6, 0, Math.PI * 2);
+            ctx.fillStyle = idx === draggingIdx ? '#fff' : COLORS.cosine;
+            ctx.fill();
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+        });
+        ctx.restore();
+
+        // Store dimensions
+        canvasCustomDraw._plotW = plotW;
+        canvasCustomDraw._plotH = plotH;
+    }
+
+    function drawCustomResultCanvas() {
+        const betas = customBetasFromPoints();
+        if (!betas) {
+            const W = canvasCustomResult.parentElement.clientWidth;
+            const H = 280;
+            const ctx = setupCanvas(canvasCustomResult, W, H);
+            ctx.fillStyle = '#16213e';
+            ctx.fillRect(0, 0, W, H);
+            ctx.fillStyle = COLORS.text;
+            ctx.font = '13px "Noto Sans SC", sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('请在左侧画布添加至少2个控制点', W / 2, H / 2);
+            return;
+        }
+
+        const W = canvasCustomResult.parentElement.clientWidth;
+        const H = 280;
+        const ctx = setupCanvas(canvasCustomResult, W, H);
+        const alphas = computeAlphas(betas);
+        const alphaBars = computeAlphaBar(alphas);
+        const snr = computeSNR(alphaBars);
+        const logSNR = snr.map(s => Math.log10(Math.max(s, 1e-10)));
+
+        // Draw alpha_bar on [0,1] and logSNR dual axis
+        const plotW = W - PAD.left - PAD.right;
+        const plotH = H - PAD.top - PAD.bottom;
+
+        ctx.fillStyle = '#16213e';
+        ctx.fillRect(0, 0, W, H);
+
+        // Grid for alpha_bar [0, 1]
+        const yTicks = [1, 0.8, 0.6, 0.4, 0.2, 0];
+        drawGrid(ctx, W, H, yTicks, 'ᾱ_t', 't');
+
+        // Plot alpha_bar
+        plotCurve(ctx, alphaBars, CUSTOM_T, 0, 1, plotW, plotH, COLORS.alpha_bar, 2.5);
+
+        // Plot log SNR scaled to [0,1] range (secondary y-axis feel)
+        const logMin = Math.min(...logSNR);
+        const logMax = Math.max(...logSNR);
+        if (logMax > logMin) {
+            const normalized = logSNR.map(v => (v - logMin) / (logMax - logMin));
+            plotCurve(ctx, normalized, CUSTOM_T, 0, 1, plotW, plotH, COLORS.sigmoid, 1.5);
+        }
+
+        // Legend
+        ctx.font = '11px "Noto Sans SC", sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillStyle = COLORS.alpha_bar;
+        ctx.fillRect(PAD.left + 10, PAD.top + 8, 16, 3);
+        ctx.fillStyle = COLORS.text;
+        ctx.fillText('ᾱ_t', PAD.left + 30, PAD.top + 12);
+
+        ctx.fillStyle = COLORS.sigmoid;
+        ctx.fillRect(PAD.left + 10, PAD.top + 24, 16, 3);
+        ctx.fillStyle = COLORS.text;
+        ctx.fillText('log SNR (归一化)', PAD.left + 30, PAD.top + 28);
+    }
+
+    function pixelToCustomPoint(e) {
+        const rect = canvasCustomDraw.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        const plotW = canvasCustomDraw._plotW || 1;
+        const plotH = canvasCustomDraw._plotH || 1;
+        const ptX = Math.max(0, Math.min(1, (x - PAD.left) / plotW));
+        const ptY = Math.max(0, Math.min(1, 1 - (y - PAD.top) / plotH));
+        return { x: ptX, y: ptY };
+    }
+
+    function findNearestPoint(e, threshold = 12) {
+        const rect = canvasCustomDraw.getBoundingClientRect();
+        const mx = e.clientX - rect.left;
+        const my = e.clientY - rect.top;
+        const plotW = canvasCustomDraw._plotW || 1;
+        const plotH = canvasCustomDraw._plotH || 1;
+        let minD = Infinity, minIdx = -1;
+        customPoints.forEach((pt, idx) => {
+            const px = PAD.left + pt.x * plotW;
+            const py = PAD.top + plotH * (1 - pt.y);
+            const d = Math.sqrt((mx - px) ** 2 + (my - py) ** 2);
+            if (d < minD) { minD = d; minIdx = idx; }
+        });
+        return minD < threshold ? minIdx : -1;
+    }
+
+    canvasCustomDraw.addEventListener('mousedown', e => {
+        if (e.button === 2) {
+            // Right click: remove point
+            const idx = findNearestPoint(e);
+            if (idx >= 0) {
+                customPoints.splice(idx, 1);
+                drawCustomDrawCanvas();
+                drawCustomResultCanvas();
+                drawCustomClouds();
+            }
+            return;
+        }
+        const idx = findNearestPoint(e);
+        if (idx >= 0) {
+            draggingIdx = idx;
+        } else {
+            const pt = pixelToCustomPoint(e);
+            customPoints.push(pt);
+            draggingIdx = customPoints.length - 1;
+            drawCustomDrawCanvas();
+            drawCustomResultCanvas();
+            drawCustomClouds();
+        }
+    });
+
+    canvasCustomDraw.addEventListener('mousemove', e => {
+        if (draggingIdx >= 0) {
+            const pt = pixelToCustomPoint(e);
+            customPoints[draggingIdx] = pt;
+            drawCustomDrawCanvas();
+            drawCustomResultCanvas();
+        }
+    });
+
+    canvasCustomDraw.addEventListener('mouseup', () => {
+        if (draggingIdx >= 0) {
+            draggingIdx = -1;
+            drawCustomDrawCanvas();
+            drawCustomResultCanvas();
+            drawCustomClouds();
+        }
+    });
+
+    canvasCustomDraw.addEventListener('mouseleave', () => {
+        if (draggingIdx >= 0) {
+            draggingIdx = -1;
+            drawCustomDrawCanvas();
+        }
+    });
+
+    canvasCustomDraw.addEventListener('contextmenu', e => e.preventDefault());
+
+    // Custom preset buttons
+    document.getElementById('btnCustomReset').addEventListener('click', () => {
+        customPoints = [];
+        drawCustomDrawCanvas();
+        drawCustomResultCanvas();
+        drawCustomClouds();
+    });
+
+    document.getElementById('btnCustomPresetLinear').addEventListener('click', () => {
+        customPoints = [];
+        for (let i = 0; i <= 8; i++) {
+            const t = i / 8;
+            customPoints.push({ x: t, y: 0.001 + t * 0.2 }); // maps to 0.0001 to 0.02
+        }
+        drawCustomDrawCanvas();
+        drawCustomResultCanvas();
+        drawCustomClouds();
+    });
+
+    document.getElementById('btnCustomPresetCosine').addEventListener('click', () => {
+        customPoints = [];
+        const T = CUSTOM_T;
+        const betas = cosineSchedule(T);
+        const step = Math.floor(T / 10);
+        for (let i = 0; i < T; i += step) {
+            customPoints.push({ x: i / (T - 1), y: Math.min(betas[i] / CUSTOM_BETA_MAX, 1) });
+        }
+        customPoints.push({ x: 1, y: Math.min(betas[T - 1] / CUSTOM_BETA_MAX, 1) });
+        drawCustomDrawCanvas();
+        drawCustomResultCanvas();
+        drawCustomClouds();
+    });
+
+    // Custom clouds
+    const CUSTOM_CLOUD_STEPS_FRAC = [0, 0.1, 0.25, 0.4, 0.6, 0.8, 0.95, 1];
+
+    function drawCustomClouds(upToIdx = CUSTOM_CLOUD_STEPS_FRAC.length) {
+        const container = document.getElementById('cloudCustom');
+        container.innerHTML = '';
+        const betas = customBetasFromPoints();
+        if (!betas) {
+            const div = document.createElement('div');
+            div.style.cssText = 'padding:2rem;text-align:center;color:var(--text-muted);font-size:0.9rem;';
+            div.textContent = '请先在上方画布添加控制点来定义调度';
+            container.appendChild(div);
+            return;
+        }
+        const alphas = computeAlphas(betas);
+        const alphaBars = computeAlphaBar(alphas);
+
+        for (let i = 0; i < Math.min(upToIdx, CUSTOM_CLOUD_STEPS_FRAC.length); i++) {
+            const frac = CUSTOM_CLOUD_STEPS_FRAC[i];
+            const step = Math.min(Math.floor(frac * (CUSTOM_T - 1)), CUSTOM_T - 1);
+            const cell = document.createElement('div');
+            cell.className = 'cloud-cell';
+            const cvs = document.createElement('canvas');
+            cell.appendChild(cvs);
+            const lbl = document.createElement('div');
+            lbl.className = 'label';
+            const ab = step === 0 ? 1 : alphaBars[step - 1];
+            lbl.textContent = `t=${step}  ᾱ=${ab.toFixed(3)}`;
+            cell.appendChild(lbl);
+            container.appendChild(cell);
+            drawPointCloud(cvs, addNoiseAccurate(basePoints, ab), 130, COLORS.cosine);
+        }
+    }
+
+    let customAnimId = null;
+    document.getElementById('btnCustomPlay').addEventListener('click', function () {
+        if (customAnimId) return;
+        let idx = 0;
+        const pbar = document.getElementById('pbarCustom').querySelector('.fill');
+        const lbl = document.getElementById('lblCustomStep');
+        const animate = () => {
+            idx++;
+            drawCustomClouds(idx);
+            const frac = CUSTOM_CLOUD_STEPS_FRAC[Math.min(idx - 1, CUSTOM_CLOUD_STEPS_FRAC.length - 1)];
+            const step = Math.min(Math.floor(frac * (CUSTOM_T - 1)), CUSTOM_T - 1);
+            pbar.style.width = (idx / CUSTOM_CLOUD_STEPS_FRAC.length * 100) + '%';
+            lbl.textContent = `t = ${step}`;
+            if (idx <= CUSTOM_CLOUD_STEPS_FRAC.length) {
+                customAnimId = setTimeout(animate, 400);
+            } else {
+                customAnimId = null;
+            }
+        };
+        drawCustomClouds(0);
+        animate();
+    });
+
+    // ── Resize handling ──
+    let resizeTimer;
+    window.addEventListener('resize', () => {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(() => {
+            drawMainChart();
+            drawLinearAlphaBarChart();
+            drawSNRChart();
+            drawCustomDrawCanvas();
+            drawCustomResultCanvas();
+        }, 150);
+    });
+
+    // ── KaTeX rendering ──
+    document.addEventListener('DOMContentLoaded', () => {
+        if (typeof renderMathInElement === 'function') {
+            renderMathInElement(document.body, {
+                delimiters: [
+                    { left: '$$', right: '$$', display: true },
+                    { left: '$', right: '$', display: false },
+                ],
+                throwOnError: false,
+            });
+        }
+
+        // Re-render KaTeX inside buttons after initial render
+        document.querySelectorAll('.curve-selector .btn').forEach(btn => {
+            if (typeof katex !== 'undefined' && btn.dataset.curve) {
+                // Already handled by auto-render
+            }
+        });
+    });
+
+    // ── Entry animation with GSAP ──
+    function initAnimations() {
+        if (typeof gsap === 'undefined') return;
+
+        gsap.from('.section', {
+            y: 40,
+            opacity: 0,
+            duration: 0.7,
+            stagger: 0.15,
+            ease: 'power2.out',
+        });
+    }
+
+    // ── Initial draw ──
+    function init() {
+        drawMainChart();
+        drawLinearAlphaBarChart();
+        drawLinearClouds(CLOUD_STEPS.length);
+        drawComparisonClouds(COMP_STEPS.length);
+        drawSNRChart();
+        drawCustomDrawCanvas();
+        drawCustomResultCanvas();
+        drawCustomClouds();
+
+        // Draw initial SNR cloud
+        const T = 1000;
+        const betas = cosineSchedule(T);
+        const ab = computeAlphaBar(computeAlphas(betas));
+        drawPointCloud(canvasSNRCloud, addNoiseAccurate(basePoints, ab[0]), 200, COLORS.cosine);
+
+        initAnimations();
+    }
+
+    // Wait for fonts + KaTeX
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', () => setTimeout(init, 100));
+    } else {
+        setTimeout(init, 100);
+    }
+
+    })();
+    </script>
+</body>
+</html>

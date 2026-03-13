@@ -1,0 +1,1394 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DDPM — Diffusion 扩散模型</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+    <!-- KaTeX -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+    <!-- GSAP -->
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+    <!-- Local shared styles -->
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+    <style>
+        /* === Page-specific styles === */
+        .flow-container {
+            position: relative;
+            width: 100%;
+            height: 520px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+        }
+        .flow-container canvas { display: block; width: 100%; height: 100%; }
+
+        .math-step {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1.2rem 1.5rem;
+            margin-bottom: 1rem;
+            cursor: pointer;
+            transition: all 0.3s;
+            border-left: 3px solid transparent;
+        }
+        .math-step:hover { border-color: var(--accent-blue); }
+        .math-step.active {
+            border-left-color: var(--accent-green);
+            background: rgba(22, 199, 154, 0.05);
+        }
+        .math-step .step-label {
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: var(--accent-purple);
+            margin-bottom: 0.4rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .math-step .step-desc {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            margin-top: 0.5rem;
+        }
+        .color-vl { color: var(--accent-purple); }
+        .color-kl { color: var(--accent-orange); }
+        .color-eps { color: var(--accent-green); }
+        .color-loss { color: var(--accent-red); }
+        .color-xt { color: var(--accent-blue); }
+
+        .train-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+        }
+        .train-canvas-wrap {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+        }
+        .train-canvas-wrap canvas { display: block; width: 100%; height: 280px; }
+        .train-canvas-wrap .canvas-label {
+            padding: 0.4rem 0.75rem;
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            border-top: 1px solid var(--border-color);
+            background: rgba(0,0,0,0.15);
+        }
+
+        .sample-viz {
+            display: flex;
+            gap: 1rem;
+        }
+        .sample-main {
+            flex: 1;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+        }
+        .sample-main canvas { display: block; width: 100%; height: 420px; }
+        .sample-side {
+            width: 220px;
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+        .stat-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 0.75rem 1rem;
+        }
+        .stat-card .stat-label {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            margin-bottom: 0.25rem;
+        }
+        .stat-card .stat-value {
+            font-family: var(--font-mono);
+            font-size: 1.4rem;
+            font-weight: 700;
+            color: var(--accent-green);
+        }
+        .mini-canvas {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+        }
+        .mini-canvas canvas { display: block; width: 100%; height: 100px; }
+
+        .compare-wrap {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5rem;
+        }
+        .compare-panel {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+        }
+        .compare-panel .panel-header {
+            padding: 0.6rem 1rem;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .compare-panel .panel-header h4 { margin: 0; font-size: 0.95rem; }
+        .compare-panel canvas { display: block; width: 100%; height: 320px; }
+        .compare-panel .run-label {
+            padding: 0.3rem 0.75rem;
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            border-top: 1px solid var(--border-color);
+            font-family: var(--font-mono);
+        }
+
+        .controls-row {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 1rem;
+            margin-bottom: 1rem;
+            padding: 0.75rem 1rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+        }
+
+        @media (max-width: 768px) {
+            .train-grid { grid-template-columns: 1fr; }
+            .sample-viz { flex-direction: column; }
+            .sample-side { width: 100%; flex-direction: row; flex-wrap: wrap; }
+            .compare-wrap { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="page-container">
+    <!-- ===== Header ===== -->
+    <header class="section" style="text-align:center; padding-top: 1rem;">
+        <h1>DDPM <span style="color:var(--text-muted); font-weight:400;">去噪扩散概率模型</span></h1>
+        <p style="max-width:680px; margin:0 auto;">
+            Denoising Diffusion Probabilistic Models 通过学习逐步去噪的逆过程，从纯高斯噪声中生成高质量样本。
+            本模块将交互式地展示 DDPM 的完整训练与采样流程。
+        </p>
+    </header>
+
+    <!-- ===== Section 1: DDPM 总览 ===== -->
+    <section class="section" id="sec-overview">
+        <div class="section-title">
+            <div class="icon">1</div>
+            <h2>DDPM 总览</h2>
+            <span class="badge badge-green">流程图</span>
+        </div>
+        <p>DDPM 由两个过程组成：<strong style="color:var(--accent-orange)">训练</strong>（学习预测噪声）和 <strong style="color:var(--accent-blue)">采样</strong>（从噪声逆向生成数据）。点击下方按钮切换查看。</p>
+        <div class="controls-row">
+            <div class="btn-group">
+                <button class="btn active" id="btn-flow-train" onclick="FlowViz.showMode('train')">训练流程</button>
+                <button class="btn" id="btn-flow-sample" onclick="FlowViz.showMode('sample')">采样流程</button>
+            </div>
+            <button class="btn btn-primary" onclick="FlowViz.replay()">重新播放</button>
+        </div>
+        <div class="flow-container">
+            <canvas id="canvas-flow"></canvas>
+        </div>
+    </section>
+
+    <!-- ===== Section 2: 目标函数推导 ===== -->
+    <section class="section" id="sec-elbo">
+        <div class="section-title">
+            <div class="icon">2</div>
+            <h2>目标函数推导</h2>
+            <span class="badge badge-purple">数学</span>
+        </div>
+        <p>从变分下界 (ELBO) 出发，经过分解与化简，得到 DDPM 的简化训练目标。点击每一步查看详细推导。</p>
+        <div id="elbo-steps"></div>
+    </section>
+
+    <!-- ===== Section 3: 训练过程模拟 ===== -->
+    <section class="section" id="sec-training">
+        <div class="section-title">
+            <div class="icon">3</div>
+            <h2>训练过程模拟</h2>
+            <span class="badge badge-orange">交互</span>
+        </div>
+        <p>在二维数据上模拟 DDPM 的训练循环。观察模型如何逐步学会预测噪声。</p>
+        <div class="controls-row">
+            <div class="slider-group">
+                <label>训练轮次</label>
+                <input type="range" id="slider-epoch" min="1" max="200" value="1" style="width:180px">
+                <span class="slider-value" id="val-epoch">1</span>
+            </div>
+            <button class="btn btn-primary" id="btn-train" onclick="TrainSim.toggleTrain()">开始训练</button>
+            <button class="btn" onclick="TrainSim.reset()">重置</button>
+            <div class="slider-group">
+                <label>速度</label>
+                <input type="range" id="slider-speed" min="1" max="10" value="5" style="width:100px">
+                <span class="slider-value" id="val-speed">5</span>
+            </div>
+        </div>
+        <div class="train-grid">
+            <div class="train-canvas-wrap">
+                <canvas id="canvas-data"></canvas>
+                <div class="canvas-label">原始数据 & 加噪样本</div>
+            </div>
+            <div class="train-canvas-wrap">
+                <canvas id="canvas-pred"></canvas>
+                <div class="canvas-label">模型噪声预测 (箭头 = 预测方向)</div>
+            </div>
+            <div class="train-canvas-wrap" style="grid-column: 1 / -1;">
+                <canvas id="canvas-loss" style="height:180px"></canvas>
+                <div class="canvas-label">训练损失曲线 (MSE)</div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ===== Section 4: 采样过程动画 ===== -->
+    <section class="section" id="sec-sampling">
+        <div class="section-title">
+            <div class="icon">4</div>
+            <h2>采样过程动画</h2>
+            <span class="badge badge-blue">动画</span>
+        </div>
+        <p>从纯噪声 \(x_T \sim \mathcal{N}(0, I)\) 出发，逐步去噪直到得到干净样本。</p>
+        <div class="controls-row">
+            <div class="slider-group">
+                <label>总步数 T</label>
+                <input type="range" id="slider-T" min="10" max="100" value="50" step="10" style="width:140px">
+                <span class="slider-value" id="val-T">50</span>
+            </div>
+            <div class="slider-group">
+                <label>速度</label>
+                <input type="range" id="slider-sample-speed" min="1" max="10" value="5" style="width:100px">
+                <span class="slider-value" id="val-sample-speed">5</span>
+            </div>
+            <div class="slider-group">
+                <label>种子</label>
+                <input type="range" id="slider-seed" min="1" max="100" value="42" style="width:100px">
+                <span class="slider-value" id="val-seed">42</span>
+            </div>
+            <button class="btn btn-primary" id="btn-sample" onclick="SampleViz.start()">开始采样</button>
+            <button class="btn" onclick="SampleViz.reset()">重置</button>
+        </div>
+        <div class="sample-viz">
+            <div class="sample-main">
+                <canvas id="canvas-sample"></canvas>
+            </div>
+            <div class="sample-side">
+                <div class="stat-card">
+                    <div class="stat-label">当前时间步 t</div>
+                    <div class="stat-value" id="stat-t">T</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">噪声幅度 ||ε||</div>
+                    <div class="stat-value" id="stat-noise">—</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">信噪比 (dB)</div>
+                    <div class="stat-value" id="stat-snr">—</div>
+                </div>
+                <div class="mini-canvas">
+                    <canvas id="canvas-noise-mag"></canvas>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ===== Section 5: DDPM vs DDIM ===== -->
+    <section class="section" id="sec-compare">
+        <div class="section-title">
+            <div class="icon">5</div>
+            <h2>DDPM vs DDIM</h2>
+            <span class="badge badge-green">对比</span>
+        </div>
+        <p>
+            DDPM 采样时在每步添加随机噪声（随机过程），而 DDIM 可通过 \(\eta=0\) 实现确定性采样。
+            相同起始噪声下，DDPM 每次结果不同，DDIM 始终一致。
+        </p>
+        <div class="controls-row">
+            <div class="slider-group">
+                <label>η (DDIM 参数)</label>
+                <input type="range" id="slider-eta" min="0" max="1" value="0" step="0.05" style="width:160px">
+                <span class="slider-value" id="val-eta">0.00</span>
+            </div>
+            <div class="slider-group">
+                <label>采样步数</label>
+                <input type="range" id="slider-cmp-steps" min="10" max="100" value="50" step="10" style="width:120px">
+                <span class="slider-value" id="val-cmp-steps">50</span>
+            </div>
+            <button class="btn btn-primary" onclick="CompareViz.run()">运行对比</button>
+            <button class="btn" onclick="CompareViz.run()">再次运行</button>
+        </div>
+        <div class="compare-wrap">
+            <div class="compare-panel">
+                <div class="panel-header">
+                    <h4 style="color:var(--accent-orange)">DDPM (随机采样)</h4>
+                    <span class="badge badge-orange">η = 1</span>
+                </div>
+                <canvas id="canvas-ddpm"></canvas>
+                <div class="run-label" id="ddpm-run-label">等待运行...</div>
+            </div>
+            <div class="compare-panel">
+                <div class="panel-header">
+                    <h4 style="color:var(--accent-blue)">DDIM (确定性采样)</h4>
+                    <span class="badge badge-blue" id="badge-eta">η = 0.00</span>
+                </div>
+                <canvas id="canvas-ddim"></canvas>
+                <div class="run-label" id="ddim-run-label">等待运行...</div>
+            </div>
+        </div>
+        <div class="info-box mt-2">
+            <p><strong>关键区别：</strong>DDPM 在逆过程每步都添加随机噪声 \(z \sim \mathcal{N}(0,I)\)，因此每次采样结果不同。
+            DDIM 当 \(\eta=0\) 时去除了随机项，从相同 \(x_T\) 出发总能得到相同结果，并且可以跳步加速。</p>
+        </div>
+    </section>
+
+</div><!-- end page-container -->
+
+<!-- Nav -->
+<script src="../shared/scripts/nav.js"></script>
+<script>
+/* ============================================================
+   Utility: seeded random, noise schedule, math helpers
+   ============================================================ */
+function mulberry32(a) {
+    return function() {
+        a |= 0; a = a + 0x6D2B79F5 | 0;
+        var t = Math.imul(a ^ a >>> 15, 1 | a);
+        t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+        return ((t ^ t >>> 14) >>> 0) / 4294967296;
+    };
+}
+
+function gaussRandom(rng) {
+    let u = 0, v = 0;
+    while (u === 0) u = (rng || Math.random)();
+    while (v === 0) v = (rng || Math.random)();
+    return Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
+}
+
+function linspace(a, b, n) {
+    const arr = [];
+    for (let i = 0; i < n; i++) arr.push(a + (b - a) * i / (n - 1));
+    return arr;
+}
+
+function cosineSchedule(T) {
+    const s = 0.008;
+    const alphaBarArr = [];
+    for (let t = 0; t <= T; t++) {
+        const f = Math.cos(((t / T) + s) / (1 + s) * Math.PI / 2);
+        alphaBarArr.push(f * f);
+    }
+    const a0 = alphaBarArr[0];
+    for (let t = 0; t <= T; t++) alphaBarArr[t] = Math.min(alphaBarArr[t] / a0, 0.9999);
+    return alphaBarArr;
+}
+
+function linearSchedule(T) {
+    const betaStart = 0.0001, betaEnd = 0.02;
+    const betas = [];
+    for (let t = 0; t < T; t++) betas.push(betaStart + (betaEnd - betaStart) * t / (T - 1));
+    const alphaBar = [1];
+    let prod = 1;
+    for (let t = 0; t < T; t++) { prod *= (1 - betas[t]); alphaBar.push(prod); }
+    return { betas, alphaBar };
+}
+
+/* 2D data: Swiss roll-ish clusters */
+function generateData(n, rng) {
+    const points = [];
+    const rand = rng || Math.random;
+    const centers = [[-2, -2], [2, 2], [-2, 2], [2, -2], [0, 0]];
+    for (let i = 0; i < n; i++) {
+        const c = centers[Math.floor(rand() * centers.length)];
+        points.push([c[0] + gaussRandom(rand) * 0.35, c[1] + gaussRandom(rand) * 0.35]);
+    }
+    return points;
+}
+
+function canvasDPR(canvas) {
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    const ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+    return { ctx, w: rect.width, h: rect.height, dpr };
+}
+
+/* ============================================================
+   Section 1: Flow Diagram
+   ============================================================ */
+const FlowViz = (() => {
+    let mode = 'train';
+    let animId = null;
+    const canvas = () => document.getElementById('canvas-flow');
+
+    function showMode(m) {
+        mode = m;
+        document.getElementById('btn-flow-train').classList.toggle('active', m === 'train');
+        document.getElementById('btn-flow-sample').classList.toggle('active', m === 'sample');
+        replay();
+    }
+
+    function replay() {
+        if (animId) cancelAnimationFrame(animId);
+        draw(0);
+    }
+
+    function draw(progress) {
+        const c = canvas();
+        const { ctx, w, h } = canvasDPR(c);
+        ctx.clearRect(0, 0, w, h);
+
+        if (mode === 'train') drawTrainFlow(ctx, w, h, progress);
+        else drawSampleFlow(ctx, w, h, progress);
+
+        if (progress < 1) {
+            animId = requestAnimationFrame(() => draw(Math.min(progress + 0.018, 1)));
+        }
+    }
+
+    function drawBox(ctx, x, y, bw, bh, text, color, progress, idx, total) {
+        const stagger = idx / total;
+        const a = Math.max(0, Math.min(1, (progress - stagger * 0.6) / 0.4));
+        if (a <= 0) return;
+        ctx.globalAlpha = a;
+        ctx.fillStyle = color + '22';
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        roundRect(ctx, x, y, bw, bh, 8);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = '#e8e8e8';
+        ctx.font = '600 13px "Noto Sans SC", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        wrapText(ctx, text, x + bw / 2, y + bh / 2, bw - 16, 16);
+        ctx.globalAlpha = 1;
+    }
+
+    function drawArrow(ctx, x1, y1, x2, y2, color, progress, idx, total) {
+        const stagger = idx / total;
+        const a = Math.max(0, Math.min(1, (progress - stagger * 0.6) / 0.4));
+        if (a <= 0) return;
+        ctx.globalAlpha = a;
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x1 + (x2 - x1) * a, y1 + (y2 - y1) * a);
+        ctx.stroke();
+        if (a > 0.9) {
+            const angle = Math.atan2(y2 - y1, x2 - x1);
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.moveTo(x2, y2);
+            ctx.lineTo(x2 - 10 * Math.cos(angle - 0.4), y2 - 10 * Math.sin(angle - 0.4));
+            ctx.lineTo(x2 - 10 * Math.cos(angle + 0.4), y2 - 10 * Math.sin(angle + 0.4));
+            ctx.closePath();
+            ctx.fill();
+        }
+        ctx.globalAlpha = 1;
+    }
+
+    function drawTrainFlow(ctx, w, h, p) {
+        const steps = [
+            { text: '采样 x₀\n从训练数据', color: '#4fc3f7' },
+            { text: '采样 t\n~ U(1,T)', color: '#b388ff' },
+            { text: '采样 ε\n~ N(0, I)', color: '#ffab40' },
+            { text: '加噪\nx_t = √ᾱ_t·x₀ + √(1-ᾱ_t)·ε', color: '#ff80ab' },
+            { text: '模型预测\nε_θ(x_t, t)', color: '#16c79a' },
+            { text: '计算损失\n||ε - ε_θ||²', color: '#ff5252' },
+        ];
+        const bw = 140, bh = 70;
+        const startX = (w - (steps.length * (bw + 30) - 30)) / 2;
+        const cy = h / 2 - bh / 2;
+
+        /* title */
+        ctx.globalAlpha = Math.min(1, p * 3);
+        ctx.fillStyle = '#ffab40';
+        ctx.font = '700 18px "Noto Sans SC", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('训练流程', w / 2, 40);
+        ctx.globalAlpha = 1;
+
+        for (let i = 0; i < steps.length; i++) {
+            const x = startX + i * (bw + 30);
+            drawBox(ctx, x, cy, bw, bh, steps[i].text, steps[i].color, p, i, steps.length);
+            if (i < steps.length - 1) {
+                drawArrow(ctx, x + bw + 4, cy + bh / 2, x + bw + 26, cy + bh / 2, '#6c6c7c', p, i, steps.length);
+            }
+        }
+
+        /* Loop arrow from loss back to model */
+        const loopA = Math.max(0, Math.min(1, (p - 0.7) / 0.3));
+        if (loopA > 0) {
+            ctx.globalAlpha = loopA;
+            ctx.strokeStyle = '#ff5252';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([5, 5]);
+            const lx = startX + 5 * (bw + 30) + bw / 2;
+            const ly = cy + bh + 10;
+            const rx = startX + 4 * (bw + 30) + bw / 2;
+            ctx.beginPath();
+            ctx.moveTo(lx, ly);
+            ctx.quadraticCurveTo((lx + rx) / 2, ly + 55, rx, ly);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.fillStyle = '#ff5252';
+            ctx.font = '500 12px "Noto Sans SC", sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('梯度更新 θ', (lx + rx) / 2, ly + 50);
+            ctx.globalAlpha = 1;
+        }
+    }
+
+    function drawSampleFlow(ctx, w, h, p) {
+        const steps = [
+            { text: 'x_T\n~ N(0, I)', color: '#ff5252' },
+            { text: '预测 ε_θ\n(x_t, t)', color: '#16c79a' },
+            { text: '计算 μ_θ\n后验均值', color: '#b388ff' },
+            { text: '采样 z\n~ N(0, I)', color: '#ffab40' },
+            { text: '更新 x_{t-1}\n= μ_θ + σ_t·z', color: '#4fc3f7' },
+            { text: '输出 x₀\n生成结果', color: '#ffd740' },
+        ];
+        const bw = 140, bh = 70;
+        const startX = (w - (steps.length * (bw + 30) - 30)) / 2;
+        const cy = h / 2 - bh / 2;
+
+        ctx.globalAlpha = Math.min(1, p * 3);
+        ctx.fillStyle = '#4fc3f7';
+        ctx.font = '700 18px "Noto Sans SC", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('采样流程', w / 2, 40);
+        ctx.globalAlpha = 1;
+
+        for (let i = 0; i < steps.length; i++) {
+            const x = startX + i * (bw + 30);
+            drawBox(ctx, x, cy, bw, bh, steps[i].text, steps[i].color, p, i, steps.length);
+            if (i < steps.length - 1) {
+                drawArrow(ctx, x + bw + 4, cy + bh / 2, x + bw + 26, cy + bh / 2, '#6c6c7c', p, i, steps.length);
+            }
+        }
+
+        /* Loop arrow (t-1 back) */
+        const loopA = Math.max(0, Math.min(1, (p - 0.6) / 0.3));
+        if (loopA > 0) {
+            ctx.globalAlpha = loopA;
+            ctx.strokeStyle = '#4fc3f7';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([5, 5]);
+            const lx = startX + 4 * (bw + 30) + bw / 2;
+            const rx = startX + 1 * (bw + 30) + bw / 2;
+            const ly = cy - 15;
+            ctx.beginPath();
+            ctx.moveTo(lx, ly);
+            ctx.quadraticCurveTo((lx + rx) / 2, ly - 55, rx, ly);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.fillStyle = '#4fc3f7';
+            ctx.font = '500 12px "Noto Sans SC", sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('重复 T 次 (t = T → 1)', (lx + rx) / 2, ly - 50);
+            ctx.globalAlpha = 1;
+        }
+    }
+
+    function roundRect(ctx, x, y, w, h, r) {
+        ctx.beginPath();
+        ctx.moveTo(x + r, y);
+        ctx.lineTo(x + w - r, y);
+        ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+        ctx.lineTo(x + w, y + h - r);
+        ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+        ctx.lineTo(x + r, y + h);
+        ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+        ctx.lineTo(x, y + r);
+        ctx.quadraticCurveTo(x, y, x + r, y);
+        ctx.closePath();
+    }
+
+    function wrapText(ctx, text, x, y, maxW, lineH) {
+        const lines = text.split('\n');
+        const startY = y - (lines.length - 1) * lineH / 2;
+        lines.forEach((line, i) => ctx.fillText(line, x, startY + i * lineH, maxW));
+    }
+
+    return { showMode, replay, draw };
+})();
+
+/* ============================================================
+   Section 2: ELBO Derivation Steps
+   ============================================================ */
+const ELBOViz = (() => {
+    const steps = [
+        {
+            label: '第一步：变分下界',
+            math: `\\log p(x_0) \\geq \\mathbb{E}_{q}\\left[\\log \\frac{p(x_{0:T})}{q(x_{1:T}|x_0)}\\right] = \\text{ELBO}`,
+            desc: '利用 Jensen 不等式，将对数似然分解为可处理的下界。q 为前向扩散过程。'
+        },
+        {
+            label: '第二步：展开联合分布',
+            math: `\\text{ELBO} = \\mathbb{E}_q\\Big[\\log p(x_T) + \\sum_{t=1}^{T}\\log\\frac{p_\\theta(x_{t-1}|x_t)}{q(x_t|x_{t-1})}\\Big]`,
+            desc: '将联合分布按马尔可夫链展开，前向过程 q 和逆向过程 p_θ 对应每一步。'
+        },
+        {
+            label: '第三步：重新组织为 KL 散度',
+            math: `\\text{ELBO} = \\underbrace{\\mathbb{E}_q[\\log p(x_T)]}_{\\text{先验项}} - \\sum_{t=2}^{T}\\underbrace{D_{\\text{KL}}(q(x_{t-1}|x_t,x_0) \\| p_\\theta(x_{t-1}|x_t))}_{L_{t-1}} - \\underbrace{D_{\\text{KL}}(q(x_1|x_0) \\| p_\\theta(x_0|x_1))}_{L_0}`,
+            desc: '利用贝叶斯规则将 q(x_t|x_{t-1}) 转化为 q(x_{t-1}|x_t, x_0)，使每一项成为两个高斯分布的 KL 散度。'
+        },
+        {
+            label: '第四步：高斯分布 KL 闭式解',
+            math: `L_{t-1} = \\frac{1}{2\\sigma_t^2}\\left\\|\\tilde{\\mu}_t(x_t, x_0) - \\mu_\\theta(x_t, t)\\right\\|^2 + C`,
+            desc: '两个高斯分布的 KL 散度可以用均值差的平方表示。C 为不依赖 θ 的常数项。'
+        },
+        {
+            label: '第五步：参数化为噪声预测',
+            math: `\\mu_\\theta(x_t, t) = \\frac{1}{\\sqrt{\\alpha_t}}\\left(x_t - \\frac{\\beta_t}{\\sqrt{1-\\bar{\\alpha}_t}}\\,\\epsilon_\\theta(x_t, t)\\right)`,
+            desc: '将均值参数化为噪声预测网络 ε_θ 的形式，模型不直接预测均值，而是预测所加噪声。'
+        },
+        {
+            label: '第六步：简化损失函数',
+            math: `\\boxed{L_{\\text{simple}} = \\mathbb{E}_{t, x_0, \\epsilon}\\left[\\left\\|\\epsilon - \\epsilon_\\theta\\!\\left(\\sqrt{\\bar{\\alpha}_t}\\,x_0 + \\sqrt{1-\\bar{\\alpha}_t}\\,\\epsilon,\\; t\\right)\\right\\|^2\\right]}`,
+            desc: 'Ho et al. 发现丢弃权重系数后的简化损失在实践中效果更好。模型只需学会预测加入的噪声 ε。'
+        }
+    ];
+
+    function init() {
+        const container = document.getElementById('elbo-steps');
+        steps.forEach((s, i) => {
+            const div = document.createElement('div');
+            div.className = 'math-step' + (i === 0 ? ' active' : '');
+            div.innerHTML = `
+                <div class="step-label">${s.label}</div>
+                <div class="math-content">$$${s.math}$$</div>
+                <div class="step-desc">${s.desc}</div>
+            `;
+            div.onclick = () => {
+                container.querySelectorAll('.math-step').forEach(el => el.classList.remove('active'));
+                div.classList.add('active');
+            };
+            container.appendChild(div);
+        });
+    }
+
+    return { init };
+})();
+
+/* ============================================================
+   Section 3: Training Simulation
+   ============================================================ */
+const TrainSim = (() => {
+    let training = false;
+    let epoch = 0;
+    let lossHistory = [];
+    let animId = null;
+    let dataPoints = [];
+    let weights = null; /* Simple 2-layer network weights */
+    const LR = 0.002;
+    const BATCH = 64;
+    const T = 50;
+    let schedule = null;
+
+    function initWeights() {
+        const rng = mulberry32(12345);
+        const H = 32;
+        /* input: [x, y, t_embed] = 3 dims -> H -> 2 (predict eps_x, eps_y) */
+        weights = {
+            W1: Array.from({length: H}, () => Array.from({length: 3}, () => (gaussRandom(rng)) * 0.3)),
+            b1: Array.from({length: H}, () => 0),
+            W2: Array.from({length: 2}, () => Array.from({length: H}, () => (gaussRandom(rng)) * 0.3)),
+            b2: [0, 0],
+        };
+    }
+
+    function forward(x, y, tNorm) {
+        const inp = [x, y, tNorm];
+        const hidden = weights.W1.map((row, i) => {
+            let sum = weights.b1[i];
+            for (let j = 0; j < 3; j++) sum += row[j] * inp[j];
+            return Math.max(0, sum); /* ReLU */
+        });
+        const out = weights.W2.map((row, i) => {
+            let sum = weights.b2[i];
+            for (let j = 0; j < hidden.length; j++) sum += row[j] * hidden[j];
+            return sum;
+        });
+        return { out, hidden, inp };
+    }
+
+    function backward(cache, target) {
+        const { out, hidden, inp } = cache;
+        const dOut = [out[0] - target[0], out[1] - target[1]];
+        /* W2, b2 grads */
+        for (let i = 0; i < 2; i++) {
+            weights.b2[i] -= LR * dOut[i];
+            for (let j = 0; j < hidden.length; j++) {
+                const g = dOut[i] * hidden[j];
+                /* dHidden */
+                const dH = dOut[i] * weights.W2[i][j] * (hidden[j] > 0 ? 1 : 0);
+                weights.W2[i][j] -= LR * g;
+                /* W1, b1 grads */
+                weights.b1[j] -= LR * dH * 0.5;
+                for (let k = 0; k < 3; k++) {
+                    weights.W1[j][k] -= LR * dH * inp[k] * 0.5;
+                }
+            }
+        }
+        return (dOut[0] ** 2 + dOut[1] ** 2) / 2;
+    }
+
+    function trainStep() {
+        const rng = Math.random;
+        let totalLoss = 0;
+        for (let b = 0; b < BATCH; b++) {
+            const idx = Math.floor(rng() * dataPoints.length);
+            const [x0, y0] = dataPoints[idx];
+            const t = Math.floor(rng() * T) + 1;
+            const aBar = schedule.alphaBar[t];
+            const sqrtA = Math.sqrt(aBar);
+            const sqrt1A = Math.sqrt(1 - aBar);
+            const e1 = gaussRandom(rng), e2 = gaussRandom(rng);
+            const xt = sqrtA * x0 + sqrt1A * e1;
+            const yt = sqrtA * y0 + sqrt1A * e2;
+            const tNorm = t / T;
+            const cache = forward(xt / 4, yt / 4, tNorm);
+            totalLoss += backward(cache, [e1, e2]);
+        }
+        return totalLoss / BATCH;
+    }
+
+    function toggleTrain() {
+        training = !training;
+        document.getElementById('btn-train').textContent = training ? '暂停训练' : '继续训练';
+        if (training) runLoop();
+    }
+
+    function runLoop() {
+        if (!training) return;
+        const speed = parseInt(document.getElementById('slider-speed').value);
+        for (let s = 0; s < speed; s++) {
+            const loss = trainStep();
+            epoch++;
+            lossHistory.push(loss);
+        }
+        document.getElementById('slider-epoch').value = Math.min(epoch, 200);
+        document.getElementById('val-epoch').textContent = epoch;
+        drawAll();
+        animId = requestAnimationFrame(runLoop);
+    }
+
+    function drawAll() {
+        drawData();
+        drawPred();
+        drawLoss();
+    }
+
+    function drawData() {
+        const c = document.getElementById('canvas-data');
+        const { ctx, w, h } = canvasDPR(c);
+        ctx.clearRect(0, 0, w, h);
+        const scale = Math.min(w, h) / 10;
+        const cx = w / 2, cy = h / 2;
+
+        /* Draw grid */
+        ctx.strokeStyle = '#2a2a4a';
+        ctx.lineWidth = 1;
+        for (let i = -4; i <= 4; i++) {
+            ctx.beginPath(); ctx.moveTo(cx + i * scale, 0); ctx.lineTo(cx + i * scale, h); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(0, cy + i * scale); ctx.lineTo(w, cy + i * scale); ctx.stroke();
+        }
+
+        /* Data points */
+        ctx.fillStyle = 'rgba(79, 195, 247, 0.6)';
+        dataPoints.forEach(([x, y]) => {
+            ctx.beginPath();
+            ctx.arc(cx + x * scale, cy - y * scale, 3, 0, Math.PI * 2);
+            ctx.fill();
+        });
+
+        /* Noisy points at random t */
+        if (epoch > 0) {
+            const t = Math.floor(T * 0.5);
+            const aBar = schedule.alphaBar[t];
+            const rng = mulberry32(42);
+            ctx.fillStyle = 'rgba(255, 82, 82, 0.4)';
+            for (let i = 0; i < Math.min(60, dataPoints.length); i++) {
+                const [x0, y0] = dataPoints[i];
+                const e1 = gaussRandom(rng), e2 = gaussRandom(rng);
+                const xt = Math.sqrt(aBar) * x0 + Math.sqrt(1 - aBar) * e1;
+                const yt = Math.sqrt(aBar) * y0 + Math.sqrt(1 - aBar) * e2;
+                ctx.beginPath();
+                ctx.arc(cx + xt * scale, cy - yt * scale, 2.5, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+    }
+
+    function drawPred() {
+        const c = document.getElementById('canvas-pred');
+        const { ctx, w, h } = canvasDPR(c);
+        ctx.clearRect(0, 0, w, h);
+        const scale = Math.min(w, h) / 10;
+        const cx = w / 2, cy = h / 2;
+
+        /* Grid */
+        ctx.strokeStyle = '#2a2a4a';
+        ctx.lineWidth = 1;
+        for (let i = -4; i <= 4; i++) {
+            ctx.beginPath(); ctx.moveTo(cx + i * scale, 0); ctx.lineTo(cx + i * scale, h); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(0, cy + i * scale); ctx.lineTo(w, cy + i * scale); ctx.stroke();
+        }
+
+        /* Predicted noise as vector field */
+        const tNorm = 0.5;
+        const step = 0.8;
+        ctx.strokeStyle = 'rgba(22, 199, 154, 0.6)';
+        ctx.lineWidth = 1.5;
+        for (let x = -3.5; x <= 3.5; x += step) {
+            for (let y = -3.5; y <= 3.5; y += step) {
+                const { out } = forward(x / 4, y / 4, tNorm);
+                const px = cx + x * scale;
+                const py = cy - y * scale;
+                const mag = Math.sqrt(out[0] ** 2 + out[1] ** 2);
+                const arrowLen = Math.min(mag * scale * 0.15, scale * 0.35);
+                if (arrowLen < 2) continue;
+                const angle = Math.atan2(-out[1], out[0]);
+                const ex = px + Math.cos(angle) * arrowLen;
+                const ey = py - Math.sin(angle) * arrowLen;
+                ctx.beginPath();
+                ctx.moveTo(px, py);
+                ctx.lineTo(ex, ey);
+                ctx.stroke();
+                /* arrowhead */
+                ctx.fillStyle = 'rgba(22, 199, 154, 0.6)';
+                ctx.beginPath();
+                ctx.moveTo(ex, ey);
+                ctx.lineTo(ex - 5 * Math.cos(angle - 0.5), ey + 5 * Math.sin(angle - 0.5));
+                ctx.lineTo(ex - 5 * Math.cos(angle + 0.5), ey + 5 * Math.sin(angle + 0.5));
+                ctx.closePath();
+                ctx.fill();
+            }
+        }
+    }
+
+    function drawLoss() {
+        const c = document.getElementById('canvas-loss');
+        const { ctx, w, h } = canvasDPR(c);
+        ctx.clearRect(0, 0, w, h);
+        if (lossHistory.length < 2) return;
+
+        const pad = { l: 50, r: 20, t: 15, b: 30 };
+        const plotW = w - pad.l - pad.r;
+        const plotH = h - pad.t - pad.b;
+        const maxLoss = Math.max(...lossHistory.slice(0, 20), 2);
+        const minLoss = 0;
+
+        /* Axes */
+        ctx.strokeStyle = '#2a2a4a';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(pad.l, pad.t);
+        ctx.lineTo(pad.l, pad.t + plotH);
+        ctx.lineTo(pad.l + plotW, pad.t + plotH);
+        ctx.stroke();
+
+        /* Y labels */
+        ctx.fillStyle = '#6c6c7c';
+        ctx.font = '11px "JetBrains Mono", monospace';
+        ctx.textAlign = 'right';
+        for (let i = 0; i <= 4; i++) {
+            const v = minLoss + (maxLoss - minLoss) * (1 - i / 4);
+            const y = pad.t + plotH * i / 4;
+            ctx.fillText(v.toFixed(2), pad.l - 6, y + 4);
+            ctx.strokeStyle = '#1a1a2e';
+            ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(pad.l + plotW, y); ctx.stroke();
+        }
+
+        /* Loss curve */
+        ctx.strokeStyle = '#16c79a';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        const n = lossHistory.length;
+        for (let i = 0; i < n; i++) {
+            const x = pad.l + (i / (n - 1)) * plotW;
+            const y = pad.t + plotH * (1 - (Math.min(lossHistory[i], maxLoss) - minLoss) / (maxLoss - minLoss));
+            if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+
+        /* Current loss */
+        ctx.fillStyle = '#16c79a';
+        ctx.textAlign = 'left';
+        ctx.fillText('Loss: ' + lossHistory[n - 1].toFixed(4), pad.l + 8, pad.t + 16);
+    }
+
+    function reset() {
+        training = false;
+        document.getElementById('btn-train').textContent = '开始训练';
+        if (animId) cancelAnimationFrame(animId);
+        epoch = 0;
+        lossHistory = [];
+        document.getElementById('slider-epoch').value = 1;
+        document.getElementById('val-epoch').textContent = '1';
+        initWeights();
+        drawAll();
+    }
+
+    function init() {
+        schedule = linearSchedule(T);
+        dataPoints = generateData(200, mulberry32(99));
+        initWeights();
+        drawAll();
+        document.getElementById('slider-speed').oninput = function() {
+            document.getElementById('val-speed').textContent = this.value;
+        };
+    }
+
+    return { init, toggleTrain, reset, drawAll };
+})();
+
+/* ============================================================
+   Section 4: Sampling Animation
+   ============================================================ */
+const SampleViz = (() => {
+    let animId = null;
+    let running = false;
+    let currentT = 0;
+    let totalT = 50;
+    let particles = [];
+    let particleHistory = [];
+    let noiseMags = [];
+    let schedule = null;
+
+    function init() {
+        bindSliders();
+        reset();
+    }
+
+    function bindSliders() {
+        document.getElementById('slider-T').oninput = function() {
+            document.getElementById('val-T').textContent = this.value;
+        };
+        document.getElementById('slider-sample-speed').oninput = function() {
+            document.getElementById('val-sample-speed').textContent = this.value;
+        };
+        document.getElementById('slider-seed').oninput = function() {
+            document.getElementById('val-seed').textContent = this.value;
+        };
+    }
+
+    function start() {
+        if (running) { running = false; document.getElementById('btn-sample').textContent = '开始采样'; return; }
+        totalT = parseInt(document.getElementById('slider-T').value);
+        const seed = parseInt(document.getElementById('slider-seed').value);
+        schedule = linearSchedule(totalT);
+        const rng = mulberry32(seed);
+
+        /* Initialize particles from N(0,I) */
+        particles = [];
+        for (let i = 0; i < 150; i++) {
+            particles.push([gaussRandom(rng) * 3, gaussRandom(rng) * 3]);
+        }
+        particleHistory = [particles.map(p => [...p])];
+        noiseMags = [];
+        currentT = totalT;
+        running = true;
+        document.getElementById('btn-sample').textContent = '暂停';
+        sampleLoop(rng);
+    }
+
+    function sampleLoop(rng) {
+        if (!running || currentT <= 0) {
+            running = false;
+            document.getElementById('btn-sample').textContent = '开始采样';
+            drawSample();
+            drawNoiseMag();
+            return;
+        }
+        const speed = parseInt(document.getElementById('slider-sample-speed').value);
+        for (let s = 0; s < speed && currentT > 0; s++) {
+            reverseStep(rng);
+            currentT--;
+        }
+        drawSample();
+        drawNoiseMag();
+        updateStats();
+        animId = requestAnimationFrame(() => sampleLoop(rng));
+    }
+
+    function reverseStep(rng) {
+        const t = currentT;
+        const beta = schedule.betas[t - 1];
+        const alpha = 1 - beta;
+        const aBar = schedule.alphaBar[t];
+        const aBarPrev = schedule.alphaBar[t - 1];
+
+        let totalNoiseMag = 0;
+        const centers = [[-2, -2], [2, 2], [-2, 2], [2, -2], [0, 0]];
+
+        particles = particles.map(([x, y]) => {
+            /* Simplified "model": pull towards nearest cluster center weighted by schedule */
+            let bestDist = Infinity, bestC = centers[0];
+            centers.forEach(c => {
+                const d = (x - c[0]) ** 2 + (y - c[1]) ** 2;
+                if (d < bestDist) { bestDist = d; bestC = c; }
+            });
+
+            /* Predicted noise direction (pointing away from data) */
+            const predEps = [x - bestC[0] * Math.sqrt(aBar), y - bestC[1] * Math.sqrt(aBar)];
+            const coeff = beta / Math.sqrt(1 - aBar + 1e-8);
+            const mu = (x - coeff * predEps[0] * 0.3) / Math.sqrt(alpha);
+            const muy = (y - coeff * predEps[1] * 0.3) / Math.sqrt(alpha);
+
+            const sigma = Math.sqrt(beta);
+            const z1 = t > 1 ? gaussRandom(rng) : 0;
+            const z2 = t > 1 ? gaussRandom(rng) : 0;
+
+            totalNoiseMag += Math.sqrt(predEps[0] ** 2 + predEps[1] ** 2);
+            return [mu + sigma * z1, muy + sigma * z2];
+        });
+
+        noiseMags.push(totalNoiseMag / particles.length);
+        particleHistory.push(particles.map(p => [...p]));
+    }
+
+    function drawSample() {
+        const c = document.getElementById('canvas-sample');
+        const { ctx, w, h } = canvasDPR(c);
+        ctx.clearRect(0, 0, w, h);
+        const scale = Math.min(w, h) / 12;
+        const cx = w / 2, cy = h / 2;
+
+        /* Grid */
+        ctx.strokeStyle = '#2a2a4a';
+        ctx.lineWidth = 0.5;
+        for (let i = -5; i <= 5; i++) {
+            ctx.beginPath(); ctx.moveTo(cx + i * scale, 0); ctx.lineTo(cx + i * scale, h); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(0, cy + i * scale); ctx.lineTo(w, cy + i * scale); ctx.stroke();
+        }
+
+        /* Target cluster centers (faint) */
+        const centers = [[-2, -2], [2, 2], [-2, 2], [2, -2], [0, 0]];
+        ctx.fillStyle = 'rgba(255, 215, 64, 0.1)';
+        centers.forEach(([x, y]) => {
+            ctx.beginPath();
+            ctx.arc(cx + x * scale, cy - y * scale, scale * 0.6, 0, Math.PI * 2);
+            ctx.fill();
+        });
+
+        /* Particle trails (last few steps) */
+        if (particleHistory.length > 1) {
+            const trailLen = Math.min(8, particleHistory.length);
+            for (let pi = 0; pi < Math.min(40, particles.length); pi++) {
+                ctx.strokeStyle = 'rgba(79, 195, 247, 0.12)';
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                for (let hi = Math.max(0, particleHistory.length - trailLen); hi < particleHistory.length; hi++) {
+                    const pt = particleHistory[hi][pi];
+                    const px = cx + pt[0] * scale, py = cy - pt[1] * scale;
+                    if (hi === Math.max(0, particleHistory.length - trailLen)) ctx.moveTo(px, py);
+                    else ctx.lineTo(px, py);
+                }
+                ctx.stroke();
+            }
+        }
+
+        /* Particles */
+        const progress = 1 - currentT / totalT;
+        const r = progress * 150 + 50, g = 195 - progress * 100, b = 247;
+        particles.forEach(([x, y]) => {
+            const px = cx + x * scale, py = cy - y * scale;
+            ctx.fillStyle = `rgba(${Math.floor(r)}, ${Math.floor(g)}, ${Math.floor(b)}, 0.7)`;
+            ctx.beginPath();
+            ctx.arc(px, py, 3.5, 0, Math.PI * 2);
+            ctx.fill();
+        });
+
+        /* Step indicator */
+        ctx.fillStyle = '#e8e8e8';
+        ctx.font = '600 14px "Noto Sans SC", sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText(`t = ${currentT} / ${totalT}`, 16, 24);
+
+        /* Progress bar */
+        const barW = 200, barH = 6;
+        ctx.fillStyle = '#2a2a4a';
+        ctx.fillRect(16, 34, barW, barH);
+        ctx.fillStyle = '#16c79a';
+        ctx.fillRect(16, 34, barW * progress, barH);
+    }
+
+    function drawNoiseMag() {
+        const c = document.getElementById('canvas-noise-mag');
+        const { ctx, w, h } = canvasDPR(c);
+        ctx.clearRect(0, 0, w, h);
+        if (noiseMags.length < 2) return;
+
+        const pad = 8;
+        const pw = w - pad * 2, ph = h - pad * 2;
+        const maxN = Math.max(...noiseMags, 0.1);
+
+        ctx.strokeStyle = '#b388ff';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        noiseMags.forEach((v, i) => {
+            const x = pad + (i / (noiseMags.length - 1)) * pw;
+            const y = pad + ph * (1 - v / maxN);
+            if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+    }
+
+    function updateStats() {
+        document.getElementById('stat-t').textContent = currentT;
+        if (noiseMags.length > 0) {
+            const last = noiseMags[noiseMags.length - 1];
+            document.getElementById('stat-noise').textContent = last.toFixed(3);
+            const snr = currentT > 0 ? (10 * Math.log10(schedule.alphaBar[currentT] / (1 - schedule.alphaBar[currentT] + 1e-8))).toFixed(1) : '∞';
+            document.getElementById('stat-snr').textContent = snr;
+        }
+    }
+
+    function reset() {
+        running = false;
+        if (animId) cancelAnimationFrame(animId);
+        document.getElementById('btn-sample').textContent = '开始采样';
+        particles = [];
+        particleHistory = [];
+        noiseMags = [];
+        currentT = 0;
+        totalT = parseInt(document.getElementById('slider-T').value);
+        document.getElementById('stat-t').textContent = 'T';
+        document.getElementById('stat-noise').textContent = '—';
+        document.getElementById('stat-snr').textContent = '—';
+        /* Clear canvases */
+        [document.getElementById('canvas-sample'), document.getElementById('canvas-noise-mag')].forEach(c => {
+            const { ctx, w, h } = canvasDPR(c);
+            ctx.clearRect(0, 0, w, h);
+        });
+    }
+
+    return { init, start, reset };
+})();
+
+/* ============================================================
+   Section 5: DDPM vs DDIM Comparison
+   ============================================================ */
+const CompareViz = (() => {
+    let runCount = 0;
+
+    function init() {
+        document.getElementById('slider-eta').oninput = function() {
+            document.getElementById('val-eta').textContent = parseFloat(this.value).toFixed(2);
+            document.getElementById('badge-eta').textContent = 'η = ' + parseFloat(this.value).toFixed(2);
+        };
+        document.getElementById('slider-cmp-steps').oninput = function() {
+            document.getElementById('val-cmp-steps').textContent = this.value;
+        };
+    }
+
+    function run() {
+        runCount++;
+        const totalT = parseInt(document.getElementById('slider-cmp-steps').value);
+        const eta = parseFloat(document.getElementById('slider-eta').value);
+        const schedule = linearSchedule(totalT);
+        const sharedSeed = 777; /* same starting noise */
+        const centers = [[-2, -2], [2, 2], [-2, 2], [2, -2], [0, 0]];
+
+        /* DDPM run (eta=1) */
+        const ddpmParticles = runSampling(totalT, 1.0, schedule, sharedSeed, centers);
+        /* DDIM run (custom eta) */
+        const ddimParticles = runSampling(totalT, eta, schedule, sharedSeed, centers);
+
+        drawCompare('canvas-ddpm', ddpmParticles, totalT);
+        drawCompare('canvas-ddim', ddimParticles, totalT);
+
+        document.getElementById('ddpm-run-label').textContent = `运行 #${runCount} | η=1.0 | ${totalT}步 | 随机采样`;
+        document.getElementById('ddim-run-label').textContent = `运行 #${runCount} | η=${eta.toFixed(2)} | ${totalT}步 | ${eta === 0 ? '确定性' : '半随机'}采样`;
+    }
+
+    function runSampling(totalT, eta, schedule, seed, centers) {
+        const rng = mulberry32(seed);
+        /* Separate RNG for stochastic noise so DDIM(eta=0) stays deterministic */
+        const stochRng = mulberry32(seed + runCount * 1000 + Math.floor(eta * 999));
+
+        let particles = [];
+        for (let i = 0; i < 120; i++) {
+            particles.push([gaussRandom(rng) * 3, gaussRandom(rng) * 3]);
+        }
+
+        const history = [particles.map(p => [...p])];
+
+        for (let step = totalT; step > 0; step--) {
+            const t = step;
+            const beta = schedule.betas[t - 1];
+            const alpha = 1 - beta;
+            const aBar = schedule.alphaBar[t];
+            const aBarPrev = t > 1 ? schedule.alphaBar[t - 1] : 1.0;
+
+            /* DDIM sigma */
+            const sigma = eta * Math.sqrt((1 - aBarPrev) / (1 - aBar + 1e-8)) * Math.sqrt(beta);
+
+            particles = particles.map(([x, y]) => {
+                /* Simplified model: pull toward nearest cluster */
+                let bestDist = Infinity, bestC = centers[0];
+                centers.forEach(c => {
+                    const d = (x - c[0]) ** 2 + (y - c[1]) ** 2;
+                    if (d < bestDist) { bestDist = d; bestC = c; }
+                });
+
+                /* Predicted x0 */
+                const predX0_x = (x - Math.sqrt(1 - aBar) * (x - bestC[0]) * 0.5) / (Math.sqrt(aBar) + 1e-8);
+                const predX0_y = (y - Math.sqrt(1 - aBar) * (y - bestC[1]) * 0.5) / (Math.sqrt(aBar) + 1e-8);
+
+                /* Clip predicted x0 */
+                const cx0 = Math.max(-5, Math.min(5, predX0_x));
+                const cy0 = Math.max(-5, Math.min(5, predX0_y));
+
+                /* Direction pointing to x_t */
+                const dirX = (x - Math.sqrt(aBar) * cx0) / (Math.sqrt(1 - aBar) + 1e-8);
+                const dirY = (y - Math.sqrt(aBar) * cy0) / (Math.sqrt(1 - aBar) + 1e-8);
+
+                /* DDIM update */
+                const newX = Math.sqrt(aBarPrev) * cx0 + Math.sqrt(Math.max(0, 1 - aBarPrev - sigma ** 2)) * dirX + sigma * (t > 1 ? gaussRandom(stochRng) : 0);
+                const newY = Math.sqrt(aBarPrev) * cy0 + Math.sqrt(Math.max(0, 1 - aBarPrev - sigma ** 2)) * dirY + sigma * (t > 1 ? gaussRandom(stochRng) : 0);
+
+                return [newX, newY];
+            });
+
+            if (step % Math.max(1, Math.floor(totalT / 20)) === 0 || step === 1) {
+                history.push(particles.map(p => [...p]));
+            }
+        }
+
+        return { final: particles, history };
+    }
+
+    function drawCompare(canvasId, data, totalT) {
+        const c = document.getElementById(canvasId);
+        const { ctx, w, h } = canvasDPR(c);
+        ctx.clearRect(0, 0, w, h);
+        const scale = Math.min(w, h) / 12;
+        const cx = w / 2, cy = h / 2;
+
+        /* Grid */
+        ctx.strokeStyle = '#2a2a4a';
+        ctx.lineWidth = 0.5;
+        for (let i = -5; i <= 5; i++) {
+            ctx.beginPath(); ctx.moveTo(cx + i * scale, 0); ctx.lineTo(cx + i * scale, h); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(0, cy + i * scale); ctx.lineTo(w, cy + i * scale); ctx.stroke();
+        }
+
+        /* Target regions */
+        const centers = [[-2, -2], [2, 2], [-2, 2], [2, -2], [0, 0]];
+        ctx.fillStyle = 'rgba(255, 215, 64, 0.06)';
+        centers.forEach(([x, y]) => {
+            ctx.beginPath();
+            ctx.arc(cx + x * scale, cy - y * scale, scale * 0.6, 0, Math.PI * 2);
+            ctx.fill();
+        });
+
+        /* Trails */
+        if (data.history.length > 1) {
+            for (let pi = 0; pi < Math.min(30, data.final.length); pi++) {
+                ctx.strokeStyle = 'rgba(179, 136, 255, 0.1)';
+                ctx.lineWidth = 0.8;
+                ctx.beginPath();
+                data.history.forEach((frame, fi) => {
+                    if (!frame[pi]) return;
+                    const px = cx + frame[pi][0] * scale;
+                    const py = cy - frame[pi][1] * scale;
+                    if (fi === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+                });
+                ctx.stroke();
+            }
+        }
+
+        /* Final particles */
+        const isRight = canvasId === 'canvas-ddim';
+        data.final.forEach(([x, y]) => {
+            const px = cx + x * scale, py = cy - y * scale;
+            ctx.fillStyle = isRight ? 'rgba(79, 195, 247, 0.75)' : 'rgba(255, 171, 64, 0.75)';
+            ctx.beginPath();
+            ctx.arc(px, py, 3.5, 0, Math.PI * 2);
+            ctx.fill();
+        });
+
+        /* Starting point marker */
+        if (data.history.length > 0) {
+            ctx.fillStyle = 'rgba(255, 82, 82, 0.3)';
+            data.history[0].slice(0, 30).forEach(([x, y]) => {
+                ctx.beginPath();
+                ctx.arc(cx + x * scale, cy - y * scale, 2, 0, Math.PI * 2);
+                ctx.fill();
+            });
+        }
+    }
+
+    return { init, run };
+})();
+
+/* ============================================================
+   Initialize everything on DOM ready
+   ============================================================ */
+document.addEventListener('DOMContentLoaded', () => {
+    /* Render KaTeX */
+    if (typeof renderMathInElement !== 'undefined') {
+        renderMathInElement(document.body, {
+            delimiters: [
+                { left: '$$', right: '$$', display: true },
+                { left: '\\(', right: '\\)', display: false },
+                { left: '\\[', right: '\\]', display: true },
+            ],
+            throwOnError: false,
+        });
+    }
+
+    /* Init sections */
+    ELBOViz.init();
+    /* Re-render math for dynamically added content */
+    setTimeout(() => {
+        if (typeof renderMathInElement !== 'undefined') {
+            renderMathInElement(document.getElementById('elbo-steps'), {
+                delimiters: [
+                    { left: '$$', right: '$$', display: true },
+                    { left: '\\(', right: '\\)', display: false },
+                ],
+                throwOnError: false,
+            });
+        }
+    }, 200);
+
+    FlowViz.replay();
+    TrainSim.init();
+    SampleViz.init();
+    CompareViz.init();
+
+    /* Handle resize */
+    let resizeTimer;
+    window.addEventListener('resize', () => {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(() => {
+            FlowViz.replay();
+            TrainSim.drawAll();
+        }, 250);
+    });
+});
+</script>
+</body>
+</html>

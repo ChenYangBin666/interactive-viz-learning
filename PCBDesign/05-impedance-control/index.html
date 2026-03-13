@@ -1,0 +1,1487 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>阻抗控制 — PCB 设计</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=JetBrains+Mono:wght@400;600&family=Noto+Sans+SC:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../shared/styles/common.css">
+<link rel="stylesheet" href="../shared/styles/components.css">
+<style>
+    .canvas-wrap { position: relative; width: 100%; border-radius: var(--radius-md); overflow: hidden; background: var(--bg-secondary); border: 1px solid var(--border-color); }
+    .canvas-wrap canvas { display: block; width: 100%; }
+    .controls-row { display: flex; flex-wrap: wrap; gap: 1rem; margin-top: 1rem; }
+    .control-group { flex: 1; min-width: 200px; display: flex; flex-direction: column; gap: 0.5rem; }
+    .control-group h4 { color: var(--accent-blue); font-size: 0.85rem; margin-bottom: 0.25rem; }
+    .readout { display: flex; align-items: center; gap: 0.5rem; padding: 0.75rem 1rem; background: var(--bg-card); border-radius: var(--radius-sm); border: 1px solid var(--border-color); }
+    .readout .label { font-size: 0.8rem; color: var(--text-secondary); }
+    .readout .value { font-family: var(--font-mono); font-size: 1.1rem; color: var(--accent-green); font-weight: 600; }
+    .readout.warn .value { color: var(--accent-orange); }
+    .readout.bad .value { color: var(--accent-red); }
+    .readouts-row { display: flex; flex-wrap: wrap; gap: 0.75rem; margin: 1rem 0; }
+    .formula-box { padding: 1rem; background: rgba(15, 52, 96, 0.4); border-radius: var(--radius-sm); border: 1px solid var(--border-color); margin: 0.75rem 0; text-align: center; }
+    .compare-wrap { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; }
+    .compare-panel { display: flex; flex-direction: column; }
+    .compare-panel h4 { text-align: center; margin-bottom: 0.5rem; }
+    .stackup-visual { display: flex; flex-direction: column; align-items: center; gap: 0; margin: 1rem auto; max-width: 500px; }
+    .stackup-layer { width: 100%; display: flex; align-items: center; justify-content: center; font-size: 0.8rem; font-family: var(--font-mono); position: relative; transition: all 0.3s; cursor: pointer; }
+    .stackup-layer:hover { filter: brightness(1.2); }
+    .stackup-layer .layer-label { position: absolute; right: -110px; font-size: 0.75rem; color: var(--text-secondary); white-space: nowrap; }
+    .layer-copper { background: linear-gradient(90deg, #c87533, #e8a040); color: #1a1a2e; font-weight: 600; height: 8px; }
+    .layer-dielectric { background: linear-gradient(90deg, #2a6e3a, #3a9e5a); color: white; height: 36px; }
+    .layer-prepreg { background: linear-gradient(90deg, #3a4e8e, #5a7ebe); color: white; height: 28px; }
+    .layer-mask { background: linear-gradient(90deg, #1a5a3a, #2a8a5a); color: white; height: 6px; }
+    .target-row { display: flex; gap: 1rem; margin: 1rem 0; flex-wrap: wrap; }
+    .target-card { flex: 1; min-width: 160px; padding: 0.75rem; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-sm); text-align: center; }
+    .target-card .target-label { font-size: 0.8rem; color: var(--text-muted); }
+    .target-card .target-value { font-family: var(--font-mono); font-size: 1.3rem; font-weight: 700; }
+    .target-card .target-width { font-family: var(--font-mono); font-size: 0.9rem; color: var(--accent-green); margin-top: 0.25rem; }
+    .result-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-top: 1rem; }
+    .result-table th, .result-table td { padding: 0.5rem 0.75rem; border: 1px solid var(--border-color); text-align: center; }
+    .result-table th { background: var(--bg-card); color: var(--accent-green); font-weight: 600; }
+    .result-table td { font-family: var(--font-mono); }
+    .eye-wrap { position: relative; height: 150px; margin-top: 0.5rem; }
+    @media (max-width: 900px) { .compare-wrap { grid-template-columns: 1fr; } }
+    @media (max-width: 768px) { .controls-row { flex-direction: column; } .stackup-layer .layer-label { display: none; } }
+</style>
+</head>
+<body>
+
+<div class="page-container">
+
+    <h1>05 — 阻抗控制</h1>
+    <p>高速信号完整性的核心：理解传输线阻抗、计算微带线/带状线特征阻抗、掌握差分阻抗设计，并将理论应用于 PCB 叠层设计中。</p>
+
+    <!-- ======================== Section 1 ======================== -->
+    <div class="section" id="sec-transmission">
+        <div class="section-title">
+            <div class="icon">1</div>
+            <h2>传输线理论</h2>
+        </div>
+        <p>当信号频率升高或走线长度超过波长的 1/10 时，PCB 走线必须视为传输线。阻抗不匹配会导致信号反射，影响信号完整性。</p>
+
+        <div class="canvas-wrap">
+            <canvas id="cvTransLine" height="320"></canvas>
+        </div>
+
+        <div class="controls-row">
+            <div class="control-group">
+                <h4>源阻抗 Z<sub>S</sub></h4>
+                <div class="slider-group">
+                    <label>Z<sub>S</sub></label>
+                    <input type="range" id="slZs" min="10" max="150" value="50" step="1">
+                    <span class="slider-value" id="valZs">50 Ω</span>
+                </div>
+            </div>
+            <div class="control-group">
+                <h4>传输线阻抗 Z<sub>0</sub></h4>
+                <div class="slider-group">
+                    <label>Z<sub>0</sub></label>
+                    <input type="range" id="slZ0" min="10" max="150" value="50" step="1">
+                    <span class="slider-value" id="valZ0">50 Ω</span>
+                </div>
+            </div>
+            <div class="control-group">
+                <h4>负载阻抗 Z<sub>L</sub></h4>
+                <div class="slider-group">
+                    <label>Z<sub>L</sub></label>
+                    <input type="range" id="slZl" min="10" max="300" value="50" step="1">
+                    <span class="slider-value" id="valZl">50 Ω</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="readouts-row">
+            <div class="readout" id="roGamma">
+                <span class="label">反射系数 Γ =</span>
+                <span class="value">0.000</span>
+            </div>
+            <div class="readout" id="roReturn">
+                <span class="label">回波损耗 =</span>
+                <span class="value">∞ dB</span>
+            </div>
+            <div class="readout" id="roMatch">
+                <span class="label">匹配状态</span>
+                <span class="value">完美匹配</span>
+            </div>
+        </div>
+
+        <div class="formula-box" id="fmGamma"></div>
+
+        <p class="text-sm text-muted" style="margin-top: 0.5rem;">眼图预览（基于反射系数估算）：</p>
+        <div class="canvas-wrap eye-wrap">
+            <canvas id="cvEye" height="150"></canvas>
+        </div>
+    </div>
+
+    <!-- ======================== Section 2 ======================== -->
+    <div class="section" id="sec-microstrip">
+        <div class="section-title">
+            <div class="icon">2</div>
+            <h2>微带线 (Microstrip)</h2>
+        </div>
+        <p>微带线是 PCB 外层最常见的传输线结构：走线位于介质层上方，下方为参考地平面，上方暴露在空气中。</p>
+
+        <div class="canvas-wrap">
+            <canvas id="cvMicrostrip" height="360"></canvas>
+        </div>
+
+        <div class="controls-row">
+            <div class="control-group">
+                <h4>线宽 W</h4>
+                <div class="slider-group">
+                    <label>W</label>
+                    <input type="range" id="slMsW" min="2" max="30" value="8" step="0.5">
+                    <span class="slider-value" id="valMsW">8.0 mil</span>
+                </div>
+            </div>
+            <div class="control-group">
+                <h4>介质高度 H</h4>
+                <div class="slider-group">
+                    <label>H</label>
+                    <input type="range" id="slMsH" min="2" max="20" value="5" step="0.5">
+                    <span class="slider-value" id="valMsH">5.0 mil</span>
+                </div>
+            </div>
+            <div class="control-group">
+                <h4>铜厚 T</h4>
+                <div class="slider-group">
+                    <label>T</label>
+                    <input type="range" id="slMsT" min="0.5" max="3" value="1.4" step="0.1">
+                    <span class="slider-value" id="valMsT">1.4 mil</span>
+                </div>
+            </div>
+            <div class="control-group">
+                <h4>介电常数 εr</h4>
+                <div class="slider-group">
+                    <label>εr</label>
+                    <input type="range" id="slMsEr" min="2.0" max="6.0" value="4.2" step="0.1">
+                    <span class="slider-value" id="valMsEr">4.2</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="readouts-row">
+            <div class="readout" id="roMsZ0">
+                <span class="label">Z<sub>0</sub> =</span>
+                <span class="value">— Ω</span>
+            </div>
+            <div class="readout" id="roMsEeff">
+                <span class="label">ε<sub>eff</sub> =</span>
+                <span class="value">—</span>
+            </div>
+            <div class="readout" id="roMsDelay">
+                <span class="label">传播延迟 =</span>
+                <span class="value">— ps/in</span>
+            </div>
+        </div>
+
+        <div class="formula-box" id="fmMicrostrip"></div>
+    </div>
+
+    <!-- ======================== Section 3 ======================== -->
+    <div class="section" id="sec-stripline">
+        <div class="section-title">
+            <div class="icon">3</div>
+            <h2>带状线 (Stripline)</h2>
+        </div>
+        <p>带状线的走线夹在两个参考地平面之间，完全被介质包围，具有更好的屏蔽性和更一致的阻抗。</p>
+
+        <div class="compare-wrap">
+            <div class="compare-panel">
+                <h4 style="color: var(--accent-blue);">对称带状线</h4>
+                <div class="canvas-wrap">
+                    <canvas id="cvStripSym" height="300"></canvas>
+                </div>
+            </div>
+            <div class="compare-panel">
+                <h4 style="color: var(--accent-purple);">非对称带状线</h4>
+                <div class="canvas-wrap">
+                    <canvas id="cvStripAsym" height="300"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <div class="controls-row">
+            <div class="control-group">
+                <h4>线宽 W</h4>
+                <div class="slider-group">
+                    <label>W</label>
+                    <input type="range" id="slSlW" min="2" max="20" value="5" step="0.5">
+                    <span class="slider-value" id="valSlW">5.0 mil</span>
+                </div>
+            </div>
+            <div class="control-group">
+                <h4>总介质厚度 B</h4>
+                <div class="slider-group">
+                    <label>B</label>
+                    <input type="range" id="slSlB" min="6" max="40" value="14" step="0.5">
+                    <span class="slider-value" id="valSlB">14.0 mil</span>
+                </div>
+            </div>
+            <div class="control-group">
+                <h4>偏移比 (非对称)</h4>
+                <div class="slider-group">
+                    <label>H1/B</label>
+                    <input type="range" id="slSlOff" min="0.15" max="0.85" value="0.5" step="0.01">
+                    <span class="slider-value" id="valSlOff">0.50</span>
+                </div>
+            </div>
+            <div class="control-group">
+                <h4>介电常数 εr</h4>
+                <div class="slider-group">
+                    <label>εr</label>
+                    <input type="range" id="slSlEr" min="2.0" max="6.0" value="4.2" step="0.1">
+                    <span class="slider-value" id="valSlEr">4.2</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="readouts-row">
+            <div class="readout" id="roSlSymZ">
+                <span class="label">对称 Z<sub>0</sub> =</span>
+                <span class="value">— Ω</span>
+            </div>
+            <div class="readout" id="roSlAsymZ">
+                <span class="label">非对称 Z<sub>0</sub> =</span>
+                <span class="value">— Ω</span>
+            </div>
+            <div class="readout" id="roSlVsMicrostrip">
+                <span class="label">vs 微带线</span>
+                <span class="value">—</span>
+            </div>
+        </div>
+
+        <div class="formula-box" id="fmStripline"></div>
+    </div>
+
+    <!-- ======================== Section 4 ======================== -->
+    <div class="section" id="sec-differential">
+        <div class="section-title">
+            <div class="icon">4</div>
+            <h2>差分阻抗</h2>
+        </div>
+        <p>高速接口（USB、HDMI、PCIe 等）使用差分信号传输。差分阻抗取决于单端阻抗和两条走线之间的耦合程度。</p>
+
+        <div class="canvas-wrap">
+            <canvas id="cvDiff" height="360"></canvas>
+        </div>
+
+        <div class="controls-row">
+            <div class="control-group">
+                <h4>线宽 W</h4>
+                <div class="slider-group">
+                    <label>W</label>
+                    <input type="range" id="slDiffW" min="2" max="15" value="5" step="0.5">
+                    <span class="slider-value" id="valDiffW">5.0 mil</span>
+                </div>
+            </div>
+            <div class="control-group">
+                <h4>间距 S</h4>
+                <div class="slider-group">
+                    <label>S</label>
+                    <input type="range" id="slDiffS" min="2" max="30" value="6" step="0.5">
+                    <span class="slider-value" id="valDiffS">6.0 mil</span>
+                </div>
+            </div>
+            <div class="control-group">
+                <h4>介质高度 H</h4>
+                <div class="slider-group">
+                    <label>H</label>
+                    <input type="range" id="slDiffH" min="2" max="15" value="5" step="0.5">
+                    <span class="slider-value" id="valDiffH">5.0 mil</span>
+                </div>
+            </div>
+            <div class="control-group">
+                <h4>εr</h4>
+                <div class="slider-group">
+                    <label>εr</label>
+                    <input type="range" id="slDiffEr" min="2.0" max="6.0" value="4.2" step="0.1">
+                    <span class="slider-value" id="valDiffEr">4.2</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="controls-row" style="margin-top: 0;">
+            <div class="control-group" style="min-width: auto;">
+                <div style="display: flex; align-items: center; gap: 0.75rem;">
+                    <span class="text-sm" style="color: var(--text-secondary);">显示耦合场线</span>
+                    <label class="toggle">
+                        <input type="checkbox" id="chkCoupling" checked>
+                        <span class="track"></span>
+                    </label>
+                </div>
+            </div>
+        </div>
+
+        <div class="readouts-row">
+            <div class="readout" id="roDiffZse">
+                <span class="label">单端 Z<sub>0</sub> =</span>
+                <span class="value">— Ω</span>
+            </div>
+            <div class="readout" id="roDiffZdiff">
+                <span class="label">差分 Z<sub>diff</sub> =</span>
+                <span class="value">— Ω</span>
+            </div>
+            <div class="readout" id="roDiffZodd">
+                <span class="label">奇模 Z<sub>odd</sub> =</span>
+                <span class="value">— Ω</span>
+            </div>
+            <div class="readout" id="roDiffZeven">
+                <span class="label">偶模 Z<sub>even</sub> =</span>
+                <span class="value">— Ω</span>
+            </div>
+            <div class="readout" id="roDiffK">
+                <span class="label">耦合系数 k =</span>
+                <span class="value">—</span>
+            </div>
+        </div>
+
+        <div class="formula-box" id="fmDiff"></div>
+    </div>
+
+    <!-- ======================== Section 5 ======================== -->
+    <div class="section" id="sec-stackup">
+        <div class="section-title">
+            <div class="icon">5</div>
+            <h2>阻抗匹配实战</h2>
+        </div>
+        <p>根据板厂叠层参数，计算实际需要的走线宽度，以达到目标阻抗。选择板层数、设定介质参数，查看推荐走线宽度。</p>
+
+        <div class="controls-row">
+            <div class="control-group" style="min-width: auto;">
+                <h4>板层数</h4>
+                <div class="btn-group">
+                    <button class="btn active" data-layers="2">2 层</button>
+                    <button class="btn" data-layers="4">4 层</button>
+                    <button class="btn" data-layers="6">6 层</button>
+                </div>
+            </div>
+            <div class="control-group">
+                <h4>板总厚度 (mil)</h4>
+                <div class="slider-group">
+                    <label>总厚</label>
+                    <input type="range" id="slBoardH" min="20" max="100" value="62" step="1">
+                    <span class="slider-value" id="valBoardH">62 mil</span>
+                </div>
+            </div>
+            <div class="control-group">
+                <h4>核心介电常数</h4>
+                <div class="slider-group">
+                    <label>εr</label>
+                    <input type="range" id="slBoardEr" min="2.5" max="6.0" value="4.2" step="0.1">
+                    <span class="slider-value" id="valBoardEr">4.2</span>
+                </div>
+            </div>
+        </div>
+
+        <div id="stackupViz" class="stackup-visual"></div>
+
+        <div class="target-row">
+            <div class="target-card">
+                <div class="target-label">单端目标</div>
+                <div class="target-value" style="color: var(--accent-blue);">50 Ω</div>
+                <div class="target-width" id="twSingle">W = — mil</div>
+            </div>
+            <div class="target-card">
+                <div class="target-label">差分目标 (USB)</div>
+                <div class="target-value" style="color: var(--accent-purple);">90 Ω</div>
+                <div class="target-width" id="twDiff90">W/S = — mil</div>
+            </div>
+            <div class="target-card">
+                <div class="target-label">差分目标 (通用)</div>
+                <div class="target-value" style="color: var(--accent-orange);">100 Ω</div>
+                <div class="target-width" id="twDiff100">W/S = — mil</div>
+            </div>
+        </div>
+
+        <table class="result-table" id="tblResults">
+            <thead>
+                <tr>
+                    <th>层名</th>
+                    <th>类型</th>
+                    <th>厚度 (mil)</th>
+                    <th>εr</th>
+                    <th>50Ω 单端 W</th>
+                    <th>100Ω 差分 W/S</th>
+                </tr>
+            </thead>
+            <tbody id="tblBody"></tbody>
+        </table>
+
+        <div class="info-box success" style="margin-top: 1rem;">
+            <p>提示：实际工程中应使用板厂提供的精确叠层参数，并通过 2D 场求解器（如 Polar SI、Saturn PCB Toolkit）进行仿真验证。此处使用的近似公式适合快速估算。</p>
+        </div>
+    </div>
+
+</div><!-- /page-container -->
+
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/gsap.min.js"></script>
+<script src="../shared/scripts/nav.js"></script>
+<script>
+/* =============================================================
+   05 - 阻抗控制 — 全部交互逻辑
+   ============================================================= */
+(() => {
+'use strict';
+
+/* ---------- helpers ---------- */
+const $ = s => document.querySelector(s);
+const $$ = s => document.querySelectorAll(s);
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+const lerp = (a, b, t) => a + (b - a) * t;
+const dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+function sizeCanvas(cv, w, h) {
+    cv.width = w * dpr;
+    cv.height = h * dpr;
+    cv.style.width = w + 'px';
+    cv.style.height = h + 'px';
+    const ctx = cv.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return ctx;
+}
+
+function fitCanvas(cv) {
+    const w = cv.parentElement.clientWidth;
+    const h = parseInt(cv.getAttribute('height')) || 320;
+    return sizeCanvas(cv, w, h);
+}
+
+function katexRender(el, tex) {
+    if (typeof el === 'string') el = $(el);
+    if (el) katex.render(tex, el, { displayMode: true, throwOnError: false });
+}
+
+const C = {
+    green: '#16c79a', blue: '#4fc3f7', purple: '#b388ff',
+    orange: '#ffab40', red: '#ff5252', yellow: '#ffd740',
+    pink: '#ff80ab', bg: '#1a1a2e', bgSec: '#16213e',
+    bgCard: '#0f3460', border: '#2a2a4a', text: '#e8e8e8',
+    textSec: '#a8a8b8', textMut: '#6c6c7c',
+    copper: '#e8a040', copperDark: '#c87533',
+    diel: '#3a9e5a', dielDark: '#2a6e3a',
+    gnd: '#707090'
+};
+
+/* =============================================================
+   Section 1 — 传输线理论
+   ============================================================= */
+const transState = { zs: 50, z0: 50, zl: 50, time: 0 };
+let transCtx, transW, transH;
+let eyeCtx, eyeW, eyeH;
+
+function initTransmission() {
+    const cv = $('#cvTransLine');
+    transW = cv.parentElement.clientWidth;
+    transH = 320;
+    transCtx = sizeCanvas(cv, transW, transH);
+
+    const cvE = $('#cvEye');
+    eyeW = cvE.parentElement.clientWidth;
+    eyeH = 150;
+    eyeCtx = sizeCanvas(cvE, eyeW, eyeH);
+
+    katexRender('#fmGamma', String.raw`\Gamma = \frac{Z_L - Z_0}{Z_L + Z_0}`);
+
+    ['slZs', 'slZ0', 'slZl'].forEach(id => {
+        $(('#' + id)).addEventListener('input', e => {
+            const v = parseFloat(e.target.value);
+            if (id === 'slZs') transState.zs = v;
+            if (id === 'slZ0') transState.z0 = v;
+            if (id === 'slZl') transState.zl = v;
+            updateTransReadouts();
+        });
+    });
+    updateTransReadouts();
+}
+
+function updateTransReadouts() {
+    const { zs, z0, zl } = transState;
+    $('#valZs').textContent = zs + ' Ω';
+    $('#valZ0').textContent = z0 + ' Ω';
+    $('#valZl').textContent = zl + ' Ω';
+
+    const gamma = (zl - z0) / (zl + z0);
+    const absG = Math.abs(gamma);
+    const rl = absG > 0.001 ? (-20 * Math.log10(absG)).toFixed(1) : '∞';
+
+    const roG = $('#roGamma');
+    roG.querySelector('.value').textContent = gamma.toFixed(3);
+    roG.className = 'readout' + (absG > 0.3 ? ' bad' : absG > 0.1 ? ' warn' : '');
+
+    const roR = $('#roReturn');
+    roR.querySelector('.value').textContent = rl + ' dB';
+
+    const roM = $('#roMatch');
+    let status = '完美匹配', cls = '';
+    if (absG > 0.3) { status = '严重失配'; cls = ' bad'; }
+    else if (absG > 0.1) { status = '轻度失配'; cls = ' warn'; }
+    else if (absG > 0.01) { status = '基本匹配'; cls = ''; }
+    roM.querySelector('.value').textContent = status;
+    roM.className = 'readout' + cls;
+}
+
+function drawTransmission(t) {
+    const ctx = transCtx, w = transW, h = transH;
+    if (!ctx) return;
+    ctx.clearRect(0, 0, w, h);
+
+    const { z0, zl } = transState;
+    const gamma = (zl - z0) / (zl + z0);
+
+    const margin = 60, traceY = h * 0.45;
+    const x0 = margin, x1 = w - margin;
+    const traceLen = x1 - x0;
+
+    // ground plane
+    ctx.fillStyle = C.gnd;
+    ctx.fillRect(x0, traceY + 30, traceLen, 6);
+    ctx.fillStyle = C.textMut;
+    ctx.font = '11px "Noto Sans SC"';
+    ctx.textAlign = 'center';
+    ctx.fillText('GND', x0 + traceLen / 2, traceY + 50);
+
+    // trace
+    ctx.strokeStyle = C.copper;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(x0, traceY);
+    ctx.lineTo(x1, traceY);
+    ctx.stroke();
+
+    // labels
+    ctx.fillStyle = C.textSec;
+    ctx.font = '12px "Noto Sans SC"';
+    ctx.textAlign = 'center';
+    ctx.fillText('源端 Z_S', x0, traceY - 50);
+    ctx.fillText('负载端 Z_L', x1, traceY - 50);
+    ctx.fillText('传输线 Z₀ = ' + z0 + 'Ω', (x0 + x1) / 2, traceY + 70);
+
+    // source box
+    ctx.strokeStyle = C.blue;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(x0 - 25, traceY - 40, 50, 30);
+    ctx.fillStyle = C.blue;
+    ctx.font = '11px "JetBrains Mono"';
+    ctx.fillText(transState.zs + 'Ω', x0, traceY - 22);
+
+    // load box
+    ctx.strokeStyle = C.orange;
+    ctx.strokeRect(x1 - 25, traceY - 40, 50, 30);
+    ctx.fillStyle = C.orange;
+    ctx.fillText(zl + 'Ω', x1, traceY - 22);
+
+    // incident wave
+    const speed = 0.3;
+    const pulsePos = ((t * speed) % 1.4) - 0.2;
+    const pWidth = 0.15;
+
+    const drawPulse = (pos, amp, color, label) => {
+        if (pos < 0 || pos > 1) return;
+        const px = x0 + pos * traceLen;
+        const pw = pWidth * traceLen;
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(x0, 0, traceLen, h);
+        ctx.clip();
+
+        const grad = ctx.createLinearGradient(px - pw, 0, px + pw, 0);
+        grad.addColorStop(0, 'transparent');
+        grad.addColorStop(0.3, color);
+        grad.addColorStop(0.5, color);
+        grad.addColorStop(0.7, color);
+        grad.addColorStop(1, 'transparent');
+
+        const waveH = Math.abs(amp) * 60;
+        const baseY = traceY - 8;
+        ctx.strokeStyle = grad;
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        for (let i = -pw; i <= pw; i += 2) {
+            const frac = (i + pw) / (2 * pw);
+            const env = Math.sin(frac * Math.PI);
+            const phase = frac * Math.PI * 6;
+            const y = baseY - env * waveH * Math.sin(phase) * Math.sign(amp);
+            if (i === -pw) ctx.moveTo(px + i, y);
+            else ctx.lineTo(px + i, y);
+        }
+        ctx.stroke();
+
+        // label
+        ctx.fillStyle = color;
+        ctx.font = '10px "Noto Sans SC"';
+        ctx.textAlign = 'center';
+        ctx.fillText(label, px, baseY - waveH - 10);
+        ctx.restore();
+    };
+
+    drawPulse(pulsePos, 1, C.green, '入射波');
+    if (Math.abs(gamma) > 0.01) {
+        const refPos = 2 - pulsePos;
+        const reflectedPos = refPos > 1 ? refPos - 1 : null;
+        if (pulsePos > 0.8) {
+            const rp = 1 - (pulsePos - 1);
+            if (rp >= 0 && rp <= 1) drawPulse(rp, -gamma, C.red, '反射波');
+        }
+    }
+
+    // mismatch indicator at load
+    if (Math.abs(gamma) > 0.01) {
+        ctx.save();
+        const flashAlpha = 0.3 + 0.3 * Math.sin(t * 3);
+        ctx.fillStyle = `rgba(255, 82, 82, ${flashAlpha})`;
+        ctx.beginPath();
+        ctx.arc(x1, traceY, 15, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+    }
+}
+
+function drawEyeDiagram(t) {
+    const ctx = eyeCtx, w = eyeW, h = eyeH;
+    if (!ctx) return;
+    ctx.clearRect(0, 0, w, h);
+
+    const gamma = Math.abs((transState.zl - transState.z0) / (transState.zl + transState.z0));
+    const margin = 20;
+    const ew = w - 2 * margin, eh = h - 2 * margin;
+
+    // grid
+    ctx.strokeStyle = C.border;
+    ctx.lineWidth = 0.5;
+    for (let i = 0; i <= 4; i++) {
+        const y = margin + (eh * i / 4);
+        ctx.beginPath(); ctx.moveTo(margin, y); ctx.lineTo(w - margin, y); ctx.stroke();
+    }
+    ctx.beginPath();
+    ctx.moveTo(margin + ew / 2, margin);
+    ctx.lineTo(margin + ew / 2, h - margin);
+    ctx.stroke();
+
+    // eye traces
+    const nTraces = 30;
+    for (let tr = 0; tr < nTraces; tr++) {
+        const jitter = gamma * 0.15 * (Math.random() - 0.5);
+        const noiseAmp = gamma * 0.4;
+        const offset = gamma * 0.1 * (Math.random() - 0.5);
+        const bit = Math.random() > 0.5 ? 1 : 0;
+        const nextBit = Math.random() > 0.5 ? 1 : 0;
+
+        ctx.strokeStyle = `rgba(22, 199, 154, ${0.15 + 0.1 * Math.random()})`;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        for (let x = 0; x <= ew; x += 2) {
+            const frac = x / ew + jitter;
+            let val;
+            if (frac < 0.15) {
+                val = bit;
+            } else if (frac < 0.35) {
+                const tf = (frac - 0.15) / 0.2;
+                val = lerp(bit, nextBit, tf * tf * (3 - 2 * tf));
+            } else if (frac < 0.65) {
+                val = nextBit;
+            } else if (frac < 0.85) {
+                const tf = (frac - 0.65) / 0.2;
+                val = lerp(nextBit, bit, tf * tf * (3 - 2 * tf));
+            } else {
+                val = bit;
+            }
+            val += noiseAmp * (Math.random() - 0.5) + offset;
+            val = clamp(val, -0.2, 1.2);
+            const py = margin + eh * (1 - val * 0.8 - 0.1);
+            if (x === 0) ctx.moveTo(margin + x, py);
+            else ctx.lineTo(margin + x, py);
+        }
+        ctx.stroke();
+    }
+
+    // eye opening label
+    const opening = Math.max(0, (1 - gamma * 2.5)) * 100;
+    ctx.fillStyle = opening > 60 ? C.green : opening > 30 ? C.orange : C.red;
+    ctx.font = '11px "Noto Sans SC"';
+    ctx.textAlign = 'right';
+    ctx.fillText('眼图张开度: ' + opening.toFixed(0) + '%', w - margin, h - 5);
+}
+
+/* =============================================================
+   Section 2 — 微带线
+   ============================================================= */
+const msState = { w: 8, h: 5, t: 1.4, er: 4.2 };
+let msCtx, msW, msH;
+
+function calcMicrostrip(W, H, T, Er) {
+    const We = W + (T / Math.PI) * Math.log(4 * Math.E / Math.sqrt((T / (1.1 * W + T)) ** 2 + (1 / (2.94 * Math.PI * (W / T + 1.1))) ** 2));
+    const ratio = We / H;
+    let z0;
+    if (ratio <= 1) {
+        const F1 = Math.log(8 * H / We + We / (4 * H));
+        z0 = (60 / Math.sqrt((Er + 1) / 2 + (Er - 1) / 2 * (1 / Math.sqrt(1 + 12 * H / We) + 0.04 * (1 - We / H) ** 2))) * F1;
+    } else {
+        const eEff = (Er + 1) / 2 + (Er - 1) / 2 / Math.sqrt(1 + 12 * H / We);
+        z0 = (120 * Math.PI) / (Math.sqrt(eEff) * (ratio + 1.393 + 0.667 * Math.log(ratio + 1.444)));
+    }
+    const eEff = (Er + 1) / 2 + (Er - 1) / 2 / Math.sqrt(1 + 12 * H / We);
+    const delay = 85 * Math.sqrt(eEff);
+    return { z0, eEff, delay };
+}
+
+function initMicrostrip() {
+    const cv = $('#cvMicrostrip');
+    msW = cv.parentElement.clientWidth;
+    msH = 360;
+    msCtx = sizeCanvas(cv, msW, msH);
+
+    katexRender('#fmMicrostrip', String.raw`Z_0 = \frac{120\pi}{\sqrt{\varepsilon_{eff}} \left[ \frac{W_e}{H} + 1.393 + 0.667 \ln\!\left(\frac{W_e}{H} + 1.444\right) \right]}`);
+
+    ['slMsW', 'slMsH', 'slMsT', 'slMsEr'].forEach(id => {
+        $('#' + id).addEventListener('input', e => {
+            const v = parseFloat(e.target.value);
+            if (id === 'slMsW') msState.w = v;
+            if (id === 'slMsH') msState.h = v;
+            if (id === 'slMsT') msState.t = v;
+            if (id === 'slMsEr') msState.er = v;
+            updateMicrostrip();
+        });
+    });
+    updateMicrostrip();
+}
+
+function updateMicrostrip() {
+    $('#valMsW').textContent = msState.w.toFixed(1) + ' mil';
+    $('#valMsH').textContent = msState.h.toFixed(1) + ' mil';
+    $('#valMsT').textContent = msState.t.toFixed(1) + ' mil';
+    $('#valMsEr').textContent = msState.er.toFixed(1);
+
+    const res = calcMicrostrip(msState.w, msState.h, msState.t, msState.er);
+    const z0El = $('#roMsZ0');
+    z0El.querySelector('.value').textContent = res.z0.toFixed(1) + ' Ω';
+    z0El.className = 'readout' + (Math.abs(res.z0 - 50) > 10 ? ' warn' : '');
+    $('#roMsEeff .value').textContent = res.eEff.toFixed(2);
+    $('#roMsDelay .value').textContent = res.delay.toFixed(1) + ' ps/in';
+}
+
+function drawMicrostrip() {
+    const ctx = msCtx, w = msW, h = msH;
+    if (!ctx) return;
+    ctx.clearRect(0, 0, w, h);
+
+    const cx = w / 2, margin = 60;
+    const scaleX = (w - 2 * margin) / 40;
+    const { w: tw, h: dh, t: tt, er } = msState;
+
+    const gndY = h * 0.72;
+    const dielH = Math.max(40, dh * scaleX * 0.8);
+    const dielTop = gndY - dielH;
+    const traceH = Math.max(4, tt * scaleX * 0.5);
+    const traceW = Math.max(20, tw * scaleX * 1.5);
+    const traceY = dielTop - traceH;
+
+    // ground plane
+    ctx.fillStyle = C.copper;
+    ctx.fillRect(margin, gndY, w - 2 * margin, 8);
+    ctx.fillStyle = C.textMut;
+    ctx.font = '11px "Noto Sans SC"';
+    ctx.textAlign = 'center';
+    ctx.fillText('GND 参考平面', cx, gndY + 24);
+
+    // dielectric
+    const dielGrad = ctx.createLinearGradient(0, dielTop, 0, gndY);
+    dielGrad.addColorStop(0, '#2a8e4a');
+    dielGrad.addColorStop(1, '#1a5e2a');
+    ctx.fillStyle = dielGrad;
+    ctx.fillRect(margin, dielTop, w - 2 * margin, dielH);
+    ctx.strokeStyle = C.border;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(margin, dielTop, w - 2 * margin, dielH);
+
+    // dielectric label
+    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+    ctx.font = '11px "JetBrains Mono"';
+    ctx.fillText('εr = ' + er.toFixed(1), cx, dielTop + dielH / 2 + 4);
+
+    // trace (copper)
+    const trGrad = ctx.createLinearGradient(0, traceY, 0, traceY + traceH);
+    trGrad.addColorStop(0, '#e8a040');
+    trGrad.addColorStop(1, '#c87533');
+    ctx.fillStyle = trGrad;
+    ctx.fillRect(cx - traceW / 2, traceY, traceW, traceH);
+    ctx.strokeStyle = '#aa6020';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(cx - traceW / 2, traceY, traceW, traceH);
+
+    // dimension lines
+    ctx.strokeStyle = C.blue;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 3]);
+
+    // W dimension
+    const dimY = traceY - 15;
+    ctx.beginPath();
+    ctx.moveTo(cx - traceW / 2, dimY);
+    ctx.lineTo(cx + traceW / 2, dimY);
+    ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(cx - traceW / 2, traceY - 5); ctx.lineTo(cx - traceW / 2, dimY - 5); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(cx + traceW / 2, traceY - 5); ctx.lineTo(cx + traceW / 2, dimY - 5); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = C.blue;
+    ctx.font = '11px "JetBrains Mono"';
+    ctx.textAlign = 'center';
+    ctx.fillText('W = ' + tw.toFixed(1), cx, dimY - 4);
+
+    // H dimension
+    const hDimX = margin + 30;
+    ctx.strokeStyle = C.orange;
+    ctx.setLineDash([4, 3]);
+    ctx.beginPath();
+    ctx.moveTo(hDimX, dielTop);
+    ctx.lineTo(hDimX, gndY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = C.orange;
+    ctx.textAlign = 'left';
+    ctx.fillText('H = ' + dh.toFixed(1), hDimX + 6, dielTop + dielH / 2 + 4);
+
+    // T dimension
+    const tDimX = cx + traceW / 2 + 20;
+    ctx.strokeStyle = C.purple;
+    ctx.setLineDash([4, 3]);
+    ctx.beginPath();
+    ctx.moveTo(tDimX, traceY);
+    ctx.lineTo(tDimX, traceY + traceH);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = C.purple;
+    ctx.textAlign = 'left';
+    ctx.fillText('T=' + tt.toFixed(1), tDimX + 5, traceY + traceH / 2 + 4);
+
+    // E-field lines
+    ctx.strokeStyle = 'rgba(79, 195, 247, 0.35)';
+    ctx.lineWidth = 1;
+    const nLines = 9;
+    for (let i = 0; i < nLines; i++) {
+        const frac = (i + 1) / (nLines + 1);
+        const fx = cx - traceW / 2 + frac * traceW;
+        ctx.beginPath();
+        ctx.moveTo(fx, traceY + traceH);
+        // curved path
+        const bendX = fx + (fx - cx) * 0.2;
+        ctx.quadraticCurveTo(bendX, (traceY + traceH + gndY) / 2, fx, gndY);
+        ctx.stroke();
+        // arrow
+        const arrY = gndY - 5;
+        ctx.beginPath();
+        ctx.moveTo(fx - 3, arrY - 5);
+        ctx.lineTo(fx, arrY);
+        ctx.lineTo(fx + 3, arrY - 5);
+        ctx.stroke();
+    }
+
+    // fringing field lines at edges
+    ctx.strokeStyle = 'rgba(79, 195, 247, 0.2)';
+    for (let side = -1; side <= 1; side += 2) {
+        const edgeX = cx + side * traceW / 2;
+        for (let j = 0; j < 3; j++) {
+            const spread = (j + 1) * 12;
+            ctx.beginPath();
+            ctx.moveTo(edgeX, traceY + traceH / 2);
+            ctx.quadraticCurveTo(edgeX + side * spread, traceY + traceH + dielH * 0.3, edgeX + side * spread * 0.3, gndY);
+            ctx.stroke();
+        }
+    }
+
+    // air label
+    ctx.fillStyle = C.textMut;
+    ctx.font = '10px "Noto Sans SC"';
+    ctx.textAlign = 'center';
+    ctx.fillText('空气 (εr = 1)', cx, traceY - 35);
+
+    // impedance result
+    const res = calcMicrostrip(msState.w, msState.h, msState.t, msState.er);
+    ctx.fillStyle = C.green;
+    ctx.font = 'bold 16px "JetBrains Mono"';
+    ctx.textAlign = 'right';
+    ctx.fillText('Z₀ = ' + res.z0.toFixed(1) + ' Ω', w - margin, 30);
+}
+
+/* =============================================================
+   Section 3 — 带状线
+   ============================================================= */
+const slState = { w: 5, b: 14, off: 0.5, er: 4.2 };
+let slSymCtx, slAsymCtx, slCanvW, slCanvH;
+
+function calcStriplineSym(W, B, T, Er) {
+    const Weff = W;
+    const m = 6 * (B - T) / (3 * B - 2 * T);
+    const ratio = Weff / (B - T);
+    const z0 = (60 / Math.sqrt(Er)) * Math.log(1.9 * (2 * (B - T)) / (0.8 * Weff + T));
+    return Math.max(10, z0);
+}
+
+function calcStriplineAsym(W, B, H1, T, Er) {
+    const H2 = B - H1 - T;
+    const z1 = calcStriplineSym(W, 2 * H1 + T, T, Er);
+    const z2 = calcStriplineSym(W, 2 * H2 + T, T, Er);
+    return 1 / (1 / z1 + 1 / z2) * 2;
+}
+
+function initStripline() {
+    const cv1 = $('#cvStripSym');
+    const cv2 = $('#cvStripAsym');
+    slCanvW = cv1.parentElement.clientWidth;
+    slCanvH = 300;
+    slSymCtx = sizeCanvas(cv1, slCanvW, slCanvH);
+    slAsymCtx = sizeCanvas(cv2, cv2.parentElement.clientWidth, slCanvH);
+
+    katexRender('#fmStripline', String.raw`Z_0 = \frac{60}{\sqrt{\varepsilon_r}} \ln\!\left(\frac{1.9 \cdot 2(B-T)}{0.8W + T}\right)`);
+
+    ['slSlW', 'slSlB', 'slSlOff', 'slSlEr'].forEach(id => {
+        $('#' + id).addEventListener('input', e => {
+            const v = parseFloat(e.target.value);
+            if (id === 'slSlW') slState.w = v;
+            if (id === 'slSlB') slState.b = v;
+            if (id === 'slSlOff') slState.off = v;
+            if (id === 'slSlEr') slState.er = v;
+            updateStripline();
+        });
+    });
+    updateStripline();
+}
+
+function updateStripline() {
+    $('#valSlW').textContent = slState.w.toFixed(1) + ' mil';
+    $('#valSlB').textContent = slState.b.toFixed(1) + ' mil';
+    $('#valSlOff').textContent = slState.off.toFixed(2);
+    $('#valSlEr').textContent = slState.er.toFixed(1);
+
+    const T = 1.4;
+    const zSym = calcStriplineSym(slState.w, slState.b, T, slState.er);
+    const H1 = slState.off * (slState.b - T);
+    const zAsym = calcStriplineAsym(slState.w, slState.b, H1, T, slState.er);
+
+    $('#roSlSymZ .value').textContent = zSym.toFixed(1) + ' Ω';
+    $('#roSlAsymZ .value').textContent = zAsym.toFixed(1) + ' Ω';
+
+    const msZ = calcMicrostrip(slState.w, slState.b / 2, T, slState.er).z0;
+    const diff = ((zSym - msZ) / msZ * 100).toFixed(0);
+    $('#roSlVsMicrostrip .value').textContent = (diff >= 0 ? '+' : '') + diff + '%';
+}
+
+function drawStriplineCrossSection(ctx, w, h, isAsym) {
+    ctx.clearRect(0, 0, w, h);
+
+    const cx = w / 2, margin = 30;
+    const totalW = w - 2 * margin;
+    const { w: tw, b: totalB, off, er } = slState;
+    const T = 1.4;
+    const scaleX = totalW / 30;
+
+    const gndTop = h * 0.15;
+    const gndBot = h * 0.85;
+    const dielH = gndBot - gndTop - 16;
+
+    // top ground
+    ctx.fillStyle = C.copper;
+    ctx.fillRect(margin, gndTop, totalW, 8);
+
+    // bottom ground
+    ctx.fillRect(margin, gndBot, totalW, 8);
+
+    // dielectric
+    const dielGrad = ctx.createLinearGradient(0, gndTop + 8, 0, gndBot);
+    dielGrad.addColorStop(0, '#2a8e4a');
+    dielGrad.addColorStop(1, '#1a5e2a');
+    ctx.fillStyle = dielGrad;
+    ctx.fillRect(margin, gndTop + 8, totalW, dielH);
+
+    // trace
+    const traceW = Math.max(15, tw * scaleX * 0.8);
+    const traceH = Math.max(4, 6);
+    let traceY;
+    if (isAsym) {
+        traceY = gndTop + 8 + off * dielH - traceH / 2;
+    } else {
+        traceY = gndTop + 8 + dielH / 2 - traceH / 2;
+    }
+
+    const trGrad = ctx.createLinearGradient(0, traceY, 0, traceY + traceH);
+    trGrad.addColorStop(0, '#e8a040');
+    trGrad.addColorStop(1, '#c87533');
+    ctx.fillStyle = trGrad;
+    ctx.fillRect(cx - traceW / 2, traceY, traceW, traceH);
+
+    // field lines
+    ctx.strokeStyle = 'rgba(79, 195, 247, 0.3)';
+    ctx.lineWidth = 1;
+    const nUp = 5, nDown = 5;
+
+    for (let i = 0; i < nUp; i++) {
+        const frac = (i + 1) / (nUp + 1);
+        const fx = cx - traceW / 2 + frac * traceW;
+        ctx.beginPath();
+        ctx.moveTo(fx, traceY);
+        ctx.lineTo(fx, gndTop + 8);
+        ctx.stroke();
+    }
+
+    for (let i = 0; i < nDown; i++) {
+        const frac = (i + 1) / (nDown + 1);
+        const fx = cx - traceW / 2 + frac * traceW;
+        ctx.beginPath();
+        ctx.moveTo(fx, traceY + traceH);
+        ctx.lineTo(fx, gndBot);
+        ctx.stroke();
+    }
+
+    // labels
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.font = '10px "JetBrains Mono"';
+    ctx.textAlign = 'center';
+    ctx.fillText('εr = ' + er.toFixed(1), cx, gndBot - 12);
+    ctx.fillStyle = C.textMut;
+    ctx.font = '10px "Noto Sans SC"';
+    ctx.fillText('GND', cx, gndTop + 5);
+    ctx.fillText('GND', cx, gndBot + 22);
+
+    // impedance
+    const zVal = isAsym
+        ? calcStriplineAsym(tw, totalB, off * (totalB - T), T, er)
+        : calcStriplineSym(tw, totalB, T, er);
+    ctx.fillStyle = C.green;
+    ctx.font = 'bold 13px "JetBrains Mono"';
+    ctx.textAlign = 'center';
+    ctx.fillText('Z₀ = ' + zVal.toFixed(1) + ' Ω', cx, gndTop - 5);
+
+    // dimension W
+    ctx.strokeStyle = C.blue;
+    ctx.setLineDash([3, 2]);
+    const dY = traceY - 10;
+    ctx.beginPath(); ctx.moveTo(cx - traceW / 2, dY); ctx.lineTo(cx + traceW / 2, dY); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = C.blue;
+    ctx.font = '10px "JetBrains Mono"';
+    ctx.fillText('W', cx, dY - 3);
+}
+
+/* =============================================================
+   Section 4 — 差分阻抗
+   ============================================================= */
+const diffState = { w: 5, s: 6, h: 5, er: 4.2, showCoupling: true };
+let diffCtx, diffW, diffH;
+
+function calcDiffImpedance(W, S, H, Er) {
+    const se = calcMicrostrip(W, H, 1.4, Er);
+    const k = Math.exp(-2.0 * S / H) * 0.5;
+    const zodd = se.z0 * (1 - k);
+    const zeven = se.z0 * (1 + k);
+    const zdiff = 2 * zodd;
+    return { z0: se.z0, zodd, zeven, zdiff, k };
+}
+
+function initDiff() {
+    const cv = $('#cvDiff');
+    diffW = cv.parentElement.clientWidth;
+    diffH = 360;
+    diffCtx = sizeCanvas(cv, diffW, diffH);
+
+    katexRender('#fmDiff', String.raw`Z_{diff} = 2 \cdot Z_{odd} = 2 \cdot Z_0 (1 - k), \quad Z_{even} = Z_0 (1 + k)`);
+
+    ['slDiffW', 'slDiffS', 'slDiffH', 'slDiffEr'].forEach(id => {
+        $('#' + id).addEventListener('input', e => {
+            const v = parseFloat(e.target.value);
+            if (id === 'slDiffW') diffState.w = v;
+            if (id === 'slDiffS') diffState.s = v;
+            if (id === 'slDiffH') diffState.h = v;
+            if (id === 'slDiffEr') diffState.er = v;
+            updateDiff();
+        });
+    });
+
+    $('#chkCoupling').addEventListener('change', e => {
+        diffState.showCoupling = e.target.checked;
+    });
+
+    updateDiff();
+}
+
+function updateDiff() {
+    $('#valDiffW').textContent = diffState.w.toFixed(1) + ' mil';
+    $('#valDiffS').textContent = diffState.s.toFixed(1) + ' mil';
+    $('#valDiffH').textContent = diffState.h.toFixed(1) + ' mil';
+    $('#valDiffEr').textContent = diffState.er.toFixed(1);
+
+    const res = calcDiffImpedance(diffState.w, diffState.s, diffState.h, diffState.er);
+    $('#roDiffZse .value').textContent = res.z0.toFixed(1) + ' Ω';
+
+    const zdEl = $('#roDiffZdiff');
+    zdEl.querySelector('.value').textContent = res.zdiff.toFixed(1) + ' Ω';
+    zdEl.className = 'readout' + (Math.abs(res.zdiff - 100) > 15 ? ' warn' : '');
+
+    $('#roDiffZodd .value').textContent = res.zodd.toFixed(1) + ' Ω';
+    $('#roDiffZeven .value').textContent = res.zeven.toFixed(1) + ' Ω';
+    $('#roDiffK .value').textContent = res.k.toFixed(3);
+}
+
+function drawDifferential() {
+    const ctx = diffCtx, w = diffW, h = diffH;
+    if (!ctx) return;
+    ctx.clearRect(0, 0, w, h);
+
+    const cx = w / 2, margin = 60;
+    const scaleX = (w - 2 * margin) / 50;
+    const { w: tw, s: ts, h: dh, er, showCoupling } = diffState;
+
+    const gndY = h * 0.72;
+    const dielH = Math.max(40, dh * scaleX * 1.2);
+    const dielTop = gndY - dielH;
+    const traceH = 6;
+    const traceW = Math.max(15, tw * scaleX * 1.2);
+    const spacing = Math.max(8, ts * scaleX * 1.2);
+    const traceY = dielTop - traceH;
+
+    // ground
+    ctx.fillStyle = C.copper;
+    ctx.fillRect(margin, gndY, w - 2 * margin, 8);
+    ctx.fillStyle = C.textMut;
+    ctx.font = '11px "Noto Sans SC"';
+    ctx.textAlign = 'center';
+    ctx.fillText('GND 参考平面', cx, gndY + 24);
+
+    // dielectric
+    const dielGrad = ctx.createLinearGradient(0, dielTop, 0, gndY);
+    dielGrad.addColorStop(0, '#2a8e4a');
+    dielGrad.addColorStop(1, '#1a5e2a');
+    ctx.fillStyle = dielGrad;
+    ctx.fillRect(margin, dielTop, w - 2 * margin, dielH);
+
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.font = '11px "JetBrains Mono"';
+    ctx.fillText('εr = ' + er.toFixed(1), cx, dielTop + dielH / 2 + 4);
+
+    // traces
+    const t1x = cx - spacing / 2 - traceW;
+    const t2x = cx + spacing / 2;
+
+    // trace D+
+    let trGrad = ctx.createLinearGradient(0, traceY, 0, traceY + traceH);
+    trGrad.addColorStop(0, '#e8a040'); trGrad.addColorStop(1, '#c87533');
+    ctx.fillStyle = trGrad;
+    ctx.fillRect(t1x, traceY, traceW, traceH);
+    ctx.fillRect(t2x, traceY, traceW, traceH);
+
+    // labels D+ D-
+    ctx.fillStyle = C.green;
+    ctx.font = 'bold 12px "JetBrains Mono"';
+    ctx.textAlign = 'center';
+    ctx.fillText('D+', t1x + traceW / 2, traceY - 25);
+    ctx.fillStyle = C.red;
+    ctx.fillText('D-', t2x + traceW / 2, traceY - 25);
+
+    // signal waveforms
+    ctx.strokeStyle = C.green;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    for (let i = 0; i < 20; i++) {
+        const px = t1x + traceW / 2 - 20 + i * 2;
+        const py = traceY - 35 + Math.sin(i * 0.6) * 6;
+        if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    }
+    ctx.stroke();
+    ctx.strokeStyle = C.red;
+    ctx.beginPath();
+    for (let i = 0; i < 20; i++) {
+        const px = t2x + traceW / 2 - 20 + i * 2;
+        const py = traceY - 35 - Math.sin(i * 0.6) * 6;
+        if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    }
+    ctx.stroke();
+
+    // spacing dimension
+    ctx.strokeStyle = C.yellow;
+    ctx.setLineDash([3, 2]);
+    const sY = traceY + traceH + 12;
+    ctx.beginPath();
+    ctx.moveTo(t1x + traceW, sY);
+    ctx.lineTo(t2x, sY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = C.yellow;
+    ctx.font = '11px "JetBrains Mono"';
+    ctx.fillText('S = ' + ts.toFixed(1), cx, sY + 14);
+
+    // W dimension
+    ctx.strokeStyle = C.blue;
+    ctx.setLineDash([3, 2]);
+    const wY = traceY - 12;
+    ctx.beginPath(); ctx.moveTo(t1x, wY); ctx.lineTo(t1x + traceW, wY); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = C.blue;
+    ctx.font = '10px "JetBrains Mono"';
+    ctx.fillText('W', t1x + traceW / 2, wY - 3);
+
+    // E-field lines to ground
+    ctx.strokeStyle = 'rgba(79, 195, 247, 0.25)';
+    ctx.lineWidth = 1;
+    for (let tr = 0; tr < 2; tr++) {
+        const bx = tr === 0 ? t1x : t2x;
+        for (let i = 0; i < 5; i++) {
+            const frac = (i + 1) / 6;
+            const fx = bx + frac * traceW;
+            ctx.beginPath();
+            ctx.moveTo(fx, traceY + traceH);
+            ctx.lineTo(fx, gndY);
+            ctx.stroke();
+        }
+    }
+
+    // coupling field lines between traces
+    if (showCoupling) {
+        ctx.strokeStyle = 'rgba(255, 215, 64, 0.4)';
+        ctx.lineWidth = 1.5;
+        const nCoup = 6;
+        for (let i = 0; i < nCoup; i++) {
+            const frac = (i + 0.5) / nCoup;
+            const sy = traceY + traceH * frac;
+            const cpH = spacing * 0.4 * (1 - Math.abs(frac - 0.5) * 1.5);
+            ctx.beginPath();
+            ctx.moveTo(t1x + traceW, sy);
+            ctx.quadraticCurveTo(cx, sy - cpH - 5, t2x, sy);
+            ctx.stroke();
+        }
+
+        // fringing coupling underneath
+        for (let i = 0; i < 3; i++) {
+            const depth = (i + 1) * dielH * 0.15;
+            ctx.beginPath();
+            ctx.moveTo(t1x + traceW, traceY + traceH);
+            ctx.quadraticCurveTo(cx, traceY + traceH + depth, t2x, traceY + traceH);
+            ctx.stroke();
+        }
+    }
+
+    // results
+    const res = calcDiffImpedance(tw, ts, dh, er);
+    ctx.fillStyle = C.green;
+    ctx.font = 'bold 14px "JetBrains Mono"';
+    ctx.textAlign = 'right';
+    ctx.fillText('Z_diff = ' + res.zdiff.toFixed(1) + ' Ω', w - margin, 25);
+    ctx.fillStyle = C.blue;
+    ctx.font = '12px "JetBrains Mono"';
+    ctx.fillText('k = ' + res.k.toFixed(3), w - margin, 45);
+}
+
+/* =============================================================
+   Section 5 — 阻抗匹配实战 / 叠层设计
+   ============================================================= */
+const stackState = { layers: 2, boardH: 62, er: 4.2 };
+
+const stackups = {
+    2: [
+        { name: 'Top', type: 'copper', signal: true },
+        { name: 'Core', type: 'dielectric' },
+        { name: 'Bottom', type: 'copper', signal: true }
+    ],
+    4: [
+        { name: 'Top (L1)', type: 'copper', signal: true },
+        { name: 'Prepreg', type: 'prepreg' },
+        { name: 'GND (L2)', type: 'copper', signal: false },
+        { name: 'Core', type: 'dielectric' },
+        { name: 'PWR (L3)', type: 'copper', signal: false },
+        { name: 'Prepreg', type: 'prepreg' },
+        { name: 'Bottom (L4)', type: 'copper', signal: true }
+    ],
+    6: [
+        { name: 'Top (L1)', type: 'copper', signal: true },
+        { name: 'Prepreg', type: 'prepreg' },
+        { name: 'GND (L2)', type: 'copper', signal: false },
+        { name: 'Core', type: 'dielectric' },
+        { name: 'Signal (L3)', type: 'copper', signal: true },
+        { name: 'Prepreg', type: 'prepreg' },
+        { name: 'Signal (L4)', type: 'copper', signal: true },
+        { name: 'Core', type: 'dielectric' },
+        { name: 'PWR (L5)', type: 'copper', signal: false },
+        { name: 'Prepreg', type: 'prepreg' },
+        { name: 'Bottom (L6)', type: 'copper', signal: true }
+    ]
+};
+
+function solveWidthForZ(targetZ, H, Er, T) {
+    let lo = 1, hi = 40;
+    for (let iter = 0; iter < 40; iter++) {
+        const mid = (lo + hi) / 2;
+        const z = calcMicrostrip(mid, H, T, Er).z0;
+        if (z > targetZ) lo = mid;
+        else hi = mid;
+    }
+    return (lo + hi) / 2;
+}
+
+function solveDiffWidth(targetZdiff, H, Er, T) {
+    let bestW = 5, bestS = 6, bestErr = 1e9;
+    for (let w = 2; w <= 15; w += 0.5) {
+        for (let s = 2; s <= 20; s += 0.5) {
+            const res = calcDiffImpedance(w, s, H, Er);
+            const err = Math.abs(res.zdiff - targetZdiff);
+            if (err < bestErr) { bestErr = err; bestW = w; bestS = s; }
+        }
+    }
+    return { w: bestW, s: bestS };
+}
+
+function initStackup() {
+    $$('[data-layers]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            $$('[data-layers]').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            stackState.layers = parseInt(btn.dataset.layers);
+            updateStackup();
+        });
+    });
+
+    ['slBoardH', 'slBoardEr'].forEach(id => {
+        $('#' + id).addEventListener('input', e => {
+            const v = parseFloat(e.target.value);
+            if (id === 'slBoardH') stackState.boardH = v;
+            if (id === 'slBoardEr') stackState.er = v;
+            updateStackup();
+        });
+    });
+
+    updateStackup();
+}
+
+function updateStackup() {
+    $('#valBoardH').textContent = stackState.boardH + ' mil';
+    $('#valBoardEr').textContent = stackState.er.toFixed(1);
+
+    const su = stackups[stackState.layers];
+    const nCopper = su.filter(l => l.type === 'copper').length;
+    const nDiel = su.filter(l => l.type !== 'copper').length;
+    const copperT = 1.4;
+    const dielEach = (stackState.boardH - nCopper * copperT) / nDiel;
+
+    // render stackup visual
+    const viz = $('#stackupViz');
+    viz.innerHTML = '';
+    su.forEach(layer => {
+        const div = document.createElement('div');
+        div.className = 'stackup-layer';
+        if (layer.type === 'copper') {
+            div.className += ' layer-copper';
+            div.style.height = '8px';
+            div.textContent = layer.name;
+        } else if (layer.type === 'dielectric') {
+            div.className += ' layer-dielectric';
+            div.style.height = Math.max(20, dielEach * 1.2) + 'px';
+            div.textContent = layer.name + ' (' + dielEach.toFixed(1) + ' mil)';
+        } else {
+            div.className += ' layer-prepreg';
+            div.style.height = Math.max(16, dielEach * 1.0) + 'px';
+            div.textContent = layer.name + ' (' + dielEach.toFixed(1) + ' mil)';
+        }
+        const lbl = document.createElement('span');
+        lbl.className = 'layer-label';
+        lbl.textContent = layer.type === 'copper' ? (layer.signal ? '信号层' : '电源/地') : 'εr=' + stackState.er.toFixed(1);
+        div.appendChild(lbl);
+        viz.appendChild(div);
+    });
+
+    // calculate widths
+    const H = dielEach;
+    const Er = stackState.er;
+    const T = copperT;
+
+    const w50 = solveWidthForZ(50, H, Er, T);
+    const d90 = solveDiffWidth(90, H, Er, T);
+    const d100 = solveDiffWidth(100, H, Er, T);
+
+    $('#twSingle').textContent = 'W = ' + w50.toFixed(1) + ' mil';
+    $('#twDiff90').textContent = 'W/S = ' + d90.w.toFixed(1) + '/' + d90.s.toFixed(1) + ' mil';
+    $('#twDiff100').textContent = 'W/S = ' + d100.w.toFixed(1) + '/' + d100.s.toFixed(1) + ' mil';
+
+    // results table
+    const tbody = $('#tblBody');
+    tbody.innerHTML = '';
+    su.forEach(layer => {
+        const tr = document.createElement('tr');
+        if (layer.type === 'copper') {
+            const layerH = layer.signal ? dielEach : '-';
+            const w50v = layer.signal ? solveWidthForZ(50, dielEach, Er, T).toFixed(1) + ' mil' : '-';
+            const d100v = layer.signal ? (() => { const r = solveDiffWidth(100, dielEach, Er, T); return r.w.toFixed(1) + '/' + r.s.toFixed(1) + ' mil'; })() : '-';
+            tr.innerHTML = `<td>${layer.name}</td><td style="color:${layer.signal ? C.green : C.orange}">${layer.signal ? '信号' : '电源/地'}</td><td>${copperT}</td><td>-</td><td>${w50v}</td><td>${d100v}</td>`;
+        } else {
+            tr.innerHTML = `<td>${layer.name}</td><td style="color:${C.textMut}">介质</td><td>${dielEach.toFixed(1)}</td><td>${Er.toFixed(1)}</td><td>-</td><td>-</td>`;
+        }
+        tbody.appendChild(tr);
+    });
+}
+
+/* =============================================================
+   Animation Loop
+   ============================================================= */
+let animTime = 0;
+
+function animate() {
+    animTime += 0.016;
+    drawTransmission(animTime);
+    drawEyeDiagram(animTime);
+    drawMicrostrip();
+    drawStriplineCrossSection(slSymCtx, slCanvW, slCanvH, false);
+    const cv2 = $('#cvStripAsym');
+    drawStriplineCrossSection(slAsymCtx, cv2.parentElement.clientWidth, slCanvH, true);
+    drawDifferential();
+    requestAnimationFrame(animate);
+}
+
+/* =============================================================
+   Init & Resize
+   ============================================================= */
+function init() {
+    initTransmission();
+    initMicrostrip();
+    initStripline();
+    initDiff();
+    initStackup();
+    animate();
+}
+
+function handleResize() {
+    const cv1 = $('#cvTransLine');
+    transW = cv1.parentElement.clientWidth;
+    transCtx = sizeCanvas(cv1, transW, transH);
+
+    const cvE = $('#cvEye');
+    eyeW = cvE.parentElement.clientWidth;
+    eyeCtx = sizeCanvas(cvE, eyeW, eyeH);
+
+    const cv2 = $('#cvMicrostrip');
+    msW = cv2.parentElement.clientWidth;
+    msCtx = sizeCanvas(cv2, msW, msH);
+
+    const cv3 = $('#cvStripSym');
+    slCanvW = cv3.parentElement.clientWidth;
+    slSymCtx = sizeCanvas(cv3, slCanvW, slCanvH);
+
+    const cv4 = $('#cvStripAsym');
+    slAsymCtx = sizeCanvas(cv4, cv4.parentElement.clientWidth, slCanvH);
+
+    const cv5 = $('#cvDiff');
+    diffW = cv5.parentElement.clientWidth;
+    diffCtx = sizeCanvas(cv5, diffW, diffH);
+}
+
+let resizeTimer;
+window.addEventListener('resize', () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(handleResize, 150);
+});
+
+document.addEventListener('DOMContentLoaded', init);
+
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,1536 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>条件生成 — Diffusion 扩散模型</title>
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+
+    <!-- KaTeX -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+
+    <!-- GSAP -->
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+
+    <!-- Local shared styles -->
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+
+    <style>
+        /* ========== Page-specific styles ========== */
+        .hero-banner {
+            text-align: center;
+            padding: 2rem 0 1rem;
+        }
+        .hero-banner h1 {
+            font-size: 2.2rem;
+            background: linear-gradient(135deg, var(--accent-green), var(--accent-blue));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .hero-banner .subtitle {
+            color: var(--text-secondary);
+            font-size: 1.05rem;
+            margin-top: 0.25rem;
+        }
+
+        .canvas-wrap {
+            position: relative;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+        }
+        .canvas-wrap canvas {
+            display: block;
+            width: 100%;
+            height: auto;
+        }
+
+        .controls-row {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 1rem;
+            padding: 0.75rem 1rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            margin-top: 0.75rem;
+        }
+
+        .control-label {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            white-space: nowrap;
+        }
+
+        .value-display {
+            font-family: var(--font-mono);
+            color: var(--accent-green);
+            font-size: 0.9rem;
+            min-width: 2.5rem;
+            text-align: center;
+        }
+
+        .formula-box {
+            padding: 1rem 1.2rem;
+            background: rgba(79, 195, 247, 0.05);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            margin: 1rem 0;
+        }
+
+        .grid-viz {
+            display: grid;
+            grid-template-columns: auto repeat(5, 1fr);
+            gap: 4px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1rem;
+            overflow-x: auto;
+        }
+        .grid-viz .grid-header {
+            font-size: 0.75rem;
+            color: var(--accent-blue);
+            font-family: var(--font-mono);
+            text-align: center;
+            padding: 0.3rem;
+        }
+        .grid-viz .grid-label {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            display: flex;
+            align-items: center;
+            padding-right: 0.5rem;
+            white-space: nowrap;
+        }
+        .grid-viz .grid-cell {
+            position: relative;
+            border-radius: var(--radius-sm);
+            overflow: hidden;
+        }
+        .grid-viz .grid-cell canvas {
+            display: block;
+            width: 100%;
+            height: auto;
+        }
+
+        .flowchart-container {
+            position: relative;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1.5rem;
+            overflow: hidden;
+        }
+        .flow-node {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0.6rem 1rem;
+            border-radius: var(--radius-md);
+            font-size: 0.85rem;
+            font-weight: 600;
+            text-align: center;
+            position: absolute;
+            white-space: nowrap;
+            transition: all 0.3s;
+            cursor: default;
+        }
+        .flow-node.text-node {
+            background: rgba(179, 136, 255, 0.15);
+            border: 1px solid var(--accent-purple);
+            color: var(--accent-purple);
+        }
+        .flow-node.encoder-node {
+            background: rgba(79, 195, 247, 0.15);
+            border: 1px solid var(--accent-blue);
+            color: var(--accent-blue);
+        }
+        .flow-node.unet-node {
+            background: rgba(22, 199, 154, 0.15);
+            border: 1px solid var(--accent-green);
+            color: var(--accent-green);
+        }
+        .flow-node.output-node {
+            background: rgba(255, 171, 64, 0.15);
+            border: 1px solid var(--accent-orange);
+            color: var(--accent-orange);
+        }
+        .flow-node.active {
+            box-shadow: 0 0 16px rgba(22, 199, 154, 0.4);
+            transform: scale(1.05);
+        }
+
+        .tradeoff-chart {
+            position: relative;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+        }
+
+        .condition-selector {
+            display: flex;
+            gap: 0.5rem;
+        }
+        .condition-btn {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            border: 2px solid var(--border-color);
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .condition-btn.active {
+            border-color: #fff;
+            transform: scale(1.15);
+            box-shadow: 0 0 10px rgba(255,255,255,0.3);
+        }
+
+        @media (max-width: 768px) {
+            .grid-viz {
+                grid-template-columns: auto repeat(3, 1fr);
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="page-container">
+        <!-- Hero -->
+        <div class="hero-banner">
+            <h1>条件生成</h1>
+            <p class="subtitle">Conditional Generation — 让扩散模型听从你的指令</p>
+        </div>
+
+        <!-- ============ Section 1: 条件生成动机 ============ -->
+        <div class="section" id="sec-motivation">
+            <div class="section-title">
+                <div class="icon">1</div>
+                <h2>条件生成动机</h2>
+            </div>
+            <div class="split-layout">
+                <div class="text-panel">
+                    <p>无条件扩散模型学习的是整个数据分布 $p(x)$。采样时，模型从分布中<strong>随机</strong>生成样本 —— 你无法控制生成的内容。</p>
+                    <p>但在实际应用中，我们往往需要<strong>指定生成目标</strong>：比如"生成一只猫"，或"生成红色簇的数据点"。这就需要条件分布 $p(x|y)$。</p>
+                    <div class="info-box">
+                        <p><strong>核心问题：</strong>如何从 $p(x)$ 过渡到 $p(x|y)$，使模型在去噪过程中朝着指定条件 $y$ 的方向引导？</p>
+                    </div>
+                    <p>右侧演示：2D 数据包含 3 个有颜色的簇。无条件采样从所有簇中随机抽取（灰色粒子）。点击某个簇的颜色按钮，观察条件采样如何只生成该簇的样本。</p>
+                    <div class="controls-row">
+                        <span class="control-label">目标簇：</span>
+                        <div class="condition-selector" id="cluster-selector">
+                            <button class="condition-btn" style="background:#ff5252" data-cluster="0" title="红色簇"></button>
+                            <button class="condition-btn" style="background:#4fc3f7" data-cluster="1" title="蓝色簇"></button>
+                            <button class="condition-btn" style="background:#16c79a" data-cluster="2" title="绿色簇"></button>
+                            <button class="condition-btn" style="background:#6c6c7c" data-cluster="none" title="无条件"></button>
+                        </div>
+                        <button class="btn btn-sm btn-primary" id="btn-resample">重新采样</button>
+                    </div>
+                </div>
+                <div class="viz-panel">
+                    <div class="canvas-wrap">
+                        <canvas id="canvas-motivation" width="600" height="500"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ============ Section 2: Classifier Guidance ============ -->
+        <div class="section" id="sec-classifier">
+            <div class="section-title">
+                <div class="icon">2</div>
+                <h2>Classifier Guidance（分类器引导）</h2>
+            </div>
+            <div class="split-layout">
+                <div class="text-panel">
+                    <p>第一种方法：训练一个独立的分类器 $p_\phi(y|x_t)$，它能在噪声数据上判断类别。</p>
+                    <div class="formula-box">
+                        <p>修改后的得分函数：</p>
+                        $$\nabla_{x} \log p(x_t | y) = \nabla_{x} \log p(x_t) + s \cdot \nabla_{x} \log p_\phi(y | x_t)$$
+                    </div>
+                    <p>其中 $s$ 是<strong>引导强度</strong>（guidance scale）：</p>
+                    <ul style="color: var(--text-secondary); margin-left: 1.2rem; margin-bottom: 1rem;">
+                        <li>$s = 0$：完全无条件，分类器梯度无效</li>
+                        <li>$s = 1$：标准后验采样</li>
+                        <li>$s > 1$：加强引导，样本更贴近目标类</li>
+                        <li>$s \gg 1$：过强引导，多样性下降</li>
+                    </ul>
+                    <div class="info-box warning">
+                        <p><strong>缺点：</strong>需要额外训练一个能处理噪声输入的分类器，且分类器质量直接影响生成效果。</p>
+                    </div>
+                    <div class="controls-row">
+                        <span class="control-label">引导强度 s：</span>
+                        <input type="range" id="slider-cg-scale" min="0" max="10" step="0.1" value="1" style="flex:1">
+                        <span class="value-display" id="val-cg-scale">1.0</span>
+                    </div>
+                    <div class="controls-row" style="margin-top:0.5rem">
+                        <span class="control-label">目标类别：</span>
+                        <div class="condition-selector" id="cg-class-selector">
+                            <button class="condition-btn active" style="background:#ff5252" data-class="0"></button>
+                            <button class="condition-btn" style="background:#4fc3f7" data-class="1"></button>
+                            <button class="condition-btn" style="background:#16c79a" data-class="2"></button>
+                        </div>
+                        <button class="btn btn-sm" id="btn-cg-step">单步去噪</button>
+                        <button class="btn btn-sm btn-primary" id="btn-cg-run">自动运行</button>
+                        <button class="btn btn-sm" id="btn-cg-reset">重置</button>
+                    </div>
+                </div>
+                <div class="viz-panel">
+                    <div class="canvas-wrap">
+                        <canvas id="canvas-classifier" width="600" height="500"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ============ Section 3: Classifier-Free Guidance ============ -->
+        <div class="section" id="sec-cfg">
+            <div class="section-title">
+                <div class="icon">3</div>
+                <h2>Classifier-Free Guidance（无分类器引导）</h2>
+            </div>
+            <div class="split-layout">
+                <div class="text-panel">
+                    <p>更优雅的方案：<strong>不需要额外分类器</strong>。在训练时，随机丢弃条件（用空标记 $\varnothing$ 替代），让同一个模型同时学习：</p>
+                    <ul style="color: var(--text-secondary); margin-left: 1.2rem; margin-bottom: 1rem;">
+                        <li>条件预测：$\epsilon_\theta(x_t, t, y)$</li>
+                        <li>无条件预测：$\epsilon_\theta(x_t, t, \varnothing)$</li>
+                    </ul>
+                    <div class="formula-box">
+                        <p>推理时的组合公式：</p>
+                        $$\tilde{\epsilon} = (1 + w) \cdot \epsilon_\theta(x_t, t, y) - w \cdot \epsilon_\theta(x_t, t, \varnothing)$$
+                    </div>
+                    <p>其中 $w$ 是引导权重。当 $w = 0$ 时退化为标准条件生成；$w > 0$ 时加强条件效果。</p>
+                    <div class="info-box success">
+                        <p><strong>优势：</strong>无需训练额外模型，只需一个网络即可完成条件与无条件预测。这是 Stable Diffusion、DALL·E 2 等模型的核心技术。</p>
+                    </div>
+                    <div class="controls-row">
+                        <span class="control-label">引导权重 w：</span>
+                        <input type="range" id="slider-cfg-w" min="0" max="10" step="0.1" value="3" style="flex:1">
+                        <span class="value-display" id="val-cfg-w">3.0</span>
+                    </div>
+                    <div class="controls-row" style="margin-top:0.5rem">
+                        <button class="btn btn-sm btn-primary" id="btn-cfg-animate">运行动画</button>
+                        <button class="btn btn-sm" id="btn-cfg-reset">重置</button>
+                    </div>
+                </div>
+                <div class="viz-panel">
+                    <div class="canvas-wrap">
+                        <canvas id="canvas-cfg" width="600" height="500"></canvas>
+                    </div>
+                    <div class="legend" style="margin-top:0.5rem">
+                        <div class="legend-item"><span class="swatch" style="background:var(--text-muted)"></span>无条件 $\epsilon_\theta(x_t,t,\varnothing)$</div>
+                        <div class="legend-item"><span class="swatch" style="background:var(--accent-blue)"></span>条件 $\epsilon_\theta(x_t,t,y)$</div>
+                        <div class="legend-item"><span class="swatch" style="background:var(--accent-green)"></span>引导后 $\tilde{\epsilon}$</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ============ Section 4: 引导强度效果 ============ -->
+        <div class="section" id="sec-strength">
+            <div class="section-title">
+                <div class="icon">4</div>
+                <h2>引导强度效果</h2>
+            </div>
+            <p>下方网格展示不同条件 + 不同引导强度的生成结果。列是引导尺度（从 0 到 15），行是不同的目标簇。观察引导强度如何影响<strong>类别一致性</strong>与<strong>多样性</strong>的平衡。</p>
+            <div class="grid-viz" id="strength-grid">
+                <!-- Header row -->
+                <div class="grid-header" style="visibility:hidden">标签</div>
+                <div class="grid-header">w = 0</div>
+                <div class="grid-header">w = 1</div>
+                <div class="grid-header">w = 3</div>
+                <div class="grid-header">w = 7</div>
+                <div class="grid-header">w = 15</div>
+                <!-- Row 1: Red cluster -->
+                <div class="grid-label"><span style="color:#ff5252">红色簇</span></div>
+                <div class="grid-cell"><canvas data-row="0" data-col="0" width="120" height="120"></canvas></div>
+                <div class="grid-cell"><canvas data-row="0" data-col="1" width="120" height="120"></canvas></div>
+                <div class="grid-cell"><canvas data-row="0" data-col="2" width="120" height="120"></canvas></div>
+                <div class="grid-cell"><canvas data-row="0" data-col="3" width="120" height="120"></canvas></div>
+                <div class="grid-cell"><canvas data-row="0" data-col="4" width="120" height="120"></canvas></div>
+                <!-- Row 2: Blue cluster -->
+                <div class="grid-label"><span style="color:#4fc3f7">蓝色簇</span></div>
+                <div class="grid-cell"><canvas data-row="1" data-col="0" width="120" height="120"></canvas></div>
+                <div class="grid-cell"><canvas data-row="1" data-col="1" width="120" height="120"></canvas></div>
+                <div class="grid-cell"><canvas data-row="1" data-col="2" width="120" height="120"></canvas></div>
+                <div class="grid-cell"><canvas data-row="1" data-col="3" width="120" height="120"></canvas></div>
+                <div class="grid-cell"><canvas data-row="1" data-col="4" width="120" height="120"></canvas></div>
+                <!-- Row 3: Green cluster -->
+                <div class="grid-label"><span style="color:#16c79a">绿色簇</span></div>
+                <div class="grid-cell"><canvas data-row="2" data-col="0" width="120" height="120"></canvas></div>
+                <div class="grid-cell"><canvas data-row="2" data-col="1" width="120" height="120"></canvas></div>
+                <div class="grid-cell"><canvas data-row="2" data-col="2" width="120" height="120"></canvas></div>
+                <div class="grid-cell"><canvas data-row="2" data-col="3" width="120" height="120"></canvas></div>
+                <div class="grid-cell"><canvas data-row="2" data-col="4" width="120" height="120"></canvas></div>
+            </div>
+            <div style="margin-top:1.5rem">
+                <h3>质量-多样性权衡曲线</h3>
+                <p>引导强度越大，样本越集中于目标类（质量高），但多样性下降。存在一个最佳平衡点。</p>
+                <div class="tradeoff-chart">
+                    <canvas id="canvas-tradeoff" width="600" height="300"></canvas>
+                </div>
+                <div class="controls-row" style="margin-top:0.75rem">
+                    <button class="btn btn-sm btn-primary" id="btn-refresh-grid">刷新所有格子</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ============ Section 5: 文本条件概念 ============ -->
+        <div class="section" id="sec-text">
+            <div class="section-title">
+                <div class="icon">5</div>
+                <h2>文本条件概念</h2>
+            </div>
+            <p>在文本到图像模型中，条件 $y$ 是一段自然语言描述。整个流程如下：</p>
+            <div class="flowchart-container" id="flowchart" style="height: 280px;">
+                <canvas id="canvas-flowchart" width="800" height="280"></canvas>
+            </div>
+            <div class="controls-row" style="margin-top:0.75rem">
+                <span class="control-label">模拟条件向量：</span>
+                <div class="btn-group" id="text-condition-group">
+                    <button class="btn active" data-cond="0">条件 A "红色"</button>
+                    <button class="btn" data-cond="1">条件 B "蓝色"</button>
+                    <button class="btn" data-cond="2">条件 C "绿色"</button>
+                </div>
+            </div>
+            <div style="margin-top:1.5rem">
+                <div class="split-layout">
+                    <div class="text-panel">
+                        <h3>文本条件流程详解</h3>
+                        <p><strong>1. 文本编码：</strong>将文本描述（如"一只橘色的猫"）通过预训练文本编码器（如 CLIP）转换为高维嵌入向量。</p>
+                        <p><strong>2. 交叉注意力：</strong>在 U-Net 的每一层中，文本嵌入通过交叉注意力机制与图像特征交互，引导去噪方向。</p>
+                        <p><strong>3. 条件去噪：</strong>模型在每个时间步都参考条件向量，使得去噪轨迹朝着符合文本描述的方向演化。</p>
+                        <div class="info-box">
+                            <p>右侧演示：选择不同的"模拟条件向量"，观察采样粒子如何被引导到不同的数据区域。这模拟了文本嵌入如何改变生成目标。</p>
+                        </div>
+                    </div>
+                    <div class="viz-panel">
+                        <div class="canvas-wrap">
+                            <canvas id="canvas-text-demo" width="600" height="450"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Shared nav -->
+    <script src="../shared/scripts/nav.js"></script>
+    <script src="../shared/scripts/diffusion-utils.js"></script>
+
+    <script>
+    /* ================================================================
+       条件生成 — 交互式可视化
+       ================================================================ */
+    document.addEventListener('DOMContentLoaded', () => {
+        // Render KaTeX
+        if (typeof renderMathInElement === 'function') {
+            renderMathInElement(document.body, {
+                delimiters: [
+                    { left: '$$', right: '$$', display: true },
+                    { left: '$', right: '$', display: false }
+                ]
+            });
+        }
+
+        const DU = DiffusionUtils;
+        const PI2 = Math.PI * 2;
+
+        // ── Cluster Data ──
+        const clusterCenters = [
+            { x: -2.2, y: -1.5 },   // red
+            { x: 2.5, y: -1.0 },    // blue
+            { x: 0.0, y: 2.5 }      // green
+        ];
+        const clusterColors = ['#ff5252', '#4fc3f7', '#16c79a'];
+        const clusterColorsAlpha = ['rgba(255,82,82,0.6)', 'rgba(79,195,247,0.6)', 'rgba(22,199,154,0.6)'];
+
+        function generateClusterData(n = 200) {
+            const pts = [];
+            const perCluster = Math.floor(n / 3);
+            for (let c = 0; c < 3; c++) {
+                const count = c < 2 ? perCluster : n - perCluster * 2;
+                for (let i = 0; i < count; i++) {
+                    pts.push({
+                        x: clusterCenters[c].x + DU.gaussianRandom(0, 0.55),
+                        y: clusterCenters[c].y + DU.gaussianRandom(0, 0.55),
+                        cluster: c
+                    });
+                }
+            }
+            return pts;
+        }
+
+        // Map data coords to canvas coords
+        function dataToCanvas(x, y, w, h, range = 5) {
+            return {
+                cx: (x + range) / (2 * range) * w,
+                cy: (range - y) / (2 * range) * h
+            };
+        }
+
+        function drawAxes(ctx, w, h) {
+            ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+            ctx.lineWidth = 1;
+            // cross lines
+            ctx.beginPath();
+            ctx.moveTo(w / 2, 0); ctx.lineTo(w / 2, h);
+            ctx.moveTo(0, h / 2); ctx.lineTo(w, h / 2);
+            ctx.stroke();
+        }
+
+        function drawClusterData(ctx, data, w, h, range = 5, alpha = 0.5) {
+            for (const p of data) {
+                const { cx, cy } = dataToCanvas(p.x, p.y, w, h, range);
+                ctx.beginPath();
+                ctx.arc(cx, cy, 3, 0, PI2);
+                ctx.fillStyle = clusterColorsAlpha[p.cluster] || 'rgba(108,108,124,0.4)';
+                ctx.globalAlpha = alpha;
+                ctx.fill();
+            }
+            ctx.globalAlpha = 1;
+        }
+
+        // ================================================================
+        // Section 1: Motivation
+        // ================================================================
+        const canvasMotiv = document.getElementById('canvas-motivation');
+        const ctxMotiv = canvasMotiv.getContext('2d');
+        let motivData = generateClusterData(250);
+        let motivParticles = [];
+        let motivTarget = 'none';
+        let motivAnimId = null;
+
+        function generateMotivParticles(target, count = 60) {
+            const particles = [];
+            for (let i = 0; i < count; i++) {
+                let tx, ty;
+                if (target === 'none') {
+                    // Random from all clusters
+                    const c = Math.floor(Math.random() * 3);
+                    tx = clusterCenters[c].x + DU.gaussianRandom(0, 0.55);
+                    ty = clusterCenters[c].y + DU.gaussianRandom(0, 0.55);
+                } else {
+                    const c = parseInt(target);
+                    tx = clusterCenters[c].x + DU.gaussianRandom(0, 0.45);
+                    ty = clusterCenters[c].y + DU.gaussianRandom(0, 0.45);
+                }
+                particles.push({
+                    x: DU.gaussianRandom(0, 3),
+                    y: DU.gaussianRandom(0, 3),
+                    tx, ty,
+                    progress: 0,
+                    speed: 0.008 + Math.random() * 0.012,
+                    cluster: target === 'none' ? -1 : parseInt(target)
+                });
+            }
+            return particles;
+        }
+
+        function drawMotivation() {
+            const w = canvasMotiv.width, h = canvasMotiv.height;
+            ctxMotiv.clearRect(0, 0, w, h);
+            ctxMotiv.fillStyle = '#16213e';
+            ctxMotiv.fillRect(0, 0, w, h);
+            drawAxes(ctxMotiv, w, h);
+
+            // Draw data clusters
+            drawClusterData(ctxMotiv, motivData, w, h, 5, 0.3);
+
+            // Draw cluster centers with labels
+            const labels = ['红', '蓝', '绿'];
+            for (let c = 0; c < 3; c++) {
+                const { cx, cy } = dataToCanvas(clusterCenters[c].x, clusterCenters[c].y, w, h, 5);
+                ctxMotiv.beginPath();
+                ctxMotiv.arc(cx, cy, 18, 0, PI2);
+                ctxMotiv.strokeStyle = clusterColors[c];
+                ctxMotiv.lineWidth = 2;
+                ctxMotiv.setLineDash([4, 3]);
+                ctxMotiv.stroke();
+                ctxMotiv.setLineDash([]);
+                ctxMotiv.fillStyle = clusterColors[c];
+                ctxMotiv.font = '12px "Noto Sans SC"';
+                ctxMotiv.textAlign = 'center';
+                ctxMotiv.fillText(labels[c], cx, cy + 32);
+            }
+
+            // Draw animated particles
+            let allDone = true;
+            for (const p of motivParticles) {
+                if (p.progress < 1) {
+                    p.progress = Math.min(1, p.progress + p.speed);
+                    allDone = false;
+                }
+                const t = DU.easeInOut(p.progress);
+                const px = DU.interpolate(p.x, p.tx, t);
+                const py = DU.interpolate(p.y, p.ty, t);
+                const { cx, cy } = dataToCanvas(px, py, w, h, 5);
+
+                ctxMotiv.beginPath();
+                ctxMotiv.arc(cx, cy, 4, 0, PI2);
+                if (p.cluster >= 0) {
+                    ctxMotiv.fillStyle = clusterColors[p.cluster];
+                } else {
+                    ctxMotiv.fillStyle = '#a8a8b8';
+                }
+                ctxMotiv.globalAlpha = 0.85;
+                ctxMotiv.fill();
+                ctxMotiv.globalAlpha = 1;
+
+                // Trail
+                if (p.progress < 1) {
+                    ctxMotiv.beginPath();
+                    const startPos = dataToCanvas(p.x, p.y, w, h, 5);
+                    ctxMotiv.moveTo(startPos.cx, startPos.cy);
+                    ctxMotiv.lineTo(cx, cy);
+                    ctxMotiv.strokeStyle = p.cluster >= 0 ? clusterColors[p.cluster] : '#6c6c7c';
+                    ctxMotiv.globalAlpha = 0.15;
+                    ctxMotiv.lineWidth = 1;
+                    ctxMotiv.stroke();
+                    ctxMotiv.globalAlpha = 1;
+                }
+            }
+
+            // Title label
+            ctxMotiv.fillStyle = '#e8e8e8';
+            ctxMotiv.font = 'bold 14px "Noto Sans SC"';
+            ctxMotiv.textAlign = 'left';
+            const modeText = motivTarget === 'none' ? '无条件采样 p(x)' : `条件采样 p(x|y=${['红','蓝','绿'][parseInt(motivTarget)]})`;
+            ctxMotiv.fillText(modeText, 16, 28);
+
+            if (!allDone) {
+                motivAnimId = requestAnimationFrame(drawMotivation);
+            }
+        }
+
+        function restartMotivation() {
+            if (motivAnimId) cancelAnimationFrame(motivAnimId);
+            motivParticles = generateMotivParticles(motivTarget);
+            drawMotivation();
+        }
+
+        // Cluster selector
+        document.getElementById('cluster-selector').addEventListener('click', e => {
+            const btn = e.target.closest('.condition-btn');
+            if (!btn) return;
+            document.querySelectorAll('#cluster-selector .condition-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            motivTarget = btn.dataset.cluster;
+            restartMotivation();
+        });
+        document.getElementById('btn-resample').addEventListener('click', restartMotivation);
+
+        // Init section 1
+        document.querySelector('#cluster-selector [data-cluster="none"]').classList.add('active');
+        restartMotivation();
+
+        // ================================================================
+        // Section 2: Classifier Guidance
+        // ================================================================
+        const canvasCG = document.getElementById('canvas-classifier');
+        const ctxCG = canvasCG.getContext('2d');
+        let cgData = generateClusterData(200);
+        let cgParticles = [];
+        let cgTargetClass = 0;
+        let cgScale = 1.0;
+        let cgStep = 0;
+        const cgTotalSteps = 50;
+        let cgAnimId = null;
+        let cgRunning = false;
+
+        function initCGParticles(count = 40) {
+            const particles = [];
+            for (let i = 0; i < count; i++) {
+                particles.push({
+                    x: DU.gaussianRandom(0, 3.5),
+                    y: DU.gaussianRandom(0, 3.5)
+                });
+            }
+            return particles;
+        }
+
+        // Simulate classifier gradient: points toward target cluster center
+        function classifierGradient(x, y, targetClass) {
+            const center = clusterCenters[targetClass];
+            const dx = center.x - x;
+            const dy = center.y - y;
+            const dist = Math.sqrt(dx * dx + dy * dy) + 0.01;
+            return { gx: dx / dist, gy: dy / dist };
+        }
+
+        // Simulate unconditional score: toward nearest cluster weighted by distance
+        function unconditionalScore(x, y) {
+            let sx = 0, sy = 0;
+            for (let c = 0; c < 3; c++) {
+                const dx = clusterCenters[c].x - x;
+                const dy = clusterCenters[c].y - y;
+                const dist2 = dx * dx + dy * dy + 0.1;
+                const w = Math.exp(-dist2 / 4);
+                sx += w * dx;
+                sy += w * dy;
+            }
+            const mag = Math.sqrt(sx * sx + sy * sy) + 0.01;
+            return { sx: sx / mag, sy: sy / mag };
+        }
+
+        function stepCGParticles() {
+            const t = 1 - cgStep / cgTotalSteps; // decreasing noise level
+            const lr = 0.08 * (1 + t);
+            const noiseAmt = 0.12 * t;
+
+            for (const p of cgParticles) {
+                const { sx, sy } = unconditionalScore(p.x, p.y);
+                const { gx, gy } = classifierGradient(p.x, p.y, cgTargetClass);
+                p.x += lr * (sx + cgScale * gx) + DU.gaussianRandom(0, noiseAmt);
+                p.y += lr * (sy + cgScale * gy) + DU.gaussianRandom(0, noiseAmt);
+            }
+            cgStep++;
+        }
+
+        function drawCG() {
+            const w = canvasCG.width, h = canvasCG.height;
+            ctxCG.clearRect(0, 0, w, h);
+            ctxCG.fillStyle = '#16213e';
+            ctxCG.fillRect(0, 0, w, h);
+            drawAxes(ctxCG, w, h);
+            drawClusterData(ctxCG, cgData, w, h, 5, 0.2);
+
+            // Draw gradient field (sparse)
+            const gridN = 12;
+            const range = 5;
+            for (let gi = 0; gi < gridN; gi++) {
+                for (let gj = 0; gj < gridN; gj++) {
+                    const gx = -range + (2 * range) * (gi + 0.5) / gridN;
+                    const gy = -range + (2 * range) * (gj + 0.5) / gridN;
+                    const { gx: cgx, gy: cgy } = classifierGradient(gx, gy, cgTargetClass);
+                    const { cx, cy } = dataToCanvas(gx, gy, w, h, range);
+                    const arrowLen = 12;
+                    ctxCG.beginPath();
+                    ctxCG.moveTo(cx, cy);
+                    ctxCG.lineTo(cx + cgx * arrowLen * cgScale * 0.3, cy - cgy * arrowLen * cgScale * 0.3);
+                    ctxCG.strokeStyle = 'rgba(255,171,64,0.2)';
+                    ctxCG.lineWidth = 1;
+                    ctxCG.stroke();
+                }
+            }
+
+            // Target indicator
+            const tc = dataToCanvas(clusterCenters[cgTargetClass].x, clusterCenters[cgTargetClass].y, w, h, 5);
+            ctxCG.beginPath();
+            ctxCG.arc(tc.cx, tc.cy, 24, 0, PI2);
+            ctxCG.strokeStyle = clusterColors[cgTargetClass];
+            ctxCG.lineWidth = 2.5;
+            ctxCG.setLineDash([6, 4]);
+            ctxCG.stroke();
+            ctxCG.setLineDash([]);
+
+            // Particles
+            for (const p of cgParticles) {
+                const { cx, cy } = dataToCanvas(p.x, p.y, w, h, 5);
+                ctxCG.beginPath();
+                ctxCG.arc(cx, cy, 5, 0, PI2);
+                ctxCG.fillStyle = '#ffab40';
+                ctxCG.globalAlpha = 0.85;
+                ctxCG.fill();
+                ctxCG.strokeStyle = '#fff';
+                ctxCG.lineWidth = 1;
+                ctxCG.globalAlpha = 0.5;
+                ctxCG.stroke();
+                ctxCG.globalAlpha = 1;
+            }
+
+            // HUD
+            ctxCG.fillStyle = '#e8e8e8';
+            ctxCG.font = 'bold 13px "Noto Sans SC"';
+            ctxCG.textAlign = 'left';
+            ctxCG.fillText(`Classifier Guidance | 步骤: ${cgStep}/${cgTotalSteps} | s=${cgScale.toFixed(1)}`, 14, 24);
+        }
+
+        function cgAutoRun() {
+            if (!cgRunning || cgStep >= cgTotalSteps) {
+                cgRunning = false;
+                return;
+            }
+            stepCGParticles();
+            drawCG();
+            cgAnimId = requestAnimationFrame(cgAutoRun);
+        }
+
+        // Controls
+        const sliderCGScale = document.getElementById('slider-cg-scale');
+        const valCGScale = document.getElementById('val-cg-scale');
+        sliderCGScale.addEventListener('input', () => {
+            cgScale = parseFloat(sliderCGScale.value);
+            valCGScale.textContent = cgScale.toFixed(1);
+        });
+
+        document.getElementById('cg-class-selector').addEventListener('click', e => {
+            const btn = e.target.closest('.condition-btn');
+            if (!btn) return;
+            document.querySelectorAll('#cg-class-selector .condition-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            cgTargetClass = parseInt(btn.dataset.class);
+            drawCG();
+        });
+
+        document.getElementById('btn-cg-step').addEventListener('click', () => {
+            if (cgStep < cgTotalSteps) {
+                stepCGParticles();
+                drawCG();
+            }
+        });
+
+        document.getElementById('btn-cg-run').addEventListener('click', () => {
+            if (cgRunning) { cgRunning = false; return; }
+            if (cgStep >= cgTotalSteps) { cgStep = 0; cgParticles = initCGParticles(); }
+            cgRunning = true;
+            cgAutoRun();
+        });
+
+        document.getElementById('btn-cg-reset').addEventListener('click', () => {
+            cgRunning = false;
+            if (cgAnimId) cancelAnimationFrame(cgAnimId);
+            cgStep = 0;
+            cgParticles = initCGParticles();
+            drawCG();
+        });
+
+        cgParticles = initCGParticles();
+        drawCG();
+
+        // ================================================================
+        // Section 3: Classifier-Free Guidance
+        // ================================================================
+        const canvasCFG = document.getElementById('canvas-cfg');
+        const ctxCFG = canvasCFG.getContext('2d');
+        let cfgW = 3.0;
+        let cfgParticles = [];
+        let cfgStep = 0;
+        const cfgTotalSteps = 50;
+        let cfgAnimId = null;
+        let cfgRunning = false;
+        const cfgTargetClass = 0; // default red
+
+        function initCFGParticles(count = 40) {
+            const pts = [];
+            for (let i = 0; i < count; i++) {
+                pts.push({
+                    x: DU.gaussianRandom(0, 3.5),
+                    y: DU.gaussianRandom(0, 3.5),
+                    // Store trajectory for trail visualization
+                    trail: []
+                });
+            }
+            return pts;
+        }
+
+        // Simulate conditional noise prediction (toward target)
+        function conditionalPrediction(x, y, targetClass) {
+            const c = clusterCenters[targetClass];
+            const dx = c.x - x;
+            const dy = c.y - y;
+            const dist = Math.sqrt(dx * dx + dy * dy) + 0.01;
+            return { ex: dx / dist, ey: dy / dist };
+        }
+
+        // Simulate unconditional noise prediction (toward overall center of mass)
+        function unconditionalPrediction(x, y) {
+            let sx = 0, sy = 0, totalW = 0;
+            for (let c = 0; c < 3; c++) {
+                const dx = clusterCenters[c].x - x;
+                const dy = clusterCenters[c].y - y;
+                const dist2 = dx * dx + dy * dy + 0.5;
+                const w = 1 / dist2;
+                sx += w * dx;
+                sy += w * dy;
+                totalW += w;
+            }
+            sx /= totalW;
+            sy /= totalW;
+            const mag = Math.sqrt(sx * sx + sy * sy) + 0.01;
+            return { ex: sx / mag, ey: sy / mag };
+        }
+
+        function stepCFGParticles() {
+            const t = 1 - cfgStep / cfgTotalSteps;
+            const lr = 0.1 * (1 + t * 0.5);
+            const noiseAmt = 0.1 * t;
+
+            for (const p of cfgParticles) {
+                const cond = conditionalPrediction(p.x, p.y, cfgTargetClass);
+                const uncond = unconditionalPrediction(p.x, p.y);
+                // CFG formula: eps_guided = (1+w)*cond - w*uncond
+                const gx = (1 + cfgW) * cond.ex - cfgW * uncond.ex;
+                const gy = (1 + cfgW) * cond.ey - cfgW * uncond.ey;
+
+                p.trail.push({ x: p.x, y: p.y });
+                if (p.trail.length > 15) p.trail.shift();
+
+                p.x += lr * gx + DU.gaussianRandom(0, noiseAmt);
+                p.y += lr * gy + DU.gaussianRandom(0, noiseAmt);
+            }
+            cfgStep++;
+        }
+
+        function drawCFG() {
+            const w = canvasCFG.width, h = canvasCFG.height;
+            ctxCFG.clearRect(0, 0, w, h);
+            ctxCFG.fillStyle = '#16213e';
+            ctxCFG.fillRect(0, 0, w, h);
+            drawAxes(ctxCFG, w, h);
+            drawClusterData(ctxCFG, cgData, w, h, 5, 0.15);
+
+            // Show direction arrows at a sample point
+            const sampleIdx = 0;
+            if (cfgParticles.length > 0) {
+                const sp = cfgParticles[sampleIdx];
+                const { cx, cy } = dataToCanvas(sp.x, sp.y, w, h, 5);
+                const cond = conditionalPrediction(sp.x, sp.y, cfgTargetClass);
+                const uncond = unconditionalPrediction(sp.x, sp.y);
+                const guided = {
+                    ex: (1 + cfgW) * cond.ex - cfgW * uncond.ex,
+                    ey: (1 + cfgW) * cond.ey - cfgW * uncond.ey
+                };
+
+                const arrowScale = 35;
+                // Unconditional
+                drawArrow(ctxCFG, cx, cy, cx + uncond.ex * arrowScale, cy - uncond.ey * arrowScale, '#6c6c7c', 2);
+                // Conditional
+                drawArrow(ctxCFG, cx, cy, cx + cond.ex * arrowScale, cy - cond.ey * arrowScale, '#4fc3f7', 2);
+                // Guided
+                const gMag = Math.sqrt(guided.ex * guided.ex + guided.ey * guided.ey);
+                const gNorm = gMag > 0 ? arrowScale * 1.2 / gMag : 0;
+                drawArrow(ctxCFG, cx, cy, cx + guided.ex * gNorm, cy - guided.ey * gNorm, '#16c79a', 2.5);
+            }
+
+            // Draw trails
+            for (const p of cfgParticles) {
+                if (p.trail.length > 1) {
+                    ctxCFG.beginPath();
+                    const start = dataToCanvas(p.trail[0].x, p.trail[0].y, w, h, 5);
+                    ctxCFG.moveTo(start.cx, start.cy);
+                    for (let i = 1; i < p.trail.length; i++) {
+                        const pt = dataToCanvas(p.trail[i].x, p.trail[i].y, w, h, 5);
+                        ctxCFG.lineTo(pt.cx, pt.cy);
+                    }
+                    const end = dataToCanvas(p.x, p.y, w, h, 5);
+                    ctxCFG.lineTo(end.cx, end.cy);
+                    ctxCFG.strokeStyle = 'rgba(22,199,154,0.2)';
+                    ctxCFG.lineWidth = 1;
+                    ctxCFG.stroke();
+                }
+            }
+
+            // Draw particles
+            for (const p of cfgParticles) {
+                const { cx, cy } = dataToCanvas(p.x, p.y, w, h, 5);
+                ctxCFG.beginPath();
+                ctxCFG.arc(cx, cy, 4.5, 0, PI2);
+                ctxCFG.fillStyle = '#16c79a';
+                ctxCFG.globalAlpha = 0.85;
+                ctxCFG.fill();
+                ctxCFG.globalAlpha = 1;
+            }
+
+            // HUD
+            ctxCFG.fillStyle = '#e8e8e8';
+            ctxCFG.font = 'bold 13px "Noto Sans SC"';
+            ctxCFG.textAlign = 'left';
+            ctxCFG.fillText(`Classifier-Free Guidance | 步骤: ${cfgStep}/${cfgTotalSteps} | w=${cfgW.toFixed(1)}`, 14, 24);
+        }
+
+        function drawArrow(ctx, x1, y1, x2, y2, color, lineW = 1.5) {
+            const angle = Math.atan2(y2 - y1, x2 - x1);
+            const headLen = 8;
+            ctx.beginPath();
+            ctx.moveTo(x1, y1);
+            ctx.lineTo(x2, y2);
+            ctx.strokeStyle = color;
+            ctx.lineWidth = lineW;
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(x2, y2);
+            ctx.lineTo(x2 - headLen * Math.cos(angle - Math.PI / 6), y2 - headLen * Math.sin(angle - Math.PI / 6));
+            ctx.lineTo(x2 - headLen * Math.cos(angle + Math.PI / 6), y2 - headLen * Math.sin(angle + Math.PI / 6));
+            ctx.closePath();
+            ctx.fillStyle = color;
+            ctx.fill();
+        }
+
+        function cfgAutoRun() {
+            if (!cfgRunning || cfgStep >= cfgTotalSteps) {
+                cfgRunning = false;
+                return;
+            }
+            stepCFGParticles();
+            drawCFG();
+            cfgAnimId = requestAnimationFrame(cfgAutoRun);
+        }
+
+        const sliderCFGW = document.getElementById('slider-cfg-w');
+        const valCFGW = document.getElementById('val-cfg-w');
+        sliderCFGW.addEventListener('input', () => {
+            cfgW = parseFloat(sliderCFGW.value);
+            valCFGW.textContent = cfgW.toFixed(1);
+        });
+
+        document.getElementById('btn-cfg-animate').addEventListener('click', () => {
+            if (cfgRunning) { cfgRunning = false; return; }
+            if (cfgStep >= cfgTotalSteps) { cfgStep = 0; cfgParticles = initCFGParticles(); }
+            cfgRunning = true;
+            cfgAutoRun();
+        });
+
+        document.getElementById('btn-cfg-reset').addEventListener('click', () => {
+            cfgRunning = false;
+            if (cfgAnimId) cancelAnimationFrame(cfgAnimId);
+            cfgStep = 0;
+            cfgParticles = initCFGParticles();
+            drawCFG();
+        });
+
+        cfgParticles = initCFGParticles();
+        drawCFG();
+
+        // ================================================================
+        // Section 4: Guidance Strength Grid
+        // ================================================================
+        const guidanceScales = [0, 1, 3, 7, 15];
+
+        function simulateGuidedSamples(targetClass, guidanceW, count = 80) {
+            let particles = [];
+            for (let i = 0; i < count; i++) {
+                particles.push({ x: DU.gaussianRandom(0, 3), y: DU.gaussianRandom(0, 3) });
+            }
+            const steps = 40;
+            for (let s = 0; s < steps; s++) {
+                const t = 1 - s / steps;
+                const lr = 0.1 * (1 + t * 0.5);
+                const noise = 0.08 * t;
+                for (const p of particles) {
+                    const cond = conditionalPrediction(p.x, p.y, targetClass);
+                    const uncond = unconditionalPrediction(p.x, p.y);
+                    const gx = (1 + guidanceW) * cond.ex - guidanceW * uncond.ex;
+                    const gy = (1 + guidanceW) * cond.ey - guidanceW * uncond.ey;
+                    p.x += lr * gx + DU.gaussianRandom(0, noise);
+                    p.y += lr * gy + DU.gaussianRandom(0, noise);
+                }
+            }
+            return particles;
+        }
+
+        function drawGridCell(canvas, targetClass, guidanceW) {
+            const ctx = canvas.getContext('2d');
+            const w = canvas.width, h = canvas.height;
+            ctx.clearRect(0, 0, w, h);
+            ctx.fillStyle = '#16213e';
+            ctx.fillRect(0, 0, w, h);
+
+            const range = 5;
+            // Draw cluster hints
+            for (let c = 0; c < 3; c++) {
+                const { cx, cy } = dataToCanvas(clusterCenters[c].x, clusterCenters[c].y, w, h, range);
+                ctx.beginPath();
+                ctx.arc(cx, cy, 8, 0, PI2);
+                ctx.fillStyle = clusterColors[c];
+                ctx.globalAlpha = 0.15;
+                ctx.fill();
+                ctx.globalAlpha = 1;
+            }
+
+            const samples = simulateGuidedSamples(targetClass, guidanceW, 60);
+            for (const p of samples) {
+                const { cx, cy } = dataToCanvas(p.x, p.y, w, h, range);
+                ctx.beginPath();
+                ctx.arc(cx, cy, 2.5, 0, PI2);
+                ctx.fillStyle = clusterColors[targetClass];
+                ctx.globalAlpha = 0.7;
+                ctx.fill();
+                ctx.globalAlpha = 1;
+            }
+        }
+
+        function refreshGrid() {
+            const cells = document.querySelectorAll('#strength-grid .grid-cell canvas');
+            cells.forEach(canvas => {
+                const row = parseInt(canvas.dataset.row);
+                const col = parseInt(canvas.dataset.col);
+                drawGridCell(canvas, row, guidanceScales[col]);
+            });
+        }
+
+        document.getElementById('btn-refresh-grid').addEventListener('click', refreshGrid);
+
+        // Tradeoff curve
+        function drawTradeoffCurve() {
+            const canvas = document.getElementById('canvas-tradeoff');
+            const ctx = canvas.getContext('2d');
+            const w = canvas.width, h = canvas.height;
+            ctx.clearRect(0, 0, w, h);
+            ctx.fillStyle = '#16213e';
+            ctx.fillRect(0, 0, w, h);
+
+            const pad = { l: 60, r: 30, t: 30, b: 50 };
+            const pw = w - pad.l - pad.r;
+            const ph = h - pad.t - pad.b;
+
+            // Axes
+            ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(pad.l, pad.t);
+            ctx.lineTo(pad.l, pad.t + ph);
+            ctx.lineTo(pad.l + pw, pad.t + ph);
+            ctx.stroke();
+
+            // Labels
+            ctx.fillStyle = '#a8a8b8';
+            ctx.font = '12px "Noto Sans SC"';
+            ctx.textAlign = 'center';
+            ctx.fillText('引导强度 w', pad.l + pw / 2, h - 8);
+            ctx.save();
+            ctx.translate(16, pad.t + ph / 2);
+            ctx.rotate(-Math.PI / 2);
+            ctx.fillText('指标值', 0, 0);
+            ctx.restore();
+
+            // Simulate metrics
+            const wValues = [0, 0.5, 1, 2, 3, 5, 7, 10, 15];
+            const quality = wValues.map(wv => {
+                // Quality: increases then plateaus
+                return 1 - Math.exp(-wv * 0.8);
+            });
+            const diversity = wValues.map(wv => {
+                // Diversity: decreases
+                return Math.exp(-wv * 0.15);
+            });
+
+            // Scale to chart coords
+            const xScale = pw / 15;
+            const yScale = ph;
+
+            // Quality curve (green)
+            ctx.beginPath();
+            ctx.strokeStyle = '#16c79a';
+            ctx.lineWidth = 2.5;
+            for (let i = 0; i < wValues.length; i++) {
+                const x = pad.l + wValues[i] * xScale;
+                const y = pad.t + ph - quality[i] * yScale;
+                if (i === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+
+            // Diversity curve (blue)
+            ctx.beginPath();
+            ctx.strokeStyle = '#4fc3f7';
+            ctx.lineWidth = 2.5;
+            for (let i = 0; i < wValues.length; i++) {
+                const x = pad.l + wValues[i] * xScale;
+                const y = pad.t + ph - diversity[i] * yScale;
+                if (i === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+
+            // Draw points
+            for (let i = 0; i < wValues.length; i++) {
+                const x = pad.l + wValues[i] * xScale;
+                // Quality dot
+                ctx.beginPath();
+                ctx.arc(x, pad.t + ph - quality[i] * yScale, 4, 0, PI2);
+                ctx.fillStyle = '#16c79a';
+                ctx.fill();
+                // Diversity dot
+                ctx.beginPath();
+                ctx.arc(x, pad.t + ph - diversity[i] * yScale, 4, 0, PI2);
+                ctx.fillStyle = '#4fc3f7';
+                ctx.fill();
+            }
+
+            // X axis ticks
+            ctx.fillStyle = '#6c6c7c';
+            ctx.font = '10px "JetBrains Mono"';
+            ctx.textAlign = 'center';
+            for (const wv of [0, 1, 3, 5, 7, 10, 15]) {
+                const x = pad.l + wv * xScale;
+                ctx.fillText(wv.toString(), x, pad.t + ph + 18);
+                ctx.beginPath();
+                ctx.moveTo(x, pad.t + ph);
+                ctx.lineTo(x, pad.t + ph + 4);
+                ctx.strokeStyle = '#6c6c7c';
+                ctx.lineWidth = 1;
+                ctx.stroke();
+            }
+
+            // Legend
+            ctx.font = '12px "Noto Sans SC"';
+            ctx.textAlign = 'left';
+            ctx.fillStyle = '#16c79a';
+            ctx.fillRect(pad.l + pw - 160, pad.t + 8, 12, 12);
+            ctx.fillStyle = '#e8e8e8';
+            ctx.fillText('类别一致性', pad.l + pw - 144, pad.t + 19);
+            ctx.fillStyle = '#4fc3f7';
+            ctx.fillRect(pad.l + pw - 160, pad.t + 28, 12, 12);
+            ctx.fillStyle = '#e8e8e8';
+            ctx.fillText('样本多样性', pad.l + pw - 144, pad.t + 39);
+
+            // Optimal zone
+            const optX = pad.l + 3 * xScale;
+            ctx.setLineDash([4, 4]);
+            ctx.strokeStyle = 'rgba(255,215,64,0.5)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(optX, pad.t);
+            ctx.lineTo(optX, pad.t + ph);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.fillStyle = '#ffd740';
+            ctx.font = '11px "Noto Sans SC"';
+            ctx.textAlign = 'center';
+            ctx.fillText('最佳平衡区', optX, pad.t + ph + 36);
+        }
+
+        refreshGrid();
+        drawTradeoffCurve();
+
+        // ================================================================
+        // Section 5: Text Condition Concept
+        // ================================================================
+        const canvasFlow = document.getElementById('canvas-flowchart');
+        const ctxFlow = canvasFlow.getContext('2d');
+        let activeCondition = 0;
+        const condLabels = ['条件A "红色"', '条件B "蓝色"', '条件C "绿色"'];
+        const condColors = ['#ff5252', '#4fc3f7', '#16c79a'];
+
+        function drawFlowchart() {
+            const w = canvasFlow.width, h = canvasFlow.height;
+            ctxFlow.clearRect(0, 0, w, h);
+            ctxFlow.fillStyle = '#16213e';
+            ctxFlow.fillRect(0, 0, w, h);
+
+            // Node positions
+            const nodes = [
+                { label: '文本描述', x: 50, y: h / 2, w: 90, h: 40, type: 'text' },
+                { label: '文本编码器', x: 200, y: h / 2, w: 100, h: 40, type: 'encoder' },
+                { label: '条件嵌入', x: 360, y: h / 2 - 50, w: 90, h: 36, type: 'encoder' },
+                { label: '交叉注意力', x: 360, y: h / 2 + 30, w: 100, h: 36, type: 'unet' },
+                { label: 'U-Net 去噪', x: 520, y: h / 2, w: 100, h: 44, type: 'unet' },
+                { label: '生成结果', x: 680, y: h / 2, w: 90, h: 40, type: 'output' },
+            ];
+
+            // Connections
+            const connections = [
+                [0, 1], [1, 2], [2, 3], [3, 4], [4, 5]
+            ];
+
+            // Draw connections
+            for (const [from, to] of connections) {
+                const n1 = nodes[from], n2 = nodes[to];
+                const x1 = n1.x + n1.w / 2 + n1.w / 2;
+                const y1 = n1.y;
+                const x2 = n2.x + n2.w / 2 - n2.w / 2;
+                const y2 = n2.y;
+                ctxFlow.beginPath();
+                ctxFlow.moveTo(x1, y1);
+                // Bezier for non-linear connections
+                if (Math.abs(y1 - y2) > 10) {
+                    const mx = (x1 + x2) / 2;
+                    ctxFlow.bezierCurveTo(mx, y1, mx, y2, x2, y2);
+                } else {
+                    ctxFlow.lineTo(x2, y2);
+                }
+                ctxFlow.strokeStyle = 'rgba(255,255,255,0.2)';
+                ctxFlow.lineWidth = 2;
+                ctxFlow.stroke();
+
+                // Arrowhead
+                const angle = Math.atan2(y2 - y1, x2 - x1);
+                ctxFlow.beginPath();
+                ctxFlow.moveTo(x2, y2);
+                ctxFlow.lineTo(x2 - 6 * Math.cos(angle - 0.5), y2 - 6 * Math.sin(angle - 0.5));
+                ctxFlow.lineTo(x2 - 6 * Math.cos(angle + 0.5), y2 - 6 * Math.sin(angle + 0.5));
+                ctxFlow.closePath();
+                ctxFlow.fillStyle = 'rgba(255,255,255,0.3)';
+                ctxFlow.fill();
+            }
+
+            // Also draw a special connection from "noise" to U-Net
+            ctxFlow.beginPath();
+            ctxFlow.setLineDash([4, 4]);
+            ctxFlow.moveTo(520 + 50, 40);
+            ctxFlow.lineTo(520 + 50, h / 2 - 22);
+            ctxFlow.strokeStyle = 'rgba(255,171,64,0.4)';
+            ctxFlow.lineWidth = 1.5;
+            ctxFlow.stroke();
+            ctxFlow.setLineDash([]);
+            ctxFlow.fillStyle = '#ffab40';
+            ctxFlow.font = '11px "Noto Sans SC"';
+            ctxFlow.textAlign = 'center';
+            ctxFlow.fillText('噪声 x_t', 570, 32);
+
+            // Draw nodes
+            const typeColors = {
+                text: { bg: 'rgba(179,136,255,0.15)', border: '#b388ff', text: '#b388ff' },
+                encoder: { bg: 'rgba(79,195,247,0.15)', border: '#4fc3f7', text: '#4fc3f7' },
+                unet: { bg: 'rgba(22,199,154,0.15)', border: '#16c79a', text: '#16c79a' },
+                output: { bg: 'rgba(255,171,64,0.15)', border: '#ffab40', text: '#ffab40' }
+            };
+
+            for (let i = 0; i < nodes.length; i++) {
+                const n = nodes[i];
+                const c = typeColors[n.type];
+                const nx = n.x + n.w / 2 - n.w / 2;
+                const ny = n.y - n.h / 2;
+
+                // Highlight active node with pulse
+                const isActive = (i === 0 || i === 2 || i === 5);
+
+                ctxFlow.fillStyle = c.bg;
+                ctxFlow.strokeStyle = c.border;
+                ctxFlow.lineWidth = isActive ? 2 : 1.5;
+
+                // Rounded rect
+                const r = 8;
+                ctxFlow.beginPath();
+                ctxFlow.moveTo(nx + r, ny);
+                ctxFlow.lineTo(nx + n.w - r, ny);
+                ctxFlow.arcTo(nx + n.w, ny, nx + n.w, ny + r, r);
+                ctxFlow.lineTo(nx + n.w, ny + n.h - r);
+                ctxFlow.arcTo(nx + n.w, ny + n.h, nx + n.w - r, ny + n.h, r);
+                ctxFlow.lineTo(nx + r, ny + n.h);
+                ctxFlow.arcTo(nx, ny + n.h, nx, ny + n.h - r, r);
+                ctxFlow.lineTo(nx, ny + r);
+                ctxFlow.arcTo(nx, ny, nx + r, ny, r);
+                ctxFlow.closePath();
+                ctxFlow.fill();
+                ctxFlow.stroke();
+
+                // Glow for active
+                if (isActive) {
+                    ctxFlow.shadowColor = c.border;
+                    ctxFlow.shadowBlur = 10;
+                    ctxFlow.stroke();
+                    ctxFlow.shadowBlur = 0;
+                }
+
+                ctxFlow.fillStyle = c.text;
+                ctxFlow.font = 'bold 12px "Noto Sans SC"';
+                ctxFlow.textAlign = 'center';
+                ctxFlow.textBaseline = 'middle';
+                ctxFlow.fillText(n.label, nx + n.w / 2, n.y);
+            }
+
+            // Show condition info
+            ctxFlow.fillStyle = condColors[activeCondition];
+            ctxFlow.font = 'bold 13px "Noto Sans SC"';
+            ctxFlow.textAlign = 'left';
+            ctxFlow.textBaseline = 'top';
+            ctxFlow.fillText(`当前条件: ${condLabels[activeCondition]}`, 14, 12);
+
+            // Condition embedding visualization (small colored bar)
+            const embX = 360, embY = h / 2 - 80, embW = 90, embH = 10;
+            ctxFlow.fillStyle = condColors[activeCondition];
+            ctxFlow.globalAlpha = 0.6;
+            ctxFlow.fillRect(embX, embY, embW, embH);
+            ctxFlow.globalAlpha = 1;
+            ctxFlow.fillStyle = '#e8e8e8';
+            ctxFlow.font = '10px "JetBrains Mono"';
+            ctxFlow.textAlign = 'center';
+            ctxFlow.fillText('embedding vector', embX + embW / 2, embY - 14);
+        }
+
+        // Condition selector for flowchart
+        document.getElementById('text-condition-group').addEventListener('click', e => {
+            const btn = e.target.closest('.btn');
+            if (!btn) return;
+            document.querySelectorAll('#text-condition-group .btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            activeCondition = parseInt(btn.dataset.cond);
+            drawFlowchart();
+            drawTextDemo();
+        });
+
+        drawFlowchart();
+
+        // Text demo canvas: shows conditional generation in 2D
+        const canvasTextDemo = document.getElementById('canvas-text-demo');
+        const ctxTextDemo = canvasTextDemo.getContext('2d');
+        let textDemoParticles = [];
+        let textDemoAnimId = null;
+        let textDemoStep = 0;
+        const textDemoTotalSteps = 60;
+
+        function initTextDemoParticles(count = 50) {
+            const pts = [];
+            for (let i = 0; i < count; i++) {
+                pts.push({
+                    x: DU.gaussianRandom(0, 3.5),
+                    y: DU.gaussianRandom(0, 3.5),
+                    trail: []
+                });
+            }
+            return pts;
+        }
+
+        function drawTextDemo() {
+            const w = canvasTextDemo.width, h = canvasTextDemo.height;
+            ctxTextDemo.clearRect(0, 0, w, h);
+            ctxTextDemo.fillStyle = '#16213e';
+            ctxTextDemo.fillRect(0, 0, w, h);
+            drawAxes(ctxTextDemo, w, h);
+
+            // Draw cluster backgrounds as "generation regions"
+            for (let c = 0; c < 3; c++) {
+                const { cx, cy } = dataToCanvas(clusterCenters[c].x, clusterCenters[c].y, w, h, 5);
+                const gradient = ctxTextDemo.createRadialGradient(cx, cy, 5, cx, cy, 60);
+                gradient.addColorStop(0, clusterColors[c] + '30');
+                gradient.addColorStop(1, 'transparent');
+                ctxTextDemo.fillStyle = gradient;
+                ctxTextDemo.fillRect(cx - 80, cy - 80, 160, 160);
+
+                // Label
+                ctxTextDemo.fillStyle = clusterColors[c];
+                ctxTextDemo.font = '11px "Noto Sans SC"';
+                ctxTextDemo.textAlign = 'center';
+                ctxTextDemo.globalAlpha = 0.7;
+                ctxTextDemo.fillText(['区域A', '区域B', '区域C'][c], cx, cy + 50);
+                ctxTextDemo.globalAlpha = 1;
+            }
+
+            // Highlight active region
+            const target = clusterCenters[activeCondition];
+            const { cx: tcx, cy: tcy } = dataToCanvas(target.x, target.y, w, h, 5);
+            ctxTextDemo.beginPath();
+            ctxTextDemo.arc(tcx, tcy, 50, 0, PI2);
+            ctxTextDemo.strokeStyle = condColors[activeCondition];
+            ctxTextDemo.lineWidth = 2;
+            ctxTextDemo.setLineDash([6, 4]);
+            ctxTextDemo.stroke();
+            ctxTextDemo.setLineDash([]);
+
+            // Draw trails
+            for (const p of textDemoParticles) {
+                if (p.trail.length > 1) {
+                    ctxTextDemo.beginPath();
+                    const s = dataToCanvas(p.trail[0].x, p.trail[0].y, w, h, 5);
+                    ctxTextDemo.moveTo(s.cx, s.cy);
+                    for (let i = 1; i < p.trail.length; i++) {
+                        const pt = dataToCanvas(p.trail[i].x, p.trail[i].y, w, h, 5);
+                        ctxTextDemo.lineTo(pt.cx, pt.cy);
+                    }
+                    const end = dataToCanvas(p.x, p.y, w, h, 5);
+                    ctxTextDemo.lineTo(end.cx, end.cy);
+                    ctxTextDemo.strokeStyle = condColors[activeCondition] + '30';
+                    ctxTextDemo.lineWidth = 1;
+                    ctxTextDemo.stroke();
+                }
+            }
+
+            // Draw particles
+            for (const p of textDemoParticles) {
+                const { cx, cy } = dataToCanvas(p.x, p.y, w, h, 5);
+                ctxTextDemo.beginPath();
+                ctxTextDemo.arc(cx, cy, 4, 0, PI2);
+                ctxTextDemo.fillStyle = condColors[activeCondition];
+                ctxTextDemo.globalAlpha = 0.8;
+                ctxTextDemo.fill();
+                ctxTextDemo.globalAlpha = 1;
+            }
+
+            // HUD
+            ctxTextDemo.fillStyle = '#e8e8e8';
+            ctxTextDemo.font = 'bold 13px "Noto Sans SC"';
+            ctxTextDemo.textAlign = 'left';
+            ctxTextDemo.fillText(`文本条件引导 | ${condLabels[activeCondition]} | 步骤: ${textDemoStep}/${textDemoTotalSteps}`, 14, 24);
+        }
+
+        function stepTextDemo() {
+            const t = 1 - textDemoStep / textDemoTotalSteps;
+            const lr = 0.08 * (1 + t);
+            const noise = 0.08 * t;
+            const gw = 5; // strong guidance for text demo
+
+            for (const p of textDemoParticles) {
+                const cond = conditionalPrediction(p.x, p.y, activeCondition);
+                const uncond = unconditionalPrediction(p.x, p.y);
+                const gx = (1 + gw) * cond.ex - gw * uncond.ex;
+                const gy = (1 + gw) * cond.ey - gw * uncond.ey;
+
+                p.trail.push({ x: p.x, y: p.y });
+                if (p.trail.length > 20) p.trail.shift();
+
+                p.x += lr * gx + DU.gaussianRandom(0, noise);
+                p.y += lr * gy + DU.gaussianRandom(0, noise);
+            }
+            textDemoStep++;
+        }
+
+        function runTextDemoAnimation() {
+            if (textDemoStep >= textDemoTotalSteps) return;
+            stepTextDemo();
+            drawTextDemo();
+            textDemoAnimId = requestAnimationFrame(runTextDemoAnimation);
+        }
+
+        // Auto-start text demo when section is visible
+        let textDemoStarted = false;
+        const textDemoObserver = new IntersectionObserver(entries => {
+            for (const entry of entries) {
+                if (entry.isIntersecting && !textDemoStarted) {
+                    textDemoStarted = true;
+                    textDemoParticles = initTextDemoParticles();
+                    textDemoStep = 0;
+                    drawTextDemo();
+                    setTimeout(() => runTextDemoAnimation(), 500);
+                }
+            }
+        }, { threshold: 0.3 });
+        textDemoObserver.observe(document.getElementById('sec-text'));
+
+        // Re-run text demo when condition changes
+        document.getElementById('text-condition-group').addEventListener('click', () => {
+            if (textDemoAnimId) cancelAnimationFrame(textDemoAnimId);
+            textDemoParticles = initTextDemoParticles();
+            textDemoStep = 0;
+            drawTextDemo();
+            setTimeout(() => runTextDemoAnimation(), 300);
+        });
+
+        // Init text demo canvas
+        textDemoParticles = initTextDemoParticles();
+        drawTextDemo();
+
+        // ================================================================
+        // GSAP entrance animations
+        // ================================================================
+        gsap.from('.hero-banner h1', { opacity: 0, y: -20, duration: 0.8, ease: 'power2.out' });
+        gsap.from('.hero-banner .subtitle', { opacity: 0, y: -10, duration: 0.8, delay: 0.15, ease: 'power2.out' });
+
+        const sections = document.querySelectorAll('.section');
+        sections.forEach((sec, i) => {
+            gsap.from(sec, {
+                scrollTrigger: sec,
+                opacity: 0,
+                y: 30,
+                duration: 0.7,
+                delay: 0.1 * i,
+                ease: 'power2.out'
+            });
+        });
+
+    }); // end DOMContentLoaded
+    </script>
+</body>
+</html>
