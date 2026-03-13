@@ -1,0 +1,2252 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>06 - 分支预测 | 指令集与微架构</title>
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+SC:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+
+    <!-- Shared Styles -->
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+
+    <!-- KaTeX -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+
+    <!-- GSAP -->
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+
+    <!-- Shared Scripts -->
+    <script src="../shared/scripts/isa-utils.js"></script>
+    <script src="../shared/scripts/nav.js"></script>
+
+    <style>
+        /* === Page Header === */
+        .page-header {
+            text-align: center;
+            padding: 2rem 0 1.5rem;
+        }
+        .page-header h1 {
+            font-size: 2.2rem;
+            background: linear-gradient(135deg, #16c79a, #4fc3f7);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .page-header .subtitle {
+            color: var(--text-secondary);
+            font-size: 1rem;
+            margin-top: 0.3rem;
+        }
+
+        /* === Alternating Section Backgrounds === */
+        .section:nth-child(even) {
+            background: var(--bg-secondary);
+            margin-left: -2rem;
+            margin-right: -2rem;
+            padding: 2rem;
+            border-radius: var(--radius-lg);
+        }
+
+        /* === Canvas wrapper === */
+        .canvas-wrap {
+            position: relative;
+            width: 100%;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+        }
+        .canvas-wrap canvas {
+            width: 100%;
+            display: block;
+        }
+
+        /* === CPI Calculator === */
+        .cpi-result {
+            font-family: var(--font-mono);
+            font-size: 2rem;
+            font-weight: 700;
+            color: var(--accent-green);
+            text-align: center;
+            padding: 1rem;
+        }
+        .cpi-formula {
+            text-align: center;
+            margin: 1rem 0;
+        }
+
+        /* === Sequence Input === */
+        .seq-input-group {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            align-items: center;
+            margin: 1rem 0;
+        }
+        .seq-input-group input[type="text"] {
+            flex: 1;
+            min-width: 200px;
+            padding: 0.5rem 0.75rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            color: var(--text-primary);
+            font-family: var(--font-mono);
+            font-size: 0.95rem;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        .seq-input-group input[type="text"]:focus {
+            border-color: var(--accent-green);
+        }
+        .seq-input-group input[type="text"]::placeholder {
+            color: var(--text-muted);
+        }
+
+        /* === Prediction Result Table === */
+        .pred-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-family: var(--font-mono);
+            font-size: 0.82rem;
+            margin: 1rem 0;
+            overflow-x: auto;
+            display: block;
+        }
+        .pred-table th, .pred-table td {
+            padding: 0.4rem 0.6rem;
+            text-align: center;
+            border: 1px solid rgba(42, 42, 74, 0.5);
+            white-space: nowrap;
+        }
+        .pred-table th {
+            background: var(--bg-card);
+            color: var(--accent-blue);
+            font-weight: 600;
+            position: sticky;
+            top: 0;
+        }
+        .pred-table .correct {
+            color: #16c79a;
+            background: rgba(22, 199, 154, 0.08);
+        }
+        .pred-table .wrong {
+            color: #ff5252;
+            background: rgba(255, 82, 82, 0.08);
+        }
+
+        /* === Accuracy Bar === */
+        .accuracy-bar-wrap {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            margin: 0.5rem 0;
+        }
+        .accuracy-bar {
+            flex: 1;
+            height: 8px;
+            background: var(--border-color);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .accuracy-bar .fill {
+            height: 100%;
+            border-radius: 4px;
+            transition: width 0.3s ease;
+        }
+        .accuracy-bar .fill.good { background: #16c79a; }
+        .accuracy-bar .fill.mid { background: #ffab40; }
+        .accuracy-bar .fill.bad { background: #ff5252; }
+        .accuracy-value {
+            font-family: var(--font-mono);
+            font-size: 0.9rem;
+            font-weight: 700;
+            min-width: 3.5rem;
+            text-align: right;
+        }
+
+        /* === State Diagram === */
+        .state-diagram-wrap {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin: 1rem 0;
+        }
+
+        /* === Side-by-Side Comparison === */
+        .compare-side {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5rem;
+        }
+        @media (max-width: 768px) {
+            .compare-side { grid-template-columns: 1fr; }
+        }
+
+        /* === BHT Table === */
+        .bht-visual {
+            display: grid;
+            gap: 0.3rem;
+            margin: 1rem 0;
+        }
+        .bht-entry {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.3rem 0.5rem;
+            border-radius: var(--radius-sm);
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            transition: all 0.3s;
+        }
+        .bht-entry.active {
+            border-color: var(--accent-green);
+            background: rgba(22, 199, 154, 0.1);
+        }
+        .bht-entry .index {
+            color: var(--text-muted);
+            min-width: 2.5rem;
+        }
+        .bht-entry .counter-val {
+            font-weight: 600;
+            min-width: 1.5rem;
+            text-align: center;
+        }
+        .bht-entry .counter-bar {
+            flex: 1;
+            height: 6px;
+            background: var(--border-color);
+            border-radius: 3px;
+            overflow: hidden;
+        }
+        .bht-entry .counter-bar .fill {
+            height: 100%;
+            border-radius: 3px;
+            transition: width 0.3s;
+        }
+        .bht-entry .pred-label {
+            font-size: 0.75rem;
+            min-width: 2.5rem;
+            text-align: right;
+        }
+
+        /* === BTB Table === */
+        .btb-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-family: var(--font-mono);
+            font-size: 0.82rem;
+            margin: 1rem 0;
+        }
+        .btb-table th, .btb-table td {
+            padding: 0.4rem 0.6rem;
+            text-align: center;
+            border: 1px solid rgba(42, 42, 74, 0.5);
+        }
+        .btb-table th {
+            background: var(--bg-card);
+            color: var(--accent-purple);
+            font-weight: 600;
+        }
+        .btb-table .hit { color: #16c79a; }
+        .btb-table .miss { color: #ff5252; }
+
+        /* === Summary Table === */
+        .summary-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9rem;
+            margin: 1rem 0;
+        }
+        .summary-table th, .summary-table td {
+            padding: 0.6rem 1rem;
+            text-align: center;
+            border: 1px solid rgba(42, 42, 74, 0.5);
+        }
+        .summary-table th {
+            background: var(--bg-card);
+            color: var(--accent-green);
+            font-weight: 700;
+        }
+        .summary-table td {
+            color: var(--text-secondary);
+        }
+        .summary-table tr:hover td {
+            background: rgba(22, 199, 154, 0.05);
+        }
+
+        /* === Preset Buttons === */
+        .preset-group {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.4rem;
+            margin: 0.5rem 0;
+        }
+        .preset-group .btn {
+            font-size: 0.78rem;
+            padding: 0.25rem 0.5rem;
+        }
+
+        /* === Log Panel === */
+        .log-panel {
+            max-height: 260px;
+            overflow-y: auto;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            padding: 0.5rem;
+            font-family: var(--font-mono);
+            font-size: 0.78rem;
+            margin: 1rem 0;
+        }
+        .log-panel .log-entry {
+            padding: 0.2rem 0.4rem;
+            border-radius: 3px;
+            margin-bottom: 2px;
+        }
+        .log-panel .log-entry.hit { color: #16c79a; background: rgba(22, 199, 154, 0.05); }
+        .log-panel .log-entry.miss { color: #ff5252; background: rgba(255, 82, 82, 0.05); }
+
+        /* === Inline stat === */
+        .stat-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1.5rem;
+            margin: 1rem 0;
+        }
+        .stat-item {
+            text-align: center;
+        }
+        .stat-item .stat-num {
+            font-family: var(--font-mono);
+            font-size: 1.5rem;
+            font-weight: 700;
+        }
+        .stat-item .stat-label {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+
+        /* === Challenge box === */
+        .challenge-box {
+            background: rgba(179, 136, 255, 0.08);
+            border: 1px solid rgba(179, 136, 255, 0.3);
+            border-radius: var(--radius-md);
+            padding: 1.5rem;
+            margin: 1.5rem 0;
+        }
+        .challenge-box h4 {
+            color: var(--accent-purple);
+            margin-bottom: 0.75rem;
+        }
+        .challenge-box .answer-reveal {
+            margin-top: 1rem;
+            padding: 0.75rem;
+            background: var(--bg-card);
+            border-radius: var(--radius-sm);
+            display: none;
+        }
+        .challenge-box .answer-reveal.show { display: block; }
+
+        /* === Misc === */
+        .highlight-green { color: #16c79a; font-weight: 600; }
+        .highlight-red { color: #ff5252; font-weight: 600; }
+        .highlight-blue { color: #4fc3f7; font-weight: 600; }
+        .highlight-purple { color: #b388ff; font-weight: 600; }
+
+        .select-wrap select {
+            padding: 0.4rem 0.8rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            color: var(--text-primary);
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            outline: none;
+            cursor: pointer;
+        }
+        .select-wrap select:focus {
+            border-color: var(--accent-green);
+        }
+    </style>
+</head>
+<body>
+    <!-- nav.js auto-injects navigation -->
+
+    <div class="page-container">
+        <!-- Header -->
+        <header class="page-header">
+            <h1>分支预测 Branch Prediction</h1>
+            <p class="subtitle">从静态预测到动态预测，消除控制冒险的核心技术</p>
+        </header>
+
+        <!-- ======================================================
+             Section 1: 为什么需要分支预测
+             ====================================================== -->
+        <div class="section" id="sec-why">
+            <div class="section-title">
+                <div class="icon">1</div>
+                <h2>为什么需要分支预测</h2>
+            </div>
+
+            <p>在流水线处理器中，分支指令的结果要到 <strong>EX 阶段</strong>才能确定，但 IF 阶段已经需要知道下一条指令的地址。如果每次遇到分支都等待结果，流水线就会产生 <strong>控制冒险（Control Hazard）</strong>，引入多个周期的气泡停顿。</p>
+
+            <div class="info-box">
+                <p>现代程序中约 <strong>15%~25%</strong> 的指令是分支指令。如果不做分支预测，性能损失将非常严重。</p>
+            </div>
+
+            <h3>控制冒险的代价</h3>
+            <p>当分支指令进入流水线后，处理器不知道该取哪条指令。最简单的做法是<strong>停顿等待</strong>（stall），直到 EX 阶段解析完分支结果。</p>
+
+            <div class="canvas-wrap" style="margin: 1.5rem 0;">
+                <canvas id="canvas-stall"></canvas>
+            </div>
+
+            <h3>CPI 影响计算器</h3>
+            <p>调整分支频率和惩罚周期数，实时观察对 CPI 的影响：</p>
+
+            <div class="cpi-formula" id="cpi-formula-display"></div>
+
+            <div class="card" style="margin: 1.5rem 0;">
+                <div class="slider-group" style="margin-bottom: 1rem;">
+                    <label>分支频率：</label>
+                    <input type="range" id="slider-freq" min="5" max="40" value="20" step="1">
+                    <span class="slider-value" id="val-freq">20%</span>
+                </div>
+                <div class="slider-group" style="margin-bottom: 1rem;">
+                    <label>惩罚周期：</label>
+                    <input type="range" id="slider-penalty" min="1" max="5" value="3" step="1">
+                    <span class="slider-value" id="val-penalty">3</span>
+                </div>
+                <div class="slider-group" style="margin-bottom: 1rem;">
+                    <label>预测准确率：</label>
+                    <input type="range" id="slider-accuracy" min="50" max="100" value="100" step="1">
+                    <span class="slider-value" id="val-accuracy">100%</span>
+                </div>
+                <div class="stat-row" style="justify-content: center;">
+                    <div class="stat-item">
+                        <div class="stat-num" id="cpi-no-pred" style="color: #ff5252;">1.60</div>
+                        <div class="stat-label">无预测 CPI</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-num" id="cpi-with-pred" style="color: #16c79a;">1.00</div>
+                        <div class="stat-label">有预测 CPI</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-num" id="cpi-speedup" style="color: #4fc3f7;">1.60x</div>
+                        <div class="stat-label">加速比</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="info-box success">
+                <p>分支预测的目标：在 IF 阶段就<strong>猜测</strong>分支结果，命中则无惩罚；只有猜错才付出代价。现代处理器的预测准确率可达 <strong>95%~99%</strong>。</p>
+            </div>
+        </div>
+
+        <!-- ======================================================
+             Section 2: 静态预测
+             ====================================================== -->
+        <div class="section" id="sec-static">
+            <div class="section-title">
+                <div class="icon">2</div>
+                <h2>静态预测</h2>
+            </div>
+
+            <p>最简单的策略：不看历史，只按固定规则预测。</p>
+
+            <div class="compare-side" style="margin: 1.5rem 0;">
+                <div class="card">
+                    <h4 style="color: var(--accent-green);">Always Taken（总是跳转）</h4>
+                    <p style="font-size: 0.9rem;">预测所有分支都跳转。对循环结尾的回跳分支效果好（循环体执行多次，大多数时候确实跳转）。</p>
+                    <div class="info-box">
+                        <p>后向分支（backward branch）：循环结尾跳回循环头，大概率跳转。</p>
+                    </div>
+                </div>
+                <div class="card">
+                    <h4 style="color: var(--accent-orange);">Always Not-Taken（总是不跳转）</h4>
+                    <p style="font-size: 0.9rem;">预测所有分支都不跳转，继续顺序执行。实现最简单，只要不跳转就继续取下一条指令。</p>
+                    <div class="info-box">
+                        <p>前向分支（forward branch）：if 语句不满足条件时不跳转，概率因程序而异。</p>
+                    </div>
+                </div>
+            </div>
+
+            <h3>交互模拟</h3>
+            <p>输入分支结果序列（<code>T</code>=跳转，<code>N</code>=不跳转），对比两种静态预测的准确率：</p>
+
+            <div class="seq-input-group">
+                <input type="text" id="static-seq" placeholder="输入序列，如 TTTTNTTTT" value="TTTTNTTTT">
+                <button class="btn btn-primary" onclick="runStaticPrediction()">运行</button>
+            </div>
+            <div class="preset-group">
+                <span style="font-size: 0.8rem; color: var(--text-muted);">预设：</span>
+                <button class="btn btn-sm" onclick="document.getElementById('static-seq').value='TTTTNTTTT'; runStaticPrediction();">循环(9次)</button>
+                <button class="btn btn-sm" onclick="document.getElementById('static-seq').value='TNTNTNTNTN'; runStaticPrediction();">交替</button>
+                <button class="btn btn-sm" onclick="document.getElementById('static-seq').value='NNNNTNNNNT'; runStaticPrediction();">稀疏跳转</button>
+                <button class="btn btn-sm" onclick="document.getElementById('static-seq').value='TTTTTTTTTN'; runStaticPrediction();">长循环</button>
+            </div>
+
+            <div class="compare-side" style="margin: 1rem 0;">
+                <div>
+                    <h4 style="color: var(--accent-green);">Always Taken</h4>
+                    <div id="static-taken-table"></div>
+                    <div class="accuracy-bar-wrap">
+                        <span style="font-size: 0.85rem; color: var(--text-secondary);">准确率：</span>
+                        <div class="accuracy-bar"><div class="fill good" id="static-taken-bar" style="width: 0;"></div></div>
+                        <span class="accuracy-value" id="static-taken-val" style="color: #16c79a;">-</span>
+                    </div>
+                </div>
+                <div>
+                    <h4 style="color: var(--accent-orange);">Always Not-Taken</h4>
+                    <div id="static-nottaken-table"></div>
+                    <div class="accuracy-bar-wrap">
+                        <span style="font-size: 0.85rem; color: var(--text-secondary);">准确率：</span>
+                        <div class="accuracy-bar"><div class="fill good" id="static-nottaken-bar" style="width: 0;"></div></div>
+                        <span class="accuracy-value" id="static-nottaken-val" style="color: #16c79a;">-</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="canvas-wrap" style="margin: 1.5rem 0;">
+                <canvas id="canvas-static-chart"></canvas>
+            </div>
+        </div>
+
+        <!-- ======================================================
+             Section 3: 1-bit 动态预测器
+             ====================================================== -->
+        <div class="section" id="sec-1bit">
+            <div class="section-title">
+                <div class="icon">3</div>
+                <h2>1-bit 动态预测器</h2>
+            </div>
+
+            <p>1-bit 预测器只有<strong>两个状态</strong>：记住上一次分支的结果，用它来预测下一次。状态转移非常简单：</p>
+
+            <div class="canvas-wrap" style="margin: 1.5rem 0;">
+                <canvas id="canvas-1bit-fsm"></canvas>
+            </div>
+
+            <h3>交互模拟</h3>
+            <p>输入分支结果序列，观察 1-bit 预测器的逐步状态转移和预测结果：</p>
+
+            <div class="seq-input-group">
+                <input type="text" id="onebit-seq" placeholder="输入序列，如 TTTTNTTTT" value="TTTTNTTTT">
+                <button class="btn btn-primary" onclick="runOneBitPrediction()">运行</button>
+            </div>
+            <div class="preset-group">
+                <span style="font-size: 0.8rem; color: var(--text-muted);">预设：</span>
+                <button class="btn btn-sm" onclick="document.getElementById('onebit-seq').value='TTTTNTTTT'; runOneBitPrediction();">循环</button>
+                <button class="btn btn-sm" onclick="document.getElementById('onebit-seq').value='TTNTTNTTNTTN'; runOneBitPrediction();">嵌套循环</button>
+                <button class="btn btn-sm" onclick="document.getElementById('onebit-seq').value='TNTNTNTNTN'; runOneBitPrediction();">交替</button>
+            </div>
+
+            <div id="onebit-result-table"></div>
+
+            <div class="accuracy-bar-wrap" style="margin: 1rem 0;">
+                <span style="font-size: 0.85rem; color: var(--text-secondary);">准确率：</span>
+                <div class="accuracy-bar"><div class="fill good" id="onebit-bar" style="width: 0;"></div></div>
+                <span class="accuracy-value" id="onebit-val" style="color: #16c79a;">-</span>
+            </div>
+
+            <div class="canvas-wrap" style="margin: 1.5rem 0;">
+                <canvas id="canvas-1bit-anim"></canvas>
+            </div>
+
+            <div class="info-box warning">
+                <p><strong>乒乓问题：</strong>在嵌套循环的边界处，分支结果会在 T/N 之间快速切换，1-bit 预测器会连续猜错两次（退出内层循环猜错一次，重新进入时再猜错一次）。</p>
+            </div>
+        </div>
+
+        <!-- ======================================================
+             Section 4: 2-bit 饱和计数器
+             ====================================================== -->
+        <div class="section" id="sec-2bit">
+            <div class="section-title">
+                <div class="icon">4</div>
+                <h2>2-bit 饱和计数器</h2>
+            </div>
+
+            <p>2-bit 预测器有 <strong>4 个状态</strong>，使用饱和计数器实现。关键改进：一次错误不会立即改变预测方向，需要连续两次相同结果才会切换预测。</p>
+
+            <div class="canvas-wrap" style="margin: 1.5rem 0;">
+                <canvas id="canvas-2bit-fsm"></canvas>
+            </div>
+
+            <h3>1-bit vs 2-bit 对比</h3>
+            <p>输入相同的分支序列，对比两种预测器的表现：</p>
+
+            <div class="seq-input-group">
+                <input type="text" id="twobit-seq" placeholder="输入序列，如 TTTTNTTTT" value="TTTTNTTTT">
+                <button class="btn btn-primary" onclick="runTwoBitComparison()">运行对比</button>
+            </div>
+            <div class="preset-group">
+                <span style="font-size: 0.8rem; color: var(--text-muted);">预设：</span>
+                <button class="btn btn-sm" onclick="document.getElementById('twobit-seq').value='TTTTNTTTT'; runTwoBitComparison();">循环</button>
+                <button class="btn btn-sm" onclick="document.getElementById('twobit-seq').value='TTTNTTTNTTTNTTT'; runTwoBitComparison();">嵌套循环</button>
+                <button class="btn btn-sm" onclick="document.getElementById('twobit-seq').value='TNTNTNTNTNTN'; runTwoBitComparison();">交替</button>
+                <button class="btn btn-sm" onclick="document.getElementById('twobit-seq').value='TTTTTTTTTNTTTTTTTTN'; runTwoBitComparison();">长循环×2</button>
+            </div>
+
+            <div class="compare-side" style="margin: 1rem 0;">
+                <div>
+                    <h4 style="color: var(--accent-orange);">1-bit 预测器</h4>
+                    <div id="compare-1bit-table"></div>
+                    <div class="accuracy-bar-wrap">
+                        <span style="font-size: 0.85rem; color: var(--text-secondary);">准确率：</span>
+                        <div class="accuracy-bar"><div class="fill good" id="compare-1bit-bar" style="width: 0;"></div></div>
+                        <span class="accuracy-value" id="compare-1bit-val" style="color: #16c79a;">-</span>
+                    </div>
+                </div>
+                <div>
+                    <h4 style="color: var(--accent-green);">2-bit 饱和计数器</h4>
+                    <div id="compare-2bit-table"></div>
+                    <div class="accuracy-bar-wrap">
+                        <span style="font-size: 0.85rem; color: var(--text-secondary);">准确率：</span>
+                        <div class="accuracy-bar"><div class="fill good" id="compare-2bit-bar" style="width: 0;"></div></div>
+                        <span class="accuracy-value" id="compare-2bit-val" style="color: #16c79a;">-</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="canvas-wrap" style="margin: 1.5rem 0;">
+                <canvas id="canvas-2bit-anim"></canvas>
+            </div>
+
+            <div class="info-box success">
+                <p><strong>为什么 2-bit 更好？</strong>在循环边界，退出时 N 只把"强跳转"降到"弱跳转"，下次重新进入循环时仍然预测跳转——避免了 1-bit 的乒乓问题。</p>
+            </div>
+        </div>
+
+        <!-- ======================================================
+             Section 5: 分支历史表 BHT
+             ====================================================== -->
+        <div class="section" id="sec-bht">
+            <div class="section-title">
+                <div class="icon">5</div>
+                <h2>分支历史表 BHT</h2>
+            </div>
+
+            <p>实际处理器中有很多分支指令，每条分支需要<strong>独立</strong>的预测器。BHT（Branch History Table）是一个由 2-bit 计数器组成的数组，用 PC 的低位来索引。</p>
+
+            <div class="canvas-wrap" style="margin: 1.5rem 0;">
+                <canvas id="canvas-bht-struct"></canvas>
+            </div>
+
+            <h3>交互模拟</h3>
+            <div class="card" style="margin: 1rem 0;">
+                <div style="display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; margin-bottom: 1rem;">
+                    <div class="select-wrap">
+                        <label style="font-size: 0.85rem; color: var(--text-secondary);">BHT 大小：</label>
+                        <select id="bht-size" onchange="resetBHT()">
+                            <option value="4">4 项</option>
+                            <option value="8" selected>8 项</option>
+                            <option value="16">16 项</option>
+                            <option value="32">32 项</option>
+                        </select>
+                    </div>
+                    <button class="btn btn-primary" onclick="runBHTStep()">下一步</button>
+                    <button class="btn" onclick="runBHTAll()">全部执行</button>
+                    <button class="btn" onclick="resetBHT()">重置</button>
+                </div>
+
+                <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.5rem;">程序中的分支指令（PC 地址 → 实际结果）：</p>
+                <div id="bht-program" style="font-family: var(--font-mono); font-size: 0.82rem; line-height: 1.8;"></div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin: 1rem 0;">
+                <div>
+                    <h4 style="margin-bottom: 0.75rem;">BHT 状态</h4>
+                    <div id="bht-visual"></div>
+                </div>
+                <div>
+                    <h4 style="margin-bottom: 0.75rem;">执行日志</h4>
+                    <div class="log-panel" id="bht-log"></div>
+                </div>
+            </div>
+
+            <div class="stat-row" id="bht-stats">
+                <div class="stat-item">
+                    <div class="stat-num" id="bht-correct" style="color: #16c79a;">0</div>
+                    <div class="stat-label">预测正确</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-num" id="bht-wrong" style="color: #ff5252;">0</div>
+                    <div class="stat-label">预测错误</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-num" id="bht-acc" style="color: #4fc3f7;">-</div>
+                    <div class="stat-label">总准确率</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-num" id="bht-alias-count" style="color: #ffab40;">0</div>
+                    <div class="stat-label">别名冲突</div>
+                </div>
+            </div>
+
+            <div class="info-box warning">
+                <p><strong>别名问题（Aliasing）：</strong>不同 PC 的分支可能映射到 BHT 的同一个条目，互相干扰预测结果。BHT 越大，别名冲突越少，但硬件成本越高。</p>
+            </div>
+        </div>
+
+        <!-- ======================================================
+             Section 6: 分支目标缓冲 BTB
+             ====================================================== -->
+        <div class="section" id="sec-btb">
+            <div class="section-title">
+                <div class="icon">6</div>
+                <h2>分支目标缓冲 BTB</h2>
+            </div>
+
+            <p>BHT 只告诉我们"是否跳转"，但<strong>跳转目标地址</strong>在哪里？BTB（Branch Target Buffer）缓存了分支指令的目标地址，使得 IF 阶段能<strong>同时</strong>得到预测结果和目标地址。</p>
+
+            <div class="canvas-wrap" style="margin: 1.5rem 0;">
+                <canvas id="canvas-btb-struct"></canvas>
+            </div>
+
+            <h3>BHT + BTB 协同工作</h3>
+            <div class="canvas-wrap" style="margin: 1.5rem 0;">
+                <canvas id="canvas-btb-combined"></canvas>
+            </div>
+
+            <h3>交互模拟</h3>
+            <div class="card" style="margin: 1rem 0;">
+                <div style="display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; margin-bottom: 1rem;">
+                    <button class="btn btn-primary" onclick="runBTBStep()">下一步</button>
+                    <button class="btn" onclick="runBTBAll()">全部执行</button>
+                    <button class="btn" onclick="resetBTB()">重置</button>
+                </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin: 1rem 0;">
+                <div>
+                    <h4 style="margin-bottom: 0.75rem;">BTB 状态</h4>
+                    <div id="btb-visual"></div>
+                </div>
+                <div>
+                    <h4 style="margin-bottom: 0.75rem;">执行日志</h4>
+                    <div class="log-panel" id="btb-log"></div>
+                </div>
+            </div>
+
+            <div class="stat-row" id="btb-stats">
+                <div class="stat-item">
+                    <div class="stat-num" id="btb-hits" style="color: #16c79a;">0</div>
+                    <div class="stat-label">BTB 命中</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-num" id="btb-misses" style="color: #ff5252;">0</div>
+                    <div class="stat-label">BTB 未命中</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-num" id="btb-pred-acc" style="color: #4fc3f7;">-</div>
+                    <div class="stat-label">预测准确率</div>
+                </div>
+            </div>
+
+            <!-- Challenge -->
+            <div class="challenge-box">
+                <h4>挑战：预测准确率</h4>
+                <p style="font-size: 0.9rem; color: var(--text-secondary);">假设一个 2-bit 饱和计数器初始状态为"弱不跳转"，分支序列为 <code>T T T N T T T N</code>。请问：预测准确率是多少？</p>
+                <button class="btn btn-sm" onclick="document.getElementById('challenge-answer').classList.toggle('show');">显示答案</button>
+                <div class="answer-reveal" id="challenge-answer">
+                    <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0;">
+                        序列分析：初始状态=1（弱NT），预测=NT<br>
+                        <span class="highlight-red">T1: 预测NT，实际T → 错误</span>，状态→2（弱T）<br>
+                        <span class="highlight-green">T2: 预测T，实际T → 正确</span>，状态→3（强T）<br>
+                        <span class="highlight-green">T3: 预测T，实际T → 正确</span>，状态→3（强T）<br>
+                        <span class="highlight-red">N4: 预测T，实际N → 错误</span>，状态→2（弱T）<br>
+                        <span class="highlight-green">T5: 预测T，实际T → 正确</span>，状态→3（强T）<br>
+                        <span class="highlight-green">T6: 预测T，实际T → 正确</span>，状态→3（强T）<br>
+                        <span class="highlight-green">T7: 预测T，实际T → 正确</span>，状态→3（强T）<br>
+                        <span class="highlight-red">N8: 预测T，实际N → 错误</span>，状态→2（弱T）<br>
+                        <br>
+                        正确：5/8 = <strong class="highlight-green">62.5%</strong>
+                    </p>
+                </div>
+            </div>
+
+            <!-- Summary Table -->
+            <h3>预测策略总结对比</h3>
+            <table class="summary-table">
+                <thead>
+                    <tr>
+                        <th>预测策略</th>
+                        <th>状态数</th>
+                        <th>硬件成本</th>
+                        <th>典型准确率</th>
+                        <th>优点</th>
+                        <th>缺点</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>静态 Always Taken</td>
+                        <td>0</td>
+                        <td>极低</td>
+                        <td>~60%</td>
+                        <td>实现简单</td>
+                        <td>无法适应变化</td>
+                    </tr>
+                    <tr>
+                        <td>静态 Always NT</td>
+                        <td>0</td>
+                        <td>极低</td>
+                        <td>~40%</td>
+                        <td>最简单</td>
+                        <td>循环分支表现差</td>
+                    </tr>
+                    <tr>
+                        <td>1-bit 动态</td>
+                        <td>2</td>
+                        <td>低</td>
+                        <td>~80%</td>
+                        <td>可适应模式</td>
+                        <td>乒乓问题</td>
+                    </tr>
+                    <tr>
+                        <td>2-bit 饱和计数器</td>
+                        <td>4</td>
+                        <td>低</td>
+                        <td>~90%</td>
+                        <td>抗干扰强</td>
+                        <td>无关联信息</td>
+                    </tr>
+                    <tr>
+                        <td>BHT + BTB</td>
+                        <td>4×N</td>
+                        <td>中等</td>
+                        <td>~93%</td>
+                        <td>多分支独立预测+目标缓存</td>
+                        <td>别名冲突</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+    </div> <!-- /page-container -->
+
+    <!-- ======================================================
+         JavaScript
+         ====================================================== -->
+    <script>
+    'use strict';
+
+    /* ===========================================================
+       Global Helpers
+       =========================================================== */
+    const C = ISAUtils.COLORS;
+    const hexToRgba = ISAUtils.hexToRgba;
+
+    function parseSequence(str) {
+        return str.toUpperCase().replace(/[^TN]/g, '').split('').map(c => c === 'T');
+    }
+
+    function accColor(pct) {
+        if (pct >= 80) return '#16c79a';
+        if (pct >= 50) return '#ffab40';
+        return '#ff5252';
+    }
+
+    function accClass(pct) {
+        if (pct >= 80) return 'good';
+        if (pct >= 50) return 'mid';
+        return 'bad';
+    }
+
+    function setAccBar(barId, valId, correct, total) {
+        const pct = total === 0 ? 0 : (correct / total * 100);
+        const bar = document.getElementById(barId);
+        const val = document.getElementById(valId);
+        bar.style.width = pct + '%';
+        bar.className = 'fill ' + accClass(pct);
+        val.textContent = pct.toFixed(1) + '%';
+        val.style.color = accColor(pct);
+    }
+
+    /* helper for building tiny prediction tables */
+    function buildPredTable(seq, predictions, results) {
+        let html = '<table class="pred-table"><tr><th>#</th>';
+        for (let i = 0; i < seq.length; i++) html += `<th>${i + 1}</th>`;
+        html += '</tr><tr><td>实际</td>';
+        for (let i = 0; i < seq.length; i++) {
+            html += `<td style="color: ${seq[i] ? '#16c79a' : '#ff5252'};">${seq[i] ? 'T' : 'N'}</td>`;
+        }
+        html += '</tr><tr><td>预测</td>';
+        for (let i = 0; i < predictions.length; i++) {
+            html += `<td style="color: ${predictions[i] ? '#4fc3f7' : '#ffab40'};">${predictions[i] ? 'T' : 'N'}</td>`;
+        }
+        html += '</tr><tr><td>结果</td>';
+        for (let i = 0; i < results.length; i++) {
+            const cls = results[i] ? 'correct' : 'wrong';
+            html += `<td class="${cls}">${results[i] ? '\u2714' : '\u2718'}</td>`;
+        }
+        html += '</tr></table>';
+        return html;
+    }
+
+    /* HiDPI canvas init */
+    function initHiDPICanvas(canvasEl, height) {
+        return ISAUtils.initCanvas(canvasEl, height || 400);
+    }
+
+    /* Resize observer for canvases */
+    const canvasResizeCallbacks = new Map();
+    const resizeObserver = new ResizeObserver(entries => {
+        for (const entry of entries) {
+            const canvas = entry.target.querySelector('canvas') || entry.target;
+            const cb = canvasResizeCallbacks.get(canvas);
+            if (cb) cb();
+        }
+    });
+
+    function registerCanvasResize(canvas, callback) {
+        canvasResizeCallbacks.set(canvas, callback);
+        const parent = canvas.parentElement;
+        if (parent) resizeObserver.observe(parent);
+    }
+
+    /* ===========================================================
+       Section 1: Control Hazard Pipeline & CPI
+       =========================================================== */
+    function drawStallPipeline() {
+        const canvas = document.getElementById('canvas-stall');
+        const { ctx, w, h } = initHiDPICanvas(canvas, 320);
+
+        ctx.clearRect(0, 0, w, h);
+
+        const instructions = [
+            { name: 'ADD x1,x2,x3', type: 'normal' },
+            { name: 'BEQ x1,x0,L1', type: 'branch' },
+            { name: '(气泡)', type: 'bubble' },
+            { name: '(气泡)', type: 'bubble' },
+            { name: '(气泡)', type: 'bubble' },
+            { name: 'L1: SUB x4,x5,x6', type: 'target' },
+        ];
+
+        const stages = ISAUtils.STAGES;
+        const cellW = Math.min(60, (w - 180) / 9);
+        const cellH = 28;
+        const startX = 140;
+        const startY = 40;
+
+        // Title
+        ctx.fillStyle = C.textPri;
+        ctx.font = 'bold 14px "Noto Sans SC", sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText('无分支预测：3 周期停顿', 10, 24);
+
+        // Column headers (cycles)
+        ctx.fillStyle = C.textMut;
+        ctx.font = '11px "JetBrains Mono", monospace';
+        ctx.textAlign = 'center';
+        for (let c = 0; c < 9; c++) {
+            ctx.fillText('C' + (c + 1), startX + c * cellW + cellW / 2, startY - 6);
+        }
+
+        // Row labels
+        ctx.textAlign = 'right';
+        ctx.font = '11px "JetBrains Mono", monospace';
+        const schedule = [
+            { inst: 0, stages: [0, 1, 2, 3, 4] },   // ADD: IF ID EX MEM WB
+            { inst: 1, stages: [1, 2, 3, 4, 5] },   // BEQ: IF ID EX MEM WB
+            { inst: 2, stages: [2, -1, -1, -1, -1] }, // bubble
+            { inst: 3, stages: [3, -1, -1, -1, -1] }, // bubble
+            { inst: 4, stages: [4, -1, -1, -1, -1] }, // bubble
+            { inst: 5, stages: [5, 6, 7, 8, 9] },   // SUB
+        ];
+
+        for (let r = 0; r < instructions.length; r++) {
+            const y = startY + r * (cellH + 6);
+            const inst = instructions[r];
+
+            ctx.fillStyle = inst.type === 'branch' ? C.orange :
+                            inst.type === 'bubble' ? C.textMut :
+                            inst.type === 'target' ? C.green : C.textSec;
+            ctx.textAlign = 'right';
+            ctx.font = '11px "JetBrains Mono", monospace';
+            ctx.fillText(inst.name, startX - 8, y + cellH / 2 + 4);
+
+            const sched = schedule[r];
+            if (inst.type === 'bubble') {
+                // Draw bubble in one cell
+                const cx = startX + sched.stages[0] * cellW;
+                ISAUtils.drawPipelineStage(ctx, cx, y, cellW - 2, cellH, 0, '---', { bubble: true });
+            } else {
+                for (let s = 0; s < 5; s++) {
+                    const col = sched.stages[s];
+                    if (col >= 0 && col < 9) {
+                        const cx = startX + col * cellW;
+                        ISAUtils.drawPipelineStage(ctx, cx, y, cellW - 2, cellH, s);
+                    }
+                }
+            }
+        }
+
+        // Draw penalty annotation
+        const annotY = startY + 2 * (cellH + 6) - 4;
+        const annotX1 = startX + 2 * cellW + cellW / 2;
+        const annotX2 = startX + 4 * cellW + cellW / 2;
+        ctx.strokeStyle = C.red;
+        ctx.lineWidth = 2;
+        ctx.setLineDash([4, 3]);
+        ctx.beginPath();
+        ctx.moveTo(annotX1, annotY);
+        ctx.lineTo(annotX2, annotY);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        ctx.fillStyle = C.red;
+        ctx.font = 'bold 11px "Noto Sans SC", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('3 周期惩罚', (annotX1 + annotX2) / 2, annotY - 8);
+
+        // Legend
+        const legY = h - 30;
+        const legItems = [
+            { label: '正常指令', color: C.blue },
+            { label: '分支指令', color: C.orange },
+            { label: '气泡/停顿', color: C.textMut },
+            { label: '目标指令', color: C.green },
+        ];
+        let legX = 10;
+        ctx.font = '11px "Noto Sans SC", sans-serif';
+        for (const item of legItems) {
+            ctx.fillStyle = item.color;
+            ctx.fillRect(legX, legY, 12, 12);
+            legX += 16;
+            ctx.fillStyle = C.textSec;
+            ctx.textAlign = 'left';
+            ctx.fillText(item.label, legX, legY + 10);
+            legX += ctx.measureText(item.label).width + 16;
+        }
+    }
+
+    function updateCPI() {
+        const freq = parseInt(document.getElementById('slider-freq').value) / 100;
+        const penalty = parseInt(document.getElementById('slider-penalty').value);
+        const accuracy = parseInt(document.getElementById('slider-accuracy').value) / 100;
+
+        document.getElementById('val-freq').textContent = (freq * 100).toFixed(0) + '%';
+        document.getElementById('val-penalty').textContent = penalty;
+        document.getElementById('val-accuracy').textContent = (accuracy * 100).toFixed(0) + '%';
+
+        const cpiNoPred = 1 + freq * penalty;
+        const cpiWithPred = 1 + freq * (1 - accuracy) * penalty;
+        const speedup = cpiNoPred / cpiWithPred;
+
+        document.getElementById('cpi-no-pred').textContent = cpiNoPred.toFixed(2);
+        document.getElementById('cpi-with-pred').textContent = cpiWithPred.toFixed(2);
+        document.getElementById('cpi-speedup').textContent = speedup.toFixed(2) + 'x';
+
+        // Update formula
+        const formulaDiv = document.getElementById('cpi-formula-display');
+        formulaDiv.innerHTML = '';
+        try {
+            katex.render(
+                `\\text{CPI}_{\\text{无预测}} = 1 + ${(freq*100).toFixed(0)}\\% \\times ${penalty} = ${cpiNoPred.toFixed(2)}`,
+                formulaDiv,
+                { displayMode: true }
+            );
+            const formula2 = document.createElement('div');
+            katex.render(
+                `\\text{CPI}_{\\text{有预测}} = 1 + ${(freq*100).toFixed(0)}\\% \\times (1 - ${(accuracy*100).toFixed(0)}\\%) \\times ${penalty} = ${cpiWithPred.toFixed(2)}`,
+                formula2,
+                { displayMode: true }
+            );
+            formulaDiv.appendChild(formula2);
+        } catch(e) { /* katex not loaded yet */ }
+    }
+
+    /* ===========================================================
+       Section 2: Static Prediction
+       =========================================================== */
+    function runStaticPrediction() {
+        const seq = parseSequence(document.getElementById('static-seq').value);
+        if (seq.length === 0) return;
+
+        const predTaken = ISAUtils.createBranchPredictor('static-taken');
+        const predNotTaken = ISAUtils.createBranchPredictor('static-not-taken');
+
+        const resTaken = [], resNT = [];
+        const predsTaken = [], predsNT = [];
+
+        for (let i = 0; i < seq.length; i++) {
+            const pt = predTaken.predict();
+            predsTaken.push(pt);
+            resTaken.push(pt === seq[i]);
+            predTaken.update(seq[i]);
+
+            const pn = predNotTaken.predict();
+            predsNT.push(pn);
+            resNT.push(pn === seq[i]);
+            predNotTaken.update(seq[i]);
+        }
+
+        const correctT = resTaken.filter(x => x).length;
+        const correctNT = resNT.filter(x => x).length;
+
+        document.getElementById('static-taken-table').innerHTML = buildPredTable(seq, predsTaken, resTaken);
+        document.getElementById('static-nottaken-table').innerHTML = buildPredTable(seq, predsNT, resNT);
+
+        setAccBar('static-taken-bar', 'static-taken-val', correctT, seq.length);
+        setAccBar('static-nottaken-bar', 'static-nottaken-val', correctNT, seq.length);
+
+        drawStaticChart(seq, correctT, correctNT);
+    }
+
+    function drawStaticChart(seq, correctT, correctNT) {
+        const canvas = document.getElementById('canvas-static-chart');
+        const { ctx, w, h } = initHiDPICanvas(canvas, 200);
+        ctx.clearRect(0, 0, w, h);
+
+        const pctT = (correctT / seq.length * 100);
+        const pctNT = (correctNT / seq.length * 100);
+
+        const barW = Math.min(120, w / 5);
+        const maxH = h - 70;
+        const centerX = w / 2;
+        const gap = 30;
+
+        // Bars
+        const barH_T = maxH * pctT / 100;
+        const barH_NT = maxH * pctNT / 100;
+
+        const x1 = centerX - gap - barW;
+        const x2 = centerX + gap;
+        const baseY = h - 40;
+
+        // Always Taken bar
+        ctx.fillStyle = hexToRgba(C.green, 0.2);
+        ctx.strokeStyle = C.green;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.roundRect(x1, baseY - barH_T, barW, barH_T, [4, 4, 0, 0]);
+        ctx.fill();
+        ctx.stroke();
+
+        // Always NT bar
+        ctx.fillStyle = hexToRgba(C.orange, 0.2);
+        ctx.strokeStyle = C.orange;
+        ctx.beginPath();
+        ctx.roundRect(x2, baseY - barH_NT, barW, barH_NT, [4, 4, 0, 0]);
+        ctx.fill();
+        ctx.stroke();
+
+        // Labels
+        ctx.font = 'bold 13px "JetBrains Mono", monospace';
+        ctx.textAlign = 'center';
+        ctx.fillStyle = C.green;
+        ctx.fillText(pctT.toFixed(1) + '%', x1 + barW / 2, baseY - barH_T - 8);
+        ctx.fillStyle = C.orange;
+        ctx.fillText(pctNT.toFixed(1) + '%', x2 + barW / 2, baseY - barH_NT - 8);
+
+        ctx.font = '12px "Noto Sans SC", sans-serif';
+        ctx.fillStyle = C.textSec;
+        ctx.fillText('Always Taken', x1 + barW / 2, baseY + 18);
+        ctx.fillText('Always NT', x2 + barW / 2, baseY + 18);
+
+        // Title
+        ctx.font = 'bold 13px "Noto Sans SC", sans-serif';
+        ctx.fillStyle = C.textPri;
+        ctx.textAlign = 'center';
+        ctx.fillText('准确率对比', w / 2, 20);
+    }
+
+    /* ===========================================================
+       Section 3: 1-bit Prediction
+       =========================================================== */
+    function draw1BitFSM() {
+        const canvas = document.getElementById('canvas-1bit-fsm');
+        const { ctx, w, h } = initHiDPICanvas(canvas, 200);
+        ctx.clearRect(0, 0, w, h);
+
+        const cy = h / 2;
+        const r = 45;
+        const leftX = w / 2 - 100;
+        const rightX = w / 2 + 100;
+
+        // Left circle: Predict Not-Taken (state 0)
+        ctx.beginPath();
+        ctx.arc(leftX, cy, r, 0, Math.PI * 2);
+        ctx.fillStyle = hexToRgba(C.orange, 0.15);
+        ctx.fill();
+        ctx.strokeStyle = C.orange;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        ctx.fillStyle = C.orange;
+        ctx.font = 'bold 12px "Noto Sans SC", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('预测不跳转', leftX, cy - 8);
+        ctx.font = '11px "JetBrains Mono", monospace';
+        ctx.fillText('(state=0)', leftX, cy + 10);
+
+        // Right circle: Predict Taken (state 1)
+        ctx.beginPath();
+        ctx.arc(rightX, cy, r, 0, Math.PI * 2);
+        ctx.fillStyle = hexToRgba(C.green, 0.15);
+        ctx.fill();
+        ctx.strokeStyle = C.green;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        ctx.fillStyle = C.green;
+        ctx.font = 'bold 12px "Noto Sans SC", sans-serif';
+        ctx.fillText('预测跳转', rightX, cy - 8);
+        ctx.font = '11px "JetBrains Mono", monospace';
+        ctx.fillText('(state=1)', rightX, cy + 10);
+
+        // Arrow: left → right (Taken)
+        const ax1 = leftX + r + 4;
+        const ax2 = rightX - r - 4;
+        ISAUtils.drawArrow(ctx, ax1, cy - 12, ax2, cy - 12, C.green, { headLen: 8 });
+        ctx.fillStyle = C.green;
+        ctx.font = 'bold 11px "Noto Sans SC", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('实际 T', (ax1 + ax2) / 2, cy - 26);
+
+        // Arrow: right → left (Not Taken)
+        ISAUtils.drawArrow(ctx, ax2, cy + 12, ax1, cy + 12, C.orange, { headLen: 8 });
+        ctx.fillStyle = C.orange;
+        ctx.fillText('实际 N', (ax1 + ax2) / 2, cy + 30);
+
+        // Self loops
+        // Left self: actual N stays
+        ctx.strokeStyle = C.orange;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(leftX - 20, cy - r - 15, 18, 0.6, 2.5);
+        ctx.stroke();
+        ctx.fillStyle = C.orange;
+        ctx.font = '10px "Noto Sans SC", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('N', leftX - 35, cy - r - 30);
+
+        // Right self: actual T stays
+        ctx.strokeStyle = C.green;
+        ctx.beginPath();
+        ctx.arc(rightX + 20, cy - r - 15, 18, 0.6, 2.5);
+        ctx.stroke();
+        ctx.fillStyle = C.green;
+        ctx.fillText('T', rightX + 35, cy - r - 30);
+    }
+
+    function runOneBitPrediction() {
+        const seq = parseSequence(document.getElementById('onebit-seq').value);
+        if (seq.length === 0) return;
+
+        const pred = ISAUtils.createBranchPredictor('1bit');
+        const predictions = [], results = [], states = [pred.getStateNum()];
+
+        for (let i = 0; i < seq.length; i++) {
+            const p = pred.predict();
+            predictions.push(p);
+            results.push(p === seq[i]);
+            pred.update(seq[i]);
+            states.push(pred.getStateNum());
+        }
+
+        const correct = results.filter(x => x).length;
+        document.getElementById('onebit-result-table').innerHTML = buildPredTable(seq, predictions, results);
+        setAccBar('onebit-bar', 'onebit-val', correct, seq.length);
+        draw1BitAnimation(seq, states, results);
+    }
+
+    function draw1BitAnimation(seq, states, results) {
+        const canvas = document.getElementById('canvas-1bit-anim');
+        const { ctx, w, h } = initHiDPICanvas(canvas, 220);
+        ctx.clearRect(0, 0, w, h);
+
+        const margin = 50;
+        const plotW = w - margin * 2;
+        const plotH = h - 80;
+        const baseY = h - 50;
+
+        // Title
+        ctx.fillStyle = C.textPri;
+        ctx.font = 'bold 13px "Noto Sans SC", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('1-bit 预测器状态变化', w / 2, 20);
+
+        // Y axis labels
+        ctx.fillStyle = C.textMut;
+        ctx.font = '10px "JetBrains Mono", monospace';
+        ctx.textAlign = 'right';
+        ctx.fillText('T(1)', margin - 6, baseY - plotH + 4);
+        ctx.fillText('N(0)', margin - 6, baseY + 4);
+
+        // Grid lines
+        ctx.strokeStyle = hexToRgba(C.border, 0.5);
+        ctx.lineWidth = 1;
+        ctx.setLineDash([3, 3]);
+        ctx.beginPath();
+        ctx.moveTo(margin, baseY - plotH);
+        ctx.lineTo(margin + plotW, baseY - plotH);
+        ctx.moveTo(margin, baseY);
+        ctx.lineTo(margin + plotW, baseY);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        if (states.length < 2) return;
+
+        const stepW = plotW / (states.length - 1);
+
+        // Draw state line
+        ctx.strokeStyle = C.blue;
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        for (let i = 0; i < states.length; i++) {
+            const x = margin + i * stepW;
+            const y = baseY - states[i] * plotH;
+            if (i === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+
+        // Draw points with result colors
+        for (let i = 0; i < states.length; i++) {
+            const x = margin + i * stepW;
+            const y = baseY - states[i] * plotH;
+            ctx.beginPath();
+            ctx.arc(x, y, 5, 0, Math.PI * 2);
+            if (i === 0) {
+                ctx.fillStyle = C.blue;
+            } else {
+                ctx.fillStyle = results[i - 1] ? '#16c79a' : '#ff5252';
+            }
+            ctx.fill();
+
+            // X labels (branch number)
+            if (i > 0 && seq.length <= 20) {
+                ctx.fillStyle = seq[i - 1] ? '#16c79a' : '#ff5252';
+                ctx.font = '10px "JetBrains Mono", monospace';
+                ctx.textAlign = 'center';
+                ctx.fillText(seq[i - 1] ? 'T' : 'N', x, baseY + 16);
+            }
+        }
+
+        // Legend at bottom
+        const legY = h - 12;
+        ctx.font = '10px "Noto Sans SC", sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillStyle = '#16c79a';
+        ctx.fillRect(margin, legY - 8, 10, 10);
+        ctx.fillText('预测正确', margin + 14, legY);
+        ctx.fillStyle = '#ff5252';
+        ctx.fillRect(margin + 90, legY - 8, 10, 10);
+        ctx.fillText('预测错误', margin + 104, legY);
+    }
+
+    /* ===========================================================
+       Section 4: 2-bit Saturating Counter
+       =========================================================== */
+    function draw2BitFSM(highlightState) {
+        const canvas = document.getElementById('canvas-2bit-fsm');
+        const { ctx, w, h } = initHiDPICanvas(canvas, 260);
+        ctx.clearRect(0, 0, w, h);
+
+        const stateNames = ['强不跳转', '弱不跳转', '弱跳转', '强跳转'];
+        const stateShort = ['00', '01', '10', '11'];
+        const stateColors = [C.red, C.orange, C.blue, C.green];
+        const predLabels = ['预测 N', '预测 N', '预测 T', '预测 T'];
+
+        const r = 40;
+        const cy = h / 2 + 10;
+        const positions = [];
+        const totalW = w - 120;
+        const startXPos = 60;
+        const spacing = totalW / 3;
+        for (let i = 0; i < 4; i++) {
+            positions.push({ x: startXPos + i * spacing, y: cy });
+        }
+
+        // Title
+        ctx.fillStyle = C.textPri;
+        ctx.font = 'bold 14px "Noto Sans SC", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('2-bit 饱和计数器状态机', w / 2, 22);
+
+        // Draw circles
+        for (let i = 0; i < 4; i++) {
+            const p = positions[i];
+            const isHighlight = highlightState === i;
+
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+            ctx.fillStyle = hexToRgba(stateColors[i], isHighlight ? 0.3 : 0.12);
+            ctx.fill();
+            ctx.strokeStyle = stateColors[i];
+            ctx.lineWidth = isHighlight ? 3 : 1.5;
+            ctx.stroke();
+
+            ctx.fillStyle = stateColors[i];
+            ctx.font = 'bold 11px "Noto Sans SC", sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(stateNames[i], p.x, p.y - 10);
+            ctx.font = '10px "JetBrains Mono", monospace';
+            ctx.fillText(stateShort[i], p.x, p.y + 6);
+            ctx.font = '9px "Noto Sans SC", sans-serif';
+            ctx.fillStyle = hexToRgba(stateColors[i], 0.7);
+            ctx.fillText(predLabels[i], p.x, p.y + 20);
+        }
+
+        // Arrows between adjacent states (Taken goes right, Not-Taken goes left)
+        for (let i = 0; i < 3; i++) {
+            const p1 = positions[i];
+            const p2 = positions[i + 1];
+            // T: right arrow (top)
+            ISAUtils.drawArrow(ctx, p1.x + r + 2, p1.y - 10, p2.x - r - 2, p2.y - 10, C.green, { headLen: 7 });
+            // N: left arrow (bottom)
+            ISAUtils.drawArrow(ctx, p2.x - r - 2, p2.y + 10, p1.x + r + 2, p1.y + 10, C.red, { headLen: 7 });
+        }
+
+        // T/N labels on arrows
+        ctx.font = '10px "JetBrains Mono", monospace';
+        for (let i = 0; i < 3; i++) {
+            const mx = (positions[i].x + positions[i + 1].x) / 2;
+            ctx.fillStyle = C.green;
+            ctx.textAlign = 'center';
+            ctx.fillText('T', mx, cy - 24);
+            ctx.fillStyle = C.red;
+            ctx.fillText('N', mx, cy + 28);
+        }
+
+        // Self loops at extremes
+        // State 0 (leftmost): N stays
+        ctx.strokeStyle = C.red;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(positions[0].x, positions[0].y - r - 18, 14, 0.3, 2.8);
+        ctx.stroke();
+        ctx.fillStyle = C.red;
+        ctx.font = '9px "JetBrains Mono", monospace';
+        ctx.fillText('N', positions[0].x - 20, positions[0].y - r - 30);
+
+        // State 3 (rightmost): T stays
+        ctx.strokeStyle = C.green;
+        ctx.beginPath();
+        ctx.arc(positions[3].x, positions[3].y - r - 18, 14, 0.3, 2.8);
+        ctx.stroke();
+        ctx.fillStyle = C.green;
+        ctx.fillText('T', positions[3].x + 20, positions[3].y - r - 30);
+
+        // Divider line between N-predict and T-predict
+        const divX = (positions[1].x + positions[2].x) / 2;
+        ctx.strokeStyle = hexToRgba(C.textMut, 0.3);
+        ctx.setLineDash([4, 4]);
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(divX, cy - r - 30);
+        ctx.lineTo(divX, cy + r + 20);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        ctx.fillStyle = C.textMut;
+        ctx.font = '10px "Noto Sans SC", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('\u2190 预测不跳转 | 预测跳转 \u2192', divX, cy + r + 34);
+    }
+
+    function runTwoBitComparison() {
+        const seq = parseSequence(document.getElementById('twobit-seq').value);
+        if (seq.length === 0) return;
+
+        // 1-bit
+        const pred1 = ISAUtils.createBranchPredictor('1bit');
+        const preds1 = [], res1 = [], states1 = [pred1.getStateNum()];
+        for (let i = 0; i < seq.length; i++) {
+            const p = pred1.predict();
+            preds1.push(p);
+            res1.push(p === seq[i]);
+            pred1.update(seq[i]);
+            states1.push(pred1.getStateNum());
+        }
+        const correct1 = res1.filter(x => x).length;
+
+        // 2-bit
+        const pred2 = ISAUtils.createBranchPredictor('2bit');
+        const preds2 = [], res2 = [], states2 = [pred2.getStateNum()];
+        for (let i = 0; i < seq.length; i++) {
+            const p = pred2.predict();
+            preds2.push(p);
+            res2.push(p === seq[i]);
+            pred2.update(seq[i]);
+            states2.push(pred2.getStateNum());
+        }
+        const correct2 = res2.filter(x => x).length;
+
+        document.getElementById('compare-1bit-table').innerHTML = buildPredTable(seq, preds1, res1);
+        document.getElementById('compare-2bit-table').innerHTML = buildPredTable(seq, preds2, res2);
+
+        setAccBar('compare-1bit-bar', 'compare-1bit-val', correct1, seq.length);
+        setAccBar('compare-2bit-bar', 'compare-2bit-val', correct2, seq.length);
+
+        draw2BitComparison(seq, states1, states2, res1, res2);
+    }
+
+    function draw2BitComparison(seq, states1, states2, res1, res2) {
+        const canvas = document.getElementById('canvas-2bit-anim');
+        const { ctx, w, h } = initHiDPICanvas(canvas, 280);
+        ctx.clearRect(0, 0, w, h);
+
+        const margin = 55;
+        const plotW = w - margin * 2;
+        const plotH1 = 80;
+        const plotH2 = 80;
+        const gap = 40;
+        const baseY1 = 30 + plotH1;
+        const baseY2 = baseY1 + gap + plotH2;
+
+        if (states1.length < 2) return;
+
+        const stepW = plotW / (states1.length - 1);
+
+        function drawLine(statesArr, results, baseY, plotHeight, maxState, label, color) {
+            // Label
+            ctx.fillStyle = color;
+            ctx.font = 'bold 12px "Noto Sans SC", sans-serif';
+            ctx.textAlign = 'left';
+            ctx.fillText(label, 4, baseY - plotHeight / 2 + 4);
+
+            // Grid
+            ctx.strokeStyle = hexToRgba(C.border, 0.3);
+            ctx.lineWidth = 1;
+            ctx.setLineDash([2, 2]);
+            for (let s = 0; s <= maxState; s++) {
+                const y = baseY - (s / maxState) * plotHeight;
+                ctx.beginPath();
+                ctx.moveTo(margin, y);
+                ctx.lineTo(margin + plotW, y);
+                ctx.stroke();
+            }
+            ctx.setLineDash([]);
+
+            // State labels
+            ctx.fillStyle = C.textMut;
+            ctx.font = '9px "JetBrains Mono", monospace';
+            ctx.textAlign = 'right';
+            for (let s = 0; s <= maxState; s++) {
+                const y = baseY - (s / maxState) * plotHeight;
+                ctx.fillText(s.toString(), margin - 4, y + 3);
+            }
+
+            // Line
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            for (let i = 0; i < statesArr.length; i++) {
+                const x = margin + i * stepW;
+                const y = baseY - (statesArr[i] / maxState) * plotHeight;
+                if (i === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+
+            // Points
+            for (let i = 0; i < statesArr.length; i++) {
+                const x = margin + i * stepW;
+                const y = baseY - (statesArr[i] / maxState) * plotHeight;
+                ctx.beginPath();
+                ctx.arc(x, y, 4, 0, Math.PI * 2);
+                if (i === 0) ctx.fillStyle = color;
+                else ctx.fillStyle = results[i - 1] ? '#16c79a' : '#ff5252';
+                ctx.fill();
+            }
+        }
+
+        drawLine(states1, res1, baseY1, plotH1, 1, '1-bit', C.orange);
+        drawLine(states2, res2, baseY2, plotH2, 3, '2-bit', C.green);
+
+        // X-axis labels
+        if (seq.length <= 20) {
+            ctx.font = '9px "JetBrains Mono", monospace';
+            ctx.textAlign = 'center';
+            for (let i = 0; i < seq.length; i++) {
+                const x = margin + (i + 1) * stepW;
+                ctx.fillStyle = seq[i] ? '#16c79a' : '#ff5252';
+                ctx.fillText(seq[i] ? 'T' : 'N', x, baseY2 + 16);
+            }
+        }
+    }
+
+    /* ===========================================================
+       Section 5: BHT (Branch History Table)
+       =========================================================== */
+    // BHT program simulation data
+    const bhtProgram = [
+        { pc: 0x1000, target: 0x0FF0, taken: true,  label: 'beq → loop_start' },
+        { pc: 0x1020, target: 0x1040, taken: false, label: 'bne → skip_else' },
+        { pc: 0x1000, target: 0x0FF0, taken: true,  label: 'beq → loop_start' },
+        { pc: 0x1060, target: 0x1000, taken: true,  label: 'blt → outer_loop' },
+        { pc: 0x1000, target: 0x0FF0, taken: true,  label: 'beq → loop_start' },
+        { pc: 0x1020, target: 0x1040, taken: true,  label: 'bne → skip_else' },
+        { pc: 0x1000, target: 0x0FF0, taken: false, label: 'beq → loop_start (exit)' },
+        { pc: 0x1060, target: 0x1000, taken: true,  label: 'blt → outer_loop' },
+        { pc: 0x1000, target: 0x0FF0, taken: true,  label: 'beq → loop_start' },
+        { pc: 0x1020, target: 0x1040, taken: false, label: 'bne → skip_else' },
+        { pc: 0x1000, target: 0x0FF0, taken: true,  label: 'beq → loop_start' },
+        { pc: 0x1060, target: 0x1000, taken: false, label: 'blt → outer_loop (exit)' },
+    ];
+
+    let bhtState = {};
+    let bhtStep = 0;
+    let bhtCorrectCount = 0;
+    let bhtWrongCount = 0;
+    let bhtAliasCount = 0;
+
+    function resetBHT() {
+        const size = parseInt(document.getElementById('bht-size').value);
+        bhtState = {};
+        for (let i = 0; i < size; i++) {
+            bhtState[i] = { counter: 1, lastPC: null }; // weakly NT
+        }
+        bhtStep = 0;
+        bhtCorrectCount = 0;
+        bhtWrongCount = 0;
+        bhtAliasCount = 0;
+
+        renderBHTVisual();
+        renderBHTProgram();
+        document.getElementById('bht-log').innerHTML = '';
+        document.getElementById('bht-correct').textContent = '0';
+        document.getElementById('bht-wrong').textContent = '0';
+        document.getElementById('bht-acc').textContent = '-';
+        document.getElementById('bht-alias-count').textContent = '0';
+
+        drawBHTStructure();
+    }
+
+    function getBHTIndex(pc) {
+        const size = parseInt(document.getElementById('bht-size').value);
+        return (pc >>> 2) % size; // word-aligned, use low bits
+    }
+
+    function renderBHTVisual(highlightIdx) {
+        const size = parseInt(document.getElementById('bht-size').value);
+        const container = document.getElementById('bht-visual');
+        let html = '<div class="bht-visual" style="grid-template-columns: 1fr;">';
+        for (let i = 0; i < size; i++) {
+            const entry = bhtState[i];
+            const stateNames = ['强NT', '弱NT', '弱T', '强T'];
+            const stateColors = [C.red, C.orange, C.blue, C.green];
+            const counter = entry ? entry.counter : 1;
+            const predTaken = counter >= 2;
+            const isActive = i === highlightIdx;
+            html += `<div class="bht-entry ${isActive ? 'active' : ''}">
+                <span class="index">[${i.toString().padStart(2, '0')}]</span>
+                <span class="counter-val" style="color: ${stateColors[counter]};">${counter}</span>
+                <div class="counter-bar">
+                    <div class="fill" style="width: ${counter / 3 * 100}%; background: ${stateColors[counter]};"></div>
+                </div>
+                <span class="pred-label" style="color: ${predTaken ? C.green : C.orange};">${stateNames[counter]}</span>
+            </div>`;
+        }
+        html += '</div>';
+        container.innerHTML = html;
+    }
+
+    function renderBHTProgram() {
+        const container = document.getElementById('bht-program');
+        let html = '';
+        for (let i = 0; i < bhtProgram.length; i++) {
+            const p = bhtProgram[i];
+            const done = i < bhtStep;
+            const current = i === bhtStep;
+            const color = done ? C.textMut : current ? C.green : C.textSec;
+            const prefix = current ? '\u25b6 ' : done ? '\u2713 ' : '  ';
+            const idx = getBHTIndex(p.pc);
+            html += `<div style="color: ${color}; ${current ? 'font-weight: 700;' : ''}">
+                ${prefix}[${i}] PC=0x${p.pc.toString(16)} → BHT[${idx}] | ${p.taken ? 'T' : 'N'} | ${p.label}
+            </div>`;
+        }
+        container.innerHTML = html;
+    }
+
+    function runBHTStep() {
+        if (bhtStep >= bhtProgram.length) return;
+
+        const p = bhtProgram[bhtStep];
+        const idx = getBHTIndex(p.pc);
+        const entry = bhtState[idx];
+
+        // Check aliasing
+        if (entry.lastPC !== null && entry.lastPC !== p.pc) {
+            bhtAliasCount++;
+        }
+        entry.lastPC = p.pc;
+
+        const prediction = entry.counter >= 2;
+        const correct = prediction === p.taken;
+
+        if (correct) bhtCorrectCount++;
+        else bhtWrongCount++;
+
+        // Update counter (2-bit saturating)
+        if (p.taken) entry.counter = Math.min(3, entry.counter + 1);
+        else entry.counter = Math.max(0, entry.counter - 1);
+
+        bhtStep++;
+
+        // Update UI
+        renderBHTVisual(idx);
+        renderBHTProgram();
+
+        const logPanel = document.getElementById('bht-log');
+        const logClass = correct ? 'hit' : 'miss';
+        logPanel.innerHTML += `<div class="log-entry ${logClass}">
+            [${bhtStep}] PC=0x${p.pc.toString(16)} BHT[${idx}] 预测=${prediction ? 'T' : 'N'} 实际=${p.taken ? 'T' : 'N'} → ${correct ? '正确' : '错误'}
+        </div>`;
+        logPanel.scrollTop = logPanel.scrollHeight;
+
+        const total = bhtCorrectCount + bhtWrongCount;
+        document.getElementById('bht-correct').textContent = bhtCorrectCount;
+        document.getElementById('bht-wrong').textContent = bhtWrongCount;
+        document.getElementById('bht-acc').textContent = (bhtCorrectCount / total * 100).toFixed(1) + '%';
+        document.getElementById('bht-alias-count').textContent = bhtAliasCount;
+    }
+
+    function runBHTAll() {
+        while (bhtStep < bhtProgram.length) {
+            runBHTStep();
+        }
+    }
+
+    function drawBHTStructure() {
+        const canvas = document.getElementById('canvas-bht-struct');
+        const { ctx, w, h } = initHiDPICanvas(canvas, 280);
+        ctx.clearRect(0, 0, w, h);
+
+        // Title
+        ctx.fillStyle = C.textPri;
+        ctx.font = 'bold 14px "Noto Sans SC", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('BHT 结构：PC → 哈希 → 2-bit 计数器 → 预测', w / 2, 24);
+
+        // PC box
+        const pcX = 30, pcY = 60, pcW = 120, pcH = 50;
+        ctx.fillStyle = hexToRgba(C.blue, 0.12);
+        ctx.strokeStyle = C.blue;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.roundRect(pcX, pcY, pcW, pcH, 6);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = C.blue;
+        ctx.font = 'bold 13px "Noto Sans SC", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('PC 地址', pcX + pcW / 2, pcY + 20);
+        ctx.font = '10px "JetBrains Mono", monospace';
+        ctx.fillText('0x1000', pcX + pcW / 2, pcY + 38);
+
+        // Hash box
+        const hashX = 200, hashY = 60, hashW = 80, hashH = 50;
+        ctx.fillStyle = hexToRgba(C.purple, 0.12);
+        ctx.strokeStyle = C.purple;
+        ctx.beginPath();
+        ctx.roundRect(hashX, hashY, hashW, hashH, 6);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = C.purple;
+        ctx.font = 'bold 12px "Noto Sans SC", sans-serif';
+        ctx.fillText('低位索引', hashX + hashW / 2, hashY + 20);
+        ctx.font = '10px "JetBrains Mono", monospace';
+        ctx.fillText('PC[n:2]', hashX + hashW / 2, hashY + 38);
+
+        // Arrow PC → Hash
+        ISAUtils.drawArrow(ctx, pcX + pcW, pcY + pcH / 2, hashX, hashY + pcH / 2, C.textSec, { headLen: 8 });
+
+        // BHT array
+        const bhtX = 340, bhtY = 40, bhtW = 140, bhtH = 190;
+        const entryH = 20;
+        const entries = 8;
+
+        ctx.fillStyle = hexToRgba(C.green, 0.08);
+        ctx.strokeStyle = C.green;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.roundRect(bhtX, bhtY, bhtW, bhtH, 6);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = C.green;
+        ctx.font = 'bold 12px "Noto Sans SC", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('BHT', bhtX + bhtW / 2, bhtY + 18);
+
+        const stateNames = ['00', '01', '10', '11'];
+        const stateColors = [C.red, C.orange, C.blue, C.green];
+
+        for (let i = 0; i < entries; i++) {
+            const ey = bhtY + 28 + i * entryH;
+            const counter = 1; // initial state
+            ctx.fillStyle = i === 0 ? hexToRgba(C.green, 0.2) : 'transparent';
+            ctx.fillRect(bhtX + 4, ey, bhtW - 8, entryH - 2);
+
+            ctx.strokeStyle = hexToRgba(C.border, 0.5);
+            ctx.lineWidth = 0.5;
+            ctx.beginPath();
+            ctx.moveTo(bhtX + 4, ey + entryH - 2);
+            ctx.lineTo(bhtX + bhtW - 4, ey + entryH - 2);
+            ctx.stroke();
+
+            ctx.fillStyle = C.textMut;
+            ctx.font = '10px "JetBrains Mono", monospace';
+            ctx.textAlign = 'left';
+            ctx.fillText(`[${i}]`, bhtX + 8, ey + 13);
+
+            ctx.fillStyle = stateColors[counter];
+            ctx.textAlign = 'center';
+            ctx.fillText(stateNames[counter], bhtX + 70, ey + 13);
+
+            ctx.fillStyle = C.textSec;
+            ctx.textAlign = 'right';
+            ctx.fillText(counter >= 2 ? '→T' : '→N', bhtX + bhtW - 10, ey + 13);
+        }
+
+        // Arrow Hash → BHT
+        ISAUtils.drawArrow(ctx, hashX + hashW, hashY + hashH / 2, bhtX, bhtY + 38, C.textSec, { headLen: 8 });
+
+        // Prediction output
+        const predX = 530, predY = 90, predW = 100, predH = 50;
+        if (predX + predW < w) {
+            ctx.fillStyle = hexToRgba(C.green, 0.12);
+            ctx.strokeStyle = C.green;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.roundRect(predX, predY, predW, predH, 6);
+            ctx.fill();
+            ctx.stroke();
+            ctx.fillStyle = C.green;
+            ctx.font = 'bold 12px "Noto Sans SC", sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('预测结果', predX + predW / 2, predY + 20);
+            ctx.font = '11px "JetBrains Mono", monospace';
+            ctx.fillText('T / NT', predX + predW / 2, predY + 38);
+
+            ISAUtils.drawArrow(ctx, bhtX + bhtW, bhtY + 38 + 20, predX, predY + predH / 2, C.green, { headLen: 8 });
+        }
+
+        // Feedback arrow
+        ctx.strokeStyle = hexToRgba(C.orange, 0.6);
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath();
+        const fbY = bhtY + bhtH + 20;
+        ctx.moveTo(bhtX + bhtW / 2, bhtY + bhtH);
+        ctx.lineTo(bhtX + bhtW / 2, fbY);
+        ctx.lineTo(bhtX - 40, fbY);
+        ctx.lineTo(bhtX - 40, bhtY + bhtH / 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        ctx.fillStyle = C.orange;
+        ctx.font = '10px "Noto Sans SC", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('实际结果反馈更新', bhtX + 20, fbY + 14);
+    }
+
+    /* ===========================================================
+       Section 6: BTB (Branch Target Buffer)
+       =========================================================== */
+    const btbProgram = [
+        { pc: 0x1000, target: 0x0FF0, taken: true,  label: 'beq → loop' },
+        { pc: 0x1020, target: 0x1060, taken: true,  label: 'bne → skip' },
+        { pc: 0x1000, target: 0x0FF0, taken: true,  label: 'beq → loop' },
+        { pc: 0x1040, target: 0x1080, taken: false, label: 'blt → else' },
+        { pc: 0x1000, target: 0x0FF0, taken: false, label: 'beq → loop (exit)' },
+        { pc: 0x1020, target: 0x1060, taken: true,  label: 'bne → skip' },
+        { pc: 0x1060, target: 0x1000, taken: true,  label: 'jal → restart' },
+        { pc: 0x1000, target: 0x0FF0, taken: true,  label: 'beq → loop' },
+        { pc: 0x1020, target: 0x1060, taken: false, label: 'bne → skip (fall)' },
+        { pc: 0x1000, target: 0x0FF0, taken: true,  label: 'beq → loop' },
+    ];
+
+    let btbEntries = {}; // tag → { target, counter }
+    let btbStep = 0;
+    let btbHitCount = 0;
+    let btbMissCount = 0;
+    let btbPredCorrect = 0;
+    let btbPredTotal = 0;
+
+    function resetBTB() {
+        btbEntries = {};
+        btbStep = 0;
+        btbHitCount = 0;
+        btbMissCount = 0;
+        btbPredCorrect = 0;
+        btbPredTotal = 0;
+
+        renderBTBVisual();
+        document.getElementById('btb-log').innerHTML = '';
+        document.getElementById('btb-hits').textContent = '0';
+        document.getElementById('btb-misses').textContent = '0';
+        document.getElementById('btb-pred-acc').textContent = '-';
+
+        drawBTBStructure();
+        drawBTBCombined();
+    }
+
+    function renderBTBVisual() {
+        const container = document.getElementById('btb-visual');
+        const keys = Object.keys(btbEntries);
+        if (keys.length === 0) {
+            container.innerHTML = '<p style="color: var(--text-muted); font-size: 0.85rem;">BTB 为空，等待第一次分支执行...</p>';
+            return;
+        }
+        let html = '<table class="btb-table"><tr><th>标签 (PC)</th><th>目标地址</th><th>计数器</th><th>预测</th></tr>';
+        for (const tag of keys) {
+            const e = btbEntries[tag];
+            const stateNames = ['强NT', '弱NT', '弱T', '强T'];
+            const stateColors = [C.red, C.orange, C.blue, C.green];
+            const pred = e.counter >= 2;
+            html += `<tr>
+                <td>0x${parseInt(tag).toString(16)}</td>
+                <td>0x${e.target.toString(16)}</td>
+                <td style="color: ${stateColors[e.counter]};">${e.counter} (${stateNames[e.counter]})</td>
+                <td style="color: ${pred ? C.green : C.orange};">${pred ? 'T' : 'NT'}</td>
+            </tr>`;
+        }
+        html += '</table>';
+        container.innerHTML = html;
+    }
+
+    function runBTBStep() {
+        if (btbStep >= btbProgram.length) return;
+
+        const p = btbProgram[btbStep];
+        const tag = p.pc;
+        const entry = btbEntries[tag];
+
+        let btbHit = false;
+        let prediction = false;
+        let targetCorrect = false;
+
+        if (entry) {
+            btbHit = true;
+            btbHitCount++;
+            prediction = entry.counter >= 2;
+            targetCorrect = entry.target === p.target;
+        } else {
+            btbMissCount++;
+            prediction = false; // no BTB entry → predict not taken
+        }
+
+        const predCorrect = prediction === p.taken;
+        btbPredTotal++;
+        if (predCorrect) btbPredCorrect++;
+
+        // Update BTB
+        if (!btbEntries[tag]) {
+            btbEntries[tag] = { target: p.target, counter: 1 };
+        }
+        const e = btbEntries[tag];
+        e.target = p.target;
+        if (p.taken) e.counter = Math.min(3, e.counter + 1);
+        else e.counter = Math.max(0, e.counter - 1);
+
+        btbStep++;
+
+        // Update UI
+        renderBTBVisual();
+
+        const logPanel = document.getElementById('btb-log');
+        const hitStr = btbHit ? 'BTB命中' : 'BTB未命中';
+        const corrStr = predCorrect ? '正确' : '错误';
+        const logClass = predCorrect ? 'hit' : 'miss';
+        logPanel.innerHTML += `<div class="log-entry ${logClass}">
+            [${btbStep}] PC=0x${p.pc.toString(16)} ${hitStr} | 预测=${prediction ? 'T' : 'N'} 实际=${p.taken ? 'T' : 'N'} → ${corrStr}
+        </div>`;
+        logPanel.scrollTop = logPanel.scrollHeight;
+
+        document.getElementById('btb-hits').textContent = btbHitCount;
+        document.getElementById('btb-misses').textContent = btbMissCount;
+        document.getElementById('btb-pred-acc').textContent =
+            btbPredTotal > 0 ? (btbPredCorrect / btbPredTotal * 100).toFixed(1) + '%' : '-';
+    }
+
+    function runBTBAll() {
+        while (btbStep < btbProgram.length) {
+            runBTBStep();
+        }
+    }
+
+    function drawBTBStructure() {
+        const canvas = document.getElementById('canvas-btb-struct');
+        const { ctx, w, h } = initHiDPICanvas(canvas, 260);
+        ctx.clearRect(0, 0, w, h);
+
+        // Title
+        ctx.fillStyle = C.textPri;
+        ctx.font = 'bold 14px "Noto Sans SC", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('BTB 结构：标签 + 目标地址', w / 2, 24);
+
+        // BTB table visual
+        const tableX = w / 2 - 160;
+        const tableY = 50;
+        const colWidths = [60, 80, 100];
+        const rowH = 28;
+        const headers = ['索引', '标签(PC)', '目标地址'];
+        const totalW = colWidths.reduce((a, b) => a + b, 0);
+
+        // Header row
+        ctx.fillStyle = hexToRgba(C.purple, 0.15);
+        ctx.fillRect(tableX, tableY, totalW, rowH);
+        ctx.strokeStyle = C.purple;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(tableX, tableY, totalW, rowH);
+
+        ctx.fillStyle = C.purple;
+        ctx.font = 'bold 11px "Noto Sans SC", sans-serif';
+        ctx.textAlign = 'center';
+        let cx = tableX;
+        for (let c = 0; c < 3; c++) {
+            ctx.fillText(headers[c], cx + colWidths[c] / 2, tableY + rowH / 2 + 4);
+            cx += colWidths[c];
+        }
+
+        // Data rows
+        const sampleData = [
+            ['0', '0x1000', '0x0FF0'],
+            ['1', '0x1020', '0x1060'],
+            ['2', '0x1040', '0x1080'],
+            ['3', '-', '-'],
+        ];
+
+        for (let r = 0; r < sampleData.length; r++) {
+            const ry = tableY + (r + 1) * rowH;
+            ctx.fillStyle = r % 2 === 0 ? hexToRgba(C.bgCard, 0.3) : 'transparent';
+            ctx.fillRect(tableX, ry, totalW, rowH);
+            ctx.strokeStyle = hexToRgba(C.border, 0.5);
+            ctx.strokeRect(tableX, ry, totalW, rowH);
+
+            cx = tableX;
+            for (let c = 0; c < 3; c++) {
+                ctx.fillStyle = c === 2 ? C.green : c === 1 ? C.blue : C.textMut;
+                ctx.font = '10px "JetBrains Mono", monospace';
+                ctx.textAlign = 'center';
+                ctx.fillText(sampleData[r][c], cx + colWidths[c] / 2, ry + rowH / 2 + 4);
+                cx += colWidths[c];
+            }
+        }
+
+        // IF stage box
+        const ifX = tableX - 130;
+        const ifY = tableY + 40;
+        const ifW = 90;
+        const ifH = 40;
+        ctx.fillStyle = hexToRgba(C.fetch, 0.12);
+        ctx.strokeStyle = C.fetch;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.roundRect(ifX, ifY, ifW, ifH, 6);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = C.fetch;
+        ctx.font = 'bold 12px "Noto Sans SC", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('IF 阶段', ifX + ifW / 2, ifY + 16);
+        ctx.font = '10px "JetBrains Mono", monospace';
+        ctx.fillText('查 BTB', ifX + ifW / 2, ifY + 32);
+
+        ISAUtils.drawArrow(ctx, ifX + ifW, ifY + ifH / 2, tableX, tableY + 2 * rowH, C.textSec, { headLen: 8 });
+
+        // Output
+        const outX = tableX + totalW + 40;
+        const outY = tableY + 40;
+
+        if (outX + 110 < w) {
+            ctx.fillStyle = hexToRgba(C.green, 0.12);
+            ctx.strokeStyle = C.green;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.roundRect(outX, outY, 110, 50, 6);
+            ctx.fill();
+            ctx.stroke();
+            ctx.fillStyle = C.green;
+            ctx.font = 'bold 11px "Noto Sans SC", sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('预测 + 目标', outX + 55, outY + 18);
+            ctx.font = '10px "JetBrains Mono", monospace';
+            ctx.fillText('T/NT + addr', outX + 55, outY + 38);
+
+            ISAUtils.drawArrow(ctx, tableX + totalW, tableY + 2 * rowH, outX, outY + 25, C.green, { headLen: 8 });
+        }
+
+        // Key benefit note
+        ctx.fillStyle = C.textSec;
+        ctx.font = '12px "Noto Sans SC", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('BTB 在 IF 阶段同时提供「是否跳转」和「跳转目标」', w / 2, h - 16);
+    }
+
+    function drawBTBCombined() {
+        const canvas = document.getElementById('canvas-btb-combined');
+        const { ctx, w, h } = initHiDPICanvas(canvas, 300);
+        ctx.clearRect(0, 0, w, h);
+
+        ctx.fillStyle = C.textPri;
+        ctx.font = 'bold 14px "Noto Sans SC", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('BHT + BTB 协同工作流程', w / 2, 24);
+
+        const boxW = 110;
+        const boxH = 45;
+        const startY = 55;
+
+        const boxes = [
+            { label: 'PC', sub: '当前指令地址', x: 30, y: startY + 60, color: C.blue },
+            { label: 'BTB', sub: '查找目标地址', x: w / 2 - boxW / 2 - 80, y: startY, color: C.purple },
+            { label: 'BHT', sub: '查找预测方向', x: w / 2 - boxW / 2 - 80, y: startY + 100, color: C.green },
+            { label: 'MUX', sub: '选择下一PC', x: w / 2 + 60, y: startY + 50, color: C.orange },
+            { label: '下一 PC', sub: '送入 IF 阶段', x: w - boxW - 20, y: startY + 50, color: C.cyan },
+        ];
+
+        // Draw boxes
+        for (const box of boxes) {
+            ctx.fillStyle = hexToRgba(box.color, 0.12);
+            ctx.strokeStyle = box.color;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.roundRect(box.x, box.y, boxW, boxH, 6);
+            ctx.fill();
+            ctx.stroke();
+
+            ctx.fillStyle = box.color;
+            ctx.font = 'bold 12px "Noto Sans SC", sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(box.label, box.x + boxW / 2, box.y + 17);
+            ctx.font = '10px "Noto Sans SC", sans-serif';
+            ctx.fillStyle = hexToRgba(box.color, 0.7);
+            ctx.fillText(box.sub, box.x + boxW / 2, box.y + 35);
+        }
+
+        // Arrows: PC → BTB, PC → BHT
+        const pc = boxes[0], btb = boxes[1], bht = boxes[2], mux = boxes[3], nextPC = boxes[4];
+        ISAUtils.drawArrow(ctx, pc.x + boxW, pc.y + 10, btb.x, btb.y + boxH / 2, C.textSec, { headLen: 7 });
+        ISAUtils.drawArrow(ctx, pc.x + boxW, pc.y + boxH - 10, bht.x, bht.y + boxH / 2, C.textSec, { headLen: 7 });
+
+        // BTB → MUX (target)
+        ISAUtils.drawArrow(ctx, btb.x + boxW, btb.y + boxH / 2, mux.x, mux.y + 10, C.purple, { headLen: 7 });
+        ctx.fillStyle = C.purple;
+        ctx.font = '10px "Noto Sans SC", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('目标地址', (btb.x + boxW + mux.x) / 2, btb.y + 5);
+
+        // BHT → MUX (direction)
+        ISAUtils.drawArrow(ctx, bht.x + boxW, bht.y + boxH / 2, mux.x, mux.y + boxH - 10, C.green, { headLen: 7 });
+        ctx.fillStyle = C.green;
+        ctx.fillText('T / NT', (bht.x + boxW + mux.x) / 2, bht.y + boxH + 14);
+
+        // MUX → Next PC
+        ISAUtils.drawArrow(ctx, mux.x + boxW, mux.y + boxH / 2, nextPC.x, nextPC.y + boxH / 2, C.orange, { headLen: 7 });
+
+        // Bottom: feedback from EX
+        const fbY = startY + 180;
+        ctx.strokeStyle = hexToRgba(C.red, 0.5);
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([5, 4]);
+        ctx.beginPath();
+        ctx.moveTo(nextPC.x + boxW / 2, nextPC.y + boxH);
+        ctx.lineTo(nextPC.x + boxW / 2, fbY);
+        ctx.lineTo(btb.x + boxW / 2, fbY);
+        ctx.lineTo(btb.x + boxW / 2, btb.y + boxH);
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(btb.x + boxW / 2 + 40, fbY);
+        ctx.lineTo(bht.x + boxW / 2 + 40, fbY);
+        ctx.lineTo(bht.x + boxW / 2 + 40, bht.y + boxH);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        ctx.fillStyle = C.red;
+        ctx.font = '11px "Noto Sans SC", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('EX 阶段结果反馈 → 更新 BTB & BHT', w / 2, fbY + 16);
+
+        // Additional note at bottom
+        ctx.fillStyle = C.textMut;
+        ctx.font = '11px "Noto Sans SC", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('若预测错误，需要刷新流水线并从正确地址重新取指', w / 2, h - 10);
+    }
+
+    /* ===========================================================
+       Initialization
+       =========================================================== */
+    document.addEventListener('DOMContentLoaded', () => {
+        // Render KaTeX
+        if (typeof renderMathInElement === 'function') {
+            renderMathInElement(document.body, {
+                delimiters: [
+                    { left: '$$', right: '$$', display: true },
+                    { left: '$', right: '$', display: false },
+                ],
+            });
+        }
+
+        // CPI sliders
+        document.getElementById('slider-freq').addEventListener('input', updateCPI);
+        document.getElementById('slider-penalty').addEventListener('input', updateCPI);
+        document.getElementById('slider-accuracy').addEventListener('input', updateCPI);
+        updateCPI();
+
+        // Draw all canvases
+        drawStallPipeline();
+        draw1BitFSM();
+        draw2BitFSM();
+        drawBHTStructure();
+        drawBTBStructure();
+        drawBTBCombined();
+
+        // Run default simulations
+        runStaticPrediction();
+        runOneBitPrediction();
+        runTwoBitComparison();
+
+        // Initialize BHT
+        resetBHT();
+        // Initialize BTB
+        resetBTB();
+
+        // Handle resize
+        const canvasIds = [
+            'canvas-stall', 'canvas-static-chart',
+            'canvas-1bit-fsm', 'canvas-1bit-anim',
+            'canvas-2bit-fsm', 'canvas-2bit-anim',
+            'canvas-bht-struct', 'canvas-btb-struct', 'canvas-btb-combined'
+        ];
+
+        let resizeTimer;
+        window.addEventListener('resize', () => {
+            clearTimeout(resizeTimer);
+            resizeTimer = setTimeout(() => {
+                drawStallPipeline();
+                draw1BitFSM();
+                draw2BitFSM(-1);
+                drawBHTStructure();
+                drawBTBStructure();
+                drawBTBCombined();
+                // Re-run simulations to re-draw their canvases
+                runStaticPrediction();
+                runOneBitPrediction();
+                runTwoBitComparison();
+            }, 200);
+        });
+    });
+    </script>
+</body>
+</html>

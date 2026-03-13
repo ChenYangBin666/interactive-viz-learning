@@ -1,0 +1,2219 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>冒险处理 — 指令集与微架构</title>
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+SC:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/gsap.min.js"></script>
+    <script defer src="../shared/scripts/isa-utils.js"></script>
+    <script defer src="../shared/scripts/nav.js"></script>
+    <style>
+        /* ===== Page Hero ===== */
+        .hero {
+            text-align: center;
+            padding: 2rem 2rem 2.5rem;
+            position: relative;
+        }
+        .hero h1 {
+            font-size: 2.4rem;
+            margin-bottom: 0.5rem;
+            background: linear-gradient(135deg, #ff5252, #ffab40, #b388ff);
+            background-size: 200% 200%;
+            animation: heroGrad 6s ease infinite;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        @keyframes heroGrad {
+            0%, 100% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+        }
+        .hero .subtitle {
+            font-size: 1.05rem;
+            color: var(--text-secondary);
+            max-width: 680px;
+            margin: 0 auto;
+        }
+        .hero-formula {
+            margin-top: 1.2rem;
+            font-family: var(--font-mono);
+            font-size: 0.9rem;
+            color: var(--text-muted);
+            opacity: 0.7;
+        }
+        .hero-formula .hl { color: #ff5252; font-weight: 600; }
+
+        /* ===== Section Alternating BG ===== */
+        .section-alt {
+            background: var(--bg-secondary);
+            margin-left: -2rem;
+            margin-right: -2rem;
+            padding: 2.5rem 2rem;
+        }
+        @media (max-width: 768px) {
+            .section-alt {
+                margin-left: -1rem;
+                margin-right: -1rem;
+                padding: 2rem 1rem;
+            }
+        }
+
+        /* ===== Hazard Type Cards ===== */
+        .hazard-cards {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 1.5rem;
+            margin-top: 1.5rem;
+        }
+        @media (max-width: 900px) {
+            .hazard-cards { grid-template-columns: 1fr; }
+        }
+        .hazard-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1.5rem;
+            cursor: pointer;
+            transition: all 0.3s;
+            position: relative;
+            overflow: hidden;
+        }
+        .hazard-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 8px 30px rgba(0,0,0,0.3);
+        }
+        .hazard-card.data-h { border-top: 3px solid #ff5252; }
+        .hazard-card.control-h { border-top: 3px solid #ffab40; }
+        .hazard-card.structural-h { border-top: 3px solid #b388ff; }
+        .hazard-card .card-icon {
+            width: 56px;
+            height: 56px;
+            border-radius: var(--radius-md);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.8rem;
+            margin-bottom: 1rem;
+        }
+        .hazard-card.data-h .card-icon { background: rgba(255,82,82,0.15); }
+        .hazard-card.control-h .card-icon { background: rgba(255,171,64,0.15); }
+        .hazard-card.structural-h .card-icon { background: rgba(179,136,255,0.15); }
+        .hazard-card h3 { margin-bottom: 0.4rem; }
+        .hazard-card .card-brief {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            margin-bottom: 0.75rem;
+        }
+        .hazard-card .card-example {
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            padding: 0.6rem 0.75rem;
+            background: rgba(0,0,0,0.25);
+            border-radius: var(--radius-sm);
+            margin-bottom: 0.75rem;
+            white-space: pre-wrap;
+            line-height: 1.6;
+        }
+        .hazard-card .card-detail {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.6s cubic-bezier(0.4,0,0.2,1), opacity 0.4s;
+            opacity: 0;
+        }
+        .hazard-card.expanded .card-detail {
+            max-height: 700px;
+            opacity: 1;
+        }
+        .hazard-card .expand-hint {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            text-align: center;
+            margin-top: 0.5rem;
+            transition: opacity 0.3s;
+        }
+        .hazard-card.expanded .expand-hint { opacity: 0; height: 0; }
+        .hazard-card .detail-canvas-wrap {
+            margin-top: 1rem;
+            border-radius: var(--radius-sm);
+            overflow: hidden;
+        }
+
+        /* ===== Pipeline Diagram Tables ===== */
+        .pipeline-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-family: var(--font-mono);
+            font-size: 0.78rem;
+            margin: 0.5rem 0;
+        }
+        .pipeline-table th, .pipeline-table td {
+            padding: 0.3rem 0.4rem;
+            text-align: center;
+            border: 1px solid rgba(42,42,74,0.5);
+            min-width: 38px;
+            transition: background 0.3s;
+        }
+        .pipeline-table th {
+            background: var(--bg-card);
+            color: var(--accent-green);
+            font-weight: 600;
+            position: sticky;
+            top: 0;
+            z-index: 2;
+        }
+        .pipeline-table td.stage-if { background: rgba(79,195,247,0.15); color: #4fc3f7; font-weight: 600; }
+        .pipeline-table td.stage-id { background: rgba(179,136,255,0.15); color: #b388ff; font-weight: 600; }
+        .pipeline-table td.stage-ex { background: rgba(22,199,154,0.15); color: #16c79a; font-weight: 600; }
+        .pipeline-table td.stage-mem { background: rgba(255,171,64,0.15); color: #ffab40; font-weight: 600; }
+        .pipeline-table td.stage-wb { background: rgba(255,128,171,0.15); color: #ff80ab; font-weight: 600; }
+        .pipeline-table td.stall-cell {
+            background: rgba(255,82,82,0.2);
+            color: #ff5252;
+            font-weight: 700;
+        }
+        .pipeline-table td.bubble-cell {
+            background: rgba(108,108,124,0.12);
+            color: #6c6c7c;
+            font-style: italic;
+        }
+        .pipeline-table td.flush-cell {
+            background: rgba(255,82,82,0.12);
+            color: #ff5252;
+            text-decoration: line-through;
+            opacity: 0.7;
+        }
+        .pipeline-table td.inst-label {
+            text-align: left;
+            background: var(--bg-card);
+            color: var(--text-primary);
+            font-weight: 600;
+            white-space: nowrap;
+            padding-left: 0.6rem;
+        }
+        .pipeline-table td.forward-cell {
+            background: rgba(22,199,154,0.25);
+            color: #16c79a;
+            font-weight: 700;
+            box-shadow: inset 0 0 10px rgba(22,199,154,0.2);
+        }
+        .pipeline-table tr:hover td:not(.inst-label):not(:empty) {
+            filter: brightness(1.2);
+        }
+
+        /* ===== Interactive Controls ===== */
+        .control-row {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            flex-wrap: wrap;
+            margin: 1rem 0;
+        }
+        .control-row label {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+        }
+        .control-row select,
+        .control-row input[type="text"] {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 0.4rem 0.8rem;
+            border-radius: var(--radius-sm);
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            transition: border-color 0.2s;
+        }
+        .control-row select:focus,
+        .control-row input[type="text"]:focus {
+            outline: none;
+            border-color: var(--accent-green);
+        }
+
+        /* ===== Stats Row ===== */
+        .stats-row {
+            display: flex;
+            gap: 1rem;
+            flex-wrap: wrap;
+            margin: 0.75rem 0;
+        }
+        .stat-item {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            padding: 0.6rem 1rem;
+            text-align: center;
+            min-width: 100px;
+            flex: 1;
+            transition: border-color 0.3s;
+        }
+        .stat-item:hover {
+            border-color: var(--accent-green);
+        }
+        .stat-item .stat-value {
+            font-family: var(--font-mono);
+            font-size: 1.4rem;
+            font-weight: 700;
+            color: var(--accent-green);
+            line-height: 1.2;
+        }
+        .stat-item .stat-label {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            margin-top: 0.2rem;
+        }
+
+        /* ===== Side-by-side compare ===== */
+        .side-compare {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5rem;
+            margin: 1rem 0;
+        }
+        @media (max-width: 900px) {
+            .side-compare { grid-template-columns: 1fr; }
+        }
+        .compare-panel {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1.2rem;
+            transition: border-color 0.3s;
+        }
+        .compare-panel h4 {
+            margin-bottom: 0.75rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.95rem;
+        }
+        .stall-tag {
+            display: inline-block;
+            padding: 0.15rem 0.6rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+        .stall-tag.red { background: rgba(255,82,82,0.15); color: #ff5252; }
+        .stall-tag.green { background: rgba(22,199,154,0.15); color: #16c79a; }
+
+        /* ===== Canvas containers ===== */
+        .canvas-container {
+            position: relative;
+            width: 100%;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+        }
+        .canvas-container canvas {
+            display: block;
+            width: 100%;
+        }
+
+        /* ===== Strategy selector ===== */
+        .strategy-tabs {
+            display: flex;
+            gap: 0.5rem;
+            margin: 1rem 0;
+            flex-wrap: wrap;
+        }
+        .strategy-tab {
+            padding: 0.5rem 1.2rem;
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            background: var(--bg-secondary);
+            color: var(--text-secondary);
+            font-family: inherit;
+            font-size: 0.85rem;
+            cursor: pointer;
+            transition: all 0.25s;
+        }
+        .strategy-tab:hover {
+            border-color: var(--accent-orange);
+            color: var(--text-primary);
+            background: rgba(255,171,64,0.05);
+        }
+        .strategy-tab.active {
+            background: rgba(255,171,64,0.15);
+            border-color: var(--accent-orange);
+            color: var(--accent-orange);
+            font-weight: 600;
+        }
+
+        /* ===== Memory Toggle ===== */
+        .memory-toggle-row {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            margin: 1rem 0;
+        }
+        .memory-toggle-label {
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+            transition: color 0.3s;
+        }
+        .memory-toggle-label.active-label {
+            color: var(--accent-green);
+            font-weight: 600;
+        }
+
+        /* ===== Analyzer ===== */
+        .analyzer-input {
+            width: 100%;
+            min-height: 140px;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            padding: 1rem;
+            border-radius: var(--radius-md);
+            resize: vertical;
+            line-height: 1.9;
+            transition: border-color 0.2s;
+        }
+        .analyzer-input:focus {
+            outline: none;
+            border-color: var(--accent-green);
+        }
+        .analyzer-input::placeholder { color: var(--text-muted); }
+
+        .hazard-annotation {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.3rem;
+            padding: 0.2rem 0.6rem;
+            border-radius: var(--radius-sm);
+            font-size: 0.75rem;
+            font-weight: 600;
+            margin: 0.15rem;
+            transition: transform 0.2s;
+        }
+        .hazard-annotation:hover { transform: scale(1.05); }
+        .hazard-annotation.data { background: rgba(255,82,82,0.15); color: #ff5252; }
+        .hazard-annotation.control { background: rgba(255,171,64,0.15); color: #ffab40; }
+        .hazard-annotation.structural { background: rgba(179,136,255,0.15); color: #b388ff; }
+
+        /* ===== Challenge Mode ===== */
+        .challenge-box {
+            background: rgba(255,215,64,0.04);
+            border: 1px solid rgba(255,215,64,0.2);
+            border-radius: var(--radius-md);
+            padding: 1.5rem;
+            margin-top: 1.5rem;
+        }
+        .challenge-box h4 {
+            color: var(--accent-yellow);
+            margin-bottom: 0.75rem;
+        }
+        .drag-inst {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 0.8rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            color: var(--text-primary);
+            cursor: grab;
+            user-select: none;
+            transition: all 0.2s;
+            margin: 0.3rem 0;
+        }
+        .drag-inst:hover {
+            border-color: var(--accent-green);
+            background: rgba(22,199,154,0.05);
+        }
+        .drag-inst.dragging {
+            opacity: 0.4;
+            border-color: var(--accent-yellow);
+            transform: scale(0.97);
+        }
+        .drag-inst .drag-handle {
+            color: var(--text-muted);
+            font-size: 1rem;
+            cursor: grab;
+            flex-shrink: 0;
+        }
+
+        /* ===== Forwarding datapath legend ===== */
+        .datapath-legend {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1rem;
+            margin: 0.75rem 0;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+        }
+        .datapath-legend .legend-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 0.3rem;
+            vertical-align: middle;
+        }
+
+        /* ===== Resource timeline ===== */
+        .resource-row {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin: 0.35rem 0;
+        }
+        .resource-label {
+            min-width: 90px;
+            font-family: var(--font-mono);
+            font-size: 0.78rem;
+            color: var(--text-secondary);
+            text-align: right;
+            flex-shrink: 0;
+        }
+        .resource-bar {
+            flex: 1;
+            display: flex;
+            gap: 2px;
+            height: 28px;
+        }
+        .resource-cell {
+            flex: 1;
+            border-radius: 3px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: var(--font-mono);
+            font-size: 0.7rem;
+            font-weight: 600;
+            transition: all 0.3s;
+            min-width: 28px;
+        }
+
+        /* ===== Instruction input for Section 2 ===== */
+        .inst-input-row {
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+            margin: 0.4rem 0;
+        }
+        .inst-input-row input {
+            flex: 1;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 0.4rem 0.8rem;
+            border-radius: var(--radius-sm);
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+        }
+        .inst-input-row input:focus {
+            outline: none;
+            border-color: var(--accent-green);
+        }
+        .dep-badge {
+            display: inline-block;
+            padding: 0.2rem 0.6rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            margin: 0.1rem;
+        }
+        .dep-badge.raw { background: rgba(255,82,82,0.15); color: #ff5252; }
+        .dep-badge.war { background: rgba(255,171,64,0.15); color: #ffab40; }
+        .dep-badge.waw { background: rgba(179,136,255,0.15); color: #b388ff; }
+
+        /* ===== Table scroll ===== */
+        .table-scroll {
+            overflow-x: auto;
+            margin: 0.75rem 0;
+            border-radius: var(--radius-sm);
+        }
+
+        /* ===== Scroll fade-in ===== */
+        .fade-in {
+            opacity: 0;
+            transform: translateY(24px);
+            transition: opacity 0.7s ease, transform 0.7s ease;
+        }
+        .fade-in.visible {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        /* ===== Dep type grid ===== */
+        .dep-type-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 1rem;
+            margin: 1.5rem 0;
+        }
+        @media (max-width: 768px) {
+            .dep-type-grid { grid-template-columns: 1fr; }
+        }
+        .dep-type-card {
+            padding: 1rem 1.2rem;
+            border-radius: var(--radius-md);
+            text-align: center;
+        }
+        .dep-type-card h4 {
+            font-family: var(--font-mono);
+            font-size: 1.3rem;
+            margin-bottom: 0.3rem;
+        }
+        .dep-type-card .dep-full {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            margin-bottom: 0.3rem;
+        }
+        .dep-type-card .dep-desc {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+
+        /* ===== Penalty comparison grid ===== */
+        .penalty-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+        @media (max-width: 768px) {
+            .penalty-grid { grid-template-columns: 1fr; }
+        }
+        .penalty-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1rem;
+            text-align: center;
+            transition: border-color 0.3s;
+        }
+        .penalty-card.active-penalty {
+            border-color: var(--accent-orange);
+            box-shadow: 0 0 12px rgba(255,171,64,0.15);
+        }
+        .penalty-card h5 {
+            font-size: 0.9rem;
+            margin-bottom: 0.5rem;
+            color: var(--text-primary);
+        }
+        .penalty-card .penalty-val {
+            font-family: var(--font-mono);
+            font-size: 1.6rem;
+            font-weight: 700;
+            color: var(--accent-orange);
+        }
+        .penalty-card .penalty-desc {
+            font-size: 0.78rem;
+            color: var(--text-muted);
+            margin-top: 0.3rem;
+        }
+    </style>
+</head>
+<body>
+    <!-- nav.js auto-injects <nav> -->
+    <div class="page-container">
+
+        <!-- ===== Hero ===== -->
+        <header class="hero fade-in">
+            <h1>冒险处理 (Hazards)</h1>
+            <p class="subtitle">
+                流水线高效并行的隐患与化解 —
+                识别数据冒险、控制冒险、结构冒险，掌握前递、停顿、预测等关键处理技术
+            </p>
+            <div class="hero-formula">
+                CPI<sub>real</sub> = CPI<sub>ideal</sub> + <span class="hl">Stall<sub>data</sub></span> + <span class="hl">Stall<sub>control</sub></span> + <span class="hl">Stall<sub>structural</sub></span>
+            </div>
+        </header>
+
+        <!-- ========================================================
+             Section 1: 三种冒险
+             ======================================================== -->
+        <section class="section fade-in" id="sec-types">
+            <div class="section-title">
+                <div class="icon">&#x26A0;</div>
+                <h2>一、三种冒险</h2>
+            </div>
+            <p>
+                流水线同时执行多条指令时，指令之间可能产生冲突，导致无法在下一个时钟周期正常执行。
+                这些冲突被称为<strong>冒险 (Hazard)</strong>。根据冲突的来源，可分为以下三类。
+                点击卡片查看详细流水线时序。
+            </p>
+            <div class="hazard-cards" id="hazard-cards"></div>
+        </section>
+
+        <!-- ========================================================
+             Section 2: 数据冒险详解
+             ======================================================== -->
+        <section class="section section-alt fade-in" id="sec-data">
+            <div class="section-title">
+                <div class="icon" style="background:rgba(255,82,82,0.15);color:#ff5252;">&#x1F4CA;</div>
+                <h2>二、数据冒险详解</h2>
+            </div>
+            <p>数据冒险发生在指令之间存在<strong>数据依赖</strong>关系时 — 后续指令需要使用前面指令尚未产生或写回的数据。</p>
+
+            <div class="dep-type-grid">
+                <div class="dep-type-card" style="background:rgba(255,82,82,0.08);border:1px solid rgba(255,82,82,0.25);border-radius:var(--radius-md);">
+                    <h4 style="color:#ff5252;">RAW</h4>
+                    <div class="dep-full">Read After Write（写后读）</div>
+                    <div class="dep-desc">最常见的<strong>真依赖</strong><br>I1 写入 R，I2 读取 R<br>必须通过前递或停顿解决</div>
+                </div>
+                <div class="dep-type-card" style="background:rgba(255,171,64,0.08);border:1px solid rgba(255,171,64,0.25);border-radius:var(--radius-md);">
+                    <h4 style="color:#ffab40;">WAR</h4>
+                    <div class="dep-full">Write After Read（读后写）</div>
+                    <div class="dep-desc">反依赖 (Anti-dependency)<br>I1 读取 R，I2 写入 R<br>寄存器重命名可消除</div>
+                </div>
+                <div class="dep-type-card" style="background:rgba(179,136,255,0.08);border:1px solid rgba(179,136,255,0.25);border-radius:var(--radius-md);">
+                    <h4 style="color:#b388ff;">WAW</h4>
+                    <div class="dep-full">Write After Write（写后写）</div>
+                    <div class="dep-desc">输出依赖 (Output-dep)<br>I1 写入 R，I2 也写入 R<br>寄存器重命名可消除</div>
+                </div>
+            </div>
+
+            <h3>RAW 冒险动画演示 (无前递)</h3>
+            <p style="font-size:0.9rem;color:var(--text-muted);margin-bottom:0.5rem;">
+                <code>add x1, x2, x3</code> 在 WB 阶段才将结果写入 x1，
+                但紧随其后的 <code>sub x4, x1, x5</code> 在 ID 阶段就要读取 x1。
+            </p>
+            <div class="canvas-container" id="data-hazard-canvas-wrap">
+                <canvas id="data-hazard-canvas"></canvas>
+            </div>
+            <div class="legend" style="margin-top:0.5rem;">
+                <div class="legend-item"><span class="swatch" style="background:#ff5252;"></span> 停顿 (Stall)</div>
+                <div class="legend-item"><span class="swatch" style="background:#6c6c7c;"></span> 气泡 (Bubble)</div>
+                <div class="legend-item"><span class="swatch" style="background:#4fc3f7;"></span> IF</div>
+                <div class="legend-item"><span class="swatch" style="background:#b388ff;"></span> ID</div>
+                <div class="legend-item"><span class="swatch" style="background:#16c79a;"></span> EX</div>
+                <div class="legend-item"><span class="swatch" style="background:#ffab40;"></span> MEM</div>
+                <div class="legend-item"><span class="swatch" style="background:#ff80ab;"></span> WB</div>
+            </div>
+
+            <h3 style="margin-top:2rem;">自定义指令对 — 自动检测依赖</h3>
+            <p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:0.5rem;">
+                输入任意两条 RISC-V 指令，系统自动检测 RAW / WAR / WAW 依赖并显示时序图。
+            </p>
+            <div class="inst-input-row">
+                <span style="color:var(--text-muted);font-size:0.85rem;min-width:30px;">I1:</span>
+                <input type="text" id="custom-inst1" value="add x1, x2, x3" placeholder="如 add x1, x2, x3">
+            </div>
+            <div class="inst-input-row">
+                <span style="color:var(--text-muted);font-size:0.85rem;min-width:30px;">I2:</span>
+                <input type="text" id="custom-inst2" value="sub x4, x1, x5" placeholder="如 sub x4, x1, x5">
+            </div>
+            <button class="btn btn-primary" id="detect-dep-btn" style="margin-top:0.5rem;">检测依赖</button>
+            <div id="dep-result" style="margin-top:0.75rem;"></div>
+        </section>
+
+        <!-- ========================================================
+             Section 3: 前递/旁路
+             ======================================================== -->
+        <section class="section fade-in" id="sec-forwarding">
+            <div class="section-title">
+                <div class="icon" style="background:rgba(22,199,154,0.15);color:#16c79a;">&#x21C9;</div>
+                <h2>三、前递/旁路 (Forwarding / Bypassing)</h2>
+            </div>
+            <p>
+                前递（也叫旁路）是解决数据冒险最重要的硬件技术。
+                核心思想：<strong>数据在 ALU 运算完毕后立即转发给下一条需要它的指令</strong>，
+                而不等待走完整条流水线写回寄存器堆。
+            </p>
+            <div class="info-box" style="margin:1rem 0;">
+                <p>
+                    <strong>两种主要前递路径：</strong><br>
+                    &bull; <strong>EX/EX 前递</strong>：将上一周期 EX 阶段的 ALU 结果直接送入当前周期 EX 阶段的 ALU 输入<br>
+                    &bull; <strong>MEM/EX 前递</strong>：将上两个周期指令在 MEM 阶段读出的数据送入当前 EX 阶段<br>
+                    &bull; <strong>注意</strong>：<code>lw</code> (load) 指令的数据在 MEM 阶段末尾才可用，因此即使有前递，紧随其后使用该数据仍需 1 个停顿（load-use hazard）
+                </p>
+            </div>
+
+            <div class="control-row">
+                <label>前递开关：</label>
+                <label class="toggle">
+                    <input type="checkbox" id="forwarding-toggle" checked>
+                    <span class="track"></span>
+                </label>
+                <span id="forwarding-status" style="font-size:0.85rem;color:var(--accent-green);font-weight:600;">前递已开启</span>
+            </div>
+
+            <div class="side-compare" id="fwd-compare">
+                <div class="compare-panel" id="fwd-panel-on">
+                    <h4><span class="stall-tag green">有前递</span> 流水线时序</h4>
+                    <div class="table-scroll" id="fwd-on-diagram"></div>
+                    <div id="fwd-on-stats" class="stats-row"></div>
+                </div>
+                <div class="compare-panel" id="fwd-panel-off">
+                    <h4><span class="stall-tag red">无前递</span> 流水线时序</h4>
+                    <div class="table-scroll" id="fwd-off-diagram"></div>
+                    <div id="fwd-off-stats" class="stats-row"></div>
+                </div>
+            </div>
+
+            <h3 style="margin-top:2rem;">数据通路与前递路径</h3>
+            <p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:0.5rem;">
+                下图展示简化的五级流水线数据通路，绿色路径为 EX/EX 前递，橙色路径为 MEM/EX 前递。
+                冒险检测单元负责检查依赖并控制 MUX 选择正确数据源。
+            </p>
+            <div class="canvas-container" id="datapath-canvas-wrap">
+                <canvas id="datapath-canvas"></canvas>
+            </div>
+            <div class="datapath-legend">
+                <span><span class="legend-dot" style="background:#16c79a;"></span> EX/EX 前递路径</span>
+                <span><span class="legend-dot" style="background:#ffab40;"></span> MEM/EX 前递路径</span>
+                <span><span class="legend-dot" style="background:#4fc3f7;"></span> 正常数据流</span>
+                <span><span class="legend-dot" style="background:#ff5252;"></span> 冒险检测信号</span>
+            </div>
+        </section>
+
+        <!-- ========================================================
+             Section 4: 控制冒险
+             ======================================================== -->
+        <section class="section section-alt fade-in" id="sec-control">
+            <div class="section-title">
+                <div class="icon" style="background:rgba(255,171,64,0.15);color:#ffab40;">&#x1F500;</div>
+                <h2>四、控制冒险 (Control Hazards)</h2>
+            </div>
+            <p>
+                分支指令 (<code>beq</code>, <code>bne</code> 等) 的跳转结果在 EX 阶段末尾才能确定，
+                但流水线在 IF 阶段就需要知道下一条取哪个地址。
+                如果猜错了方向，已经进入流水线的指令必须被<strong>冲刷 (flush)</strong>。
+            </p>
+
+            <h4 style="margin:1rem 0 0.5rem;">选择分支处理策略：</h4>
+            <div class="strategy-tabs" id="strategy-tabs">
+                <button class="strategy-tab active" data-strategy="stall">停顿等待 (Stall)</button>
+                <button class="strategy-tab" data-strategy="not-taken">预测不跳转 (Not Taken)</button>
+                <button class="strategy-tab" data-strategy="taken">预测跳转 (Taken)</button>
+            </div>
+
+            <div id="control-diagram-area">
+                <div class="table-scroll" id="control-table-wrap"></div>
+                <div class="stats-row" id="control-stats"></div>
+            </div>
+
+            <div class="info-box" id="control-info" style="margin-top:1rem;">
+                <p id="control-info-text"></p>
+            </div>
+
+            <h4 style="margin-top:1.5rem;">惩罚对比</h4>
+            <div class="penalty-grid" id="penalty-grid">
+                <div class="penalty-card" data-strat="stall">
+                    <h5>停顿等待</h5>
+                    <div class="penalty-val">2 周期</div>
+                    <div class="penalty-desc">每条分支固定损失<br>简单但代价最高</div>
+                </div>
+                <div class="penalty-card" data-strat="not-taken">
+                    <h5>预测不跳转</h5>
+                    <div class="penalty-val">0 / 2</div>
+                    <div class="penalty-desc">正确: 0 | 错误: 2<br>循环中效果一般</div>
+                </div>
+                <div class="penalty-card" data-strat="taken">
+                    <h5>预测跳转</h5>
+                    <div class="penalty-val">1 / 2</div>
+                    <div class="penalty-desc">正确: 1 | 错误: 2<br>目标地址 ID 才可得</div>
+                </div>
+            </div>
+
+            <div class="info-box warning" style="margin-top:1.5rem;">
+                <p>
+                    <strong>延迟分支 (Delayed Branch)：</strong>
+                    编译器将分支前一条<strong>独立</strong>的指令移入分支延迟槽 (delay slot) 中，
+                    不论分支结果如何该指令都会被执行，从而"填充"原本浪费的停顿周期。
+                    MIPS 经典设计采用了此方案（1 个延迟槽），但现代架构（含 RISC-V）已不再使用延迟槽，
+                    转而依赖更高级的分支预测技术。
+                </p>
+            </div>
+        </section>
+
+        <!-- ========================================================
+             Section 5: 结构冒险
+             ======================================================== -->
+        <section class="section fade-in" id="sec-structural">
+            <div class="section-title">
+                <div class="icon" style="background:rgba(179,136,255,0.15);color:#b388ff;">&#x1F3D7;</div>
+                <h2>五、结构冒险 (Structural Hazards)</h2>
+            </div>
+            <p>
+                当多条指令在同一时钟周期需要访问<strong>同一硬件资源</strong>时，产生结构冒险。
+                最典型的例子是：第 i 条指令在 <strong>MEM 阶段</strong>访问存储器的同时，
+                第 i+3 条指令在 <strong>IF 阶段</strong>也要从同一个存储器取指。
+            </p>
+
+            <div class="info-box" style="margin:1rem 0;">
+                <p>
+                    <strong>解决方案：</strong><br>
+                    &bull; <strong>哈佛架构</strong> — 将指令存储器和数据存储器分开，各有独立端口<br>
+                    &bull; <strong>多端口存储器</strong> — 允许同时多次读写（硬件成本更高）<br>
+                    &bull; <strong>流水线停顿</strong> — 让其中一条指令等待（最简单但性能下降）
+                </p>
+            </div>
+
+            <h4>切换存储器架构：</h4>
+            <div class="memory-toggle-row">
+                <span class="memory-toggle-label" id="label-unified">统一存储器 (冯诺依曼)</span>
+                <label class="toggle">
+                    <input type="checkbox" id="memory-toggle" checked>
+                    <span class="track"></span>
+                </label>
+                <span class="memory-toggle-label active-label" id="label-split">分离存储器 (哈佛架构)</span>
+            </div>
+
+            <div class="table-scroll" id="structural-table-wrap"></div>
+            <div class="stats-row" id="structural-stats"></div>
+
+            <h3 style="margin-top:1.5rem;">资源占用时间线</h3>
+            <p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:0.5rem;">
+                每行代表一个硬件资源，每列为一个时钟周期。颜色对应使用该资源的指令。
+                红色边框表示资源冲突。
+            </p>
+            <div id="resource-timeline" style="background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:var(--radius-md);padding:1rem;"></div>
+        </section>
+
+        <!-- ========================================================
+             Section 6: 综合冒险分析器
+             ======================================================== -->
+        <section class="section section-alt fade-in" id="sec-analyzer">
+            <div class="section-title">
+                <div class="icon" style="background:rgba(22,199,154,0.15);color:#16c79a;">&#x1F50D;</div>
+                <h2>六、综合冒险分析器</h2>
+            </div>
+            <p>
+                输入一段 RISC-V 指令序列（每行一条，支持 4-6 条），
+                系统自动检测所有冒险类型，并生成有/无前递两种条件下的完整流水线时序图与性能统计。
+            </p>
+
+            <textarea class="analyzer-input" id="analyzer-input" placeholder="每行一条指令，例如：
+add x1, x2, x3
+sub x4, x1, x5
+lw x6, 0(x1)
+beq x6, x4, label
+and x7, x1, x6
+sw x7, 4(x1)">add x1, x2, x3
+sub x4, x1, x5
+lw x6, 0(x1)
+beq x6, x4, label
+and x7, x1, x6
+sw x7, 4(x1)</textarea>
+
+            <div class="control-row" style="margin-top:0.75rem;">
+                <button class="btn btn-primary" id="analyze-btn">&#x1F50D; 分析冒险</button>
+                <label class="toggle" style="margin-left:1rem;">
+                    <input type="checkbox" id="analyzer-fwd-toggle" checked>
+                    <span class="track"></span>
+                </label>
+                <span style="font-size:0.85rem;color:var(--text-secondary);">启用前递</span>
+            </div>
+
+            <div id="analyzer-hazards" style="margin-top:1rem;"></div>
+
+            <div class="side-compare" id="analyzer-compare" style="margin-top:1rem;">
+                <div class="compare-panel">
+                    <h4><span class="stall-tag green">有前递</span> 时序图</h4>
+                    <div class="table-scroll" id="analyzer-fwd-table"></div>
+                    <div class="stats-row" id="analyzer-fwd-stats"></div>
+                </div>
+                <div class="compare-panel">
+                    <h4><span class="stall-tag red">无前递</span> 时序图</h4>
+                    <div class="table-scroll" id="analyzer-nofwd-table"></div>
+                    <div class="stats-row" id="analyzer-nofwd-stats"></div>
+                </div>
+            </div>
+            <div id="speedup-area"></div>
+
+            <!-- Challenge mode -->
+            <div class="challenge-box">
+                <h4>&#x1F3AF; 挑战模式：指令调度 (Instruction Scheduling)</h4>
+                <p style="font-size:0.9rem;color:var(--text-secondary);margin-bottom:0.75rem;">
+                    拖拽重排指令顺序，在<strong>保持程序语义正确</strong>的前提下，尽量减少停顿周期。
+                    编译器优化中的指令调度正是利用这一思路来提升性能。
+                </p>
+                <div id="challenge-instructions"></div>
+                <div class="control-row" style="margin-top:0.75rem;">
+                    <button class="btn btn-primary" id="challenge-eval-btn">&#x2705; 评估方案</button>
+                    <button class="btn" id="challenge-reset-btn">&#x21BA; 重置顺序</button>
+                </div>
+                <div id="challenge-result" style="margin-top:0.75rem;"></div>
+            </div>
+        </section>
+
+    </div><!-- /.page-container -->
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    'use strict';
+
+    /* ==========================================================
+     *  Constants & Aliases
+     * ========================================================== */
+    const C = ISAUtils.COLORS;
+    const STAGES = ISAUtils.STAGES;
+    const STAGE_COLORS = ISAUtils.STAGE_COLORS;
+    const hexToRgba = ISAUtils.hexToRgba;
+
+    /* ==========================================================
+     *  Debounce utility
+     * ========================================================== */
+    function debounce(fn, ms) {
+        let t;
+        return function (...a) { clearTimeout(t); t = setTimeout(() => fn.apply(this, a), ms); };
+    }
+
+    /* ==========================================================
+     *  Instruction Parser
+     * ========================================================== */
+    function parseInstruction(text) {
+        text = text.trim().replace(/,/g, ' ').replace(/\s+/g, ' ');
+        if (!text) return null;
+        const parts = text.split(' ');
+        const op = parts[0].toLowerCase();
+        const operands = parts.slice(1);
+        let rd = null, rs1 = null, rs2 = null;
+
+        const isLoad = /^l[bhwd]u?$/.test(op);
+        const isStore = /^s[bhwd]$/.test(op);
+        const isBranch = /^b(eq|ne|lt|ge|ltu|geu)$/.test(op);
+        const isJal = op === 'jal';
+        const isJalr = op === 'jalr';
+
+        if (isLoad) {
+            rd = operands[0] || null;
+            const m = (operands[1] || '').match(/\((\w+)\)/);
+            rs1 = m ? m[1] : (operands[1] || null);
+        } else if (isStore) {
+            rs2 = operands[0] || null;
+            const m = (operands[1] || '').match(/\((\w+)\)/);
+            rs1 = m ? m[1] : (operands[1] || null);
+        } else if (isBranch) {
+            rs1 = operands[0] || null;
+            rs2 = operands[1] || null;
+        } else if (isJal) {
+            rd = operands[0] || null;
+        } else if (isJalr) {
+            rd = operands[0] || null;
+            rs1 = operands[1] || null;
+        } else if (op === 'lui' || op === 'auipc') {
+            rd = operands[0] || null;
+        } else {
+            // R-type or I-type arithmetic
+            rd = operands[0] || null;
+            rs1 = operands[1] || null;
+            if (operands[2] && /^x\d+$/.test(operands[2])) {
+                rs2 = operands[2];
+            }
+        }
+
+        return {
+            op, rd, rs1, rs2,
+            text: text,
+            isLoad, isStore,
+            isBranch: isBranch || isJal || isJalr,
+            raw: text
+        };
+    }
+
+    /* ==========================================================
+     *  Dependency detection (pair-wise)
+     * ========================================================== */
+    function detectDependencies(inst1, inst2) {
+        const deps = [];
+        const p1 = typeof inst1 === 'string' ? parseInstruction(inst1) : inst1;
+        const p2 = typeof inst2 === 'string' ? parseInstruction(inst2) : inst2;
+        if (!p1 || !p2) return deps;
+
+        // RAW: I1 writes rd, I2 reads that reg
+        if (p1.rd && p1.rd !== 'x0') {
+            if (p2.rs1 === p1.rd)
+                deps.push({ type: 'RAW', reg: p1.rd, detail: `I1 写 ${p1.rd}, I2 读 rs1=${p1.rd}` });
+            if (p2.rs2 === p1.rd)
+                deps.push({ type: 'RAW', reg: p1.rd, detail: `I1 写 ${p1.rd}, I2 读 rs2=${p1.rd}` });
+        }
+        // WAR: I1 reads, I2 writes same reg
+        if (p2.rd && p2.rd !== 'x0') {
+            if (p1.rs1 === p2.rd)
+                deps.push({ type: 'WAR', reg: p2.rd, detail: `I1 读 rs1=${p2.rd}, I2 写 ${p2.rd}` });
+            if (p1.rs2 === p2.rd)
+                deps.push({ type: 'WAR', reg: p2.rd, detail: `I1 读 rs2=${p2.rd}, I2 写 ${p2.rd}` });
+        }
+        // WAW: both write same reg
+        if (p1.rd && p2.rd && p1.rd === p2.rd && p1.rd !== 'x0') {
+            deps.push({ type: 'WAW', reg: p1.rd, detail: `I1 写 ${p1.rd}, I2 也写 ${p1.rd}` });
+        }
+        return deps;
+    }
+
+    /* ==========================================================
+     *  All-hazard detection for a sequence
+     * ========================================================== */
+    function detectAllHazards(instructions) {
+        const parsed = instructions.map(t => parseInstruction(t)).filter(Boolean);
+        const hazards = [];
+
+        for (let i = 0; i < parsed.length; i++) {
+            for (let j = i + 1; j < Math.min(i + 3, parsed.length); j++) {
+                const deps = detectDependencies(parsed[i], parsed[j]);
+                for (const d of deps) {
+                    if (d.type === 'RAW') {
+                        hazards.push({
+                            type: 'data', subtype: 'RAW',
+                            from: i, to: j,
+                            reg: d.reg, distance: j - i,
+                            detail: d.detail,
+                            isLoad: parsed[i].isLoad
+                        });
+                    }
+                }
+            }
+            if (parsed[i].isBranch) {
+                hazards.push({ type: 'control', at: i, detail: `${parsed[i].op} 分支指令` });
+            }
+        }
+
+        // Structural: IF and MEM simultaneous memory access
+        for (let i = 0; i < parsed.length; i++) {
+            if (parsed[i].isLoad || parsed[i].isStore) {
+                if (i + 3 < parsed.length) {
+                    hazards.push({
+                        type: 'structural', from: i, to: i + 3,
+                        detail: `I${i+1} 的 MEM 与 I${i+4} 的 IF 同时访问存储器`
+                    });
+                }
+            }
+        }
+
+        return { parsed, hazards };
+    }
+
+    /* ==========================================================
+     *  Stall computation
+     * ========================================================== */
+    function computeStalls(parsed, hazards, forwarding) {
+        const n = parsed.length;
+        if (n === 0) return { startCycle: [], totalCycles: 0, stallCount: 0, cpi: 1 };
+
+        const startCycle = new Array(n).fill(0);
+
+        for (let i = 1; i < n; i++) {
+            startCycle[i] = startCycle[i - 1] + 1;
+
+            for (const h of hazards) {
+                if (h.type === 'data' && h.subtype === 'RAW' && h.to === i) {
+                    const fs = startCycle[h.from];
+                    if (forwarding) {
+                        // With forwarding, only load-use causes 1 stall
+                        if (h.isLoad && h.distance === 1) {
+                            startCycle[i] = Math.max(startCycle[i], fs + 2);
+                        }
+                        // Non-load or distance>=2: 0 stalls with forwarding
+                    } else {
+                        // Without forwarding: must wait for WB
+                        if (h.distance === 1) {
+                            startCycle[i] = Math.max(startCycle[i],
+                                h.isLoad ? fs + 4 : fs + 3);
+                        } else if (h.distance === 2) {
+                            startCycle[i] = Math.max(startCycle[i],
+                                h.isLoad ? fs + 3 : fs + 2);
+                        }
+                    }
+                }
+                if (h.type === 'control' && h.at === i - 1) {
+                    const penalty = forwarding ? 2 : 3;
+                    startCycle[i] = Math.max(startCycle[i], startCycle[i - 1] + penalty);
+                }
+            }
+        }
+
+        const totalCycles = startCycle[n - 1] + 5;
+        const idealCycles = n + 4;
+        const stallCount = Math.max(0, totalCycles - idealCycles);
+        const cpi = totalCycles / n;
+
+        return { startCycle, totalCycles, stallCount, cpi };
+    }
+
+    /* ==========================================================
+     *  Pipeline table HTML generation
+     * ========================================================== */
+    function generatePipelineTable(instructions, startCycle, totalCycles, options) {
+        options = options || {};
+        const n = instructions.length;
+        const stageNames = ['IF', 'ID', 'EX', 'MEM', 'WB'];
+        const stageClasses = ['stage-if', 'stage-id', 'stage-ex', 'stage-mem', 'stage-wb'];
+
+        let html = '<table class="pipeline-table"><thead><tr><th style="min-width:120px;">指令</th>';
+        for (let c = 0; c < totalCycles; c++) {
+            html += `<th>C${c + 1}</th>`;
+        }
+        html += '</tr></thead><tbody>';
+
+        for (let i = 0; i < n; i++) {
+            const p = parseInstruction(instructions[i]);
+            const label = p ? p.text : instructions[i];
+            html += `<tr><td class="inst-label">${escapeHtml(label)}</td>`;
+
+            for (let c = 0; c < totalCycles; c++) {
+                const stageIdx = c - startCycle[i];
+                if (stageIdx >= 0 && stageIdx < 5) {
+                    let cls = stageClasses[stageIdx];
+                    let text = stageNames[stageIdx];
+
+                    // Check forwarding highlight
+                    if (options.forwardingPaths) {
+                        for (const fp of options.forwardingPaths) {
+                            if (fp.toInst === i && fp.toStage === stageIdx && fp.toCycle === c) {
+                                cls = 'forward-cell';
+                            }
+                        }
+                    }
+                    // Check flush
+                    if (options.flushCells) {
+                        for (const fc of options.flushCells) {
+                            if (fc.inst === i && fc.cycle === c) {
+                                cls = 'flush-cell';
+                            }
+                        }
+                    }
+                    html += `<td class="${cls}">${text}</td>`;
+                } else {
+                    // Bubble in stall region
+                    let isBubble = false;
+                    if (i > 0 && c >= startCycle[i - 1] + 1 && c < startCycle[i]) {
+                        isBubble = true;
+                    }
+                    html += isBubble
+                        ? '<td class="bubble-cell">&#x25CB;</td>'
+                        : '<td></td>';
+                }
+            }
+            html += '</tr>';
+        }
+        html += '</tbody></table>';
+        return html;
+    }
+
+    function escapeHtml(s) {
+        return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    function generateStatsHTML(totalCycles, instCount, stallCount, cpi) {
+        return `
+            <div class="stat-item">
+                <div class="stat-value">${totalCycles}</div>
+                <div class="stat-label">总周期数</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-value">${instCount}</div>
+                <div class="stat-label">指令数</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-value" style="color:#ff5252;">${stallCount}</div>
+                <div class="stat-label">停顿周期</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-value">${cpi.toFixed(2)}</div>
+                <div class="stat-label">CPI</div>
+            </div>`;
+    }
+
+    /* ==========================================================
+     *  Section 1: Three Types of Hazards — Cards
+     * ========================================================== */
+    function initSection1() {
+        const cardsData = [
+            {
+                type: 'data-h',
+                title: '数据冒险 (Data Hazard)',
+                iconSvg: `<svg width="32" height="32" viewBox="0 0 32 32" fill="none">
+                    <rect x="4" y="6" width="10" height="20" rx="2" fill="#ff5252" opacity="0.2" stroke="#ff5252" stroke-width="1.2"/>
+                    <rect x="18" y="6" width="10" height="20" rx="2" fill="#ff5252" opacity="0.2" stroke="#ff5252" stroke-width="1.2"/>
+                    <path d="M14 12h4" stroke="#ff5252" stroke-width="2.5" stroke-linecap="round"/>
+                    <path d="M14 16h4" stroke="#ff5252" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="3 2"/>
+                    <path d="M14 20h4" stroke="#ff5252" stroke-width="2.5" stroke-linecap="round"/>
+                    <circle cx="9" cy="12" r="1.5" fill="#ff5252"/><circle cx="23" cy="12" r="1.5" fill="#ff5252"/>
+                </svg>`,
+                brief: '后续指令依赖前面指令的运算结果，但结果尚未产生或写回寄存器堆。',
+                example: 'add x1, x2, x3  // 写 x1\nsub x4, x1, x5  // 读 x1 ← 数据还没准备好!',
+                detail: '最常见的冒险类型。当 I2 需要读取 I1 还未写回的寄存器值时，流水线必须插入停顿 (stall) 或使用前递 (forwarding) 来解决。距离越近，停顿周期越多。',
+                instructions: ['add x1, x2, x3', 'sub x4, x1, x5', 'and x7, x8, x9'],
+                hazards: [{ afterInst: 0, stallCycles: 2, type: 'data' }]
+            },
+            {
+                type: 'control-h',
+                title: '控制冒险 (Control Hazard)',
+                iconSvg: `<svg width="32" height="32" viewBox="0 0 32 32" fill="none">
+                    <path d="M4 16h12" stroke="#ffab40" stroke-width="2" stroke-linecap="round"/>
+                    <path d="M16 16l10-8" stroke="#ffab40" stroke-width="2" stroke-linecap="round"/>
+                    <path d="M16 16l10 8" stroke="#ffab40" stroke-width="2" stroke-linecap="round" stroke-dasharray="3 2" opacity="0.5"/>
+                    <circle cx="16" cy="16" r="3" fill="#ffab40" opacity="0.3" stroke="#ffab40" stroke-width="1.5"/>
+                    <text x="28" y="10" font-size="7" fill="#ffab40" font-weight="bold">?</text>
+                </svg>`,
+                brief: '分支指令的跳转方向未确定时，已经取出了可能错误的后续指令。',
+                example: 'beq x1, x2, target  // 是否跳转?\nadd x3, x4, x5      // 可能不该执行!\nor  x6, x7, x8      // 也可能是错的!',
+                detail: '分支指令在 EX 阶段末尾才能确定是否跳转。在此之前流水线已经按照顺序取了 1-2 条指令，如果分支实际跳转了，这些指令必须被冲刷 (flush)，造成周期浪费。',
+                instructions: ['beq x1, x2, target', 'add x3, x4, x5', 'or x6, x7, x8'],
+                hazards: [{ afterInst: 0, stallCycles: 2, type: 'control' }]
+            },
+            {
+                type: 'structural-h',
+                title: '结构冒险 (Structural Hazard)',
+                iconSvg: `<svg width="32" height="32" viewBox="0 0 32 32" fill="none">
+                    <rect x="10" y="4" width="12" height="24" rx="2" fill="#b388ff" opacity="0.12" stroke="#b388ff" stroke-width="1.5"/>
+                    <path d="M4 10h6" stroke="#b388ff" stroke-width="2" stroke-linecap="round"/>
+                    <path d="M22 10h6" stroke="#b388ff" stroke-width="2" stroke-linecap="round"/>
+                    <path d="M4 22h6" stroke="#b388ff" stroke-width="2" stroke-linecap="round"/>
+                    <path d="M22 22h6" stroke="#b388ff" stroke-width="2" stroke-linecap="round"/>
+                    <circle cx="16" cy="16" r="3" fill="#b388ff" opacity="0.4"/>
+                    <path d="M4 10L10 10" stroke="#ff5252" stroke-width="2" opacity="0.6"/>
+                    <path d="M4 22L10 22" stroke="#ff5252" stroke-width="2" opacity="0.6"/>
+                    <text x="13" y="18" font-size="8" fill="#b388ff" font-weight="bold">!</text>
+                </svg>`,
+                brief: '两条指令在同一周期争用同一硬件资源，如存储器端口或 ALU。',
+                example: 'lw x1, 0(x2)    // MEM阶段: 读数据存储器\n...              // ...\n...              // ...\nadd x5, x6, x7  // IF阶段: 取指 ← 与上面冲突!',
+                detail: '当指令存储器和数据存储器共享同一个端口时，IF 阶段的取指和 MEM 阶段的访存会冲突。解决方案：采用哈佛架构，将指令存储器和数据存储器分开。',
+                instructions: ['lw x1, 0(x2)', 'add x3, x4, x5', 'sub x6, x7, x8', 'and x9, x10, x11'],
+                hazards: [{ afterInst: 0, stallCycles: 1, type: 'structural' }]
+            }
+        ];
+
+        const container = document.getElementById('hazard-cards');
+        container.innerHTML = '';
+
+        cardsData.forEach((data, idx) => {
+            const card = document.createElement('div');
+            card.className = `hazard-card ${data.type}`;
+            card.innerHTML = `
+                <div class="card-icon">${data.iconSvg}</div>
+                <h3>${data.title}</h3>
+                <p class="card-brief">${data.brief}</p>
+                <div class="card-example">${data.example}</div>
+                <div class="card-detail">
+                    <p style="font-size:0.88rem;color:var(--text-secondary);margin-bottom:0.75rem;">${data.detail}</p>
+                    <div class="detail-canvas-wrap table-scroll" id="card-table-${idx}"></div>
+                </div>
+                <div class="expand-hint">&#x25BC; 点击展开时序图</div>
+            `;
+
+            card.addEventListener('click', () => {
+                const wasExpanded = card.classList.contains('expanded');
+                container.querySelectorAll('.hazard-card').forEach(c => c.classList.remove('expanded'));
+                if (!wasExpanded) {
+                    card.classList.add('expanded');
+                    const result = ISAUtils.createPipelineWithHazards(data.instructions, data.hazards);
+                    const tableHTML = generatePipelineTable(
+                        data.instructions, result.startCycle, result.totalCycles
+                    );
+                    document.getElementById(`card-table-${idx}`).innerHTML = tableHTML;
+                }
+            });
+
+            container.appendChild(card);
+        });
+
+        // Animated card icons
+        document.querySelectorAll('.hazard-card .card-icon').forEach((icon, i) => {
+            gsap.to(icon, {
+                scale: 1.06, duration: 1.5, yoyo: true,
+                repeat: -1, ease: 'sine.inOut', delay: i * 0.4
+            });
+        });
+    }
+
+    /* ==========================================================
+     *  Section 2: Data Hazards — Canvas visualization
+     * ========================================================== */
+    function initSection2() {
+        drawDataHazardCanvas();
+        window.addEventListener('resize', debounce(drawDataHazardCanvas, 200));
+        document.getElementById('detect-dep-btn').addEventListener('click', detectCustomDep);
+        // Also detect on Enter key
+        ['custom-inst1', 'custom-inst2'].forEach(id => {
+            document.getElementById(id).addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') detectCustomDep();
+            });
+        });
+    }
+
+    function drawDataHazardCanvas() {
+        const canvas = document.getElementById('data-hazard-canvas');
+        const { ctx, w, h } = ISAUtils.initCanvas(canvas, 340);
+        ctx.clearRect(0, 0, w, h);
+
+        const instructions = ['add x1, x2, x3', 'sub x4, x1, x5', 'and x7, x8, x9'];
+        const startCycle = [0, 3, 4]; // 2 stall bubbles for I2
+        const cellW = Math.min(52, (w - 170) / 9);
+        const cellH = 30;
+        const leftMargin = Math.min(150, w * 0.18);
+        const topMargin = 50;
+        const rowSpacing = cellH + 28;
+        const totalCycles = 9;
+
+        // Column headers
+        ctx.font = 'bold 11px "JetBrains Mono", monospace';
+        ctx.fillStyle = C.textMut;
+        ctx.textAlign = 'center';
+        for (let c = 0; c < totalCycles; c++) {
+            ctx.fillText(`C${c + 1}`, leftMargin + c * cellW + cellW / 2, topMargin - 12);
+        }
+
+        // Draw each instruction row
+        for (let i = 0; i < instructions.length; i++) {
+            const y = topMargin + i * rowSpacing;
+
+            // Label
+            ctx.font = 'bold 11px "JetBrains Mono", monospace';
+            ctx.fillStyle = C.textPri;
+            ctx.textAlign = 'right';
+            ctx.fillText(instructions[i], leftMargin - 12, y + cellH / 2 + 4);
+
+            // Pipeline stages
+            for (let s = 0; s < 5; s++) {
+                const cycle = startCycle[i] + s;
+                if (cycle < totalCycles) {
+                    const x = leftMargin + cycle * cellW;
+                    ISAUtils.drawPipelineStage(ctx, x + 1, y, cellW - 3, cellH, s, STAGES[s]);
+                }
+            }
+
+            // Draw stall bubbles between I1 and I2
+            if (i === 1) {
+                for (let c = 1; c < 3; c++) {
+                    const x = leftMargin + c * cellW;
+                    ctx.save();
+                    ctx.fillStyle = hexToRgba(C.stall, 0.12);
+                    ctx.strokeStyle = C.stall;
+                    ctx.lineWidth = 1.5;
+                    ctx.setLineDash([4, 3]);
+                    ctx.beginPath();
+                    ctx.roundRect(x + 1, y, cellW - 3, cellH, 4);
+                    ctx.fill();
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+
+                    ctx.font = 'bold 9px "JetBrains Mono", monospace';
+                    ctx.fillStyle = C.stall;
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText('stall', x + cellW / 2, y + cellH / 2);
+                    ctx.restore();
+                }
+            }
+        }
+
+        // Animated dependency arrow: I1.EX → I2.EX (showing RAW on x1)
+        const i1ExX = leftMargin + 2 * cellW + cellW / 2;  // I1 EX center (cycle 3)
+        const i1ExY = topMargin + cellH + 3;
+        const i2ExX = leftMargin + 5 * cellW + cellW / 2;  // I2 EX center (cycle 6)
+        const i2ExY = topMargin + rowSpacing - 3;
+
+        ctx.save();
+        ctx.strokeStyle = C.stall;
+        ctx.fillStyle = C.stall;
+        ctx.lineWidth = 2;
+        ctx.setLineDash([6, 3]);
+
+        // Draw curved dependency arrow
+        const cpx = Math.max(i1ExX, i2ExX) + 30;
+        const cpy = (i1ExY + i2ExY) / 2;
+        ctx.beginPath();
+        ctx.moveTo(i1ExX, i1ExY);
+        ctx.quadraticCurveTo(cpx, cpy, i2ExX, i2ExY);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Arrowhead
+        const angle = Math.atan2(i2ExY - cpy, i2ExX - cpx);
+        ctx.beginPath();
+        ctx.moveTo(i2ExX, i2ExY);
+        ctx.lineTo(i2ExX - 8 * Math.cos(angle - Math.PI / 6), i2ExY - 8 * Math.sin(angle - Math.PI / 6));
+        ctx.lineTo(i2ExX - 8 * Math.cos(angle + Math.PI / 6), i2ExY - 8 * Math.sin(angle + Math.PI / 6));
+        ctx.closePath();
+        ctx.fill();
+
+        // Label
+        ctx.font = 'bold 11px "Noto Sans SC", sans-serif';
+        ctx.fillStyle = C.stall;
+        ctx.textAlign = 'left';
+        ctx.fillText('RAW: x1', cpx + 5, cpy - 3);
+        ctx.restore();
+
+        // Annotation at bottom
+        ctx.save();
+        ctx.font = '12px "Noto Sans SC", sans-serif';
+        ctx.fillStyle = C.textMut;
+        ctx.textAlign = 'left';
+        ctx.fillText('I2 需等待 I1 将 x1 写回 (WB) 后才能在 ID 读取 → 2 个停顿', leftMargin, h - 25);
+        ctx.font = '11px "Noto Sans SC", sans-serif';
+        ctx.fillStyle = hexToRgba(C.green, 0.7);
+        ctx.fillText('使用前递可将停顿减为 0（非 load 指令时）', leftMargin, h - 8);
+        ctx.restore();
+    }
+
+    function detectCustomDep() {
+        const inst1 = document.getElementById('custom-inst1').value.trim();
+        const inst2 = document.getElementById('custom-inst2').value.trim();
+        if (!inst1 || !inst2) return;
+
+        const deps = detectDependencies(inst1, inst2);
+        const resultDiv = document.getElementById('dep-result');
+
+        if (deps.length === 0) {
+            resultDiv.innerHTML = '<div class="info-box success"><p>&#x2705; 未检测到数据依赖，两条指令可以无停顿地连续执行。</p></div>';
+            return;
+        }
+
+        let html = '<div style="margin-bottom:0.5rem;">';
+        deps.forEach(d => {
+            html += `<span class="dep-badge ${d.type.toLowerCase()}">${d.type}</span> `;
+        });
+        html += '</div>';
+
+        deps.forEach(d => {
+            html += `<p style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:0.25rem;">&bull; ${d.detail}</p>`;
+        });
+
+        const hasRAW = deps.some(d => d.type === 'RAW');
+        if (hasRAW) {
+            const p1 = parseInstruction(inst1);
+            const insts = [inst1, inst2];
+            const stallNoFwd = p1 && p1.isLoad ? 3 : 2;
+            const stallFwd = p1 && p1.isLoad ? 1 : 0;
+            const scNoFwd = [0, 1 + stallNoFwd];
+            const tcNoFwd = scNoFwd[1] + 5;
+            const scFwd = [0, 1 + stallFwd];
+            const tcFwd = scFwd[1] + 5;
+
+            html += '<div class="side-compare" style="margin-top:0.75rem;">';
+            html += '<div class="compare-panel"><h4><span class="stall-tag green">有前递</span></h4>';
+            html += '<div class="table-scroll">' + generatePipelineTable(insts, scFwd, tcFwd) + '</div>';
+            html += `<p style="font-size:0.82rem;color:var(--text-muted);">停顿: ${stallFwd} 周期</p></div>`;
+            html += '<div class="compare-panel"><h4><span class="stall-tag red">无前递</span></h4>';
+            html += '<div class="table-scroll">' + generatePipelineTable(insts, scNoFwd, tcNoFwd) + '</div>';
+            html += `<p style="font-size:0.82rem;color:var(--text-muted);">停顿: ${stallNoFwd} 周期</p></div>`;
+            html += '</div>';
+        }
+
+        resultDiv.innerHTML = html;
+    }
+
+    /* ==========================================================
+     *  Section 3: Forwarding / Bypassing
+     * ========================================================== */
+    function initSection3() {
+        document.getElementById('forwarding-toggle').addEventListener('change', updateForwardingSection);
+        updateForwardingSection();
+        drawDatapathCanvas();
+        window.addEventListener('resize', debounce(drawDatapathCanvas, 200));
+    }
+
+    function updateForwardingSection() {
+        const on = document.getElementById('forwarding-toggle').checked;
+        const status = document.getElementById('forwarding-status');
+        status.textContent = on ? '前递已开启' : '前递已关闭';
+        status.style.color = on ? C.green : C.stall;
+
+        const instructions = [
+            'add x1, x2, x3',
+            'sub x4, x1, x5',
+            'and x7, x1, x9',
+            'or x10, x11, x12'
+        ];
+
+        // With forwarding: no stalls (EX→EX for I2, MEM→EX for I3)
+        const scFwd = [0, 1, 2, 3];
+        const tcFwd = 8;
+        const fwdHTML = generatePipelineTable(instructions, scFwd, tcFwd, {
+            forwardingPaths: [
+                { toInst: 1, toStage: 2, toCycle: 3 },  // I2.EX gets from I1.EX result
+                { toInst: 2, toStage: 2, toCycle: 4 }   // I3.EX gets from I1.MEM result
+            ]
+        });
+        document.getElementById('fwd-on-diagram').innerHTML = fwdHTML;
+        document.getElementById('fwd-on-stats').innerHTML = generateStatsHTML(tcFwd, 4, 0, tcFwd / 4);
+
+        // Without forwarding: I2 waits 2 cycles, I3 waits 1 cycle
+        const scNoFwd = [0, 3, 5, 6];
+        const tcNoFwd = 11;
+        const noFwdHTML = generatePipelineTable(instructions, scNoFwd, tcNoFwd);
+        document.getElementById('fwd-off-diagram').innerHTML = noFwdHTML;
+        document.getElementById('fwd-off-stats').innerHTML =
+            generateStatsHTML(tcNoFwd, 4, tcNoFwd - 8, tcNoFwd / 4);
+
+        // Highlight active panel
+        document.getElementById('fwd-panel-on').style.borderColor =
+            on ? C.green : 'var(--border-color)';
+        document.getElementById('fwd-panel-off').style.borderColor =
+            !on ? C.stall : 'var(--border-color)';
+    }
+
+    function drawDatapathCanvas() {
+        const canvas = document.getElementById('datapath-canvas');
+        const { ctx, w, h } = ISAUtils.initCanvas(canvas, 420);
+        ctx.clearRect(0, 0, w, h);
+
+        const stageW = Math.min(95, (w - 100) / 5);
+        const stageH = 52;
+        const stageY = 110;
+        const startX = (w - stageW * 5 - 40) / 2;
+        const gap = 10;
+        const positions = [];
+
+        // Draw pipeline stages as rounded boxes
+        STAGES.forEach((name, i) => {
+            const x = startX + i * (stageW + gap);
+            positions.push({ x, y: stageY, w: stageW, h: stageH, cx: x + stageW / 2 });
+
+            ctx.save();
+            ctx.fillStyle = hexToRgba(STAGE_COLORS[i], 0.12);
+            ctx.strokeStyle = STAGE_COLORS[i];
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.roundRect(x, stageY, stageW, stageH, 8);
+            ctx.fill();
+            ctx.stroke();
+
+            ctx.fillStyle = STAGE_COLORS[i];
+            ctx.font = 'bold 15px "JetBrains Mono", monospace';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(name, x + stageW / 2, stageY + stageH / 2 - 6);
+
+            // Chinese name below
+            const cnNames = ['取指', '译码', '执行', '访存', '写回'];
+            ctx.font = '10px "Noto Sans SC", sans-serif';
+            ctx.fillStyle = hexToRgba(STAGE_COLORS[i], 0.7);
+            ctx.fillText(cnNames[i], x + stageW / 2, stageY + stageH / 2 + 12);
+            ctx.restore();
+
+            // Pipeline register between stages
+            if (i < 4) {
+                const sepX = x + stageW + gap / 2;
+                ctx.save();
+                ctx.strokeStyle = C.border;
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.moveTo(sepX, stageY - 18);
+                ctx.lineTo(sepX, stageY + stageH + 18);
+                ctx.stroke();
+
+                const regNames = ['IF/ID', 'ID/EX', 'EX/MEM', 'MEM/WB'];
+                ctx.font = '8px "JetBrains Mono", monospace';
+                ctx.fillStyle = C.textMut;
+                ctx.textAlign = 'center';
+                ctx.fillText(regNames[i], sepX, stageY - 26);
+                ctx.restore();
+            }
+        });
+
+        // Normal data flow arrows between stages
+        for (let i = 0; i < 4; i++) {
+            const from = positions[i];
+            const to = positions[i + 1];
+            ISAUtils.drawArrow(ctx,
+                from.x + from.w, stageY + stageH / 2,
+                to.x, stageY + stageH / 2,
+                hexToRgba(C.blue, 0.5), { width: 1.5 }
+            );
+        }
+
+        // MUX before EX stage input
+        const exP = positions[2];
+        const muxX = exP.x - 16;
+        const muxY = stageY + 6;
+        const muxW = 14;
+        const muxH = stageH - 12;
+
+        ctx.save();
+        ctx.fillStyle = hexToRgba(C.green, 0.25);
+        ctx.strokeStyle = C.green;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(muxX, muxY);
+        ctx.lineTo(muxX + muxW, muxY + 10);
+        ctx.lineTo(muxX + muxW, muxY + muxH - 10);
+        ctx.lineTo(muxX, muxY + muxH);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.font = 'bold 9px "JetBrains Mono", monospace';
+        ctx.fillStyle = C.green;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('MUX', muxX + muxW / 2, stageY + stageH / 2);
+        ctx.restore();
+
+        // Forwarding Unit box
+        const fuX = exP.x - 10;
+        const fuY = stageY + stageH + 70;
+        const fuW = positions[3].x + positions[3].w - fuX + 10;
+        const fuH = 38;
+
+        ctx.save();
+        ctx.fillStyle = hexToRgba(C.green, 0.08);
+        ctx.strokeStyle = C.green;
+        ctx.lineWidth = 2;
+        ctx.setLineDash([6, 3]);
+        ctx.beginPath();
+        ctx.roundRect(fuX, fuY, fuW, fuH, 8);
+        ctx.fill();
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        ctx.font = 'bold 12px "Noto Sans SC", sans-serif';
+        ctx.fillStyle = C.green;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('前递单元 (Forwarding Unit)', fuX + fuW / 2, fuY + fuH / 2);
+        ctx.restore();
+
+        // EX→EX forwarding path (green)
+        const exMemReg = positions[2].x + positions[2].w + gap / 2;
+        drawForwardingPath(ctx,
+            exMemReg, stageY + stageH + 5,
+            muxX + muxW / 2 - 2, muxY + 6,
+            C.green, 'EX→EX'
+        );
+
+        // MEM→EX forwarding path (orange)
+        const memWbReg = positions[3].x + positions[3].w + gap / 2;
+        drawForwardingPath(ctx,
+            memWbReg, stageY + stageH + 5,
+            muxX + muxW / 2 - 2, muxY + muxH - 6,
+            C.orange, 'MEM→EX'
+        );
+
+        // Hazard Detection Unit
+        const hdX = positions[1].x;
+        const hdY = stageY - 70;
+        const hdW = positions[1].w;
+        const hdH = 32;
+
+        ctx.save();
+        ctx.fillStyle = hexToRgba(C.stall, 0.1);
+        ctx.strokeStyle = C.stall;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.roundRect(hdX, hdY, hdW, hdH, 6);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.font = 'bold 10px "Noto Sans SC", sans-serif';
+        ctx.fillStyle = C.stall;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('冒险检测单元', hdX + hdW / 2, hdY + hdH / 2);
+        ctx.restore();
+
+        // Arrow from hazard detection down to pipeline
+        ISAUtils.drawArrow(ctx,
+            hdX + hdW / 2, hdY + hdH,
+            hdX + hdW / 2, stageY - 2,
+            C.stall, { dashed: true, width: 1.5 }
+        );
+
+        // Label: "Stall / Bubble"
+        ctx.save();
+        ctx.font = '9px "JetBrains Mono", monospace';
+        ctx.fillStyle = hexToRgba(C.stall, 0.7);
+        ctx.textAlign = 'left';
+        ctx.fillText('stall/bubble', hdX + hdW / 2 + 6, hdY + hdH + 14);
+        ctx.restore();
+
+        // Connection lines from FU to MUX control
+        ctx.save();
+        ctx.strokeStyle = hexToRgba(C.green, 0.4);
+        ctx.lineWidth = 1;
+        ctx.setLineDash([3, 3]);
+        ctx.beginPath();
+        ctx.moveTo(fuX + fuW / 2 - 30, fuY);
+        ctx.lineTo(muxX + muxW / 2, muxY + muxH + 3);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.font = '8px "JetBrains Mono", monospace';
+        ctx.fillStyle = hexToRgba(C.green, 0.6);
+        ctx.textAlign = 'center';
+        ctx.fillText('ForwardA/B', muxX - 5, fuY - 8);
+        ctx.restore();
+    }
+
+    function drawForwardingPath(ctx, fromX, fromY, toX, toY, color, label) {
+        ctx.save();
+        ctx.strokeStyle = color;
+        ctx.fillStyle = color;
+        ctx.lineWidth = 2.5;
+
+        const midY = Math.max(fromY, toY) + 35;
+
+        ctx.beginPath();
+        ctx.moveTo(fromX, fromY);
+        ctx.lineTo(fromX, midY);
+        ctx.lineTo(toX, midY);
+        ctx.lineTo(toX, toY + 8);
+        ctx.stroke();
+
+        // Arrowhead pointing up at toX, toY
+        ctx.beginPath();
+        ctx.moveTo(toX, toY);
+        ctx.lineTo(toX - 5, toY + 8);
+        ctx.lineTo(toX + 5, toY + 8);
+        ctx.closePath();
+        ctx.fill();
+
+        // Label
+        ctx.font = 'bold 10px "JetBrains Mono", monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText(label, (fromX + toX) / 2, midY - 6);
+        ctx.restore();
+    }
+
+    /* ==========================================================
+     *  Section 4: Control Hazards
+     * ========================================================== */
+    function initSection4() {
+        const tabs = document.querySelectorAll('#strategy-tabs .strategy-tab');
+        tabs.forEach(tab => {
+            tab.addEventListener('click', () => {
+                tabs.forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                updateControlDiagram(tab.dataset.strategy);
+            });
+        });
+        updateControlDiagram('stall');
+    }
+
+    function updateControlDiagram(strategy) {
+        const branchInst = 'beq x1, x2, L1';
+        // Instructions that would be fetched sequentially after branch
+        const seqInsts = ['add x3, x4, x5', 'sub x6, x7, x8'];
+        // Instructions at branch target
+        const targetInsts = ['and x9, x10, x11', 'or x12, x13, x14'];
+        // For this demo, assume branch IS taken
+        const branchTaken = true;
+
+        let instructions, startCycle, totalCycles, stallCount, info, options = {};
+
+        switch (strategy) {
+            case 'stall': {
+                // Stall 2 cycles until branch resolved at end of EX
+                instructions = [branchInst, ...targetInsts];
+                startCycle = [0, 3, 4];
+                totalCycles = 9;
+                stallCount = 2;
+                info = '<strong>停顿等待策略：</strong>检测到分支指令后，流水线暂停取指 2 个周期，等待 EX 阶段确定分支方向和目标地址。简单可靠，但每条分支固定损失 2 个周期。对于分支占比 20% 的程序，CPI 增加 0.4。';
+                break;
+            }
+            case 'not-taken': {
+                // Predict not taken: fetch sequential instructions
+                // Branch IS taken → flush those 2 sequential instructions
+                instructions = [branchInst, seqInsts[0] + ' [冲刷]', seqInsts[1] + ' [冲刷]', ...targetInsts];
+                startCycle = [0, 1, 2, 3, 4];
+                totalCycles = 9;
+                stallCount = 2;
+                options.flushCells = [
+                    { inst: 1, cycle: 1 }, { inst: 1, cycle: 2 },
+                    { inst: 2, cycle: 2 }, { inst: 2, cycle: 3 }
+                ];
+                info = '<strong>预测不跳转策略：</strong>假设分支不会跳转，继续顺序取指。若预测正确（分支实际不跳转），0 停顿；若预测错误（如此例），已取的 2 条指令被冲刷，损失 2 个周期。平均惩罚 = 分支跳转概率 x 2。';
+                break;
+            }
+            case 'taken': {
+                // Predict taken: start fetching from target
+                // But target address only available after ID → 1 cycle delay
+                instructions = [branchInst, ...targetInsts];
+                startCycle = [0, 2, 3];
+                totalCycles = 8;
+                stallCount = 1;
+                info = '<strong>预测跳转策略：</strong>假设分支会跳转，但分支目标地址最早在 ID 阶段末尾才能计算出来，因此即使预测正确，仍有 1 个周期的延迟（无法在 IF 阶段就知道目标）。若预测错误，需冲刷并损失更多。';
+                break;
+            }
+        }
+
+        const n = instructions.length;
+        const tableHTML = generatePipelineTable(instructions, startCycle, totalCycles, options);
+        document.getElementById('control-table-wrap').innerHTML = tableHTML;
+
+        const cpi = totalCycles / n;
+        document.getElementById('control-stats').innerHTML = generateStatsHTML(totalCycles, n, stallCount, cpi);
+
+        document.getElementById('control-info-text').innerHTML = info;
+
+        // Highlight the active penalty card
+        document.querySelectorAll('.penalty-card').forEach(card => {
+            card.classList.toggle('active-penalty', card.dataset.strat === strategy);
+        });
+    }
+
+    /* ==========================================================
+     *  Section 5: Structural Hazards
+     * ========================================================== */
+    function initSection5() {
+        document.getElementById('memory-toggle').addEventListener('change', updateStructuralSection);
+        updateStructuralSection();
+    }
+
+    function updateStructuralSection() {
+        const split = document.getElementById('memory-toggle').checked;
+        document.getElementById('label-unified').classList.toggle('active-label', !split);
+        document.getElementById('label-split').classList.toggle('active-label', split);
+
+        const instructions = [
+            'lw x1, 0(x2)',
+            'add x3, x4, x5',
+            'sub x6, x7, x8',
+            'sw x9, 4(x2)',
+            'or x10, x11, x12'
+        ];
+
+        let startCycle, totalCycles, stallCount;
+
+        if (split) {
+            // Harvard architecture: no structural hazards
+            startCycle = [0, 1, 2, 3, 4];
+            totalCycles = 9;
+            stallCount = 0;
+        } else {
+            // Unified memory: IF and MEM port conflict at cycle 3
+            // lw MEM at cycle 3 conflicts with instruction 3's IF at cycle 3
+            startCycle = [0, 1, 2, 4, 5];
+            totalCycles = 10;
+            stallCount = 1;
+        }
+
+        const n = instructions.length;
+        const tableHTML = generatePipelineTable(instructions, startCycle, totalCycles);
+        document.getElementById('structural-table-wrap').innerHTML = tableHTML;
+
+        const cpi = totalCycles / n;
+        document.getElementById('structural-stats').innerHTML = generateStatsHTML(totalCycles, n, stallCount, cpi);
+
+        drawResourceTimeline(instructions, startCycle, totalCycles, split);
+    }
+
+    function drawResourceTimeline(instructions, startCycle, totalCycles, split) {
+        const container = document.getElementById('resource-timeline');
+        const n = instructions.length;
+
+        const resources = split
+            ? ['指令存储器', '数据存储器', '寄存器堆', 'ALU']
+            : ['统一存储器', '寄存器堆', 'ALU'];
+
+        // Build usage map
+        const usage = {};
+        resources.forEach(r => { usage[r] = new Array(totalCycles).fill(null); });
+
+        for (let i = 0; i < n; i++) {
+            const parsed = parseInstruction(instructions[i]);
+            const sc = startCycle[i];
+
+            // IF: instruction memory
+            const ifRes = split ? '指令存储器' : '统一存储器';
+            if (sc < totalCycles) {
+                if (usage[ifRes][sc] && !split) {
+                    // Conflict!
+                    usage[ifRes][sc] = { inst: i, stage: 'IF!', color: '#ff5252', conflict: true };
+                } else {
+                    usage[ifRes][sc] = { inst: i, stage: 'IF', color: STAGE_COLORS[0] };
+                }
+            }
+
+            // ID: register read
+            if (sc + 1 < totalCycles) {
+                usage['寄存器堆'][sc + 1] = { inst: i, stage: 'ID', color: STAGE_COLORS[1] };
+            }
+
+            // EX: ALU
+            if (sc + 2 < totalCycles) {
+                usage['ALU'][sc + 2] = { inst: i, stage: 'EX', color: STAGE_COLORS[2] };
+            }
+
+            // MEM: data memory (only for load/store)
+            if (sc + 3 < totalCycles && (parsed.isLoad || parsed.isStore)) {
+                const memRes = split ? '数据存储器' : '统一存储器';
+                if (usage[memRes][sc + 3] && !split) {
+                    usage[memRes][sc + 3] = { inst: i, stage: 'MEM!', color: '#ff5252', conflict: true };
+                } else {
+                    usage[memRes][sc + 3] = { inst: i, stage: 'MEM', color: STAGE_COLORS[3] };
+                }
+            }
+
+            // WB: register write
+            if (sc + 4 < totalCycles && parsed.rd) {
+                // Could mark register file usage in WB too
+            }
+        }
+
+        let html = '';
+        resources.forEach(res => {
+            html += '<div class="resource-row">';
+            html += `<div class="resource-label">${res}</div>`;
+            html += '<div class="resource-bar">';
+            for (let c = 0; c < totalCycles; c++) {
+                const u = usage[res][c];
+                if (u) {
+                    const bg = hexToRgba(u.color, 0.3);
+                    const border = u.conflict
+                        ? '2px solid #ff5252; box-shadow: inset 0 0 6px rgba(255,82,82,0.4)'
+                        : `1px solid ${u.color}`;
+                    html += `<div class="resource-cell" style="background:${bg};border:${border};color:${u.color};" title="I${u.inst+1} ${u.stage}">I${u.inst+1}</div>`;
+                } else {
+                    html += '<div class="resource-cell" style="background:rgba(42,42,74,0.2);border:1px solid rgba(42,42,74,0.4);color:var(--text-muted);">-</div>';
+                }
+            }
+            html += '</div></div>';
+        });
+
+        // Cycle labels
+        html += '<div class="resource-row"><div class="resource-label" style="color:var(--text-muted);">周期</div><div class="resource-bar">';
+        for (let c = 0; c < totalCycles; c++) {
+            html += `<div class="resource-cell" style="color:var(--text-muted);font-size:0.7rem;border:none;">C${c+1}</div>`;
+        }
+        html += '</div></div>';
+
+        container.innerHTML = html;
+    }
+
+    /* ==========================================================
+     *  Section 6: Comprehensive Hazard Analyzer
+     * ========================================================== */
+    let challengeOriginalOrder = [];
+
+    function initSection6() {
+        document.getElementById('analyze-btn').addEventListener('click', runAnalyzer);
+        document.getElementById('challenge-eval-btn').addEventListener('click', evaluateChallenge);
+        document.getElementById('challenge-reset-btn').addEventListener('click', resetChallenge);
+        runAnalyzer();
+    }
+
+    function runAnalyzer() {
+        const text = document.getElementById('analyzer-input').value.trim();
+        const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+
+        if (lines.length === 0) {
+            document.getElementById('analyzer-hazards').innerHTML =
+                '<p style="color:var(--text-muted);">请输入至少一条指令。</p>';
+            return;
+        }
+
+        const { parsed, hazards } = detectAllHazards(lines);
+
+        // Show detected hazards
+        let hzHTML = '<h4 style="margin-bottom:0.75rem;">检测到的冒险：</h4>';
+        if (hazards.length === 0) {
+            hzHTML += '<div class="info-box success"><p>&#x2705; 未检测到冒险，所有指令可无停顿执行。</p></div>';
+        } else {
+            hzHTML += '<div style="display:flex;flex-wrap:wrap;gap:0.3rem;">';
+            hazards.forEach(h => {
+                if (h.type === 'data') {
+                    hzHTML += `<span class="hazard-annotation data">${h.subtype} I${h.from+1}&#x2192;I${h.to+1} (${h.reg})</span>`;
+                } else if (h.type === 'control') {
+                    hzHTML += `<span class="hazard-annotation control">&#x1F500; 控制 I${h.at+1}</span>`;
+                } else if (h.type === 'structural') {
+                    hzHTML += `<span class="hazard-annotation structural">&#x1F3D7; 结构 I${h.from+1}/I${h.to+1}</span>`;
+                }
+            });
+            hzHTML += '</div>';
+        }
+        document.getElementById('analyzer-hazards').innerHTML = hzHTML;
+
+        // With forwarding
+        const fwd = computeStalls(parsed, hazards, true);
+        document.getElementById('analyzer-fwd-table').innerHTML =
+            generatePipelineTable(lines, fwd.startCycle, fwd.totalCycles);
+        document.getElementById('analyzer-fwd-stats').innerHTML =
+            generateStatsHTML(fwd.totalCycles, lines.length, fwd.stallCount, fwd.cpi);
+
+        // Without forwarding
+        const noFwd = computeStalls(parsed, hazards, false);
+        document.getElementById('analyzer-nofwd-table').innerHTML =
+            generatePipelineTable(lines, noFwd.startCycle, noFwd.totalCycles);
+        document.getElementById('analyzer-nofwd-stats').innerHTML =
+            generateStatsHTML(noFwd.totalCycles, lines.length, noFwd.stallCount, noFwd.cpi);
+
+        // Speedup
+        const speedupArea = document.getElementById('speedup-area');
+        if (noFwd.totalCycles > 0 && fwd.totalCycles > 0) {
+            const speedup = noFwd.totalCycles / fwd.totalCycles;
+            const saved = noFwd.stallCount - fwd.stallCount;
+            speedupArea.innerHTML = `
+                <div class="info-box success" style="margin-top:1rem;">
+                    <p>
+                        <strong>前递加速比：</strong>${speedup.toFixed(2)}x &nbsp;|&nbsp;
+                        节省 <strong>${saved}</strong> 个停顿周期 &nbsp;|&nbsp;
+                        CPI 从 ${noFwd.cpi.toFixed(2)} 降至 ${fwd.cpi.toFixed(2)}
+                    </p>
+                </div>`;
+        } else {
+            speedupArea.innerHTML = '';
+        }
+
+        // Setup challenge
+        challengeOriginalOrder = [...lines];
+        renderChallengeList(lines, document.getElementById('challenge-instructions'));
+    }
+
+    function renderChallengeList(lines, container) {
+        container.innerHTML = '';
+        lines.forEach((line, idx) => {
+            const div = document.createElement('div');
+            div.className = 'drag-inst';
+            div.draggable = true;
+            div.dataset.idx = idx;
+            div.innerHTML = `
+                <span class="drag-handle">&#x2630;</span>
+                <span style="color:var(--text-muted);min-width:28px;font-size:0.8rem;">I${idx+1}</span>
+                <code style="flex:1;">${escapeHtml(line)}</code>`;
+
+            div.addEventListener('dragstart', (e) => {
+                e.dataTransfer.setData('text/plain', idx.toString());
+                div.classList.add('dragging');
+            });
+            div.addEventListener('dragend', () => {
+                div.classList.remove('dragging');
+            });
+            div.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+            });
+            div.addEventListener('drop', (e) => {
+                e.preventDefault();
+                const fromIdx = parseInt(e.dataTransfer.getData('text/plain'));
+                const toIdx = parseInt(div.dataset.idx);
+                if (fromIdx !== toIdx) {
+                    const items = getChallengeOrder(container);
+                    const [moved] = items.splice(fromIdx, 1);
+                    items.splice(toIdx > fromIdx ? toIdx : toIdx, 0, moved);
+                    renderChallengeList(items, container);
+                }
+            });
+
+            container.appendChild(div);
+        });
+    }
+
+    function getChallengeOrder(container) {
+        const items = [];
+        container.querySelectorAll('.drag-inst code').forEach(c => items.push(c.textContent));
+        return items;
+    }
+
+    function evaluateChallenge() {
+        const container = document.getElementById('challenge-instructions');
+        const currentOrder = getChallengeOrder(container);
+        const resultDiv = document.getElementById('challenge-result');
+
+        if (currentOrder.length === 0) {
+            resultDiv.innerHTML = '<p style="color:var(--text-muted);">没有指令可评估。</p>';
+            return;
+        }
+
+        // Original score
+        const { parsed: op, hazards: oh } = detectAllHazards(challengeOriginalOrder);
+        const origResult = computeStalls(op, oh, true);
+
+        // New score
+        const { parsed: np, hazards: nh } = detectAllHazards(currentOrder);
+        const newResult = computeStalls(np, nh, true);
+
+        const improvement = origResult.stallCount - newResult.stallCount;
+        const color = improvement > 0 ? C.green : (improvement < 0 ? C.stall : C.orange);
+
+        let html = '<div style="padding:1rem;background:var(--bg-secondary);border-radius:var(--radius-md);border:1px solid var(--border-color);">';
+
+        if (improvement > 0) {
+            html += `<p style="font-size:1rem;font-weight:700;color:${color};margin-bottom:0.5rem;">&#x1F389; 优秀！减少了 ${improvement} 个停顿周期</p>`;
+        } else if (improvement < 0) {
+            html += `<p style="font-size:1rem;font-weight:700;color:${color};margin-bottom:0.5rem;">&#x26A0; 停顿增加了 ${Math.abs(improvement)} 个周期，请重新调整</p>`;
+        } else {
+            html += `<p style="font-size:1rem;font-weight:700;color:${color};margin-bottom:0.5rem;">&#x2796; 停顿数未变化</p>`;
+        }
+
+        html += '<div class="stats-row">';
+        html += `<div class="stat-item"><div class="stat-value" style="color:var(--text-muted);">${origResult.stallCount}</div><div class="stat-label">原始停顿</div></div>`;
+        html += `<div class="stat-item"><div class="stat-value" style="color:${color};">${newResult.stallCount}</div><div class="stat-label">当前停顿</div></div>`;
+        html += `<div class="stat-item"><div class="stat-value">${newResult.totalCycles}</div><div class="stat-label">总周期</div></div>`;
+        html += `<div class="stat-item"><div class="stat-value">${newResult.cpi.toFixed(2)}</div><div class="stat-label">CPI</div></div>`;
+        html += '</div>';
+
+        html += '<div class="table-scroll" style="margin-top:0.75rem;">';
+        html += generatePipelineTable(currentOrder, newResult.startCycle, newResult.totalCycles);
+        html += '</div>';
+
+        // Show detected hazards in new order
+        if (nh.length > 0) {
+            html += '<div style="margin-top:0.5rem;display:flex;flex-wrap:wrap;gap:0.3rem;">';
+            nh.forEach(h => {
+                if (h.type === 'data') {
+                    html += `<span class="hazard-annotation data">${h.subtype} I${h.from+1}&#x2192;I${h.to+1}</span>`;
+                } else if (h.type === 'control') {
+                    html += `<span class="hazard-annotation control">控制 I${h.at+1}</span>`;
+                }
+            });
+            html += '</div>';
+        }
+
+        html += '</div>';
+        resultDiv.innerHTML = html;
+    }
+
+    function resetChallenge() {
+        renderChallengeList([...challengeOriginalOrder], document.getElementById('challenge-instructions'));
+        document.getElementById('challenge-result').innerHTML = '';
+    }
+
+    /* ==========================================================
+     *  Scroll animations
+     * ========================================================== */
+    function initScrollAnimations() {
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.classList.add('visible');
+                }
+            });
+        }, { threshold: 0.08, rootMargin: '0px 0px -40px 0px' });
+
+        document.querySelectorAll('.fade-in').forEach(el => observer.observe(el));
+    }
+
+    /* ==========================================================
+     *  KaTeX auto-render
+     * ========================================================== */
+    function initKaTeX() {
+        if (typeof renderMathInElement === 'function') {
+            renderMathInElement(document.body, {
+                delimiters: [
+                    { left: '$$', right: '$$', display: true },
+                    { left: '$', right: '$', display: false },
+                ],
+                throwOnError: false
+            });
+        }
+    }
+
+    /* ==========================================================
+     *  Boot everything
+     * ========================================================== */
+    initSection1();
+    initSection2();
+    initSection3();
+    initSection4();
+    initSection5();
+    initSection6();
+    initScrollAnimations();
+
+    if (document.readyState === 'complete') {
+        initKaTeX();
+    } else {
+        window.addEventListener('load', initKaTeX);
+    }
+});
+</script>
+</body>
+</html>

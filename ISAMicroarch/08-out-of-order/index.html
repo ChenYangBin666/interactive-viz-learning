@@ -1,0 +1,1970 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>乱序执行 — 指令集与微架构</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=JetBrains+Mono:wght@400;600;700&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<link rel="stylesheet" href="../shared/styles/common.css">
+<link rel="stylesheet" href="../shared/styles/components.css">
+<style>
+/* ===== Page-specific styles ===== */
+.hero {
+    text-align: center;
+    padding: 3rem 1rem 2rem;
+}
+.hero h1 {
+    font-size: 2.4rem;
+    background: linear-gradient(135deg, var(--accent-green), var(--accent-blue));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin-bottom: 0.5rem;
+}
+.hero .subtitle {
+    color: var(--text-secondary);
+    font-size: 1.1rem;
+    max-width: 700px;
+    margin: 0 auto;
+}
+
+.section-alt {
+    background: var(--bg-secondary);
+    margin-left: -2rem;
+    margin-right: -2rem;
+    padding: 2.5rem 2rem;
+    border-top: 1px solid var(--border-color);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.controls-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 0.75rem 0;
+}
+
+.status-bar {
+    font-family: var(--font-mono);
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    padding: 0.5rem 0.75rem;
+    background: rgba(15, 52, 96, 0.4);
+    border-radius: var(--radius-sm);
+    margin-top: 0.5rem;
+    min-height: 2rem;
+    line-height: 1.6;
+}
+
+.metric-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    margin-top: 0.75rem;
+}
+.metric {
+    flex: 1;
+    min-width: 120px;
+    text-align: center;
+    padding: 0.75rem;
+    background: var(--bg-card);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-color);
+}
+.metric .val {
+    font-family: var(--font-mono);
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--accent-green);
+}
+.metric .lbl {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    margin-top: 0.2rem;
+}
+
+.inst-list {
+    font-family: var(--font-mono);
+    font-size: 0.82rem;
+    list-style: none;
+    padding: 0;
+}
+.inst-list li {
+    padding: 0.3rem 0.5rem;
+    border-radius: 3px;
+    margin-bottom: 2px;
+    color: var(--text-secondary);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+.inst-list li .idx {
+    color: var(--text-muted);
+    min-width: 1.5rem;
+}
+.inst-list li.active {
+    background: rgba(22,199,154,0.12);
+    color: var(--accent-green);
+}
+.inst-list li.done {
+    color: var(--text-muted);
+    text-decoration: line-through;
+    opacity: 0.6;
+}
+
+.rs-table, .rob-table, .rat-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    margin-top: 0.5rem;
+}
+.rs-table th, .rob-table th, .rat-table th {
+    background: var(--bg-card);
+    color: var(--accent-blue);
+    padding: 0.4rem 0.5rem;
+    text-align: center;
+    border: 1px solid var(--border-color);
+    font-weight: 600;
+    position: sticky;
+    top: 0;
+}
+.rs-table td, .rob-table td, .rat-table td {
+    padding: 0.35rem 0.5rem;
+    text-align: center;
+    border: 1px solid rgba(42,42,74,0.5);
+    transition: background 0.3s;
+}
+.rs-table tr.busy td {
+    background: rgba(255,215,64,0.08);
+}
+.rob-table tr.pending td {
+    background: rgba(255,215,64,0.1);
+}
+.rob-table tr.ready td {
+    background: rgba(22,199,154,0.12);
+}
+.rob-table tr.committed td {
+    background: rgba(79,195,247,0.1);
+}
+
+.tag-val {
+    color: var(--accent-orange);
+    font-weight: 600;
+}
+.ready-val {
+    color: var(--accent-green);
+    font-weight: 600;
+}
+.empty-val {
+    color: var(--text-muted);
+}
+
+select.inst-select {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-size: 0.82rem;
+    padding: 0.35rem 0.5rem;
+    cursor: pointer;
+}
+select.inst-select:focus {
+    outline: none;
+    border-color: var(--accent-green);
+}
+
+.pipe-stage-label {
+    display: inline-block;
+    padding: 0.15rem 0.5rem;
+    border-radius: 3px;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.concept-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1rem;
+    margin-top: 1rem;
+}
+.concept-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 1rem;
+    transition: border-color 0.3s;
+}
+.concept-card:hover {
+    border-color: var(--accent-green);
+}
+.concept-card h4 {
+    color: var(--accent-green);
+    font-size: 0.95rem;
+    margin-bottom: 0.4rem;
+}
+.concept-card p {
+    font-size: 0.82rem;
+    margin: 0;
+}
+
+@media (max-width: 768px) {
+    .section-alt {
+        margin-left: -1rem;
+        margin-right: -1rem;
+        padding: 2rem 1rem;
+    }
+    .hero h1 { font-size: 1.8rem; }
+}
+</style>
+</head>
+<body>
+<!-- nav.js auto-injects navigation -->
+<div class="page-container">
+
+<!-- ===== Hero ===== -->
+<div class="hero">
+    <h1>乱序执行</h1>
+    <p class="subtitle">Out-of-Order Execution — 打破顺序执行的瓶颈，让处理器在指令阻塞时跳过等待、执行就绪指令，大幅提升指令级并行度</p>
+</div>
+
+<!-- ===== Section 1: 为什么乱序 ===== -->
+<div class="section" id="sec-why">
+    <div class="section-title">
+        <div class="icon">1</div>
+        <h2>为什么需要乱序执行</h2>
+    </div>
+    <div class="split-layout">
+        <div class="text-panel">
+            <p>在<strong>顺序执行 (In-Order)</strong> 处理器中，一条指令若因缓存未命中等原因而停顿，其后所有指令都必须等待——即使它们的操作数已经就绪。</p>
+            <p><strong>乱序执行 (Out-of-Order, OoO)</strong> 允许处理器跳过被阻塞的指令，先执行后续就绪指令，最后再按程序顺序提交结果，从而大幅提升吞吐量。</p>
+            <div class="info-box">
+                <p>关键思想：<strong>乱序执行、顺序提交</strong>。执行可以不按顺序，但结果必须按程序顺序对外可见，以保证精确异常。</p>
+            </div>
+            <div class="controls-bar">
+                <button class="btn btn-primary" id="whyPlayBtn">播放对比</button>
+                <button class="btn" id="whyResetBtn">重置</button>
+                <span class="text-sm text-muted" id="whyStatus">点击播放查看顺序 vs 乱序对比</span>
+            </div>
+            <div class="metric-row" id="whyMetrics">
+                <div class="metric"><div class="val" id="whyInOrderCycles">-</div><div class="lbl">顺序周期数</div></div>
+                <div class="metric"><div class="val" id="whyOoOCycles">-</div><div class="lbl">乱序周期数</div></div>
+                <div class="metric"><div class="val" id="whySpeedup">-</div><div class="lbl">加速比</div></div>
+            </div>
+        </div>
+        <div class="viz-panel">
+            <div class="canvas-wrap">
+                <canvas id="whyCanvas"></canvas>
+            </div>
+            <div class="legend">
+                <div class="legend-item"><div class="swatch" style="background:#16c79a"></div>执行中</div>
+                <div class="legend-item"><div class="swatch" style="background:#ff5252"></div>停顿</div>
+                <div class="legend-item"><div class="swatch" style="background:#ffd740"></div>等待中</div>
+                <div class="legend-item"><div class="swatch" style="background:#4fc3f7"></div>已完成</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ===== Section 2: Tomasulo 算法 ===== -->
+<div class="section section-alt" id="sec-tomasulo">
+    <div class="section-title">
+        <div class="icon">2</div>
+        <h2>Tomasulo 算法</h2>
+    </div>
+    <p>1967年，Robert Tomasulo 为 IBM 360/91 浮点单元设计了这一算法。它通过<strong>保留站</strong>和<strong>公共数据总线 (CDB)</strong> 实现寄存器重命名与动态调度，是现代乱序处理器的理论基石。</p>
+    <div class="info-box">
+        <p>Tomasulo 三阶段：<strong>发射 (Issue)</strong> — 指令进入保留站；<strong>执行 (Execute)</strong> — 操作数就绪后开始计算；<strong>写回 (Write Result)</strong> — 通过 CDB 广播结果。</p>
+    </div>
+    <div class="split-layout">
+        <div class="text-panel">
+            <h3>指令序列</h3>
+            <ul class="inst-list" id="tomasuloInstList"></ul>
+            <div class="controls-bar">
+                <button class="btn btn-primary" id="tomasuloStepBtn">单步执行</button>
+                <button class="btn" id="tomasuloAutoBtn">自动播放</button>
+                <button class="btn" id="tomasuloResetBtn">重置</button>
+            </div>
+            <div class="status-bar" id="tomasuloStatus">点击"单步执行"开始 Tomasulo 模拟</div>
+        </div>
+        <div class="viz-panel">
+            <div class="canvas-wrap">
+                <canvas id="tomasuloCanvas"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ===== Section 3: 保留站 ===== -->
+<div class="section" id="sec-rs">
+    <div class="section-title">
+        <div class="icon">3</div>
+        <h2>保留站详解</h2>
+    </div>
+    <p>保留站是乱序执行的核心缓冲区。每个保留站条目保存一条已发射但尚未执行的指令及其操作数状态。当操作数还未就绪时，记录<strong>标签 (Tag)</strong> 来追踪数据来源；当 CDB 广播结果时，标签匹配的条目自动捕获数据。</p>
+    <div class="info-box success">
+        <p>保留站隐式实现了寄存器重命名：通过标签追踪数据流而非寄存器名，消除了 WAR 和 WAW 伪依赖。</p>
+    </div>
+    <div class="split-layout">
+        <div class="text-panel">
+            <h3>保留站结构</h3>
+            <div style="overflow-x:auto">
+                <table class="rs-table" id="rsTable">
+                    <thead>
+                        <tr><th>名称</th><th>Busy</th><th>Op</th><th>Vj</th><th>Vk</th><th>Qj</th><th>Qk</th></tr>
+                    </thead>
+                    <tbody id="rsTableBody"></tbody>
+                </table>
+            </div>
+            <div class="controls-bar">
+                <select class="inst-select" id="rsInstSelect">
+                    <option value="add x1, x2, x3">ADD x1, x2, x3</option>
+                    <option value="sub x4, x1, x5">SUB x4, x1, x5</option>
+                    <option value="mul x6, x4, x7">MUL x6, x4, x7</option>
+                    <option value="add x8, x6, x2">ADD x8, x6, x2</option>
+                </select>
+                <button class="btn btn-primary" id="rsIssueBtn">发射指令</button>
+                <button class="btn" id="rsBroadcastBtn">广播结果</button>
+                <button class="btn" id="rsResetBtn">重置</button>
+            </div>
+            <div class="status-bar" id="rsStatus">选择指令并发射到保留站</div>
+        </div>
+        <div class="viz-panel">
+            <div class="canvas-wrap">
+                <canvas id="rsCanvas"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ===== Section 4: 重排序缓冲区 ROB ===== -->
+<div class="section section-alt" id="sec-rob">
+    <div class="section-title">
+        <div class="icon">4</div>
+        <h2>重排序缓冲区 (ROB)</h2>
+    </div>
+    <p>ROB 是一个<strong>环形缓冲区</strong>，记录所有已发射指令的状态。指令按程序顺序进入 ROB，乱序完成执行后标记为就绪，但只有位于 ROB 头部的指令就绪后才能<strong>提交 (Commit)</strong>——这保证了精确异常和顺序提交。</p>
+    <div class="split-layout">
+        <div class="text-panel">
+            <h3>ROB 条目</h3>
+            <div style="overflow-x:auto">
+                <table class="rob-table" id="robTable">
+                    <thead>
+                        <tr><th>#</th><th>指令</th><th>目标</th><th>值</th><th>状态</th></tr>
+                    </thead>
+                    <tbody id="robTableBody"></tbody>
+                </table>
+            </div>
+            <div class="controls-bar">
+                <button class="btn btn-primary" id="robIssueBtn">发射</button>
+                <button class="btn" id="robCompleteBtn">完成执行</button>
+                <button class="btn" id="robCommitBtn">提交</button>
+                <button class="btn" id="robResetBtn">重置</button>
+            </div>
+            <div class="status-bar" id="robStatus">发射指令进入 ROB，乱序完成，顺序提交</div>
+        </div>
+        <div class="viz-panel">
+            <div class="canvas-wrap">
+                <canvas id="robCanvas"></canvas>
+            </div>
+            <div class="legend">
+                <div class="legend-item"><div class="swatch" style="background:#ffd740"></div>已发射 (Pending)</div>
+                <div class="legend-item"><div class="swatch" style="background:#16c79a"></div>已完成 (Ready)</div>
+                <div class="legend-item"><div class="swatch" style="background:#4fc3f7"></div>已提交 (Committed)</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ===== Section 5: 寄存器重命名 ===== -->
+<div class="section" id="sec-rename">
+    <div class="section-title">
+        <div class="icon">5</div>
+        <h2>寄存器重命名</h2>
+    </div>
+    <p><strong>WAR (写后读)</strong> 和 <strong>WAW (写后写)</strong> 是伪依赖——它们不涉及真正的数据流，仅因寄存器名冲突而产生。寄存器重命名通过将架构寄存器映射到更多的物理寄存器，彻底消除伪依赖，释放更多指令级并行。</p>
+    <div class="split-layout">
+        <div class="text-panel">
+            <h3>寄存器别名表 (RAT)</h3>
+            <div style="overflow-x:auto">
+                <table class="rat-table" id="ratTable">
+                    <thead>
+                        <tr><th>架构寄存器</th><th>物理寄存器</th></tr>
+                    </thead>
+                    <tbody id="ratTableBody"></tbody>
+                </table>
+            </div>
+            <div class="controls-bar">
+                <button class="btn btn-primary" id="renameStepBtn">重命名下一条</button>
+                <button class="btn" id="renameResetBtn">重置</button>
+            </div>
+            <div class="status-bar" id="renameStatus">观察重命名如何消除伪依赖</div>
+            <h3 class="mt-2">指令序列</h3>
+            <ul class="inst-list" id="renameInstList"></ul>
+        </div>
+        <div class="viz-panel">
+            <div class="canvas-wrap">
+                <canvas id="renameCanvas"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ===== Section 6: 完整乱序处理器 ===== -->
+<div class="section section-alt" id="sec-full">
+    <div class="section-title">
+        <div class="icon">6</div>
+        <h2>完整乱序处理器</h2>
+    </div>
+    <p>将所有组件组合：<strong>取指 → 译码 → 重命名 → 发射 → 执行 → 完成 → 提交</strong>。观察 ROB、保留站、RAT、功能单元和 CDB 如何协同工作。</p>
+    <div class="controls-bar">
+        <button class="btn btn-primary" id="fullStepBtn">下一周期</button>
+        <button class="btn" id="fullAutoBtn">自动播放</button>
+        <button class="btn" id="fullResetBtn">重置</button>
+        <span class="text-sm" style="color:var(--accent-green);font-family:var(--font-mono)" id="fullCycleLabel">周期: 0</span>
+    </div>
+    <div class="canvas-wrap" style="margin-top:0.75rem">
+        <canvas id="fullCanvas"></canvas>
+    </div>
+    <div class="status-bar" id="fullStatus">完整乱序处理器模拟 — 点击"下一周期"开始</div>
+    <div class="metric-row" id="fullMetrics">
+        <div class="metric"><div class="val" id="fullIPC">0.00</div><div class="lbl">IPC</div></div>
+        <div class="metric"><div class="val" id="fullCommitted">0</div><div class="lbl">已提交指令</div></div>
+        <div class="metric"><div class="val" id="fullCycles">0</div><div class="lbl">已执行周期</div></div>
+        <div class="metric"><div class="val" id="fullUtil">0%</div><div class="lbl">功能单元利用率</div></div>
+    </div>
+
+    <!-- Summary -->
+    <h3 class="mt-3">核心概念总结</h3>
+    <div class="concept-grid">
+        <div class="concept-card">
+            <h4>Tomasulo 算法</h4>
+            <p>通过保留站和 CDB 实现动态调度，消除伪依赖</p>
+        </div>
+        <div class="concept-card">
+            <h4>保留站</h4>
+            <p>缓存待执行指令，用标签追踪操作数，隐式重命名寄存器</p>
+        </div>
+        <div class="concept-card">
+            <h4>重排序缓冲区</h4>
+            <p>环形队列，乱序完成、顺序提交，保证精确异常</p>
+        </div>
+        <div class="concept-card">
+            <h4>寄存器重命名</h4>
+            <p>架构寄存器映射到物理寄存器，消除 WAR/WAW 伪依赖</p>
+        </div>
+        <div class="concept-card">
+            <h4>公共数据总线</h4>
+            <p>广播执行结果，所有等待该结果的保留站同时捕获</p>
+        </div>
+        <div class="concept-card">
+            <h4>精确异常</h4>
+            <p>通过顺序提交，异常发生时处理器状态与顺序执行一致</p>
+        </div>
+    </div>
+</div>
+
+</div><!-- /page-container -->
+
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+<script src="../shared/scripts/isa-utils.js"></script>
+<script src="../shared/scripts/nav.js"></script>
+<script>
+'use strict';
+const C = ISAUtils.COLORS;
+const hexToRgba = ISAUtils.hexToRgba;
+
+/* ================================================================
+   Helper: init HiDPI canvas
+   ================================================================ */
+function setupCanvas(id, height) {
+    const canvas = document.getElementById(id);
+    const {ctx, w, h, dpr} = ISAUtils.initCanvas(canvas, height);
+    return {canvas, ctx, w, h, dpr};
+}
+
+function clearCanvas(ctx, w, h) {
+    ctx.clearRect(0, 0, w, h);
+}
+
+/* Rounded rect helper */
+function roundRect(ctx, x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.roundRect(x, y, w, h, r || 4);
+}
+
+/* Text drawing helpers */
+function drawText(ctx, text, x, y, opts={}) {
+    ctx.save();
+    ctx.fillStyle = opts.color || C.textPri;
+    ctx.font = opts.font || '12px "Noto Sans SC", sans-serif';
+    ctx.textAlign = opts.align || 'center';
+    ctx.textBaseline = opts.baseline || 'middle';
+    if (opts.maxWidth) {
+        ctx.fillText(text, x, y, opts.maxWidth);
+    } else {
+        ctx.fillText(text, x, y);
+    }
+    ctx.restore();
+}
+
+function drawBox(ctx, x, y, w, h, opts={}) {
+    ctx.save();
+    ctx.fillStyle = opts.fill || hexToRgba(C.blue, 0.12);
+    ctx.strokeStyle = opts.stroke || C.blue;
+    ctx.lineWidth = opts.lw || 1.5;
+    if (opts.dashed) ctx.setLineDash([4,4]);
+    roundRect(ctx, x, y, w, h, opts.r || 6);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+}
+
+/* ================================================================
+   SECTION 1: 为什么乱序
+   ================================================================ */
+(() => {
+    let cv, ctx, W, H;
+    const instructions = [
+        { name: 'I1: ADD x1,x2,x3',  latency: 1, ready: true },
+        { name: 'I2: LW  x4,0(x5)',  latency: 5, ready: true },  // cache miss
+        { name: 'I3: ADD x6,x4,x7',  latency: 1, ready: false }, // depends on I2
+        { name: 'I4: SUB x8,x9,x10', latency: 1, ready: true },
+        { name: 'I5: MUL x11,x12,x1',latency: 3, ready: true },
+        { name: 'I6: ADD x13,x8,x14',latency: 1, ready: true },
+    ];
+
+    let animFrame = 0;
+    let maxFrame = 0;
+    let playing = false;
+    let animId = null;
+
+    // Compute in-order schedule
+    function computeInOrder() {
+        const schedule = [];
+        let cycle = 0;
+        for (let i = 0; i < instructions.length; i++) {
+            const inst = instructions[i];
+            // I3 depends on I2 which takes 5 cycles
+            if (i === 2) cycle = schedule[1].end; // wait for I2
+            const start = cycle;
+            const end = cycle + inst.latency;
+            schedule.push({ start, end, name: inst.name, stall: false });
+            cycle = end;
+        }
+        return schedule;
+    }
+
+    // Compute OoO schedule
+    function computeOoO() {
+        const schedule = [];
+        // I1: cycle 0-1
+        schedule.push({ start: 0, end: 1, name: instructions[0].name });
+        // I2: cycle 0-5 (cache miss, start alongside I1)
+        schedule.push({ start: 0, end: 5, name: instructions[1].name });
+        // I4: cycle 1-2 (independent, skip I3)
+        schedule.push({ start: 1, end: 2, name: instructions[3].name });
+        // I5: cycle 1-4 (independent)
+        schedule.push({ start: 1, end: 4, name: instructions[4].name });
+        // I6: cycle 2-3 (depends on I4)
+        schedule.push({ start: 2, end: 3, name: instructions[5].name });
+        // I3: cycle 5-6 (depends on I2)
+        schedule.push({ start: 5, end: 6, name: instructions[2].name });
+        return schedule;
+    }
+
+    const inOrderSched = computeInOrder();
+    const ooOSched = computeOoO();
+    const inOrderTotal = inOrderSched[inOrderSched.length - 1].end;
+    const ooOTotal = ooOSched[ooOSched.length - 1].end;
+
+    function init() {
+        const r = setupCanvas('whyCanvas', 420);
+        cv = r.canvas; ctx = r.ctx; W = r.w; H = r.h;
+        maxFrame = Math.max(inOrderTotal, ooOTotal);
+        draw();
+    }
+
+    function draw() {
+        clearCanvas(ctx, W, H);
+        const midY = H / 2;
+        const margin = 60;
+        const barH = 22;
+        const gap = 28;
+        const timeScale = (W - margin * 2 - 120) / (maxFrame + 1);
+        const labelX = 10;
+        const startX = 130;
+
+        // Headers
+        drawText(ctx, '顺序执行 (In-Order)', W * 0.5, 20, {font: 'bold 14px "Noto Sans SC"', color: C.orange});
+        drawText(ctx, '乱序执行 (Out-of-Order)', W * 0.5, midY + 14, {font: 'bold 14px "Noto Sans SC"', color: C.green});
+
+        // Time axis
+        for (let m = 0; m < 2; m++) {
+            const baseY = m === 0 ? 40 : midY + 32;
+            const sched = m === 0 ? inOrderSched : ooOSched;
+            // Time line
+            ctx.save();
+            ctx.strokeStyle = C.border;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(startX, baseY + sched.length * gap + 10);
+            ctx.lineTo(startX + (maxFrame + 1) * timeScale, baseY + sched.length * gap + 10);
+            ctx.stroke();
+            // Tick marks
+            for (let t = 0; t <= maxFrame; t++) {
+                const tx = startX + t * timeScale;
+                ctx.beginPath();
+                ctx.moveTo(tx, baseY + sched.length * gap + 6);
+                ctx.lineTo(tx, baseY + sched.length * gap + 14);
+                ctx.stroke();
+                drawText(ctx, t.toString(), tx, baseY + sched.length * gap + 22, {font: '10px "JetBrains Mono"', color: C.textMut});
+            }
+            ctx.restore();
+
+            // Draw bars
+            for (let i = 0; i < sched.length; i++) {
+                const s = sched[i];
+                const y = baseY + i * gap;
+                // Label
+                drawText(ctx, s.name, labelX, y + barH / 2, {font: '11px "JetBrains Mono"', color: C.textSec, align: 'left'});
+
+                // Bar
+                const visEnd = Math.min(s.end, animFrame);
+                const visStart = s.start;
+                if (visStart < animFrame) {
+                    const bx = startX + visStart * timeScale;
+                    const bw = (visEnd - visStart) * timeScale;
+                    let color;
+                    if (s.name.includes('LW')) color = C.orange;
+                    else if (visEnd >= s.end) color = C.blue;
+                    else color = C.green;
+
+                    // Is this a stall period? (in-order, instructions waiting)
+                    ctx.save();
+                    ctx.fillStyle = hexToRgba(color, 0.3);
+                    ctx.strokeStyle = color;
+                    ctx.lineWidth = 1.5;
+                    roundRect(ctx, bx, y, Math.max(bw, 2), barH, 4);
+                    ctx.fill();
+                    ctx.stroke();
+
+                    // Fill progress
+                    if (bw > 4) {
+                        ctx.fillStyle = hexToRgba(color, 0.6);
+                        roundRect(ctx, bx, y, bw, barH, 4);
+                        ctx.fill();
+                    }
+                    ctx.restore();
+
+                    // Duration label
+                    if (bw > 20) {
+                        drawText(ctx, `${s.end - s.start}c`, bx + bw / 2, y + barH / 2, {font: 'bold 10px "JetBrains Mono"', color: '#fff'});
+                    }
+                }
+
+                // Show stall indicator for in-order
+                if (m === 0 && i >= 2 && i <= 5 && animFrame > inOrderSched[1].start && animFrame <= inOrderSched[1].end) {
+                    if (inOrderSched[i].start >= animFrame) {
+                        const stallX = startX + animFrame * timeScale - timeScale * 0.5;
+                        drawText(ctx, '阻塞', stallX, y + barH / 2, {font: '9px "Noto Sans SC"', color: C.red});
+                    }
+                }
+            }
+        }
+
+        // Current cycle indicator
+        if (animFrame > 0 && animFrame <= maxFrame) {
+            for (let m = 0; m < 2; m++) {
+                const sched = m === 0 ? inOrderSched : ooOSched;
+                const baseY = m === 0 ? 40 : midY + 32;
+                const cx = startX + animFrame * timeScale;
+                ctx.save();
+                ctx.strokeStyle = hexToRgba(C.yellow, 0.6);
+                ctx.lineWidth = 1;
+                ctx.setLineDash([3, 3]);
+                ctx.beginPath();
+                ctx.moveTo(cx, baseY - 5);
+                ctx.lineTo(cx, baseY + sched.length * gap + 5);
+                ctx.stroke();
+                ctx.restore();
+            }
+        }
+    }
+
+    function animate() {
+        if (!playing) return;
+        animFrame += 0.05;
+        if (animFrame > maxFrame + 0.5) {
+            animFrame = maxFrame + 0.5;
+            playing = false;
+            document.getElementById('whyPlayBtn').textContent = '播放对比';
+            // Show metrics
+            document.getElementById('whyInOrderCycles').textContent = inOrderTotal;
+            document.getElementById('whyOoOCycles').textContent = ooOTotal;
+            document.getElementById('whySpeedup').textContent = (inOrderTotal / ooOTotal).toFixed(2) + 'x';
+            document.getElementById('whyStatus').textContent = `完成! 乱序执行节省了 ${inOrderTotal - ooOTotal} 个周期`;
+        }
+        draw();
+        animId = requestAnimationFrame(animate);
+    }
+
+    document.getElementById('whyPlayBtn').addEventListener('click', () => {
+        if (playing) {
+            playing = false;
+            cancelAnimationFrame(animId);
+            document.getElementById('whyPlayBtn').textContent = '播放对比';
+        } else {
+            if (animFrame >= maxFrame) animFrame = 0;
+            playing = true;
+            document.getElementById('whyPlayBtn').textContent = '暂停';
+            document.getElementById('whyStatus').textContent = '正在模拟...';
+            animate();
+        }
+    });
+
+    document.getElementById('whyResetBtn').addEventListener('click', () => {
+        playing = false;
+        cancelAnimationFrame(animId);
+        animFrame = 0;
+        document.getElementById('whyPlayBtn').textContent = '播放对比';
+        document.getElementById('whyStatus').textContent = '点击播放查看顺序 vs 乱序对比';
+        document.getElementById('whyInOrderCycles').textContent = '-';
+        document.getElementById('whyOoOCycles').textContent = '-';
+        document.getElementById('whySpeedup').textContent = '-';
+        draw();
+    });
+
+    window.addEventListener('resize', () => { init(); });
+    window.addEventListener('DOMContentLoaded', init);
+})();
+
+/* ================================================================
+   SECTION 2: Tomasulo 算法
+   ================================================================ */
+(() => {
+    let cv, ctx, W, H;
+
+    const program = [
+        { op: 'MUL', dst: 'F0', src1: 'F2', src2: 'F4', latency: 3 },
+        { op: 'SUB', dst: 'F8', src1: 'F6', src2: 'F2', latency: 1 },
+        { op: 'DIV', dst: 'F10', src1: 'F0', src2: 'F6', latency: 4 },
+        { op: 'ADD', dst: 'F6', src1: 'F8', src2: 'F2', latency: 1 },
+    ];
+
+    // Reservation stations
+    let rsAdd = []; // capacity 3
+    let rsMul = []; // capacity 2
+    const rsAddMax = 3, rsMulMax = 2;
+
+    // Register status: which RS is producing each register
+    let regStatus = {};
+    // Register values
+    let regValues = { F0: 10, F2: 20, F4: 30, F6: 40, F8: 0, F10: 0 };
+
+    let cycle = 0;
+    let issuePtr = 0;
+    let autoTimer = null;
+    let log = [];
+
+    function resetTomasulo() {
+        rsAdd = [];
+        rsMul = [];
+        regStatus = {};
+        regValues = { F0: 10, F2: 20, F4: 30, F6: 40, F8: 0, F10: 0 };
+        cycle = 0;
+        issuePtr = 0;
+        log = [];
+        clearInterval(autoTimer);
+        autoTimer = null;
+        document.getElementById('tomasuloAutoBtn').textContent = '自动播放';
+        updateTomasuloUI();
+        drawTomasulo();
+    }
+
+    function getRS(op) {
+        if (op === 'ADD' || op === 'SUB') return { list: rsAdd, max: rsAddMax, prefix: 'Add' };
+        return { list: rsMul, max: rsMulMax, prefix: 'Mul' };
+    }
+
+    function stepTomasulo() {
+        cycle++;
+        let msg = `周期 ${cycle}: `;
+
+        // Phase 1: Write Result — any RS done executing broadcasts
+        const allRS = [...rsAdd, ...rsMul];
+        for (const rs of allRS) {
+            if (rs.executing && rs.remainCycles <= 0) {
+                // Compute result
+                let result = 0;
+                if (rs.op === 'ADD') result = rs.vj + rs.vk;
+                else if (rs.op === 'SUB') result = rs.vj - rs.vk;
+                else if (rs.op === 'MUL') result = rs.vj * rs.vk;
+                else if (rs.op === 'DIV') result = rs.vk !== 0 ? Math.floor(rs.vj / rs.vk) : 0;
+
+                msg += `${rs.name} 写回结果 ${result}; `;
+
+                // Broadcast on CDB
+                for (const other of [...rsAdd, ...rsMul]) {
+                    if (other === rs) continue;
+                    if (other.qj === rs.name) { other.vj = result; other.qj = null; }
+                    if (other.qk === rs.name) { other.vk = result; other.qk = null; }
+                }
+
+                // Update register
+                if (regStatus[rs.dst] === rs.name) {
+                    regValues[rs.dst] = result;
+                    delete regStatus[rs.dst];
+                }
+
+                // Free RS
+                const idx1 = rsAdd.indexOf(rs);
+                if (idx1 >= 0) rsAdd.splice(idx1, 1);
+                const idx2 = rsMul.indexOf(rs);
+                if (idx2 >= 0) rsMul.splice(idx2, 1);
+            }
+        }
+
+        // Phase 2: Execute — decrement counters
+        for (const rs of [...rsAdd, ...rsMul]) {
+            if (rs.executing) {
+                rs.remainCycles--;
+            } else if (rs.qj === null && rs.qk === null) {
+                rs.executing = true;
+                rs.remainCycles = rs.latency - 1;
+                msg += `${rs.name} 开始执行; `;
+            }
+        }
+
+        // Phase 3: Issue
+        if (issuePtr < program.length) {
+            const inst = program[issuePtr];
+            const { list, max, prefix } = getRS(inst.op);
+            if (list.length < max) {
+                const name = prefix + (list.length + 1);
+                const entry = {
+                    name, op: inst.op, dst: inst.dst,
+                    vj: null, vk: null, qj: null, qk: null,
+                    executing: false, remainCycles: 0, latency: inst.latency
+                };
+
+                // Source 1
+                if (regStatus[inst.src1]) {
+                    entry.qj = regStatus[inst.src1];
+                } else {
+                    entry.vj = regValues[inst.src1];
+                }
+                // Source 2
+                if (regStatus[inst.src2]) {
+                    entry.qk = regStatus[inst.src2];
+                } else {
+                    entry.vk = regValues[inst.src2];
+                }
+
+                regStatus[inst.dst] = name;
+                list.push(entry);
+                msg += `发射 ${inst.op} ${inst.dst} → ${name}; `;
+                issuePtr++;
+            } else {
+                msg += `${prefix} 站满，等待; `;
+            }
+        }
+
+        if (issuePtr >= program.length && rsAdd.length === 0 && rsMul.length === 0) {
+            msg += '所有指令完成!';
+            clearInterval(autoTimer);
+            autoTimer = null;
+            document.getElementById('tomasuloAutoBtn').textContent = '自动播放';
+        }
+
+        log.push(msg);
+        document.getElementById('tomasuloStatus').textContent = msg;
+        updateTomasuloUI();
+        drawTomasulo();
+    }
+
+    function updateTomasuloUI() {
+        const list = document.getElementById('tomasuloInstList');
+        list.innerHTML = '';
+        program.forEach((inst, i) => {
+            const li = document.createElement('li');
+            li.className = i < issuePtr ? (i < issuePtr ? 'done' : '') : (i === issuePtr ? 'active' : '');
+            if (i === issuePtr && issuePtr < program.length) li.className = 'active';
+            li.innerHTML = `<span class="idx">${i + 1}.</span> ${inst.op} ${inst.dst}, ${inst.src1}, ${inst.src2}`;
+            list.appendChild(li);
+        });
+    }
+
+    function drawTomasulo() {
+        if (!ctx) return;
+        clearCanvas(ctx, W, H);
+
+        const pad = 20;
+        // Draw RS boxes
+        const rsBoxW = (W - pad * 3) / 2;
+        const rsBoxH = 180;
+
+        // ADD/SUB RS
+        drawBox(ctx, pad, 50, rsBoxW, rsBoxH, {fill: hexToRgba(C.green, 0.06), stroke: C.green});
+        drawText(ctx, '加减法保留站', pad + rsBoxW / 2, 40, {font: 'bold 12px "Noto Sans SC"', color: C.green});
+
+        // Table headers
+        const cols = ['名称', 'Op', 'Vj', 'Vk', 'Qj', 'Qk'];
+        const colW = rsBoxW / cols.length;
+        for (let c = 0; c < cols.length; c++) {
+            drawText(ctx, cols[c], pad + c * colW + colW / 2, 68, {font: 'bold 10px "JetBrains Mono"', color: C.blue});
+        }
+
+        for (let i = 0; i < rsAddMax; i++) {
+            const y = 85 + i * 28;
+            const rs = rsAdd[i];
+            if (rs) {
+                const executing = rs.executing;
+                ctx.save();
+                ctx.fillStyle = executing ? hexToRgba(C.green, 0.15) : hexToRgba(C.yellow, 0.1);
+                roundRect(ctx, pad + 4, y - 10, rsBoxW - 8, 24, 3);
+                ctx.fill();
+                ctx.restore();
+                const vals = [rs.name, rs.op,
+                    rs.vj !== null ? rs.vj : '', rs.vk !== null ? rs.vk : '',
+                    rs.qj || '', rs.qk || ''];
+                for (let c = 0; c < vals.length; c++) {
+                    const isTag = (c >= 4 && vals[c]);
+                    drawText(ctx, String(vals[c]), pad + c * colW + colW / 2, y,
+                        {font: '10px "JetBrains Mono"', color: isTag ? C.orange : C.textPri});
+                }
+            } else {
+                drawText(ctx, '-', pad + rsBoxW / 2, y, {font: '10px "JetBrains Mono"', color: C.textMut});
+            }
+        }
+
+        // MUL/DIV RS
+        const mx = pad * 2 + rsBoxW;
+        drawBox(ctx, mx, 50, rsBoxW, rsBoxH, {fill: hexToRgba(C.purple, 0.06), stroke: C.purple});
+        drawText(ctx, '乘除法保留站', mx + rsBoxW / 2, 40, {font: 'bold 12px "Noto Sans SC"', color: C.purple});
+
+        for (let c = 0; c < cols.length; c++) {
+            drawText(ctx, cols[c], mx + c * colW + colW / 2, 68, {font: 'bold 10px "JetBrains Mono"', color: C.blue});
+        }
+
+        for (let i = 0; i < rsMulMax; i++) {
+            const y = 85 + i * 28;
+            const rs = rsMul[i];
+            if (rs) {
+                ctx.save();
+                ctx.fillStyle = rs.executing ? hexToRgba(C.purple, 0.15) : hexToRgba(C.yellow, 0.1);
+                roundRect(ctx, mx + 4, y - 10, rsBoxW - 8, 24, 3);
+                ctx.fill();
+                ctx.restore();
+                const vals = [rs.name, rs.op,
+                    rs.vj !== null ? rs.vj : '', rs.vk !== null ? rs.vk : '',
+                    rs.qj || '', rs.qk || ''];
+                for (let c = 0; c < vals.length; c++) {
+                    const isTag = (c >= 4 && vals[c]);
+                    drawText(ctx, String(vals[c]), mx + c * colW + colW / 2, y,
+                        {font: '10px "JetBrains Mono"', color: isTag ? C.orange : C.textPri});
+                }
+            } else {
+                drawText(ctx, '-', mx + rsBoxW / 2, y, {font: '10px "JetBrains Mono"', color: C.textMut});
+            }
+        }
+
+        // CDB
+        const cdbY = 250;
+        drawBox(ctx, pad, cdbY, W - pad * 2, 36, {fill: hexToRgba(C.yellow, 0.08), stroke: C.yellow});
+        drawText(ctx, '公共数据总线 (CDB)', W / 2, cdbY + 18, {font: 'bold 12px "Noto Sans SC"', color: C.yellow});
+
+        // Functional units
+        const fuY = cdbY + 50;
+        const fuW = 100;
+        drawBox(ctx, W / 2 - fuW - 20, fuY, fuW, 40, {fill: hexToRgba(C.green, 0.1), stroke: C.green});
+        drawText(ctx, 'ALU', W / 2 - fuW / 2 - 20, fuY + 20, {font: 'bold 11px "JetBrains Mono"', color: C.green});
+
+        drawBox(ctx, W / 2 + 20, fuY, fuW, 40, {fill: hexToRgba(C.purple, 0.1), stroke: C.purple});
+        drawText(ctx, 'MUL/DIV', W / 2 + fuW / 2 + 20, fuY + 20, {font: 'bold 11px "JetBrains Mono"', color: C.purple});
+
+        // Arrows RS -> FU
+        ISAUtils.drawArrow(ctx, pad + rsBoxW / 2, 50 + rsBoxH, W / 2 - fuW / 2 - 20, fuY, C.green, {width: 1.5, dashed: true});
+        ISAUtils.drawArrow(ctx, mx + rsBoxW / 2, 50 + rsBoxH, W / 2 + fuW / 2 + 20, fuY, C.purple, {width: 1.5, dashed: true});
+
+        // Arrows FU -> CDB
+        ISAUtils.drawArrow(ctx, W / 2 - 20, fuY, W / 2 - 20, cdbY + 36, C.yellow, {width: 1.5});
+        ISAUtils.drawArrow(ctx, W / 2 + 20, fuY, W / 2 + 20, cdbY + 36, C.yellow, {width: 1.5});
+
+        // Register file
+        const regY = fuY + 56;
+        drawBox(ctx, pad, regY, W - pad * 2, 40, {fill: hexToRgba(C.blue, 0.06), stroke: C.blue});
+        drawText(ctx, '寄存器文件', pad + 50, regY + 20, {font: 'bold 11px "Noto Sans SC"', color: C.blue});
+        const regs = Object.keys(regValues);
+        const regW2 = (W - pad * 2 - 120) / regs.length;
+        regs.forEach((r, i) => {
+            const rx = pad + 110 + i * regW2;
+            const highlight = regStatus[r];
+            drawText(ctx, r, rx + regW2 / 2, regY + 10, {font: '9px "JetBrains Mono"', color: C.textMut});
+            drawText(ctx, highlight ? regStatus[r] : String(regValues[r]), rx + regW2 / 2, regY + 28,
+                {font: 'bold 10px "JetBrains Mono"', color: highlight ? C.orange : C.green});
+        });
+
+        // Cycle indicator
+        drawText(ctx, `周期: ${cycle}`, W - 60, 16, {font: 'bold 13px "JetBrains Mono"', color: C.green});
+    }
+
+    function initTomasulo() {
+        const r = setupCanvas('tomasuloCanvas', 420);
+        cv = r.canvas; ctx = r.ctx; W = r.w; H = r.h;
+        updateTomasuloUI();
+        drawTomasulo();
+    }
+
+    document.getElementById('tomasuloStepBtn').addEventListener('click', stepTomasulo);
+    document.getElementById('tomasuloResetBtn').addEventListener('click', resetTomasulo);
+    document.getElementById('tomasuloAutoBtn').addEventListener('click', () => {
+        if (autoTimer) {
+            clearInterval(autoTimer);
+            autoTimer = null;
+            document.getElementById('tomasuloAutoBtn').textContent = '自动播放';
+        } else {
+            autoTimer = setInterval(stepTomasulo, 1200);
+            document.getElementById('tomasuloAutoBtn').textContent = '停止';
+        }
+    });
+
+    window.addEventListener('resize', initTomasulo);
+    window.addEventListener('DOMContentLoaded', initTomasulo);
+})();
+
+/* ================================================================
+   SECTION 3: 保留站详解
+   ================================================================ */
+(() => {
+    let cv, ctx, W, H;
+
+    const rsMax = 5;
+    let rsEntries = [];
+    let nextTag = 1;
+    let regProducer = {}; // register -> tag
+
+    const instDefs = {
+        'add x1, x2, x3': { op: 'ADD', dst: 'x1', src1: 'x2', src2: 'x3' },
+        'sub x4, x1, x5': { op: 'SUB', dst: 'x4', src1: 'x1', src2: 'x5' },
+        'mul x6, x4, x7': { op: 'MUL', dst: 'x6', src1: 'x4', src2: 'x7' },
+        'add x8, x6, x2': { op: 'ADD', dst: 'x8', src1: 'x6', src2: 'x2' },
+    };
+
+    let regVals = { x1: 5, x2: 10, x3: 15, x4: 20, x5: 25, x6: 30, x7: 35, x8: 0 };
+    let broadcastQueue = [];
+
+    function resetRS() {
+        rsEntries = [];
+        nextTag = 1;
+        regProducer = {};
+        regVals = { x1: 5, x2: 10, x3: 15, x4: 20, x5: 25, x6: 30, x7: 35, x8: 0 };
+        broadcastQueue = [];
+        document.getElementById('rsStatus').textContent = '选择指令并发射到保留站';
+        updateRSTable();
+        drawRS();
+    }
+
+    function issueRS() {
+        if (rsEntries.length >= rsMax) {
+            document.getElementById('rsStatus').textContent = '保留站已满!';
+            return;
+        }
+        const sel = document.getElementById('rsInstSelect').value;
+        const def = instDefs[sel];
+        if (!def) return;
+
+        const tag = 'RS' + nextTag++;
+        const entry = {
+            name: tag, op: def.op, busy: true,
+            vj: null, vk: null, qj: null, qk: null, dst: def.dst
+        };
+
+        // src1
+        if (regProducer[def.src1]) {
+            entry.qj = regProducer[def.src1];
+        } else {
+            entry.vj = regVals[def.src1];
+        }
+        // src2
+        if (regProducer[def.src2]) {
+            entry.qk = regProducer[def.src2];
+        } else {
+            entry.vk = regVals[def.src2];
+        }
+
+        regProducer[def.dst] = tag;
+        broadcastQueue.push({ tag, result: computeResult(def.op, entry.vj || 0, entry.vk || 0) });
+        rsEntries.push(entry);
+
+        document.getElementById('rsStatus').textContent = `发射 ${def.op} ${def.dst} → ${tag}`;
+        updateRSTable();
+        drawRS();
+    }
+
+    function computeResult(op, a, b) {
+        if (op === 'ADD') return a + b;
+        if (op === 'SUB') return a - b;
+        if (op === 'MUL') return a * b;
+        return a;
+    }
+
+    function broadcastResult() {
+        if (broadcastQueue.length === 0) {
+            document.getElementById('rsStatus').textContent = '没有可广播的结果';
+            return;
+        }
+        const bcast = broadcastQueue.shift();
+        let msg = `CDB 广播: ${bcast.tag} = ${bcast.result}`;
+
+        // Update all entries waiting for this tag
+        for (const e of rsEntries) {
+            if (e.qj === bcast.tag) { e.vj = bcast.result; e.qj = null; }
+            if (e.qk === bcast.tag) { e.vk = bcast.result; e.qk = null; }
+        }
+
+        // Update register
+        for (const reg of Object.keys(regProducer)) {
+            if (regProducer[reg] === bcast.tag) {
+                regVals[reg] = bcast.result;
+                delete regProducer[reg];
+            }
+        }
+
+        // Remove completed entry
+        const idx = rsEntries.findIndex(e => e.name === bcast.tag);
+        if (idx >= 0) {
+            rsEntries[idx].busy = false;
+            // Re-add result to its queue for dependent instructions
+            const finished = rsEntries[idx];
+            rsEntries.splice(idx, 1);
+            msg += ` → ${finished.dst} 更新`;
+        }
+
+        document.getElementById('rsStatus').textContent = msg;
+        updateRSTable();
+        drawRS();
+    }
+
+    function updateRSTable() {
+        const tbody = document.getElementById('rsTableBody');
+        tbody.innerHTML = '';
+        for (let i = 0; i < rsMax; i++) {
+            const e = rsEntries[i];
+            const tr = document.createElement('tr');
+            if (e && e.busy) tr.className = 'busy';
+            if (e) {
+                tr.innerHTML = `
+                    <td>${e.name}</td>
+                    <td>${e.busy ? 'Yes' : 'No'}</td>
+                    <td>${e.op}</td>
+                    <td class="${e.vj !== null ? 'ready-val' : 'empty-val'}">${e.vj !== null ? e.vj : '-'}</td>
+                    <td class="${e.vk !== null ? 'ready-val' : 'empty-val'}">${e.vk !== null ? e.vk : '-'}</td>
+                    <td class="${e.qj ? 'tag-val' : 'empty-val'}">${e.qj || '-'}</td>
+                    <td class="${e.qk ? 'tag-val' : 'empty-val'}">${e.qk || '-'}</td>`;
+            } else {
+                tr.innerHTML = '<td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td>';
+                tr.querySelectorAll('td').forEach(td => td.classList.add('empty-val'));
+            }
+            tbody.appendChild(tr);
+        }
+    }
+
+    function drawRS() {
+        if (!ctx) return;
+        clearCanvas(ctx, W, H);
+
+        const pad = 20;
+        const boxW = W - pad * 2;
+        const entryH = 44;
+        const startY = 40;
+
+        drawText(ctx, '保留站可视化', W / 2, 18, {font: 'bold 14px "Noto Sans SC"', color: C.green});
+
+        for (let i = 0; i < rsMax; i++) {
+            const y = startY + i * (entryH + 6);
+            const e = rsEntries[i];
+
+            if (e && e.busy) {
+                const ready = e.qj === null && e.qk === null;
+                const color = ready ? C.green : C.orange;
+                drawBox(ctx, pad, y, boxW, entryH, {fill: hexToRgba(color, 0.1), stroke: color, r: 6});
+
+                // Name
+                drawText(ctx, e.name, pad + 40, y + 14, {font: 'bold 11px "JetBrains Mono"', color: color});
+                drawText(ctx, e.op, pad + 100, y + 14, {font: '11px "JetBrains Mono"', color: C.textPri});
+
+                // Operands
+                const midX = pad + boxW / 2;
+                // Vj / Qj
+                const vjLabel = e.qj ? `等待 ${e.qj}` : `Vj=${e.vj}`;
+                drawText(ctx, vjLabel, midX - 60, y + 32, {font: '10px "JetBrains Mono"', color: e.qj ? C.orange : C.green});
+
+                // Vk / Qk
+                const vkLabel = e.qk ? `等待 ${e.qk}` : `Vk=${e.vk}`;
+                drawText(ctx, vkLabel, midX + 60, y + 32, {font: '10px "JetBrains Mono"', color: e.qk ? C.orange : C.green});
+
+                // Status
+                drawText(ctx, ready ? '就绪' : '等待操作数', pad + boxW - 50, y + entryH / 2,
+                    {font: 'bold 10px "Noto Sans SC"', color: ready ? C.green : C.yellow});
+            } else {
+                drawBox(ctx, pad, y, boxW, entryH, {fill: hexToRgba(C.border, 0.2), stroke: C.border, r: 6});
+                drawText(ctx, '空闲', pad + boxW / 2, y + entryH / 2, {font: '11px "Noto Sans SC"', color: C.textMut});
+            }
+        }
+
+        // CDB at bottom
+        const cdbY = startY + rsMax * (entryH + 6) + 10;
+        drawBox(ctx, pad, cdbY, boxW, 32, {fill: hexToRgba(C.yellow, 0.08), stroke: C.yellow});
+        const queueStr = broadcastQueue.length > 0
+            ? `待广播: ${broadcastQueue.map(b => b.tag + '=' + b.result).join(', ')}`
+            : '(空)';
+        drawText(ctx, `CDB ${queueStr}`, pad + boxW / 2, cdbY + 16,
+            {font: '11px "JetBrains Mono"', color: C.yellow});
+    }
+
+    function initRS() {
+        const r = setupCanvas('rsCanvas', 380);
+        cv = r.canvas; ctx = r.ctx; W = r.w; H = r.h;
+        updateRSTable();
+        drawRS();
+    }
+
+    document.getElementById('rsIssueBtn').addEventListener('click', issueRS);
+    document.getElementById('rsBroadcastBtn').addEventListener('click', broadcastResult);
+    document.getElementById('rsResetBtn').addEventListener('click', resetRS);
+
+    window.addEventListener('resize', initRS);
+    window.addEventListener('DOMContentLoaded', initRS);
+})();
+
+/* ================================================================
+   SECTION 4: 重排序缓冲区 ROB
+   ================================================================ */
+(() => {
+    let cv, ctx, W, H;
+
+    const ROB_SIZE = 8;
+    let robEntries = []; // {id, inst, dst, value, status: 'pending'|'ready'|'committed'}
+    let nextId = 0;
+    let commitHistory = [];
+
+    const instQueue = [
+        'ADD x1,x2,x3', 'LW x4,0(x5)', 'SUB x6,x4,x7',
+        'MUL x8,x1,x9', 'ADD x10,x8,x6', 'SW x10,0(x11)',
+        'BEQ x1,x0,L1', 'ADD x12,x13,x14'
+    ];
+    let issueIdx = 0;
+
+    function resetROB() {
+        robEntries = [];
+        nextId = 0;
+        commitHistory = [];
+        issueIdx = 0;
+        document.getElementById('robStatus').textContent = '发射指令进入 ROB，乱序完成，顺序提交';
+        updateROBTable();
+        drawROB();
+    }
+
+    function issueROB() {
+        if (robEntries.length >= ROB_SIZE) {
+            document.getElementById('robStatus').textContent = 'ROB 已满! 请先提交指令';
+            return;
+        }
+        if (issueIdx >= instQueue.length) {
+            document.getElementById('robStatus').textContent = '所有指令已发射';
+            return;
+        }
+        const inst = instQueue[issueIdx++];
+        const parts = inst.split(/[\s,]+/);
+        const entry = {
+            id: nextId++,
+            inst: inst,
+            dst: parts[1] || '-',
+            value: null,
+            status: 'pending'
+        };
+        robEntries.push(entry);
+        document.getElementById('robStatus').textContent = `发射: ${inst} → ROB#${entry.id}`;
+        updateROBTable();
+        drawROB();
+    }
+
+    function completeROB() {
+        // Find a pending entry (simulate OoO: pick random pending)
+        const pending = robEntries.filter(e => e.status === 'pending');
+        if (pending.length === 0) {
+            document.getElementById('robStatus').textContent = '没有等待完成的指令';
+            return;
+        }
+        // Pick one that isn't necessarily first (to show OoO)
+        const idx = pending.length > 1 ? Math.floor(Math.random() * pending.length) : 0;
+        const entry = pending[idx];
+        entry.status = 'ready';
+        entry.value = Math.floor(Math.random() * 256);
+        document.getElementById('robStatus').textContent = `ROB#${entry.id} (${entry.inst}) 完成执行，结果=${entry.value}`;
+        updateROBTable();
+        drawROB();
+    }
+
+    function commitROB() {
+        if (robEntries.length === 0) {
+            document.getElementById('robStatus').textContent = 'ROB 为空';
+            return;
+        }
+        const head = robEntries[0];
+        if (head.status !== 'ready') {
+            document.getElementById('robStatus').textContent = `ROB 头部 #${head.id} (${head.inst}) 尚未完成，无法提交`;
+            return;
+        }
+        head.status = 'committed';
+        commitHistory.push(head);
+        robEntries.shift();
+        document.getElementById('robStatus').textContent = `提交: ROB#${head.id} (${head.inst}) → ${head.dst}=${head.value}`;
+        updateROBTable();
+        drawROB();
+    }
+
+    function updateROBTable() {
+        const tbody = document.getElementById('robTableBody');
+        tbody.innerHTML = '';
+        for (const e of robEntries) {
+            const tr = document.createElement('tr');
+            tr.className = e.status;
+            const statusText = e.status === 'pending' ? '执行中' : (e.status === 'ready' ? '已完成' : '已提交');
+            const statusColor = e.status === 'pending' ? 'tag-val' : (e.status === 'ready' ? 'ready-val' : '');
+            tr.innerHTML = `
+                <td>${e.id}</td>
+                <td style="font-family:var(--font-mono);font-size:0.78rem">${e.inst}</td>
+                <td>${e.dst}</td>
+                <td>${e.value !== null ? e.value : '-'}</td>
+                <td class="${statusColor}">${statusText}</td>`;
+            tbody.appendChild(tr);
+        }
+    }
+
+    function drawROB() {
+        if (!ctx) return;
+        clearCanvas(ctx, W, H);
+
+        const cx = W / 2;
+        const cy = H / 2;
+        const outerR = Math.min(W, H) / 2 - 40;
+        const innerR = outerR - 40;
+
+        drawText(ctx, '重排序缓冲区 (ROB)', cx, 18, {font: 'bold 14px "Noto Sans SC"', color: C.green});
+        drawText(ctx, `容量: ${ROB_SIZE}  占用: ${robEntries.length}`, cx, H - 16,
+            {font: '11px "JetBrains Mono"', color: C.textMut});
+
+        // Draw circular buffer
+        for (let i = 0; i < ROB_SIZE; i++) {
+            const angle = (i / ROB_SIZE) * Math.PI * 2 - Math.PI / 2;
+            const nextAngle = ((i + 1) / ROB_SIZE) * Math.PI * 2 - Math.PI / 2;
+
+            ctx.save();
+            const entry = robEntries[i];
+            let color = C.border;
+            let fillAlpha = 0.15;
+            if (entry) {
+                if (entry.status === 'pending') { color = C.yellow; fillAlpha = 0.3; }
+                else if (entry.status === 'ready') { color = C.green; fillAlpha = 0.35; }
+            }
+
+            // Arc segment
+            ctx.beginPath();
+            ctx.arc(cx, cy, outerR, angle + 0.03, nextAngle - 0.03);
+            ctx.arc(cx, cy, innerR, nextAngle - 0.03, angle + 0.03, true);
+            ctx.closePath();
+            ctx.fillStyle = hexToRgba(color, fillAlpha);
+            ctx.fill();
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+            ctx.restore();
+
+            // Label
+            const midAngle = (angle + nextAngle) / 2;
+            const labelR = (outerR + innerR) / 2;
+            const lx = cx + Math.cos(midAngle) * labelR;
+            const ly = cy + Math.sin(midAngle) * labelR;
+
+            if (entry) {
+                drawText(ctx, `#${entry.id}`, lx, ly - 6, {font: 'bold 9px "JetBrains Mono"', color: color});
+                const shortInst = entry.inst.split(' ')[0];
+                drawText(ctx, shortInst, lx, ly + 7, {font: '8px "JetBrains Mono"', color: C.textSec});
+            } else {
+                drawText(ctx, `${i}`, lx, ly, {font: '9px "JetBrains Mono"', color: C.textMut});
+            }
+        }
+
+        // Head/Tail pointers
+        if (robEntries.length > 0) {
+            // Head pointer (commit end)
+            const headAngle = (0 / ROB_SIZE) * Math.PI * 2 - Math.PI / 2;
+            const hx = cx + Math.cos(headAngle) * (outerR + 18);
+            const hy = cy + Math.sin(headAngle) * (outerR + 18);
+            drawText(ctx, 'HEAD', hx, hy, {font: 'bold 10px "JetBrains Mono"', color: C.red});
+
+            // Tail pointer
+            const tailAngle = (robEntries.length / ROB_SIZE) * Math.PI * 2 - Math.PI / 2;
+            const tx = cx + Math.cos(tailAngle) * (outerR + 18);
+            const ty = cy + Math.sin(tailAngle) * (outerR + 18);
+            drawText(ctx, 'TAIL', tx, ty, {font: 'bold 10px "JetBrains Mono"', color: C.blue});
+        }
+
+        // Center info
+        drawText(ctx, 'ROB', cx, cy - 8, {font: 'bold 16px "JetBrains Mono"', color: C.textMut});
+        drawText(ctx, `${robEntries.length}/${ROB_SIZE}`, cx, cy + 10, {font: '12px "JetBrains Mono"', color: C.textSec});
+    }
+
+    function initROB() {
+        const r = setupCanvas('robCanvas', 400);
+        cv = r.canvas; ctx = r.ctx; W = r.w; H = r.h;
+        updateROBTable();
+        drawROB();
+    }
+
+    document.getElementById('robIssueBtn').addEventListener('click', issueROB);
+    document.getElementById('robCompleteBtn').addEventListener('click', completeROB);
+    document.getElementById('robCommitBtn').addEventListener('click', commitROB);
+    document.getElementById('robResetBtn').addEventListener('click', resetROB);
+
+    window.addEventListener('resize', initROB);
+    window.addEventListener('DOMContentLoaded', initROB);
+})();
+
+/* ================================================================
+   SECTION 5: 寄存器重命名
+   ================================================================ */
+(() => {
+    let cv, ctx, W, H;
+
+    const archRegs = ['x1', 'x2', 'x3', 'x4', 'x5', 'x6'];
+    const physRegs = ['P0', 'P1', 'P2', 'P3', 'P4', 'P5', 'P6', 'P7', 'P8', 'P9', 'P10', 'P11'];
+    let rat = {}; // arch -> phys
+    let freeList = [];
+    let renameStep = 0;
+
+    const program = [
+        { op: 'ADD', dst: 'x1', src1: 'x2', src2: 'x3', desc: 'ADD x1, x2, x3' },
+        { op: 'SUB', dst: 'x4', src1: 'x1', src2: 'x5', desc: 'SUB x4, x1, x5' },
+        { op: 'ADD', dst: 'x1', src1: 'x6', src2: 'x2', desc: 'ADD x1, x6, x2  (WAW with I1!)' },
+        { op: 'MUL', dst: 'x3', src1: 'x1', src2: 'x4', desc: 'MUL x3, x1, x4  (WAR on x1!)' },
+        { op: 'SUB', dst: 'x5', src1: 'x3', src2: 'x6', desc: 'SUB x5, x3, x6' },
+    ];
+
+    let renamedProgram = [];
+
+    function resetRename() {
+        rat = {};
+        freeList = physRegs.slice();
+        renameStep = 0;
+        renamedProgram = [];
+        // Initial mapping
+        archRegs.forEach((r, i) => {
+            rat[r] = freeList.shift();
+        });
+        document.getElementById('renameStatus').textContent = '观察重命名如何消除伪依赖';
+        updateRenameUI();
+        drawRename();
+    }
+
+    function stepRename() {
+        if (renameStep >= program.length) {
+            document.getElementById('renameStatus').textContent = '所有指令已重命名!';
+            return;
+        }
+        const inst = program[renameStep];
+
+        // Read sources using current RAT
+        const pSrc1 = rat[inst.src1] || inst.src1;
+        const pSrc2 = rat[inst.src2] || inst.src2;
+
+        // Allocate new physical register for destination
+        if (freeList.length === 0) {
+            document.getElementById('renameStatus').textContent = '物理寄存器耗尽!';
+            return;
+        }
+        const pDst = freeList.shift();
+        const oldMapping = rat[inst.dst];
+        rat[inst.dst] = pDst;
+
+        renamedProgram.push({
+            original: inst.desc,
+            renamed: `${inst.op} ${pDst}, ${pSrc1}, ${pSrc2}`,
+            oldDst: oldMapping,
+            newDst: pDst
+        });
+
+        renameStep++;
+        document.getElementById('renameStatus').textContent =
+            `${inst.desc} → ${inst.op} ${pDst}, ${pSrc1}, ${pSrc2} (${inst.dst}: ${oldMapping}→${pDst})`;
+        updateRenameUI();
+        drawRename();
+    }
+
+    function updateRenameUI() {
+        // RAT table
+        const tbody = document.getElementById('ratTableBody');
+        tbody.innerHTML = '';
+        for (const reg of archRegs) {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `<td>${reg}</td><td class="ready-val">${rat[reg] || '-'}</td>`;
+            tbody.appendChild(tr);
+        }
+
+        // Instruction list
+        const list = document.getElementById('renameInstList');
+        list.innerHTML = '';
+        program.forEach((inst, i) => {
+            const li = document.createElement('li');
+            li.className = i < renameStep ? 'done' : (i === renameStep ? 'active' : '');
+            let text = `<span class="idx">${i + 1}.</span> ${inst.desc}`;
+            if (renamedProgram[i]) {
+                text += ` <span style="color:${C.green}">→ ${renamedProgram[i].renamed}</span>`;
+            }
+            li.innerHTML = text;
+            list.appendChild(li);
+        });
+    }
+
+    function drawRename() {
+        if (!ctx) return;
+        clearCanvas(ctx, W, H);
+
+        const pad = 20;
+        const halfW = (W - pad * 3) / 2;
+
+        // Before renaming (original dependencies)
+        drawText(ctx, '重命名前 (存在伪依赖)', pad + halfW / 2, 22, {font: 'bold 13px "Noto Sans SC"', color: C.orange});
+        drawDependencyGraph(ctx, pad, 42, halfW, H - 60, program, false);
+
+        // After renaming
+        const rx = pad * 2 + halfW;
+        drawText(ctx, '重命名后 (伪依赖消除)', rx + halfW / 2, 22, {font: 'bold 13px "Noto Sans SC"', color: C.green});
+        drawDependencyGraph(ctx, rx, 42, halfW, H - 60, program, true);
+    }
+
+    function drawDependencyGraph(ctx, ox, oy, w, h, prog, renamed) {
+        const nodeH = 32;
+        const gap = (h - prog.length * nodeH) / (prog.length + 1);
+        const nodes = [];
+
+        for (let i = 0; i < prog.length; i++) {
+            const y = oy + gap * (i + 1) + i * nodeH;
+            const inst = prog[i];
+            let label;
+            if (renamed && renamedProgram[i]) {
+                label = renamedProgram[i].renamed;
+            } else {
+                label = `${inst.op} ${inst.dst}, ${inst.src1}, ${inst.src2}`;
+            }
+
+            const color = (i < renameStep) ? (renamed ? C.green : C.orange) : C.border;
+            drawBox(ctx, ox + 10, y, w - 20, nodeH, {fill: hexToRgba(color, 0.12), stroke: color, r: 4});
+            drawText(ctx, `I${i + 1}: ${label}`, ox + w / 2, y + nodeH / 2,
+                {font: '10px "JetBrains Mono"', color: i < renameStep ? C.textPri : C.textMut, maxWidth: w - 30});
+
+            nodes.push({ x: ox + w / 2, y: y, h: nodeH, inst, idx: i });
+        }
+
+        // Draw dependency arrows
+        for (let i = 1; i < prog.length; i++) {
+            for (let j = 0; j < i; j++) {
+                let hasDep = false;
+                let isTrue = false;
+                let isFalse = false;
+
+                const pi = prog[i];
+                const pj = prog[j];
+
+                // RAW (true dependency): j writes, i reads
+                if (pi.src1 === pj.dst || pi.src2 === pj.dst) {
+                    hasDep = true;
+                    isTrue = true;
+                }
+                // WAW: both write same register
+                if (pi.dst === pj.dst) {
+                    hasDep = true;
+                    if (!isTrue) isFalse = true;
+                }
+                // WAR: j reads, i writes
+                if (pi.dst === pj.src1 || pi.dst === pj.src2) {
+                    hasDep = true;
+                    if (!isTrue) isFalse = true;
+                }
+
+                if (hasDep && j < renameStep && i < renameStep) {
+                    const fromNode = nodes[j];
+                    const toNode = nodes[i];
+
+                    if (renamed && isFalse && !isTrue) {
+                        // False dependency eliminated — draw it dimmed with strikethrough
+                        ctx.save();
+                        ctx.strokeStyle = hexToRgba(C.red, 0.2);
+                        ctx.lineWidth = 1;
+                        ctx.setLineDash([3, 3]);
+                        ctx.beginPath();
+                        ctx.moveTo(fromNode.x + (w / 4), fromNode.y + fromNode.h);
+                        ctx.lineTo(toNode.x + (w / 4), toNode.y);
+                        ctx.stroke();
+                        ctx.restore();
+                    } else if (isTrue) {
+                        const arrowColor = renamed ? C.green : C.blue;
+                        ISAUtils.drawArrow(ctx,
+                            fromNode.x - (w / 4), fromNode.y + fromNode.h,
+                            toNode.x - (w / 4), toNode.y,
+                            arrowColor, {width: 1.5});
+                    } else if (!renamed) {
+                        ISAUtils.drawArrow(ctx,
+                            fromNode.x + (w / 4), fromNode.y + fromNode.h,
+                            toNode.x + (w / 4), toNode.y,
+                            C.red, {width: 1.5, dashed: true});
+                    }
+                }
+            }
+        }
+    }
+
+    function initRename() {
+        const r = setupCanvas('renameCanvas', 420);
+        cv = r.canvas; ctx = r.ctx; W = r.w; H = r.h;
+        resetRename();
+    }
+
+    document.getElementById('renameStepBtn').addEventListener('click', stepRename);
+    document.getElementById('renameResetBtn').addEventListener('click', resetRename);
+
+    window.addEventListener('resize', initRename);
+    window.addEventListener('DOMContentLoaded', initRename);
+})();
+
+/* ================================================================
+   SECTION 6: 完整乱序处理器
+   ================================================================ */
+(() => {
+    let cv, ctx, W, H;
+
+    const program = [
+        { op: 'ADD',  dst: 'x1',  src1: 'x2',  src2: 'x3',  latency: 1 },
+        { op: 'LW',   dst: 'x4',  src1: 'x5',  src2: null,  latency: 3 },
+        { op: 'SUB',  dst: 'x6',  src1: 'x4',  src2: 'x7',  latency: 1 },
+        { op: 'MUL',  dst: 'x8',  src1: 'x1',  src2: 'x9',  latency: 3 },
+        { op: 'ADD',  dst: 'x10', src1: 'x8',  src2: 'x6',  latency: 1 },
+        { op: 'SW',   dst: null,   src1: 'x10', src2: 'x11', latency: 1 },
+        { op: 'BEQ',  dst: null,   src1: 'x1',  src2: 'x0',  latency: 1 },
+        { op: 'ADD',  dst: 'x12', src1: 'x13', src2: 'x14', latency: 1 },
+    ];
+
+    // Processor state
+    let cycle, fetchPtr, decodeQueue, renameQueue;
+    let robState, rsState, ratState, fuState;
+    let committedCount, fuBusyCycles, totalFUSlots;
+    let autoTimer;
+    let statusLog;
+
+    function resetFull() {
+        cycle = 0;
+        fetchPtr = 0;
+        decodeQueue = [];
+        renameQueue = [];
+        robState = []; // {id, inst, dst, physDst, value, status, remainCycles}
+        rsState = [];  // {id, op, vj, vk, qj, qk, robId, executing, remain}
+        ratState = {}; // arch -> robId
+        fuState = {alu: null, mul: null, mem: null}; // currently executing RS id
+        committedCount = 0;
+        fuBusyCycles = 0;
+        totalFUSlots = 0;
+        autoTimer && clearInterval(autoTimer);
+        autoTimer = null;
+        statusLog = [];
+        document.getElementById('fullAutoBtn').textContent = '自动播放';
+        updateFullMetrics();
+        updateFullStatus('完整乱序处理器模拟 — 点击"下一周期"开始');
+        document.getElementById('fullCycleLabel').textContent = '周期: 0';
+        drawFull();
+    }
+
+    function updateFullStatus(msg) {
+        statusLog.unshift(msg);
+        if (statusLog.length > 3) statusLog.pop();
+        document.getElementById('fullStatus').textContent = statusLog.join(' | ');
+    }
+
+    function updateFullMetrics() {
+        const ipc = cycle > 0 ? (committedCount / cycle).toFixed(2) : '0.00';
+        const util = totalFUSlots > 0 ? Math.round(fuBusyCycles / totalFUSlots * 100) + '%' : '0%';
+        document.getElementById('fullIPC').textContent = ipc;
+        document.getElementById('fullCommitted').textContent = committedCount;
+        document.getElementById('fullCycles').textContent = cycle;
+        document.getElementById('fullUtil').textContent = util;
+    }
+
+    function stepFull() {
+        cycle++;
+        let msg = `C${cycle}: `;
+        totalFUSlots += 3; // 3 FUs per cycle
+
+        // === Phase 5: Commit (in-order from ROB head) ===
+        if (robState.length > 0 && robState[0].status === 'ready') {
+            const head = robState.shift();
+            head.status = 'committed';
+            committedCount++;
+            // Clean up RAT if still pointing to this
+            for (const reg of Object.keys(ratState)) {
+                if (ratState[reg] === head.id) delete ratState[reg];
+            }
+            msg += `提交 ${head.inst.op}; `;
+        }
+
+        // === Phase 4: Write Back (CDB broadcast) ===
+        for (const rs of rsState) {
+            if (rs.executing && rs.remain <= 0) {
+                // Broadcast result
+                const result = Math.floor(Math.random() * 100) + 1;
+                // Update ROB
+                const robEntry = robState.find(r => r.id === rs.robId);
+                if (robEntry) {
+                    robEntry.value = result;
+                    robEntry.status = 'ready';
+                }
+                // Wake up dependent RS entries
+                for (const other of rsState) {
+                    if (other.qj === rs.robId) { other.vj = result; other.qj = null; }
+                    if (other.qk === rs.robId) { other.vk = result; other.qk = null; }
+                }
+                // Free FU
+                for (const fu of Object.keys(fuState)) {
+                    if (fuState[fu] === rs.id) fuState[fu] = null;
+                }
+                msg += `写回 ROB#${rs.robId}; `;
+                rs.done = true;
+            }
+        }
+        rsState = rsState.filter(rs => !rs.done);
+
+        // === Phase 3: Execute ===
+        for (const rs of rsState) {
+            if (rs.executing) {
+                rs.remain--;
+                fuBusyCycles++;
+            } else if (rs.qj === null && rs.qk === null) {
+                // Try to grab a functional unit
+                const fuType = (rs.op === 'MUL' || rs.op === 'DIV') ? 'mul' :
+                    (rs.op === 'LW' || rs.op === 'SW') ? 'mem' : 'alu';
+                if (fuState[fuType] === null) {
+                    fuState[fuType] = rs.id;
+                    rs.executing = true;
+                    rs.remain = rs.latency - 1;
+                    fuBusyCycles++;
+                    msg += `执行 ${rs.op}; `;
+                }
+            }
+        }
+
+        // === Phase 2: Issue/Rename ===
+        if (decodeQueue.length > 0 && robState.length < 8 && rsState.length < 6) {
+            const inst = decodeQueue.shift();
+            const robId = cycle * 10 + robState.length;
+            const robEntry = {
+                id: robId, inst, dst: inst.dst, value: null, status: 'pending'
+            };
+            robState.push(robEntry);
+
+            const rsEntry = {
+                id: robId, op: inst.op, robId,
+                vj: null, vk: null, qj: null, qk: null,
+                executing: false, remain: 0, latency: inst.latency, done: false
+            };
+
+            // Read src1
+            if (inst.src1) {
+                if (ratState[inst.src1] !== undefined) {
+                    const srcRob = robState.find(r => r.id === ratState[inst.src1]);
+                    if (srcRob && srcRob.status === 'ready') {
+                        rsEntry.vj = srcRob.value;
+                    } else {
+                        rsEntry.qj = ratState[inst.src1];
+                    }
+                } else {
+                    rsEntry.vj = Math.floor(Math.random() * 50) + 1;
+                }
+            } else {
+                rsEntry.vj = 0;
+            }
+
+            // Read src2
+            if (inst.src2) {
+                if (ratState[inst.src2] !== undefined) {
+                    const srcRob = robState.find(r => r.id === ratState[inst.src2]);
+                    if (srcRob && srcRob.status === 'ready') {
+                        rsEntry.vk = srcRob.value;
+                    } else {
+                        rsEntry.qk = ratState[inst.src2];
+                    }
+                } else {
+                    rsEntry.vk = Math.floor(Math.random() * 50) + 1;
+                }
+            } else {
+                rsEntry.vk = 0;
+            }
+
+            if (inst.dst) ratState[inst.dst] = robId;
+            rsState.push(rsEntry);
+            msg += `发射 ${inst.op}; `;
+        }
+
+        // === Phase 1: Fetch/Decode ===
+        if (fetchPtr < program.length && decodeQueue.length < 2) {
+            decodeQueue.push(program[fetchPtr]);
+            msg += `取指 I${fetchPtr + 1}; `;
+            fetchPtr++;
+        }
+
+        updateFullStatus(msg);
+        document.getElementById('fullCycleLabel').textContent = `周期: ${cycle}`;
+        updateFullMetrics();
+        drawFull();
+
+        // Check if done
+        if (fetchPtr >= program.length && robState.length === 0 && rsState.length === 0 && decodeQueue.length === 0) {
+            updateFullStatus('所有指令执行完毕!');
+            clearInterval(autoTimer);
+            autoTimer = null;
+            document.getElementById('fullAutoBtn').textContent = '自动播放';
+        }
+    }
+
+    function drawFull() {
+        if (!ctx) return;
+        clearCanvas(ctx, W, H);
+
+        const pad = 16;
+        const colW = (W - pad * 2) / 4;
+
+        // Title row: pipeline stages
+        const stages = ['取指/译码', '重命名/发射', '执行', '完成/提交'];
+        const stageColors = [C.fetch, C.decode, C.green, C.blue];
+        stages.forEach((s, i) => {
+            const x = pad + i * colW;
+            drawBox(ctx, x + 4, 10, colW - 8, 28, {fill: hexToRgba(stageColors[i], 0.15), stroke: stageColors[i], r: 4});
+            drawText(ctx, s, x + colW / 2, 24, {font: 'bold 11px "Noto Sans SC"', color: stageColors[i]});
+        });
+
+        // Decode queue
+        const dqY = 50;
+        drawBox(ctx, pad, dqY, colW - 8, 100, {fill: hexToRgba(C.fetch, 0.05), stroke: C.border, r: 6});
+        drawText(ctx, '译码队列', pad + (colW - 8) / 2, dqY + 14, {font: 'bold 10px "Noto Sans SC"', color: C.fetch});
+        decodeQueue.forEach((inst, i) => {
+            drawText(ctx, `${inst.op} ${inst.dst || ''}`, pad + (colW - 8) / 2, dqY + 34 + i * 20,
+                {font: '10px "JetBrains Mono"', color: C.textPri});
+        });
+        if (decodeQueue.length === 0) {
+            drawText(ctx, '(空)', pad + (colW - 8) / 2, dqY + 50, {font: '10px "Noto Sans SC"', color: C.textMut});
+        }
+
+        // Reservation Stations
+        const rsX = pad + colW;
+        drawBox(ctx, rsX, dqY, colW - 8, 100, {fill: hexToRgba(C.decode, 0.05), stroke: C.border, r: 6});
+        drawText(ctx, '保留站', rsX + (colW - 8) / 2, dqY + 14, {font: 'bold 10px "Noto Sans SC"', color: C.decode});
+        rsState.forEach((rs, i) => {
+            if (i >= 4) return;
+            const ready = rs.qj === null && rs.qk === null;
+            const color = rs.executing ? C.green : (ready ? C.yellow : C.orange);
+            drawText(ctx, `${rs.op} ${rs.executing ? '执行中' : (ready ? '就绪' : '等待')}`,
+                rsX + (colW - 8) / 2, dqY + 34 + i * 18,
+                {font: '10px "JetBrains Mono"', color});
+        });
+
+        // Functional Units
+        const fuX = pad + colW * 2;
+        drawBox(ctx, fuX, dqY, colW - 8, 100, {fill: hexToRgba(C.green, 0.05), stroke: C.border, r: 6});
+        drawText(ctx, '功能单元', fuX + (colW - 8) / 2, dqY + 14, {font: 'bold 10px "Noto Sans SC"', color: C.green});
+        const fus = [
+            {name: 'ALU', busy: fuState.alu !== null},
+            {name: 'MUL', busy: fuState.mul !== null},
+            {name: 'MEM', busy: fuState.mem !== null},
+        ];
+        fus.forEach((fu, i) => {
+            const fy = dqY + 34 + i * 22;
+            const color = fu.busy ? C.green : C.textMut;
+            drawBox(ctx, fuX + 8, fy - 8, colW - 24, 18, {fill: hexToRgba(color, 0.15), stroke: color, r: 3, lw: 1});
+            drawText(ctx, `${fu.name}: ${fu.busy ? '忙碌' : '空闲'}`, fuX + (colW - 8) / 2, fy,
+                {font: '9px "JetBrains Mono"', color});
+        });
+
+        // ROB
+        const robX = pad + colW * 3;
+        drawBox(ctx, robX, dqY, colW - 8, 100, {fill: hexToRgba(C.blue, 0.05), stroke: C.border, r: 6});
+        drawText(ctx, `ROB (${robState.length}/8)`, robX + (colW - 8) / 2, dqY + 14, {font: 'bold 10px "Noto Sans SC"', color: C.blue});
+        robState.forEach((e, i) => {
+            if (i >= 4) return;
+            const color = e.status === 'ready' ? C.green : C.yellow;
+            const statusText = e.status === 'ready' ? '就绪' : '等待';
+            drawText(ctx, `#${i} ${e.inst.op} ${statusText}`, robX + (colW - 8) / 2, dqY + 34 + i * 18,
+                {font: '10px "JetBrains Mono"', color});
+        });
+
+        // RAT
+        const ratY = dqY + 116;
+        drawBox(ctx, pad, ratY, W - pad * 2, 50, {fill: hexToRgba(C.purple, 0.05), stroke: C.border, r: 6});
+        drawText(ctx, 'RAT (寄存器别名表)', pad + 80, ratY + 14, {font: 'bold 10px "Noto Sans SC"', color: C.purple});
+        const ratKeys = Object.keys(ratState);
+        if (ratKeys.length > 0) {
+            const perItem = Math.min(80, (W - pad * 2 - 20) / ratKeys.length);
+            ratKeys.forEach((reg, i) => {
+                if (i > 10) return;
+                drawText(ctx, `${reg}→R${ratState[reg] % 100}`, pad + 20 + i * perItem, ratY + 36,
+                    {font: '9px "JetBrains Mono"', color: C.purple, align: 'left'});
+            });
+        } else {
+            drawText(ctx, '(所有寄存器直接读取)', (W) / 2, ratY + 36, {font: '10px "Noto Sans SC"', color: C.textMut});
+        }
+
+        // CDB
+        const cdbY = ratY + 62;
+        drawBox(ctx, pad, cdbY, W - pad * 2, 30, {fill: hexToRgba(C.yellow, 0.06), stroke: C.yellow, r: 4});
+        drawText(ctx, '公共数据总线 (CDB)', W / 2, cdbY + 15, {font: 'bold 11px "Noto Sans SC"', color: C.yellow});
+
+        // Arrows between stages
+        for (let i = 0; i < 3; i++) {
+            const fromX = pad + (i + 1) * colW - 4;
+            ISAUtils.drawArrow(ctx, fromX, dqY + 50, fromX + 8, dqY + 50, stageColors[i], {width: 1.5});
+        }
+
+        // Cycle indicator
+        drawText(ctx, `周期 ${cycle}`, W - 50, 24, {font: 'bold 12px "JetBrains Mono"', color: C.green});
+    }
+
+    function initFull() {
+        const r = setupCanvas('fullCanvas', 280);
+        cv = r.canvas; ctx = r.ctx; W = r.w; H = r.h;
+        resetFull();
+    }
+
+    document.getElementById('fullStepBtn').addEventListener('click', stepFull);
+    document.getElementById('fullResetBtn').addEventListener('click', resetFull);
+    document.getElementById('fullAutoBtn').addEventListener('click', () => {
+        if (autoTimer) {
+            clearInterval(autoTimer);
+            autoTimer = null;
+            document.getElementById('fullAutoBtn').textContent = '自动播放';
+        } else {
+            autoTimer = setInterval(stepFull, 1000);
+            document.getElementById('fullAutoBtn').textContent = '停止';
+        }
+    });
+
+    window.addEventListener('resize', initFull);
+    window.addEventListener('DOMContentLoaded', initFull);
+})();
+</script>
+</body>
+</html>

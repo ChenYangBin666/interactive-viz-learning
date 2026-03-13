@@ -1,0 +1,2232 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>指令基础 — 指令集与微架构</title>
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+SC:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+    <script src="../shared/scripts/isa-utils.js"></script>
+    <script defer src="../shared/scripts/nav.js"></script>
+    <style>
+        /* ===== Page Hero ===== */
+        .page-hero {
+            text-align: center;
+            padding: 2rem 2rem 1rem;
+        }
+        .page-hero h1 {
+            font-size: 2.2rem;
+            background: linear-gradient(135deg, #4fc3f7, #b388ff);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 0.5rem;
+        }
+        .page-hero .subtitle {
+            color: var(--text-secondary);
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        /* ===== Section Alt Backgrounds ===== */
+        .section-block {
+            padding: 3rem 0;
+        }
+        .section-block:nth-child(even) {
+            background: var(--bg-secondary);
+        }
+        .section-block:nth-child(odd) {
+            background: var(--bg-primary);
+        }
+        .section-inner {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 2rem;
+        }
+
+        /* ===== Instruction Breakdown (Section 1) ===== */
+        .inst-breakdown {
+            display: flex;
+            justify-content: center;
+            gap: 4px;
+            margin: 2rem 0;
+            flex-wrap: wrap;
+        }
+        .inst-field {
+            padding: 1rem 1.5rem;
+            border-radius: var(--radius-sm);
+            font-family: var(--font-mono);
+            font-weight: 600;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: all 0.3s;
+            position: relative;
+            text-align: center;
+            min-width: 80px;
+            border: 2px solid transparent;
+        }
+        .inst-field:hover, .inst-field.active {
+            transform: translateY(-4px);
+            box-shadow: 0 8px 25px rgba(0,0,0,0.3);
+        }
+        .inst-field.f-opcode { background: rgba(79,195,247,0.15); color: #4fc3f7; border-color: rgba(79,195,247,0.3); }
+        .inst-field.f-opcode:hover, .inst-field.f-opcode.active { border-color: #4fc3f7; background: rgba(79,195,247,0.25); }
+        .inst-field.f-rd { background: rgba(22,199,154,0.15); color: #16c79a; border-color: rgba(22,199,154,0.3); }
+        .inst-field.f-rd:hover, .inst-field.f-rd.active { border-color: #16c79a; background: rgba(22,199,154,0.25); }
+        .inst-field.f-rs1 { background: rgba(179,136,255,0.15); color: #b388ff; border-color: rgba(179,136,255,0.3); }
+        .inst-field.f-rs1:hover, .inst-field.f-rs1.active { border-color: #b388ff; background: rgba(179,136,255,0.25); }
+        .inst-field.f-rs2 { background: rgba(255,171,64,0.15); color: #ffab40; border-color: rgba(255,171,64,0.3); }
+        .inst-field.f-rs2:hover, .inst-field.f-rs2.active { border-color: #ffab40; background: rgba(255,171,64,0.25); }
+
+        .field-popup {
+            position: absolute;
+            bottom: calc(100% + 12px);
+            left: 50%;
+            transform: translateX(-50%);
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1rem 1.2rem;
+            min-width: 220px;
+            z-index: 50;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s;
+            text-align: left;
+        }
+        .field-popup.visible {
+            opacity: 1;
+            pointer-events: auto;
+        }
+        .field-popup::after {
+            content: '';
+            position: absolute;
+            top: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            border: 8px solid transparent;
+            border-top-color: var(--bg-card);
+        }
+        .field-popup h4 {
+            margin-bottom: 0.3rem;
+            font-size: 0.95rem;
+        }
+        .field-popup p {
+            font-size: 0.82rem;
+            margin: 0;
+            color: var(--text-secondary);
+            line-height: 1.5;
+        }
+
+        .analogy-box {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 1.5rem;
+            margin: 2rem auto;
+            max-width: 700px;
+            flex-wrap: wrap;
+        }
+        .analogy-item {
+            text-align: center;
+            padding: 1rem;
+            border-radius: var(--radius-md);
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            min-width: 120px;
+        }
+        .analogy-item .label {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            margin-bottom: 0.3rem;
+        }
+        .analogy-item .value {
+            font-family: var(--font-mono);
+            font-weight: 600;
+            font-size: 1.1rem;
+        }
+        .analogy-arrow {
+            font-size: 1.5rem;
+            color: var(--text-muted);
+        }
+
+        /* ===== Binary Animation (Section 1) ===== */
+        .binary-anim-wrap {
+            margin-top: 2rem;
+        }
+        .binary-anim-wrap .canvas-wrap {
+            margin-top: 1rem;
+        }
+
+        /* ===== Format Comparison (Section 2) ===== */
+        .format-tabs {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1.5rem;
+            flex-wrap: wrap;
+        }
+        .format-tab {
+            padding: 0.5rem 1.2rem;
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            background: transparent;
+            color: var(--text-secondary);
+            font-family: inherit;
+            font-size: 0.85rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .format-tab:hover {
+            border-color: var(--accent-blue);
+            color: var(--accent-blue);
+        }
+        .format-tab.active {
+            background: rgba(79,195,247,0.15);
+            border-color: var(--accent-blue);
+            color: var(--accent-blue);
+            font-weight: 600;
+        }
+
+        /* ===== Addressing Mode (Section 3) ===== */
+        .addr-mode-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+            gap: 0.75rem;
+            margin-bottom: 1.5rem;
+        }
+        .addr-mode-btn {
+            padding: 0.75rem;
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            background: transparent;
+            color: var(--text-secondary);
+            font-family: inherit;
+            font-size: 0.85rem;
+            cursor: pointer;
+            transition: all 0.3s;
+            text-align: center;
+        }
+        .addr-mode-btn:hover {
+            border-color: var(--accent-purple);
+            color: var(--accent-purple);
+        }
+        .addr-mode-btn.active {
+            background: rgba(179,136,255,0.15);
+            border-color: var(--accent-purple);
+            color: var(--accent-purple);
+            font-weight: 600;
+        }
+        .addr-desc-box {
+            margin-top: 1rem;
+            padding: 1rem;
+            background: var(--bg-card);
+            border-radius: var(--radius-md);
+            border-left: 3px solid var(--accent-purple);
+        }
+        .addr-desc-box h4 { color: var(--accent-purple); margin-bottom: 0.3rem; }
+        .addr-desc-box p { margin: 0; font-size: 0.9rem; }
+        .addr-desc-box code { font-size: 0.85rem; }
+
+        /* ===== Encoder (Section 4) ===== */
+        .encoder-input-row {
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+            flex-wrap: wrap;
+            margin-bottom: 1.5rem;
+        }
+        .encoder-input-row input {
+            flex: 1;
+            min-width: 200px;
+            padding: 0.7rem 1rem;
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            color: var(--text-primary);
+            font-family: var(--font-mono);
+            font-size: 0.95rem;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        .encoder-input-row input:focus {
+            border-color: var(--accent-green);
+        }
+        .encoder-input-row input::placeholder {
+            color: var(--text-muted);
+        }
+
+        .bit-field-row {
+            display: flex;
+            justify-content: center;
+            gap: 2px;
+            margin: 1.5rem 0;
+            flex-wrap: wrap;
+        }
+        .bit-group {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        .bit-group:hover {
+            transform: translateY(-2px);
+        }
+        .bit-group .bits {
+            display: flex;
+            gap: 1px;
+        }
+        .bit-cell {
+            width: 22px;
+            height: 28px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            font-weight: 600;
+            border-radius: 2px;
+            transition: all 0.2s;
+        }
+        .bit-group .field-label {
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            font-family: var(--font-mono);
+        }
+        .bit-group:hover .field-label {
+            color: var(--text-primary);
+        }
+
+        .bit-opcode .bit-cell { background: rgba(79,195,247,0.2); color: #4fc3f7; }
+        .bit-rd .bit-cell { background: rgba(22,199,154,0.2); color: #16c79a; }
+        .bit-funct3 .bit-cell { background: rgba(255,82,82,0.2); color: #ff5252; }
+        .bit-rs1 .bit-cell { background: rgba(179,136,255,0.2); color: #b388ff; }
+        .bit-rs2 .bit-cell { background: rgba(255,171,64,0.2); color: #ffab40; }
+        .bit-funct7 .bit-cell { background: rgba(255,82,82,0.2); color: #ff5252; }
+        .bit-imm .bit-cell { background: rgba(255,215,64,0.2); color: #ffd740; }
+
+        .bit-group:hover .bit-cell {
+            filter: brightness(1.3);
+        }
+
+        .encode-info {
+            padding: 1rem;
+            background: var(--bg-card);
+            border-radius: var(--radius-md);
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            min-height: 60px;
+        }
+        .encode-info .hex-result {
+            font-family: var(--font-mono);
+            font-size: 1.1rem;
+            color: var(--accent-green);
+            font-weight: 600;
+        }
+
+        /* ===== Execution Cycle (Section 5) ===== */
+        .cycle-controls {
+            display: flex;
+            gap: 0.75rem;
+            align-items: center;
+            margin-bottom: 1rem;
+            flex-wrap: wrap;
+        }
+
+        /* ===== Radar Chart (Section 6) ===== */
+        .radar-controls {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+        @media (max-width: 768px) {
+            .radar-controls { grid-template-columns: 1fr; }
+        }
+        .radar-slider-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.3rem;
+        }
+        .radar-slider-group label {
+            font-size: 0.82rem;
+            color: var(--text-secondary);
+            display: flex;
+            justify-content: space-between;
+        }
+        .radar-slider-group label span {
+            font-family: var(--font-mono);
+            color: var(--accent-green);
+        }
+
+        .ref-points {
+            display: flex;
+            gap: 0.75rem;
+            margin-bottom: 1.5rem;
+            flex-wrap: wrap;
+        }
+        .ref-btn {
+            padding: 0.4rem 0.9rem;
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            background: transparent;
+            color: var(--text-secondary);
+            font-family: inherit;
+            font-size: 0.82rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .ref-btn:hover { border-color: var(--accent-green); color: var(--accent-green); }
+        .ref-btn.active { background: rgba(22,199,154,0.15); border-color: var(--accent-green); color: var(--accent-green); }
+
+        .quiz-box {
+            margin-top: 2rem;
+            padding: 1.5rem;
+            background: var(--bg-card);
+            border-radius: var(--radius-md);
+            border: 1px solid var(--border-color);
+        }
+        .quiz-box h4 { color: var(--accent-yellow); margin-bottom: 0.75rem; }
+        .quiz-options {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+            margin: 1rem 0;
+        }
+        .quiz-opt {
+            padding: 0.6rem 1rem;
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            background: transparent;
+            color: var(--text-secondary);
+            font-family: inherit;
+            font-size: 0.85rem;
+            cursor: pointer;
+            text-align: left;
+            transition: all 0.2s;
+        }
+        .quiz-opt:hover { border-color: var(--accent-yellow); color: var(--accent-yellow); }
+        .quiz-opt.correct { border-color: var(--accent-green); background: rgba(22,199,154,0.15); color: var(--accent-green); }
+        .quiz-opt.wrong { border-color: var(--accent-red); background: rgba(255,82,82,0.1); color: var(--accent-red); }
+        .quiz-feedback { margin-top: 0.75rem; font-size: 0.9rem; min-height: 1.5em; }
+
+        /* ===== Responsive ===== */
+        @media (max-width: 768px) {
+            .page-hero h1 { font-size: 1.6rem; }
+            .inst-field { padding: 0.7rem 1rem; min-width: 60px; font-size: 0.85rem; }
+            .section-inner { padding: 0 1rem; }
+            .bit-cell { width: 16px; height: 22px; font-size: 0.65rem; }
+            .radar-controls { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+
+<!-- nav.js will auto-inject navigation -->
+
+<div class="page-container">
+
+<!-- Page Hero -->
+<div class="page-hero">
+    <h1>指令基础</h1>
+    <p class="subtitle">指令是处理器能理解的最小命令单元 —— 了解指令的组成、格式、寻址方式和编码规则</p>
+    <div style="margin-top:0.75rem; display:flex; justify-content:center; gap:0.5rem; flex-wrap:wrap;">
+        <span class="badge badge-blue">交互式</span>
+        <span class="badge badge-purple">可视化</span>
+        <span class="badge badge-green">RISC-V</span>
+    </div>
+</div>
+
+</div><!-- end page-container (hero only) -->
+
+<!-- ============================================================ -->
+<!-- Section 1: 什么是指令 -->
+<!-- ============================================================ -->
+<div class="section-block" id="sec1">
+<div class="section-inner">
+    <div class="section-title">
+        <div class="icon">1</div>
+        <h2>什么是指令</h2>
+    </div>
+    <p>一条指令就像一句简短的命令，告诉处理器"做什么"和"对谁做"。就像人类语言中的 <strong>动词 + 宾语</strong>，指令由 <strong>操作码</strong>（做什么）和 <strong>操作数</strong>（对谁做）组成。</p>
+
+    <div class="analogy-box">
+        <div class="analogy-item">
+            <div class="label">人类语言</div>
+            <div class="value" style="color:#4fc3f7;">把 A 和 B 加起来，放到 C</div>
+        </div>
+        <div class="analogy-arrow">&harr;</div>
+        <div class="analogy-item">
+            <div class="label">汇编指令</div>
+            <div class="value" style="color:#16c79a;">add x1, x2, x3</div>
+        </div>
+    </div>
+
+    <p style="text-align:center; color:var(--text-muted); font-size:0.85rem;">点击下方每个字段，查看详细解释</p>
+
+    <div class="inst-breakdown" id="instBreakdown">
+        <div class="inst-field f-opcode" data-field="opcode">
+            add
+            <div class="field-popup" id="popup-opcode">
+                <h4 style="color:#4fc3f7;">操作码 (Opcode)</h4>
+                <p>指令的"动词"，决定处理器执行什么操作。<code>add</code> 表示加法运算。不同的操作码对应不同的运算：加、减、与、或、跳转等。</p>
+            </div>
+        </div>
+        <div class="inst-field f-rd" data-field="rd">
+            x1
+            <div class="field-popup" id="popup-rd">
+                <h4 style="color:#16c79a;">目标寄存器 (rd)</h4>
+                <p>运算结果存放的位置。<code>x1</code> 是 RISC-V 的第 1 号通用寄存器。相当于"把答案写在哪"。</p>
+            </div>
+        </div>
+        <div class="inst-field f-rs1" data-field="rs1">
+            x2
+            <div class="field-popup" id="popup-rs1">
+                <h4 style="color:#b388ff;">源寄存器1 (rs1)</h4>
+                <p>第一个操作数的来源。<code>x2</code> 中存放的值将参与运算。相当于"加法的第一个数"。</p>
+            </div>
+        </div>
+        <div class="inst-field f-rs2" data-field="rs2">
+            x3
+            <div class="field-popup" id="popup-rs2">
+                <h4 style="color:#ffab40;">源寄存器2 (rs2)</h4>
+                <p>第二个操作数的来源。<code>x3</code> 中存放的值将与 rs1 一起参与运算。相当于"加法的第二个数"。</p>
+            </div>
+        </div>
+    </div>
+
+    <p style="text-align:center; margin-top:1.5rem; margin-bottom:0.5rem; color:var(--text-secondary);">下面展示 <code>add x1, x2, x3</code> 如何映射到 32 位二进制：</p>
+    <div class="binary-anim-wrap">
+        <div class="canvas-wrap">
+            <canvas id="binaryAnimCanvas"></canvas>
+        </div>
+    </div>
+    <div style="text-align:center; margin-top:0.75rem;">
+        <button class="btn btn-primary" id="binaryAnimBtn">播放编码动画</button>
+    </div>
+</div>
+</div>
+
+<!-- ============================================================ -->
+<!-- Section 2: 指令格式对比 -->
+<!-- ============================================================ -->
+<div class="section-block" id="sec2">
+<div class="section-inner">
+    <div class="section-title">
+        <div class="icon">2</div>
+        <h2>指令格式对比</h2>
+    </div>
+    <p>不同的计算机架构使用不同数量的操作数。操作数越多，指令越灵活但也越长；操作数越少，指令越短但需要更多条指令完成同样的计算。</p>
+
+    <div class="format-tabs" id="formatTabs">
+        <button class="format-tab active" data-fmt="3addr">三地址 (RISC)</button>
+        <button class="format-tab" data-fmt="2addr">二地址 (x86)</button>
+        <button class="format-tab" data-fmt="1addr">一地址 (累加器)</button>
+        <button class="format-tab" data-fmt="0addr">零地址 (栈机)</button>
+    </div>
+
+    <div class="split-layout">
+        <div class="text-panel">
+            <div class="card" id="formatDesc">
+                <h3 id="formatDescTitle">三地址格式</h3>
+                <p id="formatDescText">每条指令指定两个源操作数和一个目标操作数。最灵活，一条指令就能完成一个完整运算。RISC-V、ARM、MIPS 使用此格式。</p>
+                <div class="info-box mt-1" id="formatCode">
+                    <p style="font-family:var(--font-mono); margin:0;"></p>
+                </div>
+            </div>
+            <div id="formatStepInfo" class="card mt-2" style="min-height:120px;">
+                <h4 style="color:var(--accent-blue);">执行步骤</h4>
+                <div id="formatStepText" style="font-size:0.85rem; color:var(--text-secondary);"></div>
+            </div>
+        </div>
+        <div class="viz-panel">
+            <div class="canvas-wrap">
+                <canvas id="formatCanvas"></canvas>
+            </div>
+            <div class="anim-controls mt-1">
+                <button class="btn btn-sm" id="formatPrev">&#9664;</button>
+                <button class="btn btn-sm btn-primary" id="formatPlay">&#9654; 播放</button>
+                <button class="btn btn-sm" id="formatNext">&#9654;</button>
+                <div class="progress-bar"><div class="fill" id="formatProgress"></div></div>
+                <span class="step-label" id="formatStepLabel">0 / 0</span>
+            </div>
+        </div>
+    </div>
+</div>
+</div>
+
+<!-- ============================================================ -->
+<!-- Section 3: 寻址模式 -->
+<!-- ============================================================ -->
+<div class="section-block" id="sec3">
+<div class="section-inner">
+    <div class="section-title">
+        <div class="icon">3</div>
+        <h2>寻址模式</h2>
+    </div>
+    <p>寻址模式决定了指令如何找到操作数。不同的寻址模式适用于不同的场景 —— 从最简单的立即数到复杂的间接寻址。</p>
+
+    <div class="addr-mode-grid" id="addrModeGrid">
+        <button class="addr-mode-btn active" data-mode="immediate">立即数寻址</button>
+        <button class="addr-mode-btn" data-mode="register">寄存器寻址</button>
+        <button class="addr-mode-btn" data-mode="direct">直接寻址</button>
+        <button class="addr-mode-btn" data-mode="indirect">间接寻址</button>
+        <button class="addr-mode-btn" data-mode="base-offset">基址偏移寻址</button>
+        <button class="addr-mode-btn" data-mode="pc-relative">PC 相对寻址</button>
+    </div>
+
+    <div class="addr-desc-box" id="addrDescBox">
+        <h4>立即数寻址</h4>
+        <p>操作数直接编码在指令中。例如 <code>addi x1, x0, 42</code> 中的 42 就是立即数。</p>
+    </div>
+
+    <div class="canvas-wrap mt-2">
+        <canvas id="addrCanvas"></canvas>
+    </div>
+    <div style="text-align:center; margin-top:0.75rem;">
+        <button class="btn btn-primary" id="addrAnimBtn">播放数据流动画</button>
+    </div>
+</div>
+</div>
+
+<!-- ============================================================ -->
+<!-- Section 4: 机器码编码 -->
+<!-- ============================================================ -->
+<div class="section-block" id="sec4">
+<div class="section-inner">
+    <div class="section-title">
+        <div class="icon">4</div>
+        <h2>机器码编码</h2>
+    </div>
+    <p>输入一条 RISC-V 汇编指令，实时查看它的二进制编码。悬停到任何位段上查看含义。</p>
+
+    <div class="encoder-input-row">
+        <input type="text" id="encoderInput" placeholder="输入指令，如 add x1, x2, x3 或 addi x5, x0, 100" spellcheck="false" autocomplete="off">
+        <button class="btn btn-primary" id="encodeBtn">编码</button>
+    </div>
+
+    <div id="bitFieldDisplay" class="bit-field-row"></div>
+
+    <div id="encodeInfoBox" class="encode-info">
+        <p style="color:var(--text-muted);">在上方输入指令后点击"编码"，或直接按回车。支持 R-type 和 I-type 指令。</p>
+    </div>
+
+    <div class="info-box mt-2">
+        <p><strong>支持的指令：</strong> <code>add</code>, <code>sub</code>, <code>and</code>, <code>or</code>, <code>xor</code>, <code>sll</code>, <code>srl</code>, <code>slt</code>, <code>addi</code>, <code>andi</code>, <code>ori</code>, <code>lw</code>, <code>sw</code>, <code>beq</code>, <code>bne</code>, <code>jal</code>, <code>lui</code></p>
+    </div>
+</div>
+</div>
+
+<!-- ============================================================ -->
+<!-- Section 5: 指令执行周期 -->
+<!-- ============================================================ -->
+<div class="section-block" id="sec5">
+<div class="section-inner">
+    <div class="section-title">
+        <div class="icon">5</div>
+        <h2>指令执行周期</h2>
+    </div>
+    <p>每条指令在处理器中经历 5 个阶段：取指 (IF)、译码 (ID)、执行 (EX)、访存 (MEM)、写回 (WB)。点击步进按钮，逐步观察数据在硬件模块之间的流动。</p>
+
+    <div class="cycle-controls">
+        <button class="btn btn-sm" id="cyclePrev" disabled>&#9664; 上一步</button>
+        <button class="btn btn-sm btn-primary" id="cyclePlay">&#9654; 自动播放</button>
+        <button class="btn btn-sm" id="cycleNext">下一步 &#9654;</button>
+        <button class="btn btn-sm" id="cycleReset">重置</button>
+        <span class="step-label" id="cycleStepLabel">阶段: 就绪</span>
+    </div>
+
+    <div class="canvas-wrap">
+        <canvas id="cycleCanvas"></canvas>
+    </div>
+
+    <div class="legend mt-1" id="cycleLegend">
+        <div class="legend-item"><div class="swatch" style="background:#4fc3f7;"></div> 取指 (IF)</div>
+        <div class="legend-item"><div class="swatch" style="background:#b388ff;"></div> 译码 (ID)</div>
+        <div class="legend-item"><div class="swatch" style="background:#16c79a;"></div> 执行 (EX)</div>
+        <div class="legend-item"><div class="swatch" style="background:#ffab40;"></div> 访存 (MEM)</div>
+        <div class="legend-item"><div class="swatch" style="background:#ff80ab;"></div> 写回 (WB)</div>
+    </div>
+</div>
+</div>
+
+<!-- ============================================================ -->
+<!-- Section 6: 指令集设计空间 -->
+<!-- ============================================================ -->
+<div class="section-block" id="sec6">
+<div class="section-inner">
+    <div class="section-title">
+        <div class="icon">6</div>
+        <h2>指令集设计空间</h2>
+    </div>
+    <p>指令集架构有许多设计维度。调整下方滑块，在雷达图中观察你的设计选择，并与经典架构进行对比。</p>
+
+    <div class="ref-points" id="refPoints">
+        <button class="ref-btn" data-ref="riscv">RISC-V</button>
+        <button class="ref-btn" data-ref="x86">x86</button>
+        <button class="ref-btn" data-ref="arm">ARM</button>
+        <button class="ref-btn" data-ref="clear">清除参考</button>
+    </div>
+
+    <div class="split-layout">
+        <div class="text-panel">
+            <div class="radar-controls" id="radarControls">
+                <div class="radar-slider-group">
+                    <label>指令长度 (固定 vs 可变) <span id="rv-instLen">5</span></label>
+                    <input type="range" min="1" max="10" value="5" data-axis="instLen">
+                </div>
+                <div class="radar-slider-group">
+                    <label>操作数数量 <span id="rv-operandCnt">5</span></label>
+                    <input type="range" min="1" max="10" value="5" data-axis="operandCnt">
+                </div>
+                <div class="radar-slider-group">
+                    <label>寻址模式丰富度 <span id="rv-addrModes">5</span></label>
+                    <input type="range" min="1" max="10" value="5" data-axis="addrModes">
+                </div>
+                <div class="radar-slider-group">
+                    <label>寄存器数量 <span id="rv-regCount">5</span></label>
+                    <input type="range" min="1" max="10" value="5" data-axis="regCount">
+                </div>
+                <div class="radar-slider-group">
+                    <label>编码复杂度 <span id="rv-encComplexity">5</span></label>
+                    <input type="range" min="1" max="10" value="5" data-axis="encComplexity">
+                </div>
+                <div class="radar-slider-group">
+                    <label>指令数量 <span id="rv-instCount">5</span></label>
+                    <input type="range" min="1" max="10" value="5" data-axis="instCount">
+                </div>
+            </div>
+        </div>
+        <div class="viz-panel">
+            <div class="canvas-wrap">
+                <canvas id="radarCanvas"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <div class="quiz-box" id="quizBox">
+        <h4>设计挑战</h4>
+        <p>假设你要设计一个嵌入式处理器，要求：低功耗、小芯片面积、编译器友好。你会如何选择？</p>
+        <div class="quiz-options" id="quizOptions">
+            <button class="quiz-opt" data-idx="0">A. 大量寻址模式 + 可变长指令 + 丰富指令集</button>
+            <button class="quiz-opt" data-idx="1">B. 固定长指令 + 较多寄存器 + 简单编码 + 少量寻址模式</button>
+            <button class="quiz-opt" data-idx="2">C. 零地址栈机 + 极短指令 + 无寄存器</button>
+            <button class="quiz-opt" data-idx="3">D. 可变长指令 + 大量寄存器 + 复杂编码</button>
+        </div>
+        <div class="quiz-feedback" id="quizFeedback"></div>
+    </div>
+</div>
+</div>
+
+<!-- Footer -->
+<div style="text-align:center; padding:2rem; color:var(--text-muted); font-size:0.8rem;">
+    指令基础 — 指令集与微架构 交互式学习 模块 01
+</div>
+
+<script>
+// ================================================================
+// Shared constants
+// ================================================================
+const C = ISAUtils.COLORS;
+const DPR = window.devicePixelRatio || 1;
+
+// ================================================================
+// Section 1: What is an Instruction
+// ================================================================
+(function initSection1() {
+    // Field popups
+    const fields = document.querySelectorAll('#instBreakdown .inst-field');
+    let activeField = null;
+
+    fields.forEach(f => {
+        f.addEventListener('click', () => {
+            const popup = f.querySelector('.field-popup');
+            if (activeField === f) {
+                popup.classList.remove('visible');
+                f.classList.remove('active');
+                activeField = null;
+                return;
+            }
+            if (activeField) {
+                activeField.querySelector('.field-popup').classList.remove('visible');
+                activeField.classList.remove('active');
+            }
+            popup.classList.add('visible');
+            f.classList.add('active');
+            activeField = f;
+        });
+    });
+
+    document.addEventListener('click', e => {
+        if (activeField && !activeField.contains(e.target)) {
+            activeField.querySelector('.field-popup').classList.remove('visible');
+            activeField.classList.remove('active');
+            activeField = null;
+        }
+    });
+
+    // Binary animation canvas
+    const canvas = document.getElementById('binaryAnimCanvas');
+    const { ctx, w, h } = ISAUtils.initCanvas(canvas, 180);
+    let animProgress = 0;
+    let animating = false;
+
+    const fields32 = [
+        { name: 'funct7', bits: '0000000', color: C.red, len: 7 },
+        { name: 'rs2', bits: '00011', color: C.orange, len: 5 },
+        { name: 'rs1', bits: '00010', color: C.purple, len: 5 },
+        { name: 'funct3', bits: '000', color: C.red, len: 3 },
+        { name: 'rd', bits: '00001', color: C.green, len: 5 },
+        { name: 'opcode', bits: '0110011', color: C.blue, len: 7 },
+    ];
+
+    function drawBinaryAnim() {
+        ctx.clearRect(0, 0, w, h);
+
+        const totalBits = 32;
+        const bitW = Math.min(20, (w - 60) / totalBits);
+        const startX = (w - totalBits * bitW) / 2;
+        const y = 30;
+        const barH = 40;
+
+        // Title
+        ctx.font = 'bold 14px "Noto Sans SC", sans-serif';
+        ctx.fillStyle = C.textPri;
+        ctx.textAlign = 'center';
+        ctx.fillText('add x1, x2, x3  →  32位机器码', w / 2, 20);
+
+        let bitIdx = 0;
+        fields32.forEach(field => {
+            for (let i = 0; i < field.len; i++) {
+                const progress = Math.min(1, Math.max(0, (animProgress * totalBits - bitIdx) / 1));
+                const x = startX + bitIdx * bitW;
+
+                ctx.globalAlpha = 0.2 + 0.8 * progress;
+                ctx.fillStyle = ISAUtils.hexToRgba(field.color, 0.2 + 0.15 * progress);
+                ctx.fillRect(x, y, bitW - 1, barH);
+
+                ctx.fillStyle = field.color;
+                ctx.font = `bold ${Math.min(11, bitW * 0.65)}px "JetBrains Mono", monospace`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(field.bits[i], x + bitW / 2, y + barH / 2);
+                ctx.globalAlpha = 1;
+                bitIdx++;
+            }
+        });
+
+        // Field labels below
+        bitIdx = 0;
+        const labelY = y + barH + 16;
+        fields32.forEach(field => {
+            const xStart = startX + bitIdx * bitW;
+            const xEnd = xStart + field.len * bitW;
+            const xMid = (xStart + xEnd) / 2;
+
+            const progress = Math.min(1, Math.max(0, animProgress * 1.5 - bitIdx / totalBits));
+            ctx.globalAlpha = progress;
+
+            ctx.strokeStyle = ISAUtils.hexToRgba(field.color, 0.4);
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(xStart + 2, y + barH + 2);
+            ctx.lineTo(xStart + 2, labelY - 6);
+            ctx.lineTo(xEnd - 2, labelY - 6);
+            ctx.lineTo(xEnd - 2, y + barH + 2);
+            ctx.stroke();
+
+            ctx.fillStyle = field.color;
+            ctx.font = '10px "JetBrains Mono", monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText(field.name, xMid, labelY + 4);
+
+            ctx.globalAlpha = 1;
+            bitIdx += field.len;
+        });
+
+        // Assembly labels
+        const asmY = y + barH + 42;
+        const asmLabels = [
+            { text: 'add', color: C.blue, note: '操作码' },
+            { text: 'x1(rd)', color: C.green, note: '目标' },
+            { text: 'x2(rs1)', color: C.purple, note: '源1' },
+            { text: 'x3(rs2)', color: C.orange, note: '源2' },
+        ];
+
+        const asmSpacing = Math.min(140, w / 5);
+        const asmStartX = w / 2 - (asmLabels.length - 1) * asmSpacing / 2;
+
+        ctx.globalAlpha = Math.min(1, animProgress * 2);
+        asmLabels.forEach((a, i) => {
+            const ax = asmStartX + i * asmSpacing;
+            ctx.fillStyle = a.color;
+            ctx.font = 'bold 13px "JetBrains Mono", monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText(a.text, ax, asmY);
+            ctx.fillStyle = C.textMut;
+            ctx.font = '10px "Noto Sans SC", sans-serif';
+            ctx.fillText(a.note, ax, asmY + 16);
+        });
+        ctx.globalAlpha = 1;
+
+        // Hex result
+        if (animProgress > 0.8) {
+            const hexAlpha = (animProgress - 0.8) / 0.2;
+            ctx.globalAlpha = hexAlpha;
+            ctx.fillStyle = C.green;
+            ctx.font = 'bold 12px "JetBrains Mono", monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText('0x003100B3', w / 2, h - 10);
+            ctx.globalAlpha = 1;
+        }
+    }
+
+    drawBinaryAnim();
+
+    document.getElementById('binaryAnimBtn').addEventListener('click', () => {
+        if (animating) return;
+        animating = true;
+        animProgress = 0;
+        gsap.to({ p: 0 }, {
+            p: 1, duration: 2, ease: 'power2.inOut',
+            onUpdate: function() { animProgress = this.targets()[0].p; drawBinaryAnim(); },
+            onComplete: () => { animating = false; }
+        });
+    });
+
+    window.addEventListener('resize', () => {
+        const r = ISAUtils.initCanvas(canvas, 180);
+        Object.assign(canvas, { _w: r.w, _h: r.h });
+        drawBinaryAnim();
+    });
+})();
+
+// ================================================================
+// Section 2: Instruction Format Comparison
+// ================================================================
+(function initSection2() {
+    const canvas = document.getElementById('formatCanvas');
+    let { ctx, w, h } = ISAUtils.initCanvas(canvas, 420);
+
+    const formats = {
+        '3addr': {
+            title: '三地址格式',
+            desc: '每条指令指定两个源操作数和一个目标操作数。最灵活，一条指令就能完成一个完整运算。RISC-V、ARM、MIPS 使用此格式。',
+            example: 'add C, A, B   // C = A + B',
+            steps: [
+                { text: '指令: add C, A, B', regs: { A: 3, B: 5, C: '-' }, note: '三地址格式：op dst, src1, src2' },
+                { text: '读取 A=3, B=5', regs: { A: 3, B: 5, C: '-' }, note: '从寄存器读取两个源操作数' },
+                { text: 'ALU 计算 3 + 5 = 8', regs: { A: 3, B: 5, C: '-' }, note: 'ALU 执行加法运算', alu: '3 + 5 = 8' },
+                { text: '结果写回 C = 8', regs: { A: 3, B: 5, C: 8 }, note: '结果写入目标寄存器 C', highlight: 'C' },
+            ]
+        },
+        '2addr': {
+            title: '二地址格式',
+            desc: '目标寄存器同时也是一个源操作数。结果覆盖其中一个源。x86 传统上使用此格式（如 ADD EAX, EBX）。',
+            example: 'mov C, A   // C = A\nadd C, B   // C = C + B',
+            steps: [
+                { text: '指令1: mov C, A', regs: { A: 3, B: 5, C: '-' }, note: '先把 A 复制到 C' },
+                { text: 'C = A = 3', regs: { A: 3, B: 5, C: 3 }, note: 'C 现在保存了 A 的值', highlight: 'C' },
+                { text: '指令2: add C, B', regs: { A: 3, B: 5, C: 3 }, note: '二地址：C 既是目标也是源' },
+                { text: 'C = C + B = 3 + 5 = 8', regs: { A: 3, B: 5, C: 8 }, note: '结果覆盖 C', highlight: 'C', alu: '3 + 5 = 8' },
+            ]
+        },
+        '1addr': {
+            title: '一地址格式（累加器）',
+            desc: '所有运算隐含使用累加器(ACC)。指令只需指定一个操作数，另一个隐含是ACC。早期计算机如PDP-8使用此格式。',
+            example: 'LOAD A    // ACC = A\nADD B     // ACC = ACC + B\nSTORE C   // C = ACC',
+            steps: [
+                { text: '指令1: LOAD A', regs: { A: 3, B: 5, ACC: '-', C: '-' }, note: '把 A 加载到累加器' },
+                { text: 'ACC = A = 3', regs: { A: 3, B: 5, ACC: 3, C: '-' }, note: '累加器保存了 A', highlight: 'ACC' },
+                { text: '指令2: ADD B', regs: { A: 3, B: 5, ACC: 3, C: '-' }, note: 'ACC = ACC + B', alu: '3 + 5 = 8' },
+                { text: 'ACC = 3 + 5 = 8', regs: { A: 3, B: 5, ACC: 8, C: '-' }, note: '结果留在累加器中', highlight: 'ACC' },
+                { text: '指令3: STORE C', regs: { A: 3, B: 5, ACC: 8, C: '-' }, note: '把累加器写入 C' },
+                { text: 'C = ACC = 8', regs: { A: 3, B: 5, ACC: 8, C: 8 }, note: '完成! 需要3条指令', highlight: 'C' },
+            ]
+        },
+        '0addr': {
+            title: '零地址格式（栈机）',
+            desc: '所有操作在栈顶进行，无需指定操作数地址。JVM字节码和Forth语言使用此模型。指令最短但需要更多条。',
+            example: 'PUSH A\nPUSH B\nADD\nPOP C',
+            steps: [
+                { text: '指令1: PUSH A', regs: {}, stack: [], note: '将 A 的值压入栈' },
+                { text: '栈: [3]', regs: {}, stack: [3], note: 'A=3 已在栈顶' },
+                { text: '指令2: PUSH B', regs: {}, stack: [3], note: '将 B 的值压入栈' },
+                { text: '栈: [3, 5]', regs: {}, stack: [3, 5], note: 'B=5 在栈顶, A=3 在下面' },
+                { text: '指令3: ADD', regs: {}, stack: [3, 5], note: '弹出栈顶两个元素相加', alu: '3 + 5 = 8' },
+                { text: '栈: [8]', regs: {}, stack: [8], note: '结果 8 压回栈顶' },
+                { text: '指令4: POP C', regs: {}, stack: [8], note: '弹出栈顶到 C' },
+                { text: 'C = 8, 栈空', regs: { C: 8 }, stack: [], note: '完成! 需要4条指令', highlight: 'C' },
+            ]
+        }
+    };
+
+    let currentFmt = '3addr';
+    let currentStep = 0;
+    let playing = false;
+    let playTimer = null;
+
+    function updateFormatDesc() {
+        const fmt = formats[currentFmt];
+        document.getElementById('formatDescTitle').textContent = fmt.title;
+        document.getElementById('formatDescText').textContent = fmt.desc;
+        document.querySelector('#formatCode p').textContent = fmt.example;
+    }
+
+    function drawFormat() {
+        ctx.clearRect(0, 0, w, h);
+        const fmt = formats[currentFmt];
+        const step = fmt.steps[currentStep] || fmt.steps[0];
+
+        // Title
+        ctx.font = 'bold 15px "Noto Sans SC", sans-serif';
+        ctx.fillStyle = C.textPri;
+        ctx.textAlign = 'center';
+        ctx.fillText(fmt.title + ' — 计算 A(3) + B(5) → C', w / 2, 25);
+
+        // Current instruction text
+        ctx.font = 'bold 13px "JetBrains Mono", monospace';
+        ctx.fillStyle = C.blue;
+        ctx.fillText(step.text, w / 2, 52);
+
+        // Draw registers or stack
+        if (currentFmt === '0addr') {
+            drawStackView(step);
+        } else {
+            drawRegisterView(step);
+        }
+
+        // ALU indicator
+        if (step.alu) {
+            const aluX = w / 2, aluY = 250;
+            ctx.fillStyle = ISAUtils.hexToRgba(C.green, 0.15);
+            ctx.strokeStyle = C.green;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.roundRect(aluX - 70, aluY - 20, 140, 40, 8);
+            ctx.fill();
+            ctx.stroke();
+            ctx.fillStyle = C.green;
+            ctx.font = 'bold 14px "JetBrains Mono", monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText('ALU: ' + step.alu, aluX, aluY + 5);
+        }
+
+        // Step info
+        document.getElementById('formatStepText').textContent = step.note;
+        document.getElementById('formatStepLabel').textContent = (currentStep + 1) + ' / ' + fmt.steps.length;
+        document.getElementById('formatProgress').style.width = ((currentStep + 1) / fmt.steps.length * 100) + '%';
+    }
+
+    function drawRegisterView(step) {
+        const regs = step.regs;
+        const keys = Object.keys(regs);
+        const regW = 100, regH = 50;
+        const totalW = keys.length * (regW + 20) - 20;
+        let rx = (w - totalW) / 2;
+        const ry = 120;
+
+        keys.forEach(k => {
+            const hl = step.highlight === k;
+            const color = hl ? C.green : C.border;
+            const bgColor = hl ? ISAUtils.hexToRgba(C.green, 0.15) : ISAUtils.hexToRgba(C.bgSec, 0.8);
+
+            ctx.fillStyle = bgColor;
+            ctx.strokeStyle = color;
+            ctx.lineWidth = hl ? 2.5 : 1;
+            ctx.beginPath();
+            ctx.roundRect(rx, ry, regW, regH, 6);
+            ctx.fill();
+            ctx.stroke();
+
+            ctx.font = '11px "Noto Sans SC", sans-serif';
+            ctx.fillStyle = C.textMut;
+            ctx.textAlign = 'center';
+            ctx.fillText(k, rx + regW / 2, ry + 18);
+
+            ctx.font = 'bold 18px "JetBrains Mono", monospace';
+            ctx.fillStyle = hl ? C.green : C.textPri;
+            ctx.fillText(regs[k] === '-' ? '-' : String(regs[k]), rx + regW / 2, ry + 40);
+
+            rx += regW + 20;
+        });
+    }
+
+    function drawStackView(step) {
+        const stack = step.stack || [];
+        const regs = step.regs || {};
+
+        // Stack
+        const stackX = w / 2 - 50;
+        const stackW = 100;
+        const slotH = 40;
+        const stackBaseY = 320;
+        const maxSlots = 4;
+
+        ctx.font = 'bold 12px "Noto Sans SC", sans-serif';
+        ctx.fillStyle = C.textMut;
+        ctx.textAlign = 'center';
+        ctx.fillText('栈', stackX + stackW / 2, 85);
+
+        // Draw empty slots
+        for (let i = 0; i < maxSlots; i++) {
+            const sy = stackBaseY - (i + 1) * slotH;
+            ctx.strokeStyle = C.border;
+            ctx.lineWidth = 1;
+            ctx.setLineDash([4, 4]);
+            ctx.beginPath();
+            ctx.roundRect(stackX, sy, stackW, slotH - 2, 4);
+            ctx.stroke();
+            ctx.setLineDash([]);
+        }
+
+        // Draw filled slots
+        stack.forEach((val, i) => {
+            const sy = stackBaseY - (i + 1) * slotH;
+            const isTop = (i === stack.length - 1);
+            const color = isTop ? C.green : C.blue;
+
+            ctx.fillStyle = ISAUtils.hexToRgba(color, 0.15);
+            ctx.strokeStyle = color;
+            ctx.lineWidth = isTop ? 2 : 1;
+            ctx.beginPath();
+            ctx.roundRect(stackX, sy, stackW, slotH - 2, 4);
+            ctx.fill();
+            ctx.stroke();
+
+            ctx.fillStyle = color;
+            ctx.font = 'bold 16px "JetBrains Mono", monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText(String(val), stackX + stackW / 2, sy + slotH / 2);
+        });
+
+        // Arrow for top
+        if (stack.length > 0) {
+            const topY = stackBaseY - stack.length * slotH + slotH / 2;
+            ctx.fillStyle = C.green;
+            ctx.font = '11px "Noto Sans SC", sans-serif';
+            ctx.textAlign = 'left';
+            ctx.fillText('← 栈顶', stackX + stackW + 10, topY);
+        }
+
+        // Draw C register if present
+        if (regs.C !== undefined) {
+            const cx = w / 2 + 100, cy = 200;
+            ctx.fillStyle = ISAUtils.hexToRgba(C.green, 0.15);
+            ctx.strokeStyle = C.green;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.roundRect(cx, cy, 80, 40, 6);
+            ctx.fill();
+            ctx.stroke();
+            ctx.fillStyle = C.textMut;
+            ctx.font = '10px "Noto Sans SC", sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('C', cx + 40, cy + 15);
+            ctx.fillStyle = C.green;
+            ctx.font = 'bold 16px "JetBrains Mono", monospace';
+            ctx.fillText(String(regs.C), cx + 40, cy + 33);
+        }
+    }
+
+    // Tab switching
+    document.getElementById('formatTabs').addEventListener('click', e => {
+        const tab = e.target.closest('.format-tab');
+        if (!tab) return;
+        document.querySelectorAll('.format-tab').forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        currentFmt = tab.dataset.fmt;
+        currentStep = 0;
+        stopPlay();
+        updateFormatDesc();
+        drawFormat();
+    });
+
+    // Controls
+    function stopPlay() {
+        playing = false;
+        clearInterval(playTimer);
+        document.getElementById('formatPlay').innerHTML = '&#9654; 播放';
+    }
+
+    document.getElementById('formatPlay').addEventListener('click', () => {
+        if (playing) { stopPlay(); return; }
+        playing = true;
+        document.getElementById('formatPlay').innerHTML = '&#9646;&#9646; 暂停';
+        playTimer = setInterval(() => {
+            const fmt = formats[currentFmt];
+            currentStep++;
+            if (currentStep >= fmt.steps.length) {
+                currentStep = 0;
+            }
+            drawFormat();
+        }, 1200);
+    });
+
+    document.getElementById('formatNext').addEventListener('click', () => {
+        stopPlay();
+        const fmt = formats[currentFmt];
+        currentStep = Math.min(currentStep + 1, fmt.steps.length - 1);
+        drawFormat();
+    });
+
+    document.getElementById('formatPrev').addEventListener('click', () => {
+        stopPlay();
+        currentStep = Math.max(currentStep - 1, 0);
+        drawFormat();
+    });
+
+    updateFormatDesc();
+    drawFormat();
+
+    window.addEventListener('resize', () => {
+        const r = ISAUtils.initCanvas(canvas, 420);
+        w = r.w; h = r.h; ctx = r.ctx;
+        drawFormat();
+    });
+})();
+
+// ================================================================
+// Section 3: Addressing Modes
+// ================================================================
+(function initSection3() {
+    const canvas = document.getElementById('addrCanvas');
+    let { ctx, w, h } = ISAUtils.initCanvas(canvas, 400);
+
+    const modes = {
+        'immediate': {
+            title: '立即数寻址',
+            desc: '操作数直接编码在指令中。例如 <code>addi x1, x0, 42</code> 中的 42 就是立即数。',
+            example: 'addi x1, x0, 42',
+        },
+        'register': {
+            title: '寄存器寻址',
+            desc: '操作数在寄存器中。指令指定寄存器编号，处理器直接读取寄存器的值。',
+            example: 'add x1, x2, x3',
+        },
+        'direct': {
+            title: '直接寻址',
+            desc: '指令中直接给出内存地址。处理器用这个地址去访问内存。RISC-V 不直接支持此模式。',
+            example: 'LOAD x1, [0x1000]',
+        },
+        'indirect': {
+            title: '间接寻址',
+            desc: '寄存器中保存的是内存地址，处理器先读寄存器得到地址，再用该地址访问内存。',
+            example: 'lw x1, 0(x2)  // x2存地址',
+        },
+        'base-offset': {
+            title: '基址偏移寻址',
+            desc: '有效地址 = 基址寄存器 + 偏移量。RISC-V 的 lw/sw 指令使用此模式。',
+            example: 'lw x1, 8(x2)  // addr = x2+8',
+        },
+        'pc-relative': {
+            title: 'PC 相对寻址',
+            desc: '有效地址 = PC + 偏移量。用于分支和跳转指令，使代码位置无关。',
+            example: 'beq x1, x2, offset',
+        }
+    };
+
+    let currentMode = 'immediate';
+    let animProgress = 0;
+    let animating = false;
+
+    function updateAddrDesc() {
+        const mode = modes[currentMode];
+        const box = document.getElementById('addrDescBox');
+        box.querySelector('h4').textContent = mode.title;
+        box.querySelector('p').innerHTML = mode.desc + ' <br><code>' + mode.example + '</code>';
+    }
+
+    function drawAddr() {
+        ctx.clearRect(0, 0, w, h);
+        const p = animProgress;
+
+        // Layout
+        const instX = 40, instY = 30, instW = Math.min(200, w * 0.25), instH = 50;
+        const regX = w * 0.38, regY = 30, regW = Math.min(160, w * 0.2), regH = 180;
+        const memX = w * 0.68, memY = 30, memW = Math.min(160, w * 0.2), memH = 280;
+        const aluX = w * 0.38, aluY = 260, aluW = regW, aluH = 50;
+
+        // Instruction box
+        ctx.fillStyle = ISAUtils.hexToRgba(C.blue, 0.12);
+        ctx.strokeStyle = C.blue;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.roundRect(instX, instY, instW, instH, 6);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = C.textMut;
+        ctx.font = '10px "Noto Sans SC", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('指令', instX + instW / 2, instY + 16);
+        ctx.fillStyle = C.blue;
+        ctx.font = 'bold 12px "JetBrains Mono", monospace';
+        ctx.fillText(modes[currentMode].example.split('//')[0].trim(), instX + instW / 2, instY + 36);
+
+        // Register file
+        ctx.fillStyle = ISAUtils.hexToRgba(C.purple, 0.08);
+        ctx.strokeStyle = C.purple;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.roundRect(regX, regY, regW, regH, 8);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = C.purple;
+        ctx.font = 'bold 12px "Noto Sans SC", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('寄存器文件', regX + regW / 2, regY + 20);
+
+        // Draw some registers
+        const regNames = ['x0 = 0', 'x1 = ?', 'x2 = 0x1000', 'x3 = 7'];
+        regNames.forEach((r, i) => {
+            const ry = regY + 35 + i * 34;
+            const isActive = (currentMode === 'register' && i >= 1 && i <= 3) ||
+                             (currentMode === 'base-offset' && i === 2) ||
+                             (currentMode === 'indirect' && i === 2) ||
+                             (currentMode === 'immediate' && i === 0);
+            ctx.fillStyle = isActive && p > 0.3 ? ISAUtils.hexToRgba(C.green, 0.15) : 'transparent';
+            ctx.strokeStyle = isActive && p > 0.3 ? C.green : C.border;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.roundRect(regX + 10, ry, regW - 20, 26, 4);
+            ctx.fill();
+            ctx.stroke();
+            ctx.fillStyle = isActive && p > 0.3 ? C.green : C.textSec;
+            ctx.font = '11px "JetBrains Mono", monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText(r, regX + regW / 2, ry + 16);
+        });
+
+        // Memory
+        ctx.fillStyle = ISAUtils.hexToRgba(C.orange, 0.08);
+        ctx.strokeStyle = C.orange;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.roundRect(memX, memY, memW, memH, 8);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = C.orange;
+        ctx.font = 'bold 12px "Noto Sans SC", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('内存', memX + memW / 2, memY + 20);
+
+        const memSlots = [
+            { addr: '0x0FF8', val: '...' },
+            { addr: '0x1000', val: '42' },
+            { addr: '0x1008', val: '99' },
+            { addr: '0x1010', val: '...' },
+            { addr: '0x1018', val: '...' },
+            { addr: '0x1020', val: '...' },
+        ];
+        memSlots.forEach((slot, i) => {
+            const my = memY + 35 + i * 38;
+            const isActive = (
+                (currentMode === 'direct' && slot.addr === '0x1000') ||
+                (currentMode === 'indirect' && slot.addr === '0x1000') ||
+                (currentMode === 'base-offset' && slot.addr === '0x1008')
+            );
+            ctx.fillStyle = isActive && p > 0.5 ? ISAUtils.hexToRgba(C.green, 0.15) : 'transparent';
+            ctx.strokeStyle = isActive && p > 0.5 ? C.green : C.border;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.roundRect(memX + 8, my, memW - 16, 30, 4);
+            ctx.fill();
+            ctx.stroke();
+
+            ctx.fillStyle = C.textMut;
+            ctx.font = '9px "JetBrains Mono", monospace';
+            ctx.textAlign = 'left';
+            ctx.fillText(slot.addr, memX + 14, my + 13);
+            ctx.fillStyle = isActive && p > 0.5 ? C.green : C.textSec;
+            ctx.font = 'bold 11px "JetBrains Mono", monospace';
+            ctx.textAlign = 'right';
+            ctx.fillText(slot.val, memX + memW - 14, my + 24);
+        });
+
+        // ALU
+        ctx.fillStyle = ISAUtils.hexToRgba(C.green, 0.12);
+        ctx.strokeStyle = C.green;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.roundRect(aluX, aluY, aluW, aluH, 8);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = C.green;
+        ctx.font = 'bold 13px "Noto Sans SC", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('ALU', aluX + aluW / 2, aluY + 30);
+
+        // Animated data flow arrows
+        if (p > 0.1) {
+            ctx.globalAlpha = Math.min(1, (p - 0.1) * 3);
+            const arrowColor = C.cyan;
+
+            if (currentMode === 'immediate') {
+                // Instruction -> ALU (immediate value)
+                ISAUtils.drawArrow(ctx, instX + instW, instY + instH / 2, aluX, aluY + aluH / 2, arrowColor, { width: 2 });
+                if (p > 0.5) {
+                    ctx.fillStyle = C.cyan;
+                    ctx.font = 'bold 11px "JetBrains Mono", monospace';
+                    ctx.textAlign = 'center';
+                    ctx.fillText('立即数 42', (instX + instW + aluX) / 2, instY + instH / 2 + 50);
+                }
+            } else if (currentMode === 'register') {
+                // Register -> ALU
+                ISAUtils.drawArrow(ctx, regX + regW / 2, regY + regH, aluX + aluW / 2, aluY, arrowColor, { width: 2 });
+                if (p > 0.5) {
+                    ctx.fillStyle = C.cyan;
+                    ctx.font = 'bold 11px "JetBrains Mono", monospace';
+                    ctx.textAlign = 'center';
+                    ctx.fillText('寄存器值', regX + regW / 2 + 40, (regY + regH + aluY) / 2);
+                }
+            } else if (currentMode === 'direct') {
+                // Instruction -> Memory (address) -> ALU
+                ISAUtils.drawArrow(ctx, instX + instW, instY + instH / 2, memX, memY + 35 + 1 * 38 + 15, C.yellow, { width: 2 });
+                if (p > 0.4) {
+                    ISAUtils.drawArrow(ctx, memX, memY + 35 + 1 * 38 + 15, aluX + aluW, aluY + aluH / 2, arrowColor, { width: 2 });
+                }
+            } else if (currentMode === 'indirect') {
+                // Instruction -> Register -> Memory -> ALU
+                ISAUtils.drawArrow(ctx, instX + instW, instY + instH / 2, regX, regY + 35 + 2 * 34 + 13, C.yellow, { width: 2 });
+                if (p > 0.3) {
+                    ISAUtils.drawArrow(ctx, regX + regW, regY + 35 + 2 * 34 + 13, memX, memY + 35 + 1 * 38 + 15, C.purple, { width: 2 });
+                }
+                if (p > 0.6) {
+                    ISAUtils.drawArrow(ctx, memX, memY + 35 + 1 * 38 + 30, aluX + aluW, aluY + 10, arrowColor, { width: 2 });
+                }
+            } else if (currentMode === 'base-offset') {
+                // Register(base) + Instruction(offset) -> Memory -> ALU
+                ISAUtils.drawArrow(ctx, regX + regW, regY + 35 + 2 * 34 + 13, memX, memY + 35 + 2 * 38 + 15, C.purple, { width: 2 });
+                if (p > 0.4) {
+                    ctx.fillStyle = C.yellow;
+                    ctx.font = '10px "JetBrains Mono", monospace';
+                    ctx.textAlign = 'center';
+                    ctx.fillText('0x1000 + 8', (regX + regW + memX) / 2, regY + 35 + 2 * 34 - 5);
+                }
+                if (p > 0.6) {
+                    ISAUtils.drawArrow(ctx, memX, memY + 35 + 2 * 38 + 30, aluX + aluW, aluY + 10, arrowColor, { width: 2 });
+                }
+            } else if (currentMode === 'pc-relative') {
+                // PC + offset -> target
+                const pcX = instX + 20, pcY = instY + instH + 30;
+                ctx.fillStyle = ISAUtils.hexToRgba(C.pink, 0.15);
+                ctx.strokeStyle = C.pink;
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                ctx.roundRect(pcX, pcY, 100, 36, 6);
+                ctx.fill();
+                ctx.stroke();
+                ctx.fillStyle = C.pink;
+                ctx.font = 'bold 12px "JetBrains Mono", monospace';
+                ctx.textAlign = 'center';
+                ctx.fillText('PC = 0x100', pcX + 50, pcY + 22);
+
+                ISAUtils.drawArrow(ctx, pcX + 100, pcY + 18, aluX, aluY + aluH / 2, C.pink, { width: 2 });
+                if (p > 0.4) {
+                    ctx.fillStyle = C.cyan;
+                    ctx.font = '10px "JetBrains Mono", monospace';
+                    ctx.textAlign = 'center';
+                    ctx.fillText('PC + offset', (pcX + 100 + aluX) / 2, pcY + 50);
+                }
+            }
+            ctx.globalAlpha = 1;
+        }
+    }
+
+    // Mode buttons
+    document.getElementById('addrModeGrid').addEventListener('click', e => {
+        const btn = e.target.closest('.addr-mode-btn');
+        if (!btn) return;
+        document.querySelectorAll('.addr-mode-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        currentMode = btn.dataset.mode;
+        animProgress = 0;
+        updateAddrDesc();
+        drawAddr();
+    });
+
+    document.getElementById('addrAnimBtn').addEventListener('click', () => {
+        if (animating) return;
+        animating = true;
+        animProgress = 0;
+        gsap.to({ p: 0 }, {
+            p: 1, duration: 2, ease: 'power2.inOut',
+            onUpdate: function() { animProgress = this.targets()[0].p; drawAddr(); },
+            onComplete: () => { animating = false; }
+        });
+    });
+
+    updateAddrDesc();
+    drawAddr();
+
+    window.addEventListener('resize', () => {
+        const r = ISAUtils.initCanvas(canvas, 400);
+        w = r.w; h = r.h; ctx = r.ctx;
+        drawAddr();
+    });
+})();
+
+// ================================================================
+// Section 4: Machine Code Encoding
+// ================================================================
+(function initSection4() {
+    const input = document.getElementById('encoderInput');
+    const display = document.getElementById('bitFieldDisplay');
+    const infoBox = document.getElementById('encodeInfoBox');
+
+    function parseInstruction(text) {
+        text = text.trim().toLowerCase().replace(/,/g, ' ').replace(/\s+/g, ' ');
+        const parts = text.split(' ');
+        const mnemonic = parts[0];
+        const inst = ISAUtils.RISCV_INSTS[mnemonic];
+        if (!inst) return null;
+
+        const result = { mnemonic, type: inst.type, desc: inst.desc };
+
+        if (inst.type === 'R') {
+            if (parts.length < 4) return null;
+            result.rd = ISAUtils.regNum(parts[1]);
+            result.rs1 = ISAUtils.regNum(parts[2]);
+            result.rs2 = ISAUtils.regNum(parts[3]);
+            result.funct3 = inst.funct3;
+            result.funct7 = inst.funct7;
+            result.opcode = ISAUtils.RISCV_OPCODES['R'].opcode;
+
+            result.binary = inst.funct7 + ISAUtils.toBin(result.rs2, 5) + ISAUtils.toBin(result.rs1, 5) +
+                inst.funct3 + ISAUtils.toBin(result.rd, 5) + result.opcode;
+
+            result.fields = [
+                { name: 'funct7', bits: inst.funct7, cls: 'bit-funct7', tip: '功能码高位: ' + inst.funct7 },
+                { name: 'rs2', bits: ISAUtils.toBin(result.rs2, 5), cls: 'bit-rs2', tip: '源寄存器2: x' + result.rs2 },
+                { name: 'rs1', bits: ISAUtils.toBin(result.rs1, 5), cls: 'bit-rs1', tip: '源寄存器1: x' + result.rs1 },
+                { name: 'funct3', bits: inst.funct3, cls: 'bit-funct3', tip: '功能码低位: ' + inst.funct3 },
+                { name: 'rd', bits: ISAUtils.toBin(result.rd, 5), cls: 'bit-rd', tip: '目标寄存器: x' + result.rd },
+                { name: 'opcode', bits: result.opcode, cls: 'bit-opcode', tip: '操作码: R-type' },
+            ];
+        } else if (inst.type === 'I') {
+            if (parts.length < 4) {
+                // try lw format: lw x1, offset(x2)
+                if (parts.length >= 3 && parts[2].includes('(')) {
+                    const m = parts[2].match(/(-?\d+)\((\w+)\)/);
+                    if (m) {
+                        result.rd = ISAUtils.regNum(parts[1]);
+                        result.imm = parseInt(m[1]);
+                        result.rs1 = ISAUtils.regNum(m[2]);
+                    } else return null;
+                } else return null;
+            } else {
+                result.rd = ISAUtils.regNum(parts[1]);
+                result.rs1 = ISAUtils.regNum(parts[2]);
+                result.imm = parseInt(parts[3]);
+            }
+            result.funct3 = inst.funct3;
+            const opcodeVal = inst.opcode || ISAUtils.RISCV_OPCODES['I'].opcode;
+            result.opcode = opcodeVal;
+
+            const imm12 = ISAUtils.toBin(result.imm & 0xFFF, 12);
+            result.binary = imm12 + ISAUtils.toBin(result.rs1, 5) + inst.funct3 + ISAUtils.toBin(result.rd, 5) + opcodeVal;
+
+            result.fields = [
+                { name: 'imm[11:0]', bits: imm12, cls: 'bit-imm', tip: '立即数: ' + result.imm + ' (' + imm12 + ')' },
+                { name: 'rs1', bits: ISAUtils.toBin(result.rs1, 5), cls: 'bit-rs1', tip: '源寄存器1: x' + result.rs1 },
+                { name: 'funct3', bits: inst.funct3, cls: 'bit-funct3', tip: '功能码: ' + inst.funct3 },
+                { name: 'rd', bits: ISAUtils.toBin(result.rd, 5), cls: 'bit-rd', tip: '目标寄存器: x' + result.rd },
+                { name: 'opcode', bits: opcodeVal, cls: 'bit-opcode', tip: '操作码: I-type' },
+            ];
+        } else if (inst.type === 'S') {
+            // sw rs2, offset(rs1)
+            if (parts.length < 3) return null;
+            result.rs2 = ISAUtils.regNum(parts[1]);
+            const m = parts[2].match(/(-?\d+)\((\w+)\)/);
+            if (!m) return null;
+            result.imm = parseInt(m[1]);
+            result.rs1 = ISAUtils.regNum(m[2]);
+            result.funct3 = inst.funct3;
+            result.opcode = ISAUtils.RISCV_OPCODES['S'].opcode;
+
+            const imm12 = ISAUtils.toBin(result.imm & 0xFFF, 12);
+            const immHi = imm12.slice(0, 7);
+            const immLo = imm12.slice(7, 12);
+            result.binary = immHi + ISAUtils.toBin(result.rs2, 5) + ISAUtils.toBin(result.rs1, 5) +
+                inst.funct3 + immLo + result.opcode;
+
+            result.fields = [
+                { name: 'imm[11:5]', bits: immHi, cls: 'bit-imm', tip: '立即数高位: ' + immHi },
+                { name: 'rs2', bits: ISAUtils.toBin(result.rs2, 5), cls: 'bit-rs2', tip: '源寄存器2: x' + result.rs2 },
+                { name: 'rs1', bits: ISAUtils.toBin(result.rs1, 5), cls: 'bit-rs1', tip: '源寄存器1: x' + result.rs1 },
+                { name: 'funct3', bits: inst.funct3, cls: 'bit-funct3', tip: '功能码: ' + inst.funct3 },
+                { name: 'imm[4:0]', bits: immLo, cls: 'bit-imm', tip: '立即数低位: ' + immLo },
+                { name: 'opcode', bits: result.opcode, cls: 'bit-opcode', tip: '操作码: S-type' },
+            ];
+        } else if (inst.type === 'B') {
+            if (parts.length < 4) return null;
+            result.rs1 = ISAUtils.regNum(parts[1]);
+            result.rs2 = ISAUtils.regNum(parts[2]);
+            result.imm = parseInt(parts[3]);
+            result.funct3 = inst.funct3;
+            result.opcode = ISAUtils.RISCV_OPCODES['B'].opcode;
+
+            const imm13 = ISAUtils.toBin((result.imm >> 1) & 0xFFF, 13);
+            result.binary = ISAUtils.toBin(result.imm & 0x1FFE, 32).slice(0, 32);
+
+            result.fields = [
+                { name: 'imm', bits: ISAUtils.toBin(result.imm & 0x1FFE, 7), cls: 'bit-imm', tip: '分支偏移: ' + result.imm },
+                { name: 'rs2', bits: ISAUtils.toBin(result.rs2, 5), cls: 'bit-rs2', tip: '源寄存器2: x' + result.rs2 },
+                { name: 'rs1', bits: ISAUtils.toBin(result.rs1, 5), cls: 'bit-rs1', tip: '源寄存器1: x' + result.rs1 },
+                { name: 'funct3', bits: inst.funct3, cls: 'bit-funct3', tip: '功能码: ' + inst.funct3 },
+                { name: 'imm', bits: ISAUtils.toBin(result.imm & 0x1E, 5), cls: 'bit-imm', tip: '分支偏移低位' },
+                { name: 'opcode', bits: result.opcode, cls: 'bit-opcode', tip: '操作码: B-type' },
+            ];
+        } else if (inst.type === 'U') {
+            if (parts.length < 3) return null;
+            result.rd = ISAUtils.regNum(parts[1]);
+            result.imm = parseInt(parts[2]);
+            result.opcode = ISAUtils.RISCV_OPCODES['U'].opcode;
+
+            const imm20 = ISAUtils.toBin((result.imm >>> 0) & 0xFFFFF, 20);
+            result.binary = imm20 + ISAUtils.toBin(result.rd, 5) + result.opcode;
+
+            result.fields = [
+                { name: 'imm[31:12]', bits: imm20, cls: 'bit-imm', tip: '高20位立即数: ' + result.imm },
+                { name: 'rd', bits: ISAUtils.toBin(result.rd, 5), cls: 'bit-rd', tip: '目标寄存器: x' + result.rd },
+                { name: 'opcode', bits: result.opcode, cls: 'bit-opcode', tip: '操作码: U-type' },
+            ];
+        } else if (inst.type === 'J') {
+            if (parts.length < 3) return null;
+            result.rd = ISAUtils.regNum(parts[1]);
+            result.imm = parseInt(parts[2]);
+            result.opcode = ISAUtils.RISCV_OPCODES['J'].opcode;
+
+            const imm20 = ISAUtils.toBin((result.imm >>> 1) & 0xFFFFF, 20);
+            result.binary = imm20 + ISAUtils.toBin(result.rd, 5) + result.opcode;
+
+            result.fields = [
+                { name: 'imm[20:1]', bits: imm20, cls: 'bit-imm', tip: '跳转偏移: ' + result.imm },
+                { name: 'rd', bits: ISAUtils.toBin(result.rd, 5), cls: 'bit-rd', tip: '目标寄存器: x' + result.rd },
+                { name: 'opcode', bits: result.opcode, cls: 'bit-opcode', tip: '操作码: J-type' },
+            ];
+        }
+
+        if (result.binary) {
+            const n = parseInt(result.binary.slice(0, 32), 2);
+            result.hex = '0x' + (n >>> 0).toString(16).toUpperCase().padStart(8, '0');
+        }
+
+        return result;
+    }
+
+    function renderBitFields(result) {
+        display.innerHTML = '';
+        if (!result || !result.fields) return;
+
+        let hoverInfoEl = null;
+
+        result.fields.forEach(field => {
+            const group = document.createElement('div');
+            group.className = 'bit-group ' + field.cls;
+
+            const bitsDiv = document.createElement('div');
+            bitsDiv.className = 'bits';
+            field.bits.split('').forEach(b => {
+                const cell = document.createElement('div');
+                cell.className = 'bit-cell';
+                cell.textContent = b;
+                bitsDiv.appendChild(cell);
+            });
+
+            const label = document.createElement('div');
+            label.className = 'field-label';
+            label.textContent = field.name;
+
+            group.appendChild(bitsDiv);
+            group.appendChild(label);
+
+            group.addEventListener('mouseenter', () => {
+                infoBox.innerHTML = '<p><strong style="color:' + C.green + ';">' + field.name + '</strong>: ' + field.tip + '</p>' +
+                    '<p class="hex-result">二进制: ' + field.bits + ' (' + field.bits.length + ' 位)</p>';
+            });
+            group.addEventListener('mouseleave', () => {
+                showDefaultInfo(result);
+            });
+
+            display.appendChild(group);
+        });
+
+        // Animate in
+        gsap.from(display.children, {
+            y: 20, opacity: 0, duration: 0.4, stagger: 0.08, ease: 'power2.out'
+        });
+
+        showDefaultInfo(result);
+    }
+
+    function showDefaultInfo(result) {
+        if (!result) {
+            infoBox.innerHTML = '<p style="color:var(--text-muted);">在上方输入指令后点击"编码"，或直接按回车。</p>';
+            return;
+        }
+        infoBox.innerHTML =
+            '<p><strong>' + result.mnemonic + '</strong> — ' + result.desc + ' (' + result.type + '-type)</p>' +
+            '<p class="hex-result">机器码: ' + (result.hex || '?') + '</p>' +
+            '<p style="font-family:var(--font-mono); font-size:0.8rem; color:var(--text-muted); word-break:break-all;">' +
+            (result.binary || '') + '</p>';
+    }
+
+    function doEncode() {
+        const text = input.value.trim();
+        if (!text) return;
+        const result = parseInstruction(text);
+        if (!result) {
+            display.innerHTML = '';
+            infoBox.innerHTML = '<p style="color:var(--accent-red);">无法识别指令。请检查格式，如 <code>add x1, x2, x3</code> 或 <code>addi x5, x0, 100</code></p>';
+            return;
+        }
+        renderBitFields(result);
+    }
+
+    document.getElementById('encodeBtn').addEventListener('click', doEncode);
+    input.addEventListener('keydown', e => { if (e.key === 'Enter') doEncode(); });
+
+    // Default example
+    input.value = 'add x1, x2, x3';
+    doEncode();
+})();
+
+// ================================================================
+// Section 5: Instruction Execution Cycle
+// ================================================================
+(function initSection5() {
+    const canvas = document.getElementById('cycleCanvas');
+    let { ctx, w, h } = ISAUtils.initCanvas(canvas, 480);
+
+    const stageNames = ['取指 (IF)', '译码 (ID)', '执行 (EX)', '访存 (MEM)', '写回 (WB)'];
+    const stageDescs = [
+        '从指令存储器中读取 PC 指向的指令，PC = PC + 4',
+        '解码指令字段，读取源寄存器 rs1/rs2 的值',
+        'ALU 根据操作码执行运算（加/减/比较等）',
+        '如果是 load/store 指令，访问数据存储器',
+        '将结果写回目标寄存器 rd'
+    ];
+
+    let currentStage = -1; // -1 = ready
+    let playing = false;
+    let playTimer = null;
+
+    // Hardware block positions (computed dynamically)
+    function getLayout() {
+        const margin = 20;
+        const blockW = Math.min(130, (w - margin * 2) / 5.5);
+        const blockH = 60;
+        const topY = 50;
+        const midY = 180;
+        const botY = 310;
+
+        return {
+            pc: { x: margin, y: topY, w: blockW * 0.7, h: blockH, label: 'PC', color: C.blue },
+            imem: { x: margin + blockW, y: topY, w: blockW, h: blockH, label: '指令存储器', color: C.fetch },
+            ireg: { x: margin + blockW * 2.2, y: topY, w: blockW, h: blockH, label: '指令寄存器', color: C.decode },
+            regfile: { x: margin, y: midY, w: blockW * 1.2, h: blockH * 1.5, label: '寄存器文件', color: C.purple },
+            alu: { x: margin + blockW * 1.8, y: midY, w: blockW, h: blockH * 1.5, label: 'ALU', color: C.execute },
+            dmem: { x: margin + blockW * 3.2, y: midY, w: blockW, h: blockH * 1.5, label: '数据存储器', color: C.memory },
+            mux: { x: margin + blockW * 4.5, y: midY + 20, w: blockW * 0.5, h: blockH, label: 'MUX', color: C.writeback },
+        };
+    }
+
+    function drawBlock(block, active, glowing) {
+        const alpha = active ? 0.25 : 0.1;
+        const lineW = active ? 2.5 : 1;
+
+        ctx.fillStyle = ISAUtils.hexToRgba(block.color, alpha);
+        ctx.strokeStyle = active ? block.color : ISAUtils.hexToRgba(block.color, 0.4);
+        ctx.lineWidth = lineW;
+
+        if (glowing) {
+            ctx.shadowColor = block.color;
+            ctx.shadowBlur = 15;
+        }
+
+        ctx.beginPath();
+        ctx.roundRect(block.x, block.y, block.w, block.h, 8);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.shadowBlur = 0;
+
+        ctx.fillStyle = active ? block.color : C.textMut;
+        ctx.font = 'bold 12px "Noto Sans SC", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+
+        // Split label if too long
+        const maxCharsPerLine = Math.floor(block.w / 13);
+        if (block.label.length > maxCharsPerLine) {
+            const mid = Math.ceil(block.label.length / 2);
+            ctx.fillText(block.label.slice(0, mid), block.x + block.w / 2, block.y + block.h / 2 - 8);
+            ctx.fillText(block.label.slice(mid), block.x + block.w / 2, block.y + block.h / 2 + 8);
+        } else {
+            ctx.fillText(block.label, block.x + block.w / 2, block.y + block.h / 2);
+        }
+    }
+
+    function drawCycle() {
+        ctx.clearRect(0, 0, w, h);
+        const L = getLayout();
+
+        // Title
+        ctx.font = 'bold 15px "Noto Sans SC", sans-serif';
+        ctx.fillStyle = C.textPri;
+        ctx.textAlign = 'center';
+        ctx.fillText('指令: add x1, x2, x3', w / 2, 25);
+
+        // Stage indicators at top
+        const stageY = 40;
+        const stageSpacing = Math.min(120, (w - 40) / 5);
+        const stageStartX = (w - 5 * stageSpacing) / 2 + stageSpacing / 2;
+
+        for (let i = 0; i < 5; i++) {
+            const sx = stageStartX + i * stageSpacing;
+            const active = i === currentStage;
+            const done = i < currentStage;
+
+            ISAUtils.drawPipelineStage(ctx, sx - 30, stageY, 60, 26, i,
+                ISAUtils.STAGES[i], { stall: false, bubble: false });
+
+            if (active) {
+                ctx.fillStyle = ISAUtils.STAGE_COLORS[i];
+                ctx.beginPath();
+                ctx.arc(sx, stageY + 34, 4, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            if (done) {
+                ctx.strokeStyle = ISAUtils.hexToRgba(ISAUtils.STAGE_COLORS[i], 0.3);
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(sx - 10, stageY + 13);
+                ctx.lineTo(sx - 3, stageY + 20);
+                ctx.lineTo(sx + 10, stageY + 6);
+                ctx.stroke();
+            }
+        }
+
+        // Draw connecting arrows between stages
+        for (let i = 0; i < 4; i++) {
+            const x1 = stageStartX + i * stageSpacing + 30;
+            const x2 = stageStartX + (i + 1) * stageSpacing - 30;
+            const cy = stageY + 13;
+            ctx.strokeStyle = C.border;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(x1 + 2, cy);
+            ctx.lineTo(x2 - 2, cy);
+            ctx.stroke();
+            // Small arrow head
+            ctx.beginPath();
+            ctx.moveTo(x2 - 2, cy);
+            ctx.lineTo(x2 - 7, cy - 3);
+            ctx.lineTo(x2 - 7, cy + 3);
+            ctx.closePath();
+            ctx.fillStyle = C.border;
+            ctx.fill();
+        }
+
+        // Hardware blocks
+        const blocks = [L.pc, L.imem, L.ireg, L.regfile, L.alu, L.dmem, L.mux];
+        const activeMap = {
+            0: [L.pc, L.imem],          // IF
+            1: [L.ireg, L.regfile],      // ID
+            2: [L.alu],                   // EX
+            3: [L.dmem],                  // MEM
+            4: [L.mux, L.regfile],       // WB
+        };
+        const glowSet = activeMap[currentStage] || [];
+
+        blocks.forEach(b => {
+            const isActive = glowSet.includes(b);
+            drawBlock(b, isActive, isActive);
+        });
+
+        // Static wiring
+        const wireColor = ISAUtils.hexToRgba(C.border, 0.4);
+        // PC -> IMEM
+        ISAUtils.drawArrow(ctx, L.pc.x + L.pc.w, L.pc.y + L.pc.h / 2,
+            L.imem.x, L.imem.y + L.imem.h / 2, wireColor, { width: 1 });
+        // IMEM -> IREG
+        ISAUtils.drawArrow(ctx, L.imem.x + L.imem.w, L.imem.y + L.imem.h / 2,
+            L.ireg.x, L.ireg.y + L.ireg.h / 2, wireColor, { width: 1 });
+        // IREG -> Regfile
+        ISAUtils.drawArrow(ctx, L.ireg.x + L.ireg.w / 2, L.ireg.y + L.ireg.h,
+            L.regfile.x + L.regfile.w / 2, L.regfile.y, wireColor, { width: 1 });
+        // Regfile -> ALU
+        ISAUtils.drawArrow(ctx, L.regfile.x + L.regfile.w, L.regfile.y + L.regfile.h / 2,
+            L.alu.x, L.alu.y + L.alu.h / 2, wireColor, { width: 1 });
+        // ALU -> DMEM
+        ISAUtils.drawArrow(ctx, L.alu.x + L.alu.w, L.alu.y + L.alu.h / 2,
+            L.dmem.x, L.dmem.y + L.dmem.h / 2, wireColor, { width: 1 });
+        // DMEM -> MUX
+        ISAUtils.drawArrow(ctx, L.dmem.x + L.dmem.w, L.dmem.y + L.dmem.h / 2,
+            L.mux.x, L.mux.y + L.mux.h / 2, wireColor, { width: 1 });
+
+        // Active data flow arrows (highlighted)
+        if (currentStage >= 0) {
+            const sc = ISAUtils.STAGE_COLORS[currentStage];
+            if (currentStage === 0) {
+                ISAUtils.drawArrow(ctx, L.pc.x + L.pc.w, L.pc.y + L.pc.h / 2,
+                    L.imem.x, L.imem.y + L.imem.h / 2, sc, { width: 2.5 });
+                ISAUtils.drawArrow(ctx, L.imem.x + L.imem.w, L.imem.y + L.imem.h / 2,
+                    L.ireg.x, L.ireg.y + L.ireg.h / 2, sc, { width: 2.5 });
+            } else if (currentStage === 1) {
+                ISAUtils.drawArrow(ctx, L.ireg.x + L.ireg.w / 2, L.ireg.y + L.ireg.h,
+                    L.regfile.x + L.regfile.w / 2, L.regfile.y, sc, { width: 2.5 });
+            } else if (currentStage === 2) {
+                ISAUtils.drawArrow(ctx, L.regfile.x + L.regfile.w, L.regfile.y + L.regfile.h / 2,
+                    L.alu.x, L.alu.y + L.alu.h / 2, sc, { width: 2.5 });
+            } else if (currentStage === 3) {
+                ISAUtils.drawArrow(ctx, L.alu.x + L.alu.w, L.alu.y + L.alu.h / 2,
+                    L.dmem.x, L.dmem.y + L.dmem.h / 2, sc, { width: 2.5 });
+            } else if (currentStage === 4) {
+                // WB: mux -> regfile
+                ISAUtils.drawArrow(ctx, L.mux.x + L.mux.w / 2, L.mux.y,
+                    L.regfile.x + L.regfile.w, L.regfile.y + 20, sc, { width: 2.5 });
+            }
+        }
+
+        // Description text at bottom
+        const descY = h - 60;
+        ctx.fillStyle = ISAUtils.hexToRgba(C.bgSec, 0.9);
+        ctx.fillRect(0, descY - 15, w, 50);
+
+        if (currentStage >= 0 && currentStage < 5) {
+            ctx.fillStyle = ISAUtils.STAGE_COLORS[currentStage];
+            ctx.font = 'bold 13px "Noto Sans SC", sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(stageNames[currentStage], w / 2, descY + 2);
+            ctx.fillStyle = C.textSec;
+            ctx.font = '12px "Noto Sans SC", sans-serif';
+            ctx.fillText(stageDescs[currentStage], w / 2, descY + 22);
+        } else {
+            ctx.fillStyle = C.textMut;
+            ctx.font = '12px "Noto Sans SC", sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('点击"下一步"开始逐步执行指令', w / 2, descY + 10);
+        }
+
+        // Update step label
+        const label = currentStage < 0 ? '就绪' : stageNames[currentStage];
+        document.getElementById('cycleStepLabel').textContent = '阶段: ' + label;
+        document.getElementById('cyclePrev').disabled = currentStage <= -1;
+    }
+
+    function stopCyclePlay() {
+        playing = false;
+        clearInterval(playTimer);
+        document.getElementById('cyclePlay').innerHTML = '&#9654; 自动播放';
+    }
+
+    document.getElementById('cycleNext').addEventListener('click', () => {
+        stopCyclePlay();
+        if (currentStage < 4) {
+            currentStage++;
+            drawCycle();
+        }
+    });
+
+    document.getElementById('cyclePrev').addEventListener('click', () => {
+        stopCyclePlay();
+        if (currentStage > -1) {
+            currentStage--;
+            drawCycle();
+        }
+    });
+
+    document.getElementById('cycleReset').addEventListener('click', () => {
+        stopCyclePlay();
+        currentStage = -1;
+        drawCycle();
+    });
+
+    document.getElementById('cyclePlay').addEventListener('click', () => {
+        if (playing) { stopCyclePlay(); return; }
+        playing = true;
+        document.getElementById('cyclePlay').innerHTML = '&#9646;&#9646; 暂停';
+        if (currentStage >= 4) currentStage = -1;
+        playTimer = setInterval(() => {
+            currentStage++;
+            drawCycle();
+            if (currentStage >= 4) {
+                stopCyclePlay();
+            }
+        }, 1500);
+    });
+
+    drawCycle();
+
+    window.addEventListener('resize', () => {
+        const r = ISAUtils.initCanvas(canvas, 480);
+        w = r.w; h = r.h; ctx = r.ctx;
+        drawCycle();
+    });
+})();
+
+// ================================================================
+// Section 6: ISA Design Space (Radar Chart)
+// ================================================================
+(function initSection6() {
+    const canvas = document.getElementById('radarCanvas');
+    let { ctx, w, h } = ISAUtils.initCanvas(canvas, 450);
+
+    const axes = [
+        { key: 'instLen', label: '指令长度\n(固定vs可变)' },
+        { key: 'operandCnt', label: '操作数数量' },
+        { key: 'addrModes', label: '寻址模式\n丰富度' },
+        { key: 'regCount', label: '寄存器数量' },
+        { key: 'encComplexity', label: '编码复杂度' },
+        { key: 'instCount', label: '指令数量' },
+    ];
+
+    const refData = {
+        riscv: { instLen: 9, operandCnt: 7, addrModes: 3, regCount: 8, encComplexity: 3, instCount: 3, label: 'RISC-V', color: C.green },
+        x86: { instLen: 2, operandCnt: 6, addrModes: 9, regCount: 4, encComplexity: 9, instCount: 10, label: 'x86', color: C.red },
+        arm: { instLen: 8, operandCnt: 7, addrModes: 5, regCount: 7, encComplexity: 5, instCount: 5, label: 'ARM', color: C.blue },
+    };
+
+    let userValues = {};
+    let activeRefs = new Set();
+
+    // Initialize from sliders
+    document.querySelectorAll('#radarControls input[type="range"]').forEach(slider => {
+        const axis = slider.dataset.axis;
+        userValues[axis] = parseInt(slider.value);
+
+        slider.addEventListener('input', () => {
+            userValues[axis] = parseInt(slider.value);
+            document.getElementById('rv-' + axis).textContent = slider.value;
+            drawRadar();
+        });
+    });
+
+    // Reference buttons
+    document.getElementById('refPoints').addEventListener('click', e => {
+        const btn = e.target.closest('.ref-btn');
+        if (!btn) return;
+        const ref = btn.dataset.ref;
+        if (ref === 'clear') {
+            activeRefs.clear();
+            document.querySelectorAll('.ref-btn').forEach(b => b.classList.remove('active'));
+        } else {
+            if (activeRefs.has(ref)) {
+                activeRefs.delete(ref);
+                btn.classList.remove('active');
+            } else {
+                activeRefs.add(ref);
+                btn.classList.add('active');
+            }
+        }
+        drawRadar();
+    });
+
+    function drawRadar() {
+        ctx.clearRect(0, 0, w, h);
+        const cx = w / 2;
+        const cy = h / 2 + 10;
+        const maxR = Math.min(w, h) * 0.35;
+        const n = axes.length;
+
+        // Draw grid rings
+        for (let ring = 2; ring <= 10; ring += 2) {
+            const r = maxR * ring / 10;
+            ctx.strokeStyle = ISAUtils.hexToRgba(C.border, 0.5);
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            for (let i = 0; i <= n; i++) {
+                const angle = (Math.PI * 2 * i / n) - Math.PI / 2;
+                const px = cx + r * Math.cos(angle);
+                const py = cy + r * Math.sin(angle);
+                if (i === 0) ctx.moveTo(px, py);
+                else ctx.lineTo(px, py);
+            }
+            ctx.closePath();
+            ctx.stroke();
+
+            // Ring value label
+            const labelAngle = -Math.PI / 2;
+            ctx.fillStyle = C.textMut;
+            ctx.font = '9px "JetBrains Mono", monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText(String(ring), cx + r * Math.cos(labelAngle) + 12, cy + r * Math.sin(labelAngle) + 4);
+        }
+
+        // Draw axis lines and labels
+        for (let i = 0; i < n; i++) {
+            const angle = (Math.PI * 2 * i / n) - Math.PI / 2;
+            const ex = cx + maxR * Math.cos(angle);
+            const ey = cy + maxR * Math.sin(angle);
+
+            ctx.strokeStyle = ISAUtils.hexToRgba(C.border, 0.3);
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(cx, cy);
+            ctx.lineTo(ex, ey);
+            ctx.stroke();
+
+            // Label
+            const lx = cx + (maxR + 30) * Math.cos(angle);
+            const ly = cy + (maxR + 30) * Math.sin(angle);
+            ctx.fillStyle = C.textSec;
+            ctx.font = '11px "Noto Sans SC", sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+
+            const lines = axes[i].label.split('\n');
+            lines.forEach((line, li) => {
+                ctx.fillText(line, lx, ly + (li - (lines.length - 1) / 2) * 14);
+            });
+        }
+
+        // Draw reference polygons
+        activeRefs.forEach(refKey => {
+            const ref = refData[refKey];
+            if (!ref) return;
+            drawPolygon(ref, cx, cy, maxR, n, ref.color, 0.15);
+        });
+
+        // Draw user polygon
+        drawPolygon(userValues, cx, cy, maxR, n, C.green, 0.25);
+
+        // Legend
+        let legendY = 20;
+        ctx.font = 'bold 12px "Noto Sans SC", sans-serif';
+        ctx.textAlign = 'left';
+
+        ctx.fillStyle = C.green;
+        ctx.fillRect(w - 130, legendY, 12, 12);
+        ctx.fillText('你的设计', w - 112, legendY + 11);
+        legendY += 20;
+
+        activeRefs.forEach(refKey => {
+            const ref = refData[refKey];
+            ctx.fillStyle = ref.color;
+            ctx.fillRect(w - 130, legendY, 12, 12);
+            ctx.fillText(ref.label, w - 112, legendY + 11);
+            legendY += 20;
+        });
+    }
+
+    function drawPolygon(values, cx, cy, maxR, n, color, fillAlpha) {
+        ctx.beginPath();
+        for (let i = 0; i < n; i++) {
+            const angle = (Math.PI * 2 * i / n) - Math.PI / 2;
+            const val = (values[axes[i].key] || 5) / 10;
+            const px = cx + maxR * val * Math.cos(angle);
+            const py = cy + maxR * val * Math.sin(angle);
+            if (i === 0) ctx.moveTo(px, py);
+            else ctx.lineTo(px, py);
+        }
+        ctx.closePath();
+
+        ctx.fillStyle = ISAUtils.hexToRgba(color, fillAlpha);
+        ctx.fill();
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        // Draw dots at vertices
+        for (let i = 0; i < n; i++) {
+            const angle = (Math.PI * 2 * i / n) - Math.PI / 2;
+            const val = (values[axes[i].key] || 5) / 10;
+            const px = cx + maxR * val * Math.cos(angle);
+            const py = cy + maxR * val * Math.sin(angle);
+
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.arc(px, py, 4, 0, Math.PI * 2);
+            ctx.fill();
+        }
+    }
+
+    drawRadar();
+
+    window.addEventListener('resize', () => {
+        const r = ISAUtils.initCanvas(canvas, 450);
+        w = r.w; h = r.h; ctx = r.ctx;
+        drawRadar();
+    });
+
+    // Quiz
+    const quizBox = document.getElementById('quizBox');
+    const quizOptions = document.getElementById('quizOptions');
+    const quizFeedback = document.getElementById('quizFeedback');
+    let answered = false;
+
+    quizOptions.addEventListener('click', e => {
+        const opt = e.target.closest('.quiz-opt');
+        if (!opt || answered) return;
+        answered = true;
+        const idx = parseInt(opt.dataset.idx);
+
+        document.querySelectorAll('.quiz-opt').forEach(o => {
+            o.style.pointerEvents = 'none';
+        });
+
+        if (idx === 1) {
+            opt.classList.add('correct');
+            quizFeedback.innerHTML = '<span style="color:' + C.green + ';">正确!</span> 嵌入式场景追求低功耗和小面积。固定长指令简化解码硬件（降低功耗），较多寄存器减少访存次数，简单编码让编译器更容易生成高效代码，少量寻址模式也简化了硬件。这正是 RISC 的设计哲学。';
+
+            // Update sliders to match RISC-V style
+            const riscvValues = { instLen: 9, operandCnt: 7, addrModes: 3, regCount: 8, encComplexity: 3, instCount: 3 };
+            Object.entries(riscvValues).forEach(([k, v]) => {
+                const slider = document.querySelector('#radarControls input[data-axis="' + k + '"]');
+                if (slider) {
+                    gsap.to(slider, { value: v, duration: 0.8, ease: 'power2.out',
+                        onUpdate: () => {
+                            userValues[k] = Math.round(parseFloat(slider.value));
+                            document.getElementById('rv-' + k).textContent = userValues[k];
+                            drawRadar();
+                        }
+                    });
+                }
+            });
+        } else {
+            opt.classList.add('wrong');
+            document.querySelectorAll('.quiz-opt')[1].classList.add('correct');
+            let reason = '';
+            if (idx === 0) reason = '大量寻址模式和可变长指令会增加解码硬件复杂度，提高功耗和芯片面积。';
+            else if (idx === 2) reason = '栈机虽然指令短，但需要大量的 push/pop 操作，频繁访问内存，性能和功耗都不理想。';
+            else reason = '复杂编码和可变长指令增加了硬件复杂度，不适合低功耗嵌入式场景。';
+            quizFeedback.innerHTML = '<span style="color:' + C.red + ';">不太对。</span> ' + reason +
+                ' 正确答案是 B：固定长指令 + 较多寄存器 + 简单编码 + 少量寻址模式，即 RISC 风格设计。';
+
+            // Allow retry
+            setTimeout(() => {
+                answered = false;
+                document.querySelectorAll('.quiz-opt').forEach(o => {
+                    o.style.pointerEvents = '';
+                    o.classList.remove('wrong');
+                });
+            }, 3000);
+        }
+    });
+})();
+
+// ================================================================
+// KaTeX auto-render
+// ================================================================
+document.addEventListener('DOMContentLoaded', () => {
+    if (typeof renderMathInElement === 'function') {
+        renderMathInElement(document.body, {
+            delimiters: [
+                { left: '$$', right: '$$', display: true },
+                { left: '$', right: '$', display: false }
+            ]
+        });
+    }
+});
+</script>
+</body>
+</html>

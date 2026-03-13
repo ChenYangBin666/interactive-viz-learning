@@ -1,0 +1,2168 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RISC-V 深入 — 指令集与微架构</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+<link rel="stylesheet" href="../shared/styles/common.css">
+<link rel="stylesheet" href="../shared/styles/components.css">
+<style>
+/* ========== Page-specific Styles ========== */
+.hero {
+    text-align: center;
+    padding: 3rem 0 2rem;
+}
+.hero h1 {
+    font-size: 2.4rem;
+    background: linear-gradient(135deg, var(--accent-green), var(--accent-blue));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin-bottom: 0.5rem;
+}
+.hero .subtitle {
+    color: var(--text-secondary);
+    font-size: 1.1rem;
+}
+
+.section-alt {
+    background: var(--bg-secondary);
+    margin-left: -2rem;
+    margin-right: -2rem;
+    padding: 2.5rem 2rem;
+    border-top: 1px solid var(--border-color);
+    border-bottom: 1px solid var(--border-color);
+}
+
+/* Register File Grid */
+.reg-grid {
+    display: grid;
+    grid-template-columns: repeat(8, 1fr);
+    gap: 4px;
+    margin-top: 1rem;
+}
+.reg-cell {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 6px 4px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    position: relative;
+}
+.reg-cell:hover {
+    border-color: var(--accent-green);
+    background: rgba(22, 199, 154, 0.1);
+}
+.reg-cell.selected {
+    border-color: var(--accent-green);
+    background: rgba(22, 199, 154, 0.15);
+    box-shadow: 0 0 8px rgba(22, 199, 154, 0.3);
+}
+.reg-cell .reg-name {
+    color: var(--text-muted);
+    font-size: 0.65rem;
+    display: block;
+}
+.reg-cell .reg-val {
+    color: var(--accent-green);
+    font-weight: 700;
+    font-size: 0.8rem;
+    display: block;
+    margin-top: 2px;
+}
+.reg-cell.group-arg { border-left: 3px solid var(--accent-blue); }
+.reg-cell.group-saved { border-left: 3px solid var(--accent-purple); }
+.reg-cell.group-temp { border-left: 3px solid var(--accent-orange); }
+.reg-cell.group-special { border-left: 3px solid var(--accent-red); }
+.reg-cell.changed {
+    animation: regFlash 0.6s ease;
+}
+@keyframes regFlash {
+    0% { background: rgba(22, 199, 154, 0.4); }
+    100% { background: rgba(22, 199, 154, 0.15); }
+}
+
+.reg-detail {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 1.25rem;
+    margin-top: 1rem;
+    min-height: 120px;
+}
+.reg-detail h4 {
+    color: var(--accent-green);
+    font-family: var(--font-mono);
+    margin-bottom: 0.5rem;
+}
+.reg-detail .detail-row {
+    display: flex;
+    gap: 1rem;
+    font-size: 0.85rem;
+    margin-bottom: 0.3rem;
+}
+.reg-detail .detail-label {
+    color: var(--text-muted);
+    min-width: 80px;
+}
+.reg-detail .detail-value {
+    color: var(--text-primary);
+}
+
+.reg-exec-panel {
+    margin-top: 1rem;
+    padding: 1rem;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+}
+.reg-exec-panel .exec-input {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    flex-wrap: wrap;
+}
+.reg-exec-panel input, .reg-exec-panel select {
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    padding: 0.4rem 0.6rem;
+    border-radius: var(--radius-sm);
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+}
+.reg-exec-panel select { cursor: pointer; }
+.reg-exec-panel input:focus, .reg-exec-panel select:focus {
+    outline: none;
+    border-color: var(--accent-green);
+}
+
+/* Instruction Format Diagram */
+.format-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-top: 1rem;
+}
+.format-row {
+    display: flex;
+    align-items: stretch;
+    cursor: pointer;
+    transition: all 0.3s;
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    border: 1px solid transparent;
+}
+.format-row:hover {
+    border-color: var(--border-color);
+    transform: translateY(-1px);
+}
+.format-row.expanded {
+    border-color: var(--accent-green);
+}
+.format-label {
+    min-width: 70px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-card);
+    font-family: var(--font-mono);
+    font-weight: 700;
+    font-size: 0.85rem;
+    color: var(--accent-green);
+    padding: 0.5rem;
+}
+.format-fields {
+    display: flex;
+    flex: 1;
+    height: 42px;
+}
+.format-field {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    font-weight: 600;
+    padding: 0 4px;
+    color: #1a1a2e;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+}
+.format-field .bits-label {
+    position: absolute;
+    bottom: 1px;
+    font-size: 0.55rem;
+    opacity: 0.7;
+}
+.field-opcode { background: var(--accent-blue); flex: 7; }
+.field-rd { background: var(--accent-green); flex: 5; }
+.field-funct3 { background: var(--accent-purple); flex: 3; }
+.field-rs1 { background: #80deea; flex: 5; }
+.field-rs2 { background: var(--accent-orange); flex: 5; }
+.field-funct7 { background: var(--accent-red); flex: 7; }
+.field-imm { background: var(--accent-yellow); }
+
+.format-detail-panel {
+    display: none;
+    padding: 1rem;
+    background: rgba(15, 52, 96, 0.5);
+    border: 1px solid var(--border-color);
+    border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+    margin-top: -1px;
+    font-size: 0.85rem;
+    line-height: 1.6;
+}
+.format-detail-panel.show { display: block; }
+.format-detail-panel .field-desc {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    margin-bottom: 0.3rem;
+}
+.format-detail-panel .field-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+    flex-shrink: 0;
+}
+
+/* Wire animation canvas */
+.wire-canvas-wrap {
+    margin-top: 1rem;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    background: var(--bg-secondary);
+}
+.wire-canvas-wrap canvas {
+    display: block;
+    width: 100%;
+}
+
+/* Encoder / Decoder shared */
+.codec-panel {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 1.5rem;
+}
+.codec-row {
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-bottom: 1rem;
+}
+.codec-row label {
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    min-width: 70px;
+}
+.codec-row select, .codec-row input[type="text"], .codec-row input[type="number"] {
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    padding: 0.45rem 0.7rem;
+    border-radius: var(--radius-sm);
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    min-width: 80px;
+}
+.codec-row select:focus, .codec-row input:focus {
+    outline: none;
+    border-color: var(--accent-green);
+}
+
+.bit-display {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0;
+    font-family: var(--font-mono);
+    font-size: 0.9rem;
+    margin: 1rem 0;
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+}
+.bit-display .bit {
+    width: calc(100% / 32);
+    min-width: 20px;
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    color: #1a1a2e;
+    position: relative;
+    transition: all 0.3s;
+}
+.bit-display .bit .bit-idx {
+    position: absolute;
+    top: -14px;
+    font-size: 0.55rem;
+    color: var(--text-muted);
+    font-weight: 400;
+}
+.bit-display .bit.highlight-anim {
+    animation: bitPulse 0.5s ease;
+}
+@keyframes bitPulse {
+    0% { transform: scale(1.3); }
+    100% { transform: scale(1); }
+}
+
+.hex-display {
+    font-family: var(--font-mono);
+    font-size: 1.1rem;
+    color: var(--accent-green);
+    background: var(--bg-card);
+    padding: 0.5rem 1rem;
+    border-radius: var(--radius-sm);
+    display: inline-block;
+    margin-top: 0.5rem;
+}
+
+/* Decode steps */
+.decode-steps {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    margin-top: 1rem;
+}
+.decode-step {
+    padding: 0.75rem 1rem;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    font-size: 0.85rem;
+    opacity: 0.3;
+    transition: all 0.4s;
+}
+.decode-step.active {
+    opacity: 1;
+    border-color: var(--accent-green);
+}
+.decode-step .step-title {
+    color: var(--accent-green);
+    font-weight: 600;
+    margin-bottom: 0.3rem;
+}
+.decode-step .step-content {
+    font-family: var(--font-mono);
+    color: var(--text-primary);
+}
+
+/* Immediate Encoding */
+.imm-format-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 1rem;
+    margin-top: 1rem;
+}
+.imm-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 1rem;
+}
+.imm-card h4 {
+    font-family: var(--font-mono);
+    color: var(--accent-blue);
+    margin-bottom: 0.75rem;
+}
+.imm-bits {
+    display: flex;
+    gap: 1px;
+    margin: 0.5rem 0;
+}
+.imm-bit {
+    flex: 1;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    font-weight: 600;
+    border-radius: 2px;
+    transition: all 0.3s;
+}
+.imm-bit.sign { background: var(--accent-red); color: #1a1a2e; }
+.imm-bit.val { background: var(--accent-yellow); color: #1a1a2e; }
+.imm-bit.zero { background: var(--border-color); color: var(--text-muted); }
+
+/* Reference Table */
+.ref-table-wrap {
+    overflow-x: auto;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    margin-top: 1rem;
+}
+.ref-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.82rem;
+}
+.ref-table th {
+    background: var(--bg-card);
+    color: var(--accent-green);
+    font-weight: 600;
+    padding: 0.6rem 0.8rem;
+    text-align: left;
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    border-bottom: 2px solid var(--border-color);
+}
+.ref-table td {
+    padding: 0.5rem 0.8rem;
+    border-bottom: 1px solid rgba(42, 42, 74, 0.4);
+    font-family: var(--font-mono);
+    color: var(--text-secondary);
+}
+.ref-table tr:hover td {
+    background: rgba(22, 199, 154, 0.05);
+}
+.ref-table .fmt-badge {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.search-input {
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    padding: 0.5rem 1rem;
+    border-radius: var(--radius-md);
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    width: 100%;
+    max-width: 400px;
+}
+.search-input:focus {
+    outline: none;
+    border-color: var(--accent-green);
+}
+
+/* Practice Mode */
+.practice-panel {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 1.5rem;
+    margin-top: 1rem;
+}
+.practice-question {
+    font-family: var(--font-mono);
+    font-size: 1rem;
+    color: var(--text-primary);
+    background: var(--bg-primary);
+    padding: 1rem;
+    border-radius: var(--radius-sm);
+    margin: 1rem 0;
+    text-align: center;
+    word-break: break-all;
+}
+.practice-answer-input {
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    padding: 0.6rem 1rem;
+    border-radius: var(--radius-sm);
+    font-family: var(--font-mono);
+    font-size: 0.9rem;
+    width: 100%;
+}
+.practice-answer-input:focus {
+    outline: none;
+    border-color: var(--accent-green);
+}
+.practice-feedback {
+    padding: 0.75rem 1rem;
+    border-radius: var(--radius-sm);
+    margin-top: 0.75rem;
+    font-size: 0.9rem;
+    display: none;
+}
+.practice-feedback.correct {
+    display: block;
+    background: rgba(22, 199, 154, 0.1);
+    border: 1px solid var(--accent-green);
+    color: var(--accent-green);
+}
+.practice-feedback.wrong {
+    display: block;
+    background: rgba(255, 82, 82, 0.1);
+    border: 1px solid var(--accent-red);
+    color: var(--accent-red);
+}
+
+.score-display {
+    display: flex;
+    gap: 1.5rem;
+    align-items: center;
+    margin-bottom: 1rem;
+}
+.score-item {
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+}
+.score-item .score-num {
+    font-size: 1.2rem;
+    font-weight: 700;
+    color: var(--accent-green);
+}
+
+.difficulty-selector {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+}
+.difficulty-btn {
+    padding: 0.3rem 0.8rem;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+.difficulty-btn.active {
+    background: rgba(22, 199, 154, 0.15);
+    border-color: var(--accent-green);
+    color: var(--accent-green);
+}
+
+/* Sign extension visual */
+.sign-ext-visual {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    margin: 0.75rem 0;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+}
+.sign-ext-bit {
+    width: 22px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 2px;
+    font-weight: 600;
+}
+.sign-ext-bit.extended {
+    background: rgba(255, 82, 82, 0.2);
+    color: var(--accent-red);
+}
+.sign-ext-bit.original {
+    background: rgba(255, 215, 64, 0.2);
+    color: var(--accent-yellow);
+}
+.sign-ext-arrow {
+    color: var(--text-muted);
+    padding: 0 4px;
+}
+
+/* Responsive overrides */
+@media (max-width: 900px) {
+    .reg-grid { grid-template-columns: repeat(4, 1fr); }
+    .format-fields { flex-wrap: wrap; height: auto; }
+    .format-field { min-height: 36px; }
+    .bit-display .bit { min-width: 16px; font-size: 0.75rem; height: 30px; }
+    .section-alt { margin-left: -1rem; margin-right: -1rem; padding: 2rem 1rem; }
+}
+@media (max-width: 600px) {
+    .reg-grid { grid-template-columns: repeat(4, 1fr); }
+    .codec-row { flex-direction: column; align-items: flex-start; }
+}
+</style>
+</head>
+<body>
+<!-- nav.js auto-injects navigation -->
+<div class="page-container">
+
+<!-- Hero -->
+<div class="hero">
+    <h1>RISC-V 深入</h1>
+    <p class="subtitle">寄存器组、指令格式、编码与解码 -- 全面掌握 RV32I 指令集架构</p>
+</div>
+
+<!-- ============ Section 1: Register File ============ -->
+<div class="section" id="sec-regfile">
+    <div class="section-title">
+        <div class="icon">1</div>
+        <h2>RV32I 寄存器组</h2>
+    </div>
+    <p>RISC-V 拥有 32 个通用寄存器 (x0-x31)，每个 32 位宽。点击任意寄存器查看详情，或在下方执行指令观察寄存器变化。</p>
+
+    <div class="legend" id="reg-legend">
+        <div class="legend-item"><span class="swatch" style="background:var(--accent-red)"></span> 特殊寄存器</div>
+        <div class="legend-item"><span class="swatch" style="background:var(--accent-blue)"></span> 参数寄存器 (a0-a7)</div>
+        <div class="legend-item"><span class="swatch" style="background:var(--accent-purple)"></span> 保存寄存器 (s0-s11)</div>
+        <div class="legend-item"><span class="swatch" style="background:var(--accent-orange)"></span> 临时寄存器 (t0-t6)</div>
+    </div>
+
+    <div class="reg-grid" id="reg-grid"></div>
+
+    <div class="reg-detail" id="reg-detail">
+        <h4>点击上方寄存器查看详情</h4>
+        <p style="color:var(--text-muted);font-size:0.85rem;">选择一个寄存器以查看其 ABI 名称、调用约定和典型用途。</p>
+    </div>
+
+    <div class="reg-exec-panel">
+        <h4 style="margin-bottom:0.75rem;">执行指令</h4>
+        <div class="exec-input">
+            <select id="reg-exec-inst">
+                <option value="addi">addi</option>
+                <option value="add">add</option>
+                <option value="sub">sub</option>
+                <option value="and">and</option>
+                <option value="or">or</option>
+                <option value="xor">xor</option>
+                <option value="sll">sll</option>
+                <option value="srl">srl</option>
+                <option value="lui">lui</option>
+            </select>
+            <input type="text" id="reg-exec-rd" placeholder="rd (如 x1)" style="width:70px;">
+            <input type="text" id="reg-exec-rs1" placeholder="rs1 (如 x2)" style="width:70px;">
+            <input type="text" id="reg-exec-op2" placeholder="rs2/imm" style="width:90px;">
+            <button class="btn btn-primary" onclick="execRegInst()">执行</button>
+            <button class="btn" onclick="resetRegs()">重置</button>
+        </div>
+        <p style="color:var(--text-muted);font-size:0.8rem;margin-top:0.5rem;">
+            示例：addi x1 x0 42 → 将 42 存入 x1 | add x3 x1 x2 → x3 = x1 + x2
+        </p>
+    </div>
+</div>
+
+<!-- ============ Section 2: Instruction Formats ============ -->
+<div class="section section-alt" id="sec-formats">
+    <div class="section-title">
+        <div class="icon">2</div>
+        <h2>六种指令格式</h2>
+    </div>
+    <p>RV32I 的所有指令都是固定 32 位宽，分为六种格式。点击任一格式展开字段详解，颜色编码帮助你快速识别各字段。</p>
+
+    <div class="legend">
+        <div class="legend-item"><span class="swatch" style="background:var(--accent-blue)"></span> opcode (7位)</div>
+        <div class="legend-item"><span class="swatch" style="background:var(--accent-green)"></span> rd (5位)</div>
+        <div class="legend-item"><span class="swatch" style="background:var(--accent-purple)"></span> funct3 (3位)</div>
+        <div class="legend-item"><span class="swatch" style="background:#80deea"></span> rs1 (5位)</div>
+        <div class="legend-item"><span class="swatch" style="background:var(--accent-orange)"></span> rs2 (5位)</div>
+        <div class="legend-item"><span class="swatch" style="background:var(--accent-red)"></span> funct7 (7位)</div>
+        <div class="legend-item"><span class="swatch" style="background:var(--accent-yellow)"></span> imm (立即数)</div>
+    </div>
+
+    <div class="format-stack" id="format-stack"></div>
+
+    <h3 style="margin-top:2rem;margin-bottom:0.75rem;">B/J 型立即数位排列动画</h3>
+    <p>B 型和 J 型指令的立即数位被打乱存放，这是为了硬件优化——让符号位始终在最高位，方便快速符号扩展。</p>
+    <div style="margin-bottom:0.5rem;">
+        <button class="btn btn-sm" onclick="animateWireRouting('B')" id="btn-wire-b">B 型线路动画</button>
+        <button class="btn btn-sm" onclick="animateWireRouting('J')" id="btn-wire-j">J 型线路动画</button>
+    </div>
+    <div class="wire-canvas-wrap">
+        <canvas id="wire-canvas"></canvas>
+    </div>
+</div>
+
+<!-- ============ Section 3: Interactive Encoder ============ -->
+<div class="section" id="sec-encoder">
+    <div class="section-title">
+        <div class="icon">3</div>
+        <h2>交互式编码器</h2>
+    </div>
+    <p>选择一条指令并填入操作数，实时查看 32 位编码结果。颜色标注各字段在二进制中的位置。</p>
+
+    <div class="codec-panel">
+        <div class="codec-row">
+            <label>指令：</label>
+            <select id="enc-inst" onchange="updateEncoder()">
+                <option value="">-- 选择指令 --</option>
+            </select>
+        </div>
+        <div class="codec-row" id="enc-operands"></div>
+        <button class="btn btn-primary" onclick="doEncode()" style="margin-top:0.5rem;">编码</button>
+        <button class="btn" onclick="animateEncode()" style="margin-top:0.5rem;">动画编码</button>
+
+        <div style="margin-top:1rem;">
+            <div style="display:flex;gap:4px;margin-bottom:4px;font-family:var(--font-mono);font-size:0.55rem;color:var(--text-muted);" id="enc-bit-indices"></div>
+            <div class="bit-display" id="enc-bits"></div>
+        </div>
+        <div class="hex-display" id="enc-hex" style="display:none;"></div>
+        <div id="enc-field-legend" style="margin-top:0.75rem;font-size:0.8rem;color:var(--text-secondary);"></div>
+    </div>
+</div>
+
+<!-- ============ Section 4: Interactive Decoder ============ -->
+<div class="section section-alt" id="sec-decoder">
+    <div class="section-title">
+        <div class="icon">4</div>
+        <h2>交互式解码器</h2>
+    </div>
+    <p>输入 32 位二进制或 8 位十六进制值，逐步解码出对应的 RISC-V 指令。支持动画展示解码过程。</p>
+
+    <div class="codec-panel">
+        <div class="codec-row">
+            <label>二进制：</label>
+            <input type="text" id="dec-bin-input" placeholder="如 00000000001000001000000110110011" style="width:100%;max-width:500px;" maxlength="32">
+        </div>
+        <div class="codec-row">
+            <label>十六进制：</label>
+            <input type="text" id="dec-hex-input" placeholder="如 002080B3" style="width:160px;" maxlength="8">
+            <button class="btn" onclick="hexToBinInput()">转换</button>
+        </div>
+        <button class="btn btn-primary" onclick="doDecode()">解码</button>
+        <button class="btn" onclick="animateDecode()">逐步解码</button>
+        <button class="btn" onclick="linkFromEncoder()">从编码器导入</button>
+
+        <div style="margin-top:1rem;">
+            <div class="bit-display" id="dec-bits"></div>
+        </div>
+
+        <div class="decode-steps" id="decode-steps">
+            <div class="decode-step" id="ds-opcode">
+                <div class="step-title">第1步：提取 opcode (位 [6:0])</div>
+                <div class="step-content" id="ds-opcode-val">--</div>
+            </div>
+            <div class="decode-step" id="ds-format">
+                <div class="step-title">第2步：确定指令格式</div>
+                <div class="step-content" id="ds-format-val">--</div>
+            </div>
+            <div class="decode-step" id="ds-fields">
+                <div class="step-title">第3步：提取各字段</div>
+                <div class="step-content" id="ds-fields-val">--</div>
+            </div>
+            <div class="decode-step" id="ds-inst">
+                <div class="step-title">第4步：识别指令</div>
+                <div class="step-content" id="ds-inst-val">--</div>
+            </div>
+        </div>
+
+        <div id="dec-error" style="color:var(--accent-red);margin-top:0.75rem;font-size:0.85rem;display:none;"></div>
+        <div id="dec-result" style="margin-top:1rem;padding:1rem;background:var(--bg-card);border-radius:var(--radius-sm);display:none;">
+            <span style="color:var(--text-muted);font-size:0.85rem;">解码结果：</span>
+            <span id="dec-result-text" style="font-family:var(--font-mono);color:var(--accent-green);font-size:1.1rem;font-weight:700;"></span>
+        </div>
+    </div>
+</div>
+
+<!-- ============ Section 5: Immediate Encoding ============ -->
+<div class="section" id="sec-immediate">
+    <div class="section-title">
+        <div class="icon">5</div>
+        <h2>立即数编码</h2>
+    </div>
+    <p>不同格式的立即数编码方式各不相同。输入一个十进制数，查看它在各种格式下的编码以及符号扩展过程。</p>
+
+    <div class="codec-panel" style="margin-bottom:1.5rem;">
+        <div class="codec-row">
+            <label>十进制值：</label>
+            <input type="number" id="imm-input" value="42" style="width:120px;" onchange="updateImmDisplay()">
+            <button class="btn btn-primary" onclick="updateImmDisplay()">查看编码</button>
+        </div>
+    </div>
+
+    <div class="imm-format-grid" id="imm-grid"></div>
+
+    <div style="margin-top:2rem;">
+        <h3>为什么 B/J 型要打乱立即数位？</h3>
+        <div class="info-box" style="margin-top:0.75rem;">
+            <p><strong>硬件优化原因：</strong>在所有格式中，符号位 (最高位) 总是位于指令的第 31 位。
+            这样解码器可以在提取 opcode 的同时就开始符号扩展，无需等待格式判定完成。
+            此外，各格式中相同位置的位尽量对齐到相同的立即数位，减少多路选择器的复杂度。</p>
+        </div>
+    </div>
+
+    <h3 style="margin-top:1.5rem;">符号扩展可视化</h3>
+    <p>RISC-V 立即数始终做符号扩展到 32 位。下面展示不同宽度立即数的扩展过程：</p>
+    <div id="sign-ext-demo"></div>
+</div>
+
+<!-- ============ Section 6: Reference & Practice ============ -->
+<div class="section section-alt" id="sec-practice">
+    <div class="section-title">
+        <div class="icon">6</div>
+        <h2>指令速查与练习</h2>
+    </div>
+
+    <div class="tabs">
+        <button class="tab active" onclick="switchTab(this,'tab-ref')">速查表</button>
+        <button class="tab" onclick="switchTab(this,'tab-practice')">练习模式</button>
+    </div>
+
+    <!-- Reference Table -->
+    <div class="tab-content active" id="tab-ref">
+        <input type="text" class="search-input" placeholder="搜索指令名称或描述..." id="ref-search" oninput="filterRefTable()">
+        <div class="ref-table-wrap" style="max-height:500px;overflow-y:auto;margin-top:1rem;">
+            <table class="ref-table" id="ref-table">
+                <thead>
+                    <tr>
+                        <th>指令</th>
+                        <th>格式</th>
+                        <th>opcode</th>
+                        <th>funct3</th>
+                        <th>funct7</th>
+                        <th>描述</th>
+                        <th>示例</th>
+                    </tr>
+                </thead>
+                <tbody id="ref-tbody"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Practice Mode -->
+    <div class="tab-content" id="tab-practice">
+        <div class="score-display">
+            <div class="score-item">得分：<span class="score-num" id="prac-score">0</span></div>
+            <div class="score-item">总题：<span class="score-num" id="prac-total">0</span></div>
+            <div class="score-item">正确率：<span class="score-num" id="prac-rate">-</span></div>
+        </div>
+
+        <div class="difficulty-selector">
+            <button class="difficulty-btn active" onclick="setDifficulty(this,1)">简单</button>
+            <button class="difficulty-btn" onclick="setDifficulty(this,2)">中等</button>
+            <button class="difficulty-btn" onclick="setDifficulty(this,3)">困难</button>
+        </div>
+
+        <div class="practice-panel" id="practice-panel">
+            <div id="prac-mode-label" style="color:var(--accent-blue);font-weight:600;margin-bottom:0.5rem;"></div>
+            <div class="practice-question" id="prac-question">点击「出题」开始练习</div>
+            <input type="text" class="practice-answer-input" id="prac-answer" placeholder="输入答案..." onkeydown="if(event.key==='Enter')checkPractice()">
+            <div style="display:flex;gap:0.5rem;margin-top:0.75rem;">
+                <button class="btn btn-primary" onclick="checkPractice()">提交</button>
+                <button class="btn" onclick="generatePractice()">出题</button>
+                <button class="btn" onclick="showPracticeAnswer()">显示答案</button>
+                <button class="btn" onclick="resetPractice()">重置分数</button>
+            </div>
+            <div class="practice-feedback" id="prac-feedback"></div>
+        </div>
+    </div>
+</div>
+
+</div> <!-- end page-container -->
+
+<script src="../shared/scripts/isa-utils.js"></script>
+<script src="../shared/scripts/nav.js"></script>
+<script>
+'use strict';
+
+/* ================================================================
+   Global Data & Constants
+   ================================================================ */
+const C = ISAUtils.COLORS;
+const INSTS = ISAUtils.RISCV_INSTS;
+const OPCODES = ISAUtils.RISCV_OPCODES;
+
+// Register ABI info
+const REG_INFO = [
+    { abi: 'zero', group: 'special', convention: '硬连线零', usage: '常数 0，写入无效' },
+    { abi: 'ra',   group: 'special', convention: '调用者保存', usage: '返回地址 (return address)' },
+    { abi: 'sp',   group: 'special', convention: '被调用者保存', usage: '栈指针 (stack pointer)' },
+    { abi: 'gp',   group: 'special', convention: '--', usage: '全局指针 (global pointer)' },
+    { abi: 'tp',   group: 'special', convention: '--', usage: '线程指针 (thread pointer)' },
+    { abi: 't0',   group: 'temp', convention: '调用者保存', usage: '临时寄存器 / 备用链接寄存器' },
+    { abi: 't1',   group: 'temp', convention: '调用者保存', usage: '临时寄存器' },
+    { abi: 't2',   group: 'temp', convention: '调用者保存', usage: '临时寄存器' },
+    { abi: 's0/fp', group: 'saved', convention: '被调用者保存', usage: '保存寄存器 / 帧指针' },
+    { abi: 's1',   group: 'saved', convention: '被调用者保存', usage: '保存寄存器' },
+    { abi: 'a0',   group: 'arg', convention: '调用者保存', usage: '函数参数 / 返回值' },
+    { abi: 'a1',   group: 'arg', convention: '调用者保存', usage: '函数参数 / 返回值' },
+    { abi: 'a2',   group: 'arg', convention: '调用者保存', usage: '函数参数' },
+    { abi: 'a3',   group: 'arg', convention: '调用者保存', usage: '函数参数' },
+    { abi: 'a4',   group: 'arg', convention: '调用者保存', usage: '函数参数' },
+    { abi: 'a5',   group: 'arg', convention: '调用者保存', usage: '函数参数' },
+    { abi: 'a6',   group: 'arg', convention: '调用者保存', usage: '函数参数' },
+    { abi: 'a7',   group: 'arg', convention: '调用者保存', usage: '函数参数' },
+    { abi: 's2',   group: 'saved', convention: '被调用者保存', usage: '保存寄存器' },
+    { abi: 's3',   group: 'saved', convention: '被调用者保存', usage: '保存寄存器' },
+    { abi: 's4',   group: 'saved', convention: '被调用者保存', usage: '保存寄存器' },
+    { abi: 's5',   group: 'saved', convention: '被调用者保存', usage: '保存寄存器' },
+    { abi: 's6',   group: 'saved', convention: '被调用者保存', usage: '保存寄存器' },
+    { abi: 's7',   group: 'saved', convention: '被调用者保存', usage: '保存寄存器' },
+    { abi: 's8',   group: 'saved', convention: '被调用者保存', usage: '保存寄存器' },
+    { abi: 's9',   group: 'saved', convention: '被调用者保存', usage: '保存寄存器' },
+    { abi: 's10',  group: 'saved', convention: '被调用者保存', usage: '保存寄存器' },
+    { abi: 's11',  group: 'saved', convention: '被调用者保存', usage: '保存寄存器' },
+    { abi: 't3',   group: 'temp', convention: '调用者保存', usage: '临时寄存器' },
+    { abi: 't4',   group: 'temp', convention: '调用者保存', usage: '临时寄存器' },
+    { abi: 't5',   group: 'temp', convention: '调用者保存', usage: '临时寄存器' },
+    { abi: 't6',   group: 'temp', convention: '调用者保存', usage: '临时寄存器' },
+];
+
+const GROUP_CLASS = { special: 'group-special', arg: 'group-arg', saved: 'group-saved', temp: 'group-temp' };
+const GROUP_LABEL = { special: '特殊', arg: '参数', saved: '保存', temp: '临时' };
+
+// Instruction format field colors mapping
+const FIELD_COLORS = {
+    'opcode': C.blue, 'rd': C.green, 'funct3': C.purple,
+    'rs1': '#80deea', 'rs2': C.orange, 'funct7': C.red, 'imm': C.yellow
+};
+
+// Format bit layouts: each element is [fieldName, bitCount]
+const FORMAT_LAYOUTS = {
+    'R': [['funct7',7],['rs2',5],['rs1',5],['funct3',3],['rd',5],['opcode',7]],
+    'I': [['imm',12],['rs1',5],['funct3',3],['rd',5],['opcode',7]],
+    'S': [['imm',7],['rs2',5],['rs1',5],['funct3',3],['imm',5],['opcode',7]],
+    'B': [['imm',7],['rs2',5],['rs1',5],['funct3',3],['imm',5],['opcode',7]],
+    'U': [['imm',20],['rd',5],['opcode',7]],
+    'J': [['imm',20],['rd',5],['opcode',7]],
+};
+
+const FORMAT_FIELD_LABELS = {
+    'R': ['funct7 [31:25]','rs2 [24:20]','rs1 [19:15]','funct3 [14:12]','rd [11:7]','opcode [6:0]'],
+    'I': ['imm[11:0] [31:20]','rs1 [19:15]','funct3 [14:12]','rd [11:7]','opcode [6:0]'],
+    'S': ['imm[11:5] [31:25]','rs2 [24:20]','rs1 [19:15]','funct3 [14:12]','imm[4:0] [11:7]','opcode [6:0]'],
+    'B': ['imm[12|10:5] [31:25]','rs2 [24:20]','rs1 [19:15]','funct3 [14:12]','imm[4:1|11] [11:7]','opcode [6:0]'],
+    'U': ['imm[31:12] [31:12]','rd [11:7]','opcode [6:0]'],
+    'J': ['imm[20|10:1|11|19:12] [31:12]','rd [11:7]','opcode [6:0]'],
+};
+
+const FORMAT_DESCRIPTIONS = {
+    'R': '寄存器-寄存器操作。三个寄存器操作数：rd = rs1 op rs2。通过 funct3 和 funct7 区分具体操作。',
+    'I': '立即数操作和加载。12 位有符号立即数，rd = rs1 op imm。也用于 JALR 和 LOAD 指令。',
+    'S': '存储指令。将 rs2 的值存储到 rs1+imm 的地址。立即数分为两段：[11:5] 和 [4:0]。',
+    'B': '条件分支。比较 rs1 和 rs2，条件成立则 PC += imm。立即数位被打乱以优化硬件。',
+    'U': '高位立即数。20 位立即数加载到目标寄存器的高 20 位。用于 LUI 和 AUIPC。',
+    'J': '无条件跳转 (JAL)。20 位立即数编码跳转偏移，rd 保存返回地址。立即数位经过重排。',
+};
+
+/* ================================================================
+   Register File State
+   ================================================================ */
+let regs = new Int32Array(32);
+let selectedReg = -1;
+
+function buildRegGrid() {
+    const grid = document.getElementById('reg-grid');
+    grid.innerHTML = '';
+    for (let i = 0; i < 32; i++) {
+        const info = REG_INFO[i];
+        const cell = document.createElement('div');
+        cell.className = `reg-cell ${GROUP_CLASS[info.group]}`;
+        cell.dataset.idx = i;
+        cell.innerHTML = `<span class="reg-name">x${i} (${info.abi})</span><span class="reg-val" id="rv-${i}">${regs[i]}</span>`;
+        cell.onclick = () => selectReg(i);
+        grid.appendChild(cell);
+    }
+}
+
+function selectReg(i) {
+    selectedReg = i;
+    document.querySelectorAll('.reg-cell').forEach(c => c.classList.remove('selected'));
+    const cell = document.querySelector(`.reg-cell[data-idx="${i}"]`);
+    if (cell) cell.classList.add('selected');
+
+    const info = REG_INFO[i];
+    const detail = document.getElementById('reg-detail');
+    detail.innerHTML = `
+        <h4>x${i} — ${info.abi}</h4>
+        <div class="detail-row"><span class="detail-label">寄存器号</span><span class="detail-value">x${i}</span></div>
+        <div class="detail-row"><span class="detail-label">ABI 名称</span><span class="detail-value">${info.abi}</span></div>
+        <div class="detail-row"><span class="detail-label">分组</span><span class="detail-value">${GROUP_LABEL[info.group]}</span></div>
+        <div class="detail-row"><span class="detail-label">调用约定</span><span class="detail-value">${info.convention}</span></div>
+        <div class="detail-row"><span class="detail-label">典型用途</span><span class="detail-value">${info.usage}</span></div>
+        <div class="detail-row"><span class="detail-label">当前值</span><span class="detail-value" style="color:var(--accent-green);font-family:var(--font-mono);">${regs[i]} (0x${(regs[i] >>> 0).toString(16).toUpperCase().padStart(8,'0')})</span></div>
+    `;
+}
+
+function updateRegDisplay(idx) {
+    const el = document.getElementById(`rv-${idx}`);
+    if (el) {
+        el.textContent = regs[idx];
+        const cell = el.closest('.reg-cell');
+        cell.classList.add('changed');
+        setTimeout(() => cell.classList.remove('changed'), 600);
+    }
+    if (selectedReg === idx) selectReg(idx);
+}
+
+function parseReg(s) {
+    s = s.trim().toLowerCase();
+    if (s.startsWith('x')) return parseInt(s.slice(1));
+    for (let i = 0; i < 32; i++) {
+        if (REG_INFO[i].abi === s || REG_INFO[i].abi.split('/').includes(s)) return i;
+    }
+    return NaN;
+}
+
+function execRegInst() {
+    const inst = document.getElementById('reg-exec-inst').value;
+    const rdStr = document.getElementById('reg-exec-rd').value;
+    const rs1Str = document.getElementById('reg-exec-rs1').value;
+    const op2Str = document.getElementById('reg-exec-op2').value;
+
+    const rd = parseReg(rdStr);
+    if (isNaN(rd) || rd < 0 || rd > 31) { alert('无效的目标寄存器 rd'); return; }
+    if (rd === 0) { alert('x0 始终为 0，不可写入'); return; }
+
+    let rs1, op2;
+    if (inst === 'lui') {
+        op2 = parseInt(op2Str);
+        if (isNaN(op2)) { alert('无效的立即数'); return; }
+        regs[rd] = (op2 << 12) | 0;
+        updateRegDisplay(rd);
+        return;
+    }
+
+    rs1 = parseReg(rs1Str);
+    if (isNaN(rs1) || rs1 < 0 || rs1 > 31) { alert('无效的源寄存器 rs1'); return; }
+
+    const isImm = ['addi'].includes(inst);
+    if (isImm) {
+        op2 = parseInt(op2Str);
+        if (isNaN(op2)) { alert('无效的立即数'); return; }
+    } else {
+        op2 = parseReg(op2Str);
+        if (isNaN(op2) || op2 < 0 || op2 > 31) { alert('无效的源寄存器 rs2'); return; }
+        op2 = regs[op2];
+    }
+
+    const a = regs[rs1];
+    const b = op2;
+    let result = 0;
+    switch (inst) {
+        case 'add': case 'addi': result = (a + b) | 0; break;
+        case 'sub': result = (a - b) | 0; break;
+        case 'and': result = a & b; break;
+        case 'or':  result = a | b; break;
+        case 'xor': result = a ^ b; break;
+        case 'sll': result = (a << (b & 0x1f)) | 0; break;
+        case 'srl': result = (a >>> (b & 0x1f)) | 0; break;
+        default: alert('不支持的指令'); return;
+    }
+    regs[rd] = result;
+    updateRegDisplay(rd);
+}
+
+function resetRegs() {
+    regs = new Int32Array(32);
+    for (let i = 0; i < 32; i++) {
+        const el = document.getElementById(`rv-${i}`);
+        if (el) el.textContent = '0';
+    }
+    if (selectedReg >= 0) selectReg(selectedReg);
+}
+
+/* ================================================================
+   Instruction Formats (Section 2)
+   ================================================================ */
+function buildFormatStack() {
+    const stack = document.getElementById('format-stack');
+    stack.innerHTML = '';
+    const types = ['R','I','S','B','U','J'];
+    types.forEach(t => {
+        const layout = FORMAT_LAYOUTS[t];
+        const labels = FORMAT_FIELD_LABELS[t];
+
+        const row = document.createElement('div');
+        row.className = 'format-row';
+        row.dataset.type = t;
+
+        // Label
+        const lbl = document.createElement('div');
+        lbl.className = 'format-label';
+        lbl.textContent = t + ' 型';
+        row.appendChild(lbl);
+
+        // Fields
+        const fields = document.createElement('div');
+        fields.className = 'format-fields';
+        layout.forEach(([field, bits], idx) => {
+            const f = document.createElement('div');
+            const baseField = field === 'imm' ? 'imm' : field;
+            f.className = `format-field field-${baseField}`;
+            f.style.flex = bits;
+            f.innerHTML = `${labels[idx]}<span class="bits-label">${bits}位</span>`;
+            fields.appendChild(f);
+        });
+        row.appendChild(fields);
+        row.onclick = () => toggleFormatDetail(t);
+        stack.appendChild(row);
+
+        // Detail panel
+        const detail = document.createElement('div');
+        detail.className = 'format-detail-panel';
+        detail.id = `fmt-detail-${t}`;
+        let html = `<p style="margin-bottom:0.75rem;color:var(--text-primary);">${FORMAT_DESCRIPTIONS[t]}</p>`;
+        html += '<div style="display:flex;flex-direction:column;gap:0.3rem;">';
+        layout.forEach(([field, bits], idx) => {
+            const baseField = field === 'imm' ? 'imm' : field;
+            const color = FIELD_COLORS[baseField] || C.yellow;
+            html += `<div class="field-desc"><span class="field-dot" style="background:${color}"></span><span style="color:var(--text-primary);font-family:var(--font-mono);font-weight:600;">${labels[idx]}</span><span style="color:var(--text-muted);">— ${bits} 位</span></div>`;
+        });
+        html += '</div>';
+        // Show example instruction for this type
+        const examples = Object.entries(INSTS).filter(([,v]) => v.type === t);
+        if (examples.length) {
+            html += `<p style="margin-top:0.75rem;color:var(--text-muted);font-size:0.8rem;">例：${examples.map(([n,v]) => `<code>${n}</code> (${v.desc})`).join('、')}</p>`;
+        }
+        detail.innerHTML = html;
+        stack.appendChild(detail);
+    });
+}
+
+function toggleFormatDetail(type) {
+    const row = document.querySelector(`.format-row[data-type="${type}"]`);
+    const detail = document.getElementById(`fmt-detail-${type}`);
+    const isOpen = detail.classList.contains('show');
+
+    // Close all
+    document.querySelectorAll('.format-row').forEach(r => r.classList.remove('expanded'));
+    document.querySelectorAll('.format-detail-panel').forEach(d => d.classList.remove('show'));
+
+    if (!isOpen) {
+        row.classList.add('expanded');
+        detail.classList.add('show');
+        gsap.from(detail, { height: 0, opacity: 0, duration: 0.3, ease: 'power2.out' });
+    }
+}
+
+/* Wire Routing Animation for B/J type */
+let wireAnimId = null;
+function animateWireRouting(type) {
+    const canvas = document.getElementById('wire-canvas');
+    const { ctx, w, h } = ISAUtils.initCanvas(canvas, 280);
+    if (wireAnimId) cancelAnimationFrame(wireAnimId);
+
+    ctx.clearRect(0, 0, w, h);
+    const font = '11px "JetBrains Mono", monospace';
+    const smallFont = '9px "JetBrains Mono", monospace';
+
+    // Top row: instruction bit positions (31..0)
+    // Bottom row: immediate bit positions
+    const topY = 40;
+    const botY = 230;
+    const padX = 30;
+    const bitW = (w - padX * 2) / 32;
+
+    // Draw labels
+    ctx.fillStyle = C.textSec;
+    ctx.font = '12px "Noto Sans SC", sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText(`${type} 型指令位 [31:0]`, padX, topY - 18);
+    ctx.fillText('立即数位排列', padX, botY - 18);
+
+    let mapping; // [instBit, immBit, label]
+    if (type === 'B') {
+        // B-type: imm[12|10:5] in [31:25], imm[4:1|11] in [11:7]
+        // inst[31]=imm[12], inst[30:25]=imm[10:5], inst[11:8]=imm[4:1], inst[7]=imm[11]
+        mapping = [
+            [31, 12, '12'],
+            [30, 10, '10'], [29, 9, '9'], [28, 8, '8'], [27, 7, '7'], [26, 6, '6'], [25, 5, '5'],
+            [11, 4, '4'], [10, 3, '3'], [9, 2, '2'], [8, 1, '1'],
+            [7, 11, '11'],
+        ];
+    } else {
+        // J-type: imm[20|10:1|11|19:12] in [31:12]
+        // inst[31]=imm[20], inst[30:21]=imm[10:1], inst[20]=imm[11], inst[19:12]=imm[19:12]
+        mapping = [
+            [31, 20, '20'],
+            [30, 10, '10'], [29, 9, '9'], [28, 8, '8'], [27, 7, '7'], [26, 6, '6'],
+            [25, 5, '5'], [24, 4, '4'], [23, 3, '3'], [22, 2, '2'], [21, 1, '1'],
+            [20, 11, '11'],
+            [19, 19, '19'], [18, 18, '18'], [17, 17, '17'], [16, 16, '16'],
+            [15, 15, '15'], [14, 14, '14'], [13, 13, '13'], [12, 12, '12'],
+        ];
+    }
+
+    // Determine max imm bit for bottom row width
+    const maxImmBit = type === 'B' ? 12 : 20;
+    const immBitW = (w - padX * 2) / (maxImmBit + 1);
+
+    // Draw all instruction bit boxes (top row)
+    for (let i = 0; i < 32; i++) {
+        const x = padX + (31 - i) * bitW;
+        const isUsed = mapping.some(m => m[0] === i);
+        ctx.fillStyle = isUsed ? ISAUtils.hexToRgba(C.yellow, 0.2) : ISAUtils.hexToRgba(C.border, 0.3);
+        ctx.strokeStyle = isUsed ? C.yellow : C.border;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.roundRect(x, topY, bitW - 1, 24, 2);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = isUsed ? C.yellow : C.textMut;
+        ctx.font = smallFont;
+        ctx.textAlign = 'center';
+        ctx.fillText(i.toString(), x + bitW / 2, topY + 15);
+    }
+
+    // Draw imm bit boxes (bottom row)
+    for (let i = 0; i <= maxImmBit; i++) {
+        const x = padX + (maxImmBit - i) * immBitW;
+        const isUsed = mapping.some(m => m[1] === i);
+        ctx.fillStyle = isUsed ? ISAUtils.hexToRgba(C.green, 0.2) : ISAUtils.hexToRgba(C.border, 0.3);
+        ctx.strokeStyle = isUsed ? C.green : C.border;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.roundRect(x, botY, immBitW - 1, 24, 2);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = isUsed ? C.green : C.textMut;
+        ctx.font = smallFont;
+        ctx.textAlign = 'center';
+        ctx.fillText(i.toString(), x + immBitW / 2, botY + 15);
+    }
+
+    // Animate wires one by one
+    let wireIdx = 0;
+    const totalWires = mapping.length;
+    const wireDelay = 120;
+
+    function drawWire(idx) {
+        if (idx >= totalWires) return;
+        const [instBit, immBit, label] = mapping[idx];
+        const x1 = padX + (31 - instBit) * bitW + bitW / 2;
+        const y1 = topY + 24;
+        const x2 = padX + (maxImmBit - immBit) * immBitW + immBitW / 2;
+        const y2 = botY;
+
+        // Determine color based on whether this is a "shuffle" (instBit position differs from immBit)
+        const isShuffle = (instBit !== immBit + (type === 'B' ? 19 : 11));
+        const wireColor = isShuffle ? C.orange : C.green;
+
+        // Animate with GSAP
+        const progress = { t: 0 };
+        gsap.to(progress, {
+            t: 1,
+            duration: 0.4,
+            ease: 'power2.out',
+            onUpdate: () => {
+                const t = progress.t;
+                const cx1 = x1;
+                const cy1 = y1 + 10;
+                const cx2 = x2;
+                const cy2 = y2 - 10;
+                // Bezier curve
+                const mx = x1 + (x2 - x1) * t;
+                const my = y1 + 24 + (y2 - y1 - 24) * t;
+                ctx.strokeStyle = wireColor;
+                ctx.lineWidth = 1.5;
+                ctx.globalAlpha = 0.7;
+                ctx.beginPath();
+                ctx.moveTo(x1, y1);
+                ctx.bezierCurveTo(cx1, cy1 + (cy2 - cy1) * 0.3, cx2, cy2 - (cy2 - cy1) * 0.3, x2, y2);
+                ctx.stroke();
+                ctx.globalAlpha = 1;
+            }
+        });
+    }
+
+    // Stagger wire drawings
+    mapping.forEach((m, i) => {
+        setTimeout(() => drawWire(i), i * wireDelay);
+    });
+}
+
+/* ================================================================
+   Encoder (Section 3)
+   ================================================================ */
+function populateEncoderDropdown() {
+    const sel = document.getElementById('enc-inst');
+    Object.keys(INSTS).forEach(name => {
+        const opt = document.createElement('option');
+        opt.value = name;
+        opt.textContent = `${name} — ${INSTS[name].desc} (${INSTS[name].type}型)`;
+        sel.appendChild(opt);
+    });
+}
+
+function updateEncoder() {
+    const name = document.getElementById('enc-inst').value;
+    const div = document.getElementById('enc-operands');
+    div.innerHTML = '';
+    if (!name) return;
+
+    const info = INSTS[name];
+    const type = info.type;
+
+    if (type === 'R') {
+        div.innerHTML = `
+            <label>rd：</label><input type="text" id="enc-rd" placeholder="x1" style="width:60px;">
+            <label>rs1：</label><input type="text" id="enc-rs1" placeholder="x2" style="width:60px;">
+            <label>rs2：</label><input type="text" id="enc-rs2" placeholder="x3" style="width:60px;">
+        `;
+    } else if (type === 'I') {
+        div.innerHTML = `
+            <label>rd：</label><input type="text" id="enc-rd" placeholder="x1" style="width:60px;">
+            <label>rs1：</label><input type="text" id="enc-rs1" placeholder="x2" style="width:60px;">
+            <label>imm：</label><input type="number" id="enc-imm" placeholder="0" style="width:80px;">
+        `;
+    } else if (type === 'S') {
+        div.innerHTML = `
+            <label>rs2：</label><input type="text" id="enc-rs2" placeholder="x1" style="width:60px;">
+            <label>rs1：</label><input type="text" id="enc-rs1" placeholder="x2" style="width:60px;">
+            <label>imm：</label><input type="number" id="enc-imm" placeholder="0" style="width:80px;">
+        `;
+    } else if (type === 'B') {
+        div.innerHTML = `
+            <label>rs1：</label><input type="text" id="enc-rs1" placeholder="x1" style="width:60px;">
+            <label>rs2：</label><input type="text" id="enc-rs2" placeholder="x2" style="width:60px;">
+            <label>imm：</label><input type="number" id="enc-imm" placeholder="0" style="width:80px;">
+        `;
+    } else if (type === 'U') {
+        div.innerHTML = `
+            <label>rd：</label><input type="text" id="enc-rd" placeholder="x1" style="width:60px;">
+            <label>imm：</label><input type="number" id="enc-imm" placeholder="0" style="width:100px;">
+        `;
+    } else if (type === 'J') {
+        div.innerHTML = `
+            <label>rd：</label><input type="text" id="enc-rd" placeholder="x1" style="width:60px;">
+            <label>imm：</label><input type="number" id="enc-imm" placeholder="0" style="width:100px;">
+        `;
+    }
+}
+
+let lastEncodedBinary = '';
+
+function encodeInstruction(name, operands) {
+    const info = INSTS[name];
+    const type = info.type;
+    let opcode = info.opcode || OPCODES[type].opcode;
+    let bin = '';
+    let fieldMap = {}; // bitIndex -> fieldName
+
+    const rd = operands.rd != null ? (operands.rd & 0x1f) : 0;
+    const rs1 = operands.rs1 != null ? (operands.rs1 & 0x1f) : 0;
+    const rs2 = operands.rs2 != null ? (operands.rs2 & 0x1f) : 0;
+    const imm = operands.imm != null ? operands.imm : 0;
+
+    const toBin = ISAUtils.toBin;
+
+    if (type === 'R') {
+        const funct7 = info.funct7 || '0000000';
+        const funct3 = info.funct3 || '000';
+        bin = funct7 + toBin(rs2, 5) + toBin(rs1, 5) + funct3 + toBin(rd, 5) + opcode;
+        for (let i = 0; i < 7; i++) fieldMap[i] = 'funct7';
+        for (let i = 7; i < 12; i++) fieldMap[i] = 'rs2';
+        for (let i = 12; i < 17; i++) fieldMap[i] = 'rs1';
+        for (let i = 17; i < 20; i++) fieldMap[i] = 'funct3';
+        for (let i = 20; i < 25; i++) fieldMap[i] = 'rd';
+        for (let i = 25; i < 32; i++) fieldMap[i] = 'opcode';
+    } else if (type === 'I') {
+        const funct3 = info.funct3 || '000';
+        const immBits = toBin(imm & 0xFFF, 12);
+        bin = immBits + toBin(rs1, 5) + funct3 + toBin(rd, 5) + opcode;
+        for (let i = 0; i < 12; i++) fieldMap[i] = 'imm';
+        for (let i = 12; i < 17; i++) fieldMap[i] = 'rs1';
+        for (let i = 17; i < 20; i++) fieldMap[i] = 'funct3';
+        for (let i = 20; i < 25; i++) fieldMap[i] = 'rd';
+        for (let i = 25; i < 32; i++) fieldMap[i] = 'opcode';
+    } else if (type === 'S') {
+        const funct3 = info.funct3 || '000';
+        const immVal = imm & 0xFFF;
+        const immBin = toBin(immVal, 12);
+        bin = immBin.slice(0, 7) + toBin(rs2, 5) + toBin(rs1, 5) + funct3 + immBin.slice(7, 12) + opcode;
+        for (let i = 0; i < 7; i++) fieldMap[i] = 'imm';
+        for (let i = 7; i < 12; i++) fieldMap[i] = 'rs2';
+        for (let i = 12; i < 17; i++) fieldMap[i] = 'rs1';
+        for (let i = 17; i < 20; i++) fieldMap[i] = 'funct3';
+        for (let i = 20; i < 25; i++) fieldMap[i] = 'imm';
+        for (let i = 25; i < 32; i++) fieldMap[i] = 'opcode';
+    } else if (type === 'B') {
+        const funct3 = info.funct3 || '000';
+        const immVal = imm & 0x1FFE; // B-type: imm[12:1], bit 0 always 0
+        const immBin = toBin((imm >> 0) & 0x1FFF, 13);
+        // B-type layout: imm[12] | imm[10:5] | rs2 | rs1 | funct3 | imm[4:1] | imm[11] | opcode
+        const bit12 = immBin[0];
+        const bit10_5 = immBin.slice(2, 8);
+        const bit4_1 = immBin.slice(8, 12);
+        const bit11 = immBin[1];
+        bin = bit12 + bit10_5 + toBin(rs2, 5) + toBin(rs1, 5) + funct3 + bit4_1 + bit11 + opcode;
+        for (let i = 0; i < 7; i++) fieldMap[i] = 'imm';
+        for (let i = 7; i < 12; i++) fieldMap[i] = 'rs2';
+        for (let i = 12; i < 17; i++) fieldMap[i] = 'rs1';
+        for (let i = 17; i < 20; i++) fieldMap[i] = 'funct3';
+        for (let i = 20; i < 25; i++) fieldMap[i] = 'imm';
+        for (let i = 25; i < 32; i++) fieldMap[i] = 'opcode';
+    } else if (type === 'U') {
+        const immVal = (imm & 0xFFFFF);
+        bin = toBin(immVal, 20) + toBin(rd, 5) + opcode;
+        for (let i = 0; i < 20; i++) fieldMap[i] = 'imm';
+        for (let i = 20; i < 25; i++) fieldMap[i] = 'rd';
+        for (let i = 25; i < 32; i++) fieldMap[i] = 'opcode';
+    } else if (type === 'J') {
+        const immBin = toBin((imm >> 0) & 0x1FFFFF, 21);
+        // J-type: imm[20] | imm[10:1] | imm[11] | imm[19:12] | rd | opcode
+        const bit20 = immBin[0];
+        const bit10_1 = immBin.slice(10, 20);
+        const bit11 = immBin[9];
+        const bit19_12 = immBin.slice(1, 9);
+        bin = bit20 + bit10_1 + bit11 + bit19_12 + toBin(rd, 5) + opcode;
+        for (let i = 0; i < 20; i++) fieldMap[i] = 'imm';
+        for (let i = 20; i < 25; i++) fieldMap[i] = 'rd';
+        for (let i = 25; i < 32; i++) fieldMap[i] = 'opcode';
+    }
+
+    return { bin, fieldMap };
+}
+
+function displayBits(containerId, bin, fieldMap, animate) {
+    const container = document.getElementById(containerId);
+    container.innerHTML = '';
+    for (let i = 0; i < 32; i++) {
+        const bit = document.createElement('div');
+        bit.className = 'bit';
+        const field = fieldMap ? fieldMap[i] : 'opcode';
+        const color = FIELD_COLORS[field] || C.blue;
+        bit.style.background = color;
+        bit.textContent = bin[i] || '0';
+        if (animate) {
+            bit.style.opacity = '0';
+            bit.style.transform = 'scale(0)';
+            gsap.to(bit, { opacity: 1, transform: 'scale(1)', duration: 0.3, delay: i * 0.03, ease: 'back.out(1.7)' });
+        }
+        container.appendChild(bit);
+    }
+}
+
+function doEncode() {
+    const name = document.getElementById('enc-inst').value;
+    if (!name) { alert('请先选择指令'); return; }
+
+    const operands = {};
+    const rdEl = document.getElementById('enc-rd');
+    const rs1El = document.getElementById('enc-rs1');
+    const rs2El = document.getElementById('enc-rs2');
+    const immEl = document.getElementById('enc-imm');
+
+    if (rdEl) operands.rd = parseReg(rdEl.value);
+    if (rs1El) operands.rs1 = parseReg(rs1El.value);
+    if (rs2El) operands.rs2 = parseReg(rs2El.value);
+    if (immEl) operands.imm = parseInt(immEl.value) || 0;
+
+    const { bin, fieldMap } = encodeInstruction(name, operands);
+    lastEncodedBinary = bin;
+
+    displayBits('enc-bits', bin, fieldMap, false);
+
+    const hexVal = parseInt(bin, 2);
+    const hexStr = '0x' + (hexVal >>> 0).toString(16).toUpperCase().padStart(8, '0');
+    const hexEl = document.getElementById('enc-hex');
+    hexEl.style.display = 'inline-block';
+    hexEl.textContent = hexStr;
+
+    // Field legend
+    const info = INSTS[name];
+    const type = info.type;
+    const legendEl = document.getElementById('enc-field-legend');
+    const layout = FORMAT_LAYOUTS[type];
+    const labels = FORMAT_FIELD_LABELS[type];
+    let legendHtml = layout.map(([f, bits], idx) => {
+        const baseF = f === 'imm' ? 'imm' : f;
+        const color = FIELD_COLORS[baseF];
+        return `<span style="display:inline-flex;align-items:center;gap:3px;margin-right:10px;"><span style="width:10px;height:10px;background:${color};border-radius:2px;display:inline-block;"></span>${labels[idx]}</span>`;
+    }).join('');
+    legendEl.innerHTML = legendHtml;
+}
+
+function animateEncode() {
+    const name = document.getElementById('enc-inst').value;
+    if (!name) { alert('请先选择指令'); return; }
+
+    const operands = {};
+    const rdEl = document.getElementById('enc-rd');
+    const rs1El = document.getElementById('enc-rs1');
+    const rs2El = document.getElementById('enc-rs2');
+    const immEl = document.getElementById('enc-imm');
+
+    if (rdEl) operands.rd = parseReg(rdEl.value);
+    if (rs1El) operands.rs1 = parseReg(rs1El.value);
+    if (rs2El) operands.rs2 = parseReg(rs2El.value);
+    if (immEl) operands.imm = parseInt(immEl.value) || 0;
+
+    const { bin, fieldMap } = encodeInstruction(name, operands);
+    lastEncodedBinary = bin;
+
+    displayBits('enc-bits', bin, fieldMap, true);
+
+    const hexVal = parseInt(bin, 2);
+    const hexStr = '0x' + (hexVal >>> 0).toString(16).toUpperCase().padStart(8, '0');
+    const hexEl = document.getElementById('enc-hex');
+    hexEl.style.display = 'inline-block';
+    hexEl.textContent = hexStr;
+    gsap.from(hexEl, { opacity: 0, y: 10, duration: 0.5, delay: 1 });
+}
+
+/* ================================================================
+   Decoder (Section 4)
+   ================================================================ */
+function hexToBinInput() {
+    const hex = document.getElementById('dec-hex-input').value.trim();
+    if (!hex) return;
+    const val = parseInt(hex, 16);
+    if (isNaN(val)) { alert('无效的十六进制值'); return; }
+    const bin = ISAUtils.toBin(val, 32);
+    document.getElementById('dec-bin-input').value = bin;
+}
+
+function linkFromEncoder() {
+    if (!lastEncodedBinary) { alert('请先在编码器中编码一条指令'); return; }
+    document.getElementById('dec-bin-input').value = lastEncodedBinary;
+    const hexVal = parseInt(lastEncodedBinary, 2);
+    document.getElementById('dec-hex-input').value = (hexVal >>> 0).toString(16).toUpperCase().padStart(8, '0');
+}
+
+function decodeInstruction(bin) {
+    if (bin.length !== 32 || !/^[01]+$/.test(bin)) {
+        return { error: '输入必须是 32 位二进制字符串' };
+    }
+
+    const opcode = bin.slice(25, 32);
+
+    // Determine format from opcode
+    let format = null;
+    let opcodeType = '';
+
+    const opcodeMap = {
+        '0110011': { format: 'R', name: 'R-type (寄存器操作)' },
+        '0010011': { format: 'I', name: 'I-type (立即数操作)' },
+        '0000011': { format: 'I', name: 'I-type (加载)' },
+        '0100011': { format: 'S', name: 'S-type (存储)' },
+        '1100011': { format: 'B', name: 'B-type (分支)' },
+        '0110111': { format: 'U', name: 'U-type (LUI)' },
+        '0010111': { format: 'U', name: 'U-type (AUIPC)' },
+        '1101111': { format: 'J', name: 'J-type (JAL)' },
+        '1100111': { format: 'I', name: 'I-type (JALR)' },
+    };
+
+    if (opcodeMap[opcode]) {
+        format = opcodeMap[opcode].format;
+        opcodeType = opcodeMap[opcode].name;
+    } else {
+        return { error: `未知的 opcode: ${opcode}`, opcode };
+    }
+
+    // Extract fields
+    const fields = {};
+    fields.opcode = opcode;
+
+    if (format === 'R') {
+        fields.funct7 = bin.slice(0, 7);
+        fields.rs2 = parseInt(bin.slice(7, 12), 2);
+        fields.rs1 = parseInt(bin.slice(12, 17), 2);
+        fields.funct3 = bin.slice(17, 20);
+        fields.rd = parseInt(bin.slice(20, 25), 2);
+    } else if (format === 'I') {
+        fields.imm = bin.slice(0, 12);
+        fields.rs1 = parseInt(bin.slice(12, 17), 2);
+        fields.funct3 = bin.slice(17, 20);
+        fields.rd = parseInt(bin.slice(20, 25), 2);
+        // Sign extend 12-bit immediate
+        let immVal = parseInt(fields.imm, 2);
+        if (immVal >= 2048) immVal -= 4096;
+        fields.immVal = immVal;
+    } else if (format === 'S') {
+        const imm11_5 = bin.slice(0, 7);
+        fields.rs2 = parseInt(bin.slice(7, 12), 2);
+        fields.rs1 = parseInt(bin.slice(12, 17), 2);
+        fields.funct3 = bin.slice(17, 20);
+        const imm4_0 = bin.slice(20, 25);
+        fields.imm = imm11_5 + imm4_0;
+        let immVal = parseInt(fields.imm, 2);
+        if (immVal >= 2048) immVal -= 4096;
+        fields.immVal = immVal;
+    } else if (format === 'B') {
+        const bit12 = bin[0];
+        const bit10_5 = bin.slice(1, 7);
+        fields.rs2 = parseInt(bin.slice(7, 12), 2);
+        fields.rs1 = parseInt(bin.slice(12, 17), 2);
+        fields.funct3 = bin.slice(17, 20);
+        const bit4_1 = bin.slice(20, 24);
+        const bit11 = bin[24];
+        fields.imm = bit12 + bit11 + bit10_5 + bit4_1 + '0';
+        let immVal = parseInt(fields.imm, 2);
+        if (immVal >= 4096) immVal -= 8192;
+        fields.immVal = immVal;
+    } else if (format === 'U') {
+        fields.imm = bin.slice(0, 20);
+        fields.rd = parseInt(bin.slice(20, 25), 2);
+        fields.immVal = parseInt(fields.imm, 2) << 12;
+    } else if (format === 'J') {
+        const bit20 = bin[0];
+        const bit10_1 = bin.slice(1, 11);
+        const bit11 = bin[11];
+        const bit19_12 = bin.slice(12, 20);
+        fields.rd = parseInt(bin.slice(20, 25), 2);
+        fields.imm = bit20 + bit19_12 + bit11 + bit10_1 + '0';
+        let immVal = parseInt(fields.imm, 2);
+        if (immVal >= 1048576) immVal -= 2097152;
+        fields.immVal = immVal;
+    }
+
+    // Identify specific instruction
+    let instName = null;
+    for (const [name, info] of Object.entries(INSTS)) {
+        const instOpcode = info.opcode || OPCODES[info.type].opcode;
+        if (instOpcode !== opcode) continue;
+        if (info.type !== format) continue;
+        if (info.funct3 && info.funct3 !== fields.funct3) continue;
+        if (info.funct7 && info.funct7 !== fields.funct7) continue;
+        instName = name;
+        break;
+    }
+
+    // Build assembly string
+    let assembly = '';
+    if (instName) {
+        if (format === 'R') {
+            assembly = `${instName} x${fields.rd}, x${fields.rs1}, x${fields.rs2}`;
+        } else if (format === 'I') {
+            if (opcode === '0000011') { // load
+                assembly = `${instName} x${fields.rd}, ${fields.immVal}(x${fields.rs1})`;
+            } else {
+                assembly = `${instName} x${fields.rd}, x${fields.rs1}, ${fields.immVal}`;
+            }
+        } else if (format === 'S') {
+            assembly = `${instName} x${fields.rs2}, ${fields.immVal}(x${fields.rs1})`;
+        } else if (format === 'B') {
+            assembly = `${instName} x${fields.rs1}, x${fields.rs2}, ${fields.immVal}`;
+        } else if (format === 'U') {
+            assembly = `${instName} x${fields.rd}, ${parseInt(fields.imm, 2)}`;
+        } else if (format === 'J') {
+            assembly = `${instName} x${fields.rd}, ${fields.immVal}`;
+        }
+    } else {
+        assembly = `未知指令 (格式: ${format}, opcode: ${opcode})`;
+    }
+
+    // Build fieldMap for bit display
+    const fieldMap = {};
+    const layout = FORMAT_LAYOUTS[format];
+    let bitIdx = 0;
+    layout.forEach(([field, bits]) => {
+        const baseField = field === 'imm' ? 'imm' : field;
+        for (let j = 0; j < bits; j++) {
+            fieldMap[bitIdx++] = baseField;
+        }
+    });
+
+    return { format, opcodeType, fields, instName, assembly, fieldMap };
+}
+
+function doDecode() {
+    let bin = document.getElementById('dec-bin-input').value.trim().replace(/\s/g, '');
+    if (bin.length !== 32) {
+        showDecError('请输入完整的 32 位二进制字符串');
+        return;
+    }
+
+    const result = decodeInstruction(bin);
+    if (result.error) {
+        showDecError(result.error);
+        return;
+    }
+
+    hideDecError();
+    displayBits('dec-bits', bin, result.fieldMap, false);
+    showDecodeResult(result);
+
+    // Activate all steps immediately
+    document.querySelectorAll('.decode-step').forEach(s => s.classList.add('active'));
+    fillDecodeSteps(result, bin);
+}
+
+function animateDecode() {
+    let bin = document.getElementById('dec-bin-input').value.trim().replace(/\s/g, '');
+    if (bin.length !== 32) {
+        showDecError('请输入完整的 32 位二进制字符串');
+        return;
+    }
+
+    const result = decodeInstruction(bin);
+    if (result.error) {
+        showDecError(result.error);
+        return;
+    }
+
+    hideDecError();
+    displayBits('dec-bits', bin, result.fieldMap, true);
+
+    // Reset steps
+    document.querySelectorAll('.decode-step').forEach(s => s.classList.remove('active'));
+    document.getElementById('dec-result').style.display = 'none';
+
+    const steps = ['ds-opcode', 'ds-format', 'ds-fields', 'ds-inst'];
+    steps.forEach((id, i) => {
+        setTimeout(() => {
+            document.getElementById(id).classList.add('active');
+            fillDecodeStep(i, result, bin);
+            if (i === steps.length - 1) {
+                setTimeout(() => showDecodeResult(result), 400);
+            }
+        }, 800 + i * 600);
+    });
+}
+
+function fillDecodeSteps(result, bin) {
+    for (let i = 0; i < 4; i++) fillDecodeStep(i, result, bin);
+}
+
+function fillDecodeStep(idx, result, bin) {
+    const opcode = bin.slice(25, 32);
+    if (idx === 0) {
+        document.getElementById('ds-opcode-val').textContent = opcode;
+    } else if (idx === 1) {
+        document.getElementById('ds-format-val').textContent = result.opcodeType;
+    } else if (idx === 2) {
+        const f = result.fields;
+        let fieldStr = '';
+        if (result.format === 'R') {
+            fieldStr = `rd=x${f.rd}, rs1=x${f.rs1}, rs2=x${f.rs2}, funct3=${f.funct3}, funct7=${f.funct7}`;
+        } else if (result.format === 'I') {
+            fieldStr = `rd=x${f.rd}, rs1=x${f.rs1}, funct3=${f.funct3}, imm=${f.immVal}`;
+        } else if (result.format === 'S') {
+            fieldStr = `rs1=x${f.rs1}, rs2=x${f.rs2}, funct3=${f.funct3}, imm=${f.immVal}`;
+        } else if (result.format === 'B') {
+            fieldStr = `rs1=x${f.rs1}, rs2=x${f.rs2}, funct3=${f.funct3}, imm=${f.immVal}`;
+        } else if (result.format === 'U') {
+            fieldStr = `rd=x${f.rd}, imm=${parseInt(f.imm, 2)}`;
+        } else if (result.format === 'J') {
+            fieldStr = `rd=x${f.rd}, imm=${f.immVal}`;
+        }
+        document.getElementById('ds-fields-val').textContent = fieldStr;
+    } else if (idx === 3) {
+        document.getElementById('ds-inst-val').textContent = result.instName ?
+            `${result.instName} — ${INSTS[result.instName]?.desc || ''}` : '未识别的具体指令';
+    }
+}
+
+function showDecodeResult(result) {
+    const el = document.getElementById('dec-result');
+    el.style.display = 'block';
+    document.getElementById('dec-result-text').textContent = result.assembly;
+    gsap.from(el, { opacity: 0, y: 10, duration: 0.4 });
+}
+
+function showDecError(msg) {
+    const el = document.getElementById('dec-error');
+    el.style.display = 'block';
+    el.textContent = msg;
+    document.getElementById('dec-result').style.display = 'none';
+}
+function hideDecError() {
+    document.getElementById('dec-error').style.display = 'none';
+}
+
+/* ================================================================
+   Immediate Encoding (Section 5)
+   ================================================================ */
+function updateImmDisplay() {
+    const val = parseInt(document.getElementById('imm-input').value) || 0;
+    const grid = document.getElementById('imm-grid');
+    grid.innerHTML = '';
+
+    const formats = [
+        { name: 'I 型', bits: 12, desc: 'imm[11:0]，直接存放' },
+        { name: 'S 型', bits: 12, desc: 'imm[11:5] 和 imm[4:0] 分两段' },
+        { name: 'B 型', bits: 13, desc: 'imm[12|10:5|4:1|11]，位0恒为0' },
+        { name: 'U 型', bits: 20, desc: 'imm[31:12]，高20位直接存放' },
+        { name: 'J 型', bits: 21, desc: 'imm[20|10:1|11|19:12]，位0恒为0' },
+    ];
+
+    formats.forEach(fmt => {
+        const card = document.createElement('div');
+        card.className = 'imm-card';
+
+        const mask = (1 << fmt.bits) - 1;
+        let clampedVal = val;
+        const halfRange = 1 << (fmt.bits - 1);
+        if (clampedVal >= halfRange) clampedVal = halfRange - 1;
+        if (clampedVal < -halfRange) clampedVal = -halfRange;
+
+        const unsigned = clampedVal < 0 ? (clampedVal + (1 << fmt.bits)) : clampedVal;
+        const binStr = ISAUtils.toBin(unsigned, fmt.bits);
+
+        let bitsHtml = '<div class="imm-bits">';
+        for (let i = 0; i < fmt.bits; i++) {
+            const isSign = (i === 0);
+            bitsHtml += `<div class="imm-bit ${isSign ? 'sign' : 'val'}">${binStr[i]}</div>`;
+        }
+        bitsHtml += '</div>';
+
+        card.innerHTML = `
+            <h4>${fmt.name} (${fmt.bits}位)</h4>
+            <p style="font-size:0.8rem;color:var(--text-muted);margin-bottom:0.5rem;">${fmt.desc}</p>
+            ${bitsHtml}
+            <p style="font-size:0.8rem;margin-top:0.5rem;">
+                <span style="color:var(--text-muted);">编码值：</span>
+                <span style="color:var(--accent-green);font-family:var(--font-mono);">${clampedVal}</span>
+                <span style="color:var(--text-muted);">（范围：${-halfRange} ~ ${halfRange - 1}）</span>
+            </p>
+        `;
+        grid.appendChild(card);
+    });
+
+    // Sign extension demo
+    buildSignExtDemo(val);
+}
+
+function buildSignExtDemo(val) {
+    const container = document.getElementById('sign-ext-demo');
+    container.innerHTML = '';
+
+    const widths = [12, 13, 20, 21];
+    const labels = ['I/S 型 (12位)', 'B 型 (13位)', 'U 型 (20位)', 'J 型 (21位)'];
+
+    widths.forEach((w, idx) => {
+        const halfRange = 1 << (w - 1);
+        let clampedVal = val;
+        if (clampedVal >= halfRange) clampedVal = halfRange - 1;
+        if (clampedVal < -halfRange) clampedVal = -halfRange;
+
+        const unsigned = clampedVal < 0 ? (clampedVal + (1 << w)) : clampedVal;
+        const origBin = ISAUtils.toBin(unsigned, w);
+        const signBit = origBin[0];
+
+        // Sign extend to 32 bits
+        const extended32 = signBit.repeat(32 - w) + origBin;
+
+        const row = document.createElement('div');
+        row.style.marginBottom = '1rem';
+        row.innerHTML = `<p style="font-size:0.8rem;color:var(--accent-blue);margin-bottom:4px;font-weight:600;">${labels[idx]}：${clampedVal}</p>`;
+
+        const visual = document.createElement('div');
+        visual.className = 'sign-ext-visual';
+
+        for (let i = 0; i < 32; i++) {
+            const bit = document.createElement('span');
+            bit.className = `sign-ext-bit ${i < (32 - w) ? 'extended' : 'original'}`;
+            bit.textContent = extended32[i];
+            visual.appendChild(bit);
+        }
+
+        row.appendChild(visual);
+        container.appendChild(row);
+    });
+}
+
+/* ================================================================
+   Reference Table & Practice (Section 6)
+   ================================================================ */
+function buildRefTable() {
+    const tbody = document.getElementById('ref-tbody');
+    tbody.innerHTML = '';
+
+    const fmtColors = {
+        'R': C.green, 'I': C.blue, 'S': C.orange, 'B': C.purple, 'U': C.yellow, 'J': C.red
+    };
+
+    const examples = {
+        'add': 'add x1, x2, x3',
+        'sub': 'sub x1, x2, x3',
+        'and': 'and x1, x2, x3',
+        'or': 'or x1, x2, x3',
+        'xor': 'xor x1, x2, x3',
+        'sll': 'sll x1, x2, x3',
+        'srl': 'srl x1, x2, x3',
+        'slt': 'slt x1, x2, x3',
+        'addi': 'addi x1, x2, 10',
+        'andi': 'andi x1, x2, 0xFF',
+        'ori': 'ori x1, x2, 0x0F',
+        'lw': 'lw x1, 0(x2)',
+        'sw': 'sw x1, 0(x2)',
+        'beq': 'beq x1, x2, 8',
+        'bne': 'bne x1, x2, 8',
+        'jal': 'jal x1, 100',
+        'lui': 'lui x1, 0x12345',
+    };
+
+    Object.entries(INSTS).forEach(([name, info]) => {
+        const tr = document.createElement('tr');
+        const opcode = info.opcode || OPCODES[info.type].opcode;
+        const fmtColor = fmtColors[info.type] || C.textSec;
+
+        tr.innerHTML = `
+            <td style="color:var(--accent-green);font-weight:700;">${name}</td>
+            <td><span class="fmt-badge" style="background:${ISAUtils.hexToRgba(fmtColor, 0.2)};color:${fmtColor};">${info.type}</span></td>
+            <td>${opcode}</td>
+            <td>${info.funct3 || '-'}</td>
+            <td>${info.funct7 || '-'}</td>
+            <td style="font-family:var(--font-cn);color:var(--text-secondary);">${info.desc}</td>
+            <td style="font-size:0.75rem;">${examples[name] || ''}</td>
+        `;
+        tr.dataset.name = name;
+        tr.dataset.desc = info.desc;
+        tbody.appendChild(tr);
+    });
+}
+
+function filterRefTable() {
+    const query = document.getElementById('ref-search').value.trim().toLowerCase();
+    const rows = document.querySelectorAll('#ref-tbody tr');
+    rows.forEach(row => {
+        const name = row.dataset.name.toLowerCase();
+        const desc = row.dataset.desc.toLowerCase();
+        row.style.display = (name.includes(query) || desc.includes(query)) ? '' : 'none';
+    });
+}
+
+function switchTab(btn, tabId) {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById(tabId).classList.add('active');
+}
+
+/* Practice Mode */
+let practiceScore = 0;
+let practiceTotal = 0;
+let practiceDifficulty = 1;
+let currentPractice = null;
+
+function setDifficulty(btn, level) {
+    document.querySelectorAll('.difficulty-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    practiceDifficulty = level;
+}
+
+function resetPractice() {
+    practiceScore = 0;
+    practiceTotal = 0;
+    document.getElementById('prac-score').textContent = '0';
+    document.getElementById('prac-total').textContent = '0';
+    document.getElementById('prac-rate').textContent = '-';
+    document.getElementById('prac-feedback').className = 'practice-feedback';
+    document.getElementById('prac-feedback').style.display = 'none';
+    document.getElementById('prac-question').textContent = '点击「出题」开始练习';
+    document.getElementById('prac-answer').value = '';
+    currentPractice = null;
+}
+
+function generatePractice() {
+    document.getElementById('prac-feedback').style.display = 'none';
+    document.getElementById('prac-answer').value = '';
+
+    const instNames = Object.keys(INSTS);
+    const rng = () => Math.random();
+
+    // Decide mode: 0 = binary->assembly, 1 = assembly->binary
+    let mode;
+    if (practiceDifficulty === 1) {
+        mode = 0; // Easy: binary to assembly
+    } else if (practiceDifficulty === 2) {
+        mode = Math.random() < 0.5 ? 0 : 1;
+    } else {
+        mode = 1; // Hard: assembly to binary
+    }
+
+    // Pick random instruction
+    let availableInsts = instNames;
+    if (practiceDifficulty === 1) {
+        // Easy: only R-type and simple I-type
+        availableInsts = instNames.filter(n => INSTS[n].type === 'R' || n === 'addi');
+    }
+
+    const instName = availableInsts[Math.floor(rng() * availableInsts.length)];
+    const info = INSTS[instName];
+    const type = info.type;
+
+    // Generate random operands
+    const operands = {};
+    const rd = Math.floor(rng() * 31) + 1; // avoid x0 for simplicity
+    const rs1 = Math.floor(rng() * 32);
+    const rs2 = Math.floor(rng() * 32);
+
+    let immVal = 0;
+    if (type === 'I') {
+        immVal = Math.floor(rng() * 64) - 32;
+        if (practiceDifficulty === 1) immVal = Math.floor(rng() * 16);
+    } else if (type === 'S') {
+        immVal = Math.floor(rng() * 64) - 32;
+    } else if (type === 'B') {
+        immVal = (Math.floor(rng() * 16) + 1) * 2; // even, small
+    } else if (type === 'U') {
+        immVal = Math.floor(rng() * 256);
+    } else if (type === 'J') {
+        immVal = (Math.floor(rng() * 32) + 1) * 2;
+    }
+
+    operands.rd = rd;
+    operands.rs1 = rs1;
+    operands.rs2 = rs2;
+    operands.imm = immVal;
+
+    // Build assembly string
+    let assembly = '';
+    if (type === 'R') {
+        assembly = `${instName} x${rd}, x${rs1}, x${rs2}`;
+    } else if (type === 'I') {
+        if (info.opcode === '0000011') {
+            assembly = `${instName} x${rd}, ${immVal}(x${rs1})`;
+        } else {
+            assembly = `${instName} x${rd}, x${rs1}, ${immVal}`;
+        }
+    } else if (type === 'S') {
+        assembly = `${instName} x${rs2}, ${immVal}(x${rs1})`;
+    } else if (type === 'B') {
+        assembly = `${instName} x${rs1}, x${rs2}, ${immVal}`;
+    } else if (type === 'U') {
+        assembly = `${instName} x${rd}, ${immVal}`;
+    } else if (type === 'J') {
+        assembly = `${instName} x${rd}, ${immVal}`;
+    }
+
+    const { bin } = encodeInstruction(instName, operands);
+    const hexStr = '0x' + (parseInt(bin, 2) >>> 0).toString(16).toUpperCase().padStart(8, '0');
+
+    if (mode === 0) {
+        // Given binary, decode to assembly
+        document.getElementById('prac-mode-label').textContent = '题目类型：二进制 → 汇编';
+        document.getElementById('prac-question').textContent = bin;
+        document.getElementById('prac-answer').placeholder = '输入汇编指令，如 add x1, x2, x3';
+        currentPractice = { mode: 0, answer: assembly, bin, hex: hexStr };
+    } else {
+        // Given assembly, encode to binary
+        document.getElementById('prac-mode-label').textContent = '题目类型：汇编 → 二进制';
+        document.getElementById('prac-question').textContent = assembly;
+        document.getElementById('prac-answer').placeholder = '输入 32 位二进制或十六进制（0x开头）';
+        currentPractice = { mode: 1, answer: bin, hex: hexStr, assembly };
+    }
+}
+
+function checkPractice() {
+    if (!currentPractice) { alert('请先点击「出题」生成题目'); return; }
+
+    const userAnswer = document.getElementById('prac-answer').value.trim();
+    if (!userAnswer) return;
+
+    let correct = false;
+    const fb = document.getElementById('prac-feedback');
+
+    if (currentPractice.mode === 0) {
+        // Normalize both answers for comparison
+        const normalizeAsm = s => s.toLowerCase().replace(/\s+/g, ' ').replace(/\s*,\s*/g, ', ').trim();
+        correct = normalizeAsm(userAnswer) === normalizeAsm(currentPractice.answer);
+    } else {
+        // Accept binary or hex
+        let userBin = userAnswer;
+        if (userAnswer.startsWith('0x') || userAnswer.startsWith('0X')) {
+            const hexVal = parseInt(userAnswer, 16);
+            userBin = ISAUtils.toBin(hexVal, 32);
+        }
+        correct = userBin.replace(/\s/g, '') === currentPractice.answer;
+    }
+
+    practiceTotal++;
+    if (correct) {
+        practiceScore++;
+        fb.className = 'practice-feedback correct';
+        fb.textContent = '正确！';
+    } else {
+        fb.className = 'practice-feedback wrong';
+        fb.textContent = `错误。正确答案：${currentPractice.answer}`;
+    }
+    fb.style.display = 'block';
+
+    document.getElementById('prac-score').textContent = practiceScore;
+    document.getElementById('prac-total').textContent = practiceTotal;
+    document.getElementById('prac-rate').textContent = Math.round(practiceScore / practiceTotal * 100) + '%';
+}
+
+function showPracticeAnswer() {
+    if (!currentPractice) return;
+    const fb = document.getElementById('prac-feedback');
+    fb.className = 'practice-feedback wrong';
+    fb.textContent = `答案：${currentPractice.answer}`;
+    fb.style.display = 'block';
+}
+
+/* ================================================================
+   Initialization
+   ================================================================ */
+document.addEventListener('DOMContentLoaded', () => {
+    // Section 1: Register File
+    buildRegGrid();
+
+    // Section 2: Instruction Formats
+    buildFormatStack();
+
+    // Section 3: Encoder
+    populateEncoderDropdown();
+
+    // Initialize encoder bit display
+    const encBits = document.getElementById('enc-bits');
+    for (let i = 0; i < 32; i++) {
+        const bit = document.createElement('div');
+        bit.className = 'bit';
+        bit.style.background = C.border;
+        bit.textContent = '0';
+        bit.style.color = C.textMut;
+        encBits.appendChild(bit);
+    }
+
+    // Bit index labels
+    const idxContainer = document.getElementById('enc-bit-indices');
+    for (let i = 31; i >= 0; i--) {
+        const span = document.createElement('span');
+        span.style.flex = '1';
+        span.style.textAlign = 'center';
+        span.style.minWidth = '20px';
+        span.textContent = i;
+        idxContainer.appendChild(span);
+    }
+
+    // Section 5: Immediate Encoding
+    updateImmDisplay();
+
+    // Section 6: Reference Table
+    buildRefTable();
+
+    // Wire canvas initial draw
+    const wireCanvas = document.getElementById('wire-canvas');
+    ISAUtils.initCanvas(wireCanvas, 280);
+    const wCtx = wireCanvas.getContext('2d');
+    wCtx.fillStyle = C.textMut;
+    wCtx.font = '14px "Noto Sans SC", sans-serif';
+    wCtx.textAlign = 'center';
+    wCtx.fillText('点击上方按钮查看 B 型 / J 型立即数位路由动画', wireCanvas.width / (2 * (window.devicePixelRatio || 1)), 140);
+
+    // Smooth scroll for section links
+    document.querySelectorAll('a[href^="#"]').forEach(a => {
+        a.addEventListener('click', e => {
+            e.preventDefault();
+            document.querySelector(a.getAttribute('href'))?.scrollIntoView({ behavior: 'smooth' });
+        });
+    });
+
+    // Resize handler for canvases
+    let resizeTimer;
+    window.addEventListener('resize', () => {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(() => {
+            const wireCanvas = document.getElementById('wire-canvas');
+            ISAUtils.initCanvas(wireCanvas, 280);
+        }, 250);
+    });
+
+    // KaTeX auto-render
+    if (typeof renderMathInElement === 'function') {
+        renderMathInElement(document.body, {
+            delimiters: [
+                { left: '$$', right: '$$', display: true },
+                { left: '$', right: '$', display: false },
+            ]
+        });
+    }
+});
+</script>
+</body>
+</html>

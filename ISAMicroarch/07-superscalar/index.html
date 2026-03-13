@@ -1,0 +1,2027 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>超标量 — 指令集与微架构</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+    <!-- KaTeX -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+    <!-- GSAP -->
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+    <!-- Shared Styles -->
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+    <style>
+        /* ===== Page-specific styles ===== */
+        .hero {
+            text-align: center;
+            padding: 3rem 1rem 2rem;
+        }
+        .hero h1 {
+            font-size: 2.4rem;
+            background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 0.5rem;
+        }
+        .hero .subtitle {
+            color: var(--text-secondary);
+            font-size: 1.1rem;
+            max-width: 700px;
+            margin: 0 auto;
+        }
+
+        /* Alternating section backgrounds */
+        .section-alt {
+            background: var(--bg-secondary);
+            margin-left: -2rem;
+            margin-right: -2rem;
+            padding: 2.5rem 2rem;
+        }
+        @media (max-width: 768px) {
+            .section-alt {
+                margin-left: -1rem;
+                margin-right: -1rem;
+                padding: 2rem 1rem;
+            }
+        }
+
+        /* Canvas containers */
+        .canvas-container {
+            position: relative;
+            width: 100%;
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+            margin: 1rem 0;
+        }
+        .canvas-container canvas {
+            display: block;
+            width: 100%;
+        }
+
+        /* Controls row */
+        .controls-row {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 1rem;
+            margin: 1rem 0;
+        }
+
+        /* Metric cards */
+        .metric-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1rem;
+            margin: 1rem 0;
+        }
+        .metric-card {
+            flex: 1;
+            min-width: 120px;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            padding: 0.75rem 1rem;
+            text-align: center;
+        }
+        .metric-card .label {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            margin-bottom: 0.25rem;
+        }
+        .metric-card .value {
+            font-family: var(--font-mono);
+            font-size: 1.4rem;
+            font-weight: 700;
+            color: var(--accent-green);
+        }
+        .metric-card .value.blue { color: var(--accent-blue); }
+        .metric-card .value.purple { color: var(--accent-purple); }
+        .metric-card .value.orange { color: var(--accent-orange); }
+        .metric-card .value.red { color: var(--accent-red); }
+
+        /* Instruction list */
+        .inst-list {
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            list-style: none;
+            padding: 0;
+            margin: 0.5rem 0;
+        }
+        .inst-list li {
+            padding: 0.3rem 0.6rem;
+            border-radius: 4px;
+            margin-bottom: 2px;
+            cursor: pointer;
+            transition: background 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .inst-list li:hover {
+            background: rgba(79, 195, 247, 0.1);
+        }
+        .inst-list li .idx {
+            color: var(--text-muted);
+            font-size: 0.75rem;
+            min-width: 1.5rem;
+        }
+        .inst-list li.highlight {
+            background: rgba(22, 199, 154, 0.15);
+            border-left: 2px solid var(--accent-green);
+        }
+
+        /* Functional unit blocks */
+        .fu-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 0.75rem;
+            margin: 1rem 0;
+        }
+        .fu-block {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            padding: 0.75rem;
+            text-align: center;
+            transition: all 0.3s;
+        }
+        .fu-block.active {
+            border-color: var(--accent-green);
+            box-shadow: 0 0 12px rgba(22, 199, 154, 0.2);
+        }
+        .fu-block .fu-name {
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: var(--accent-blue);
+            margin-bottom: 0.3rem;
+        }
+        .fu-block .fu-inst {
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            color: var(--text-primary);
+            min-height: 1.2rem;
+        }
+
+        /* Comparison side-by-side */
+        .compare-panels {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5rem;
+        }
+        @media (max-width: 768px) {
+            .compare-panels {
+                grid-template-columns: 1fr;
+            }
+        }
+        .compare-panel {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1rem;
+        }
+        .compare-panel h4 {
+            text-align: center;
+            margin-bottom: 0.75rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        /* Quiz styles */
+        .quiz-container {
+            max-width: 700px;
+            margin: 1rem auto;
+        }
+        .quiz-question {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1.25rem;
+            margin-bottom: 1rem;
+        }
+        .quiz-question p {
+            color: var(--text-primary);
+            font-weight: 500;
+            margin-bottom: 0.75rem;
+        }
+        .quiz-options {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+        .quiz-option {
+            padding: 0.6rem 1rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 0.9rem;
+            text-align: left;
+            transition: all 0.2s;
+        }
+        .quiz-option:hover {
+            border-color: var(--accent-blue);
+            background: rgba(79, 195, 247, 0.08);
+        }
+        .quiz-option.correct {
+            border-color: var(--accent-green);
+            background: rgba(22, 199, 154, 0.15);
+            color: var(--accent-green);
+        }
+        .quiz-option.wrong {
+            border-color: var(--accent-red);
+            background: rgba(255, 82, 82, 0.1);
+            color: var(--accent-red);
+        }
+        .quiz-option:disabled {
+            cursor: default;
+        }
+
+        /* Dep graph node */
+        .dep-example-selector {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+
+        /* Wall viz */
+        .wall-cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin: 1rem 0;
+        }
+        .wall-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1.25rem;
+            text-align: center;
+            transition: all 0.3s;
+        }
+        .wall-card:hover {
+            border-color: var(--accent-orange);
+            box-shadow: 0 0 16px rgba(255, 171, 64, 0.15);
+        }
+        .wall-card .wall-icon {
+            font-size: 2rem;
+            margin-bottom: 0.5rem;
+        }
+        .wall-card h4 {
+            color: var(--accent-orange);
+            margin-bottom: 0.4rem;
+        }
+        .wall-card p {
+            font-size: 0.85rem;
+        }
+
+        /* Section anchors */
+        .section[id] {
+            scroll-margin-top: 70px;
+        }
+
+        /* Code block */
+        .code-block {
+            background: rgba(0,0,0,0.3);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            padding: 0.75rem 1rem;
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            color: var(--text-primary);
+            overflow-x: auto;
+            line-height: 1.6;
+            margin: 0.5rem 0;
+        }
+        .code-block .line-num {
+            color: var(--text-muted);
+            user-select: none;
+            display: inline-block;
+            width: 2rem;
+            text-align: right;
+            margin-right: 0.75rem;
+        }
+        .code-block .keyword { color: var(--accent-purple); }
+        .code-block .reg { color: var(--accent-blue); }
+        .code-block .imm { color: var(--accent-orange); }
+        .code-block .comment { color: var(--text-muted); font-style: italic; }
+
+        /* Cycle stepper */
+        .cycle-display {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+        .cycle-num {
+            font-family: var(--font-mono);
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: var(--accent-blue);
+            min-width: 6rem;
+        }
+
+        /* Drag target highlight */
+        .drop-highlight {
+            border: 2px dashed var(--accent-green) !important;
+            background: rgba(22, 199, 154, 0.08) !important;
+        }
+
+        /* Status pill */
+        .status-pill {
+            display: inline-block;
+            padding: 0.15rem 0.5rem;
+            border-radius: 9999px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            font-family: var(--font-mono);
+        }
+        .status-pill.issuing { background: rgba(22,199,154,0.2); color: var(--accent-green); }
+        .status-pill.waiting  { background: rgba(255,171,64,0.2); color: var(--accent-orange); }
+        .status-pill.done     { background: rgba(79,195,247,0.2); color: var(--accent-blue); }
+        .status-pill.stalled  { background: rgba(255,82,82,0.2); color: var(--accent-red); }
+    </style>
+</head>
+<body>
+    <!-- nav.js auto-injects navigation -->
+    <div class="page-container">
+        <!-- Hero -->
+        <div class="hero">
+            <h1>超标量处理器</h1>
+            <p class="subtitle">突破标量瓶颈：每个时钟周期发射多条指令，探索指令级并行的极限</p>
+        </div>
+
+        <!-- ===================== Section 1 ===================== -->
+        <div class="section" id="sec-scalar-vs-super">
+            <div class="section-title">
+                <div class="icon">1</div>
+                <h2>从标量到超标量</h2>
+            </div>
+
+            <p>标量处理器每个周期最多发射一条指令（IPC &le; 1），而超标量处理器可以同时发射多条指令，将 IPC 提升至 2、4 甚至更高。这是现代高性能 CPU 的核心设计理念。</p>
+
+            <div class="info-box">
+                <p><strong>IPC (Instructions Per Cycle)</strong>：每个时钟周期完成的指令数，是衡量处理器执行效率的关键指标。</p>
+            </div>
+
+            <div class="controls-row">
+                <div class="slider-group" style="flex:1; max-width:400px;">
+                    <label>发射宽度：</label>
+                    <input type="range" id="issueWidthSlider" min="1" max="4" value="1" step="1">
+                    <span class="slider-value" id="issueWidthVal">1</span>
+                </div>
+                <button class="btn btn-primary" id="s1PlayBtn">播放动画</button>
+                <button class="btn" id="s1ResetBtn">重置</button>
+            </div>
+
+            <div class="metric-row">
+                <div class="metric-card">
+                    <div class="label">发射宽度</div>
+                    <div class="value" id="s1MetricWidth">1</div>
+                </div>
+                <div class="metric-card">
+                    <div class="label">理论最大 IPC</div>
+                    <div class="value blue" id="s1MetricIPC">1.00</div>
+                </div>
+                <div class="metric-card">
+                    <div class="label">理论加速比</div>
+                    <div class="value purple" id="s1MetricSpeedup">1.0x</div>
+                </div>
+                <div class="metric-card">
+                    <div class="label">8条指令所需周期</div>
+                    <div class="value orange" id="s1MetricCycles">12</div>
+                </div>
+            </div>
+
+            <div class="canvas-container">
+                <canvas id="s1Canvas"></canvas>
+            </div>
+            <div class="legend">
+                <div class="legend-item"><div class="swatch" style="background:#4fc3f7"></div>取指 (IF)</div>
+                <div class="legend-item"><div class="swatch" style="background:#b388ff"></div>译码 (ID)</div>
+                <div class="legend-item"><div class="swatch" style="background:#16c79a"></div>执行 (EX)</div>
+                <div class="legend-item"><div class="swatch" style="background:#ffab40"></div>访存 (MEM)</div>
+                <div class="legend-item"><div class="swatch" style="background:#ff80ab"></div>写回 (WB)</div>
+            </div>
+
+            <div class="info-box success" style="margin-top:1rem;">
+                <p>$$\text{理论加速比} = \frac{\text{标量周期数}}{\text{超标量周期数}} = \frac{N + S - 1}{\lceil N/W \rceil + S - 1}$$<br>
+                其中 \(N\) = 指令数，\(S\) = 流水线级数，\(W\) = 发射宽度。拖动滑块感受不同发射宽度下的吞吐提升。</p>
+            </div>
+        </div>
+
+        <!-- ===================== Section 2 ===================== -->
+        <div class="section section-alt" id="sec-ilp">
+            <div class="section-title">
+                <div class="icon">2</div>
+                <h2>指令级并行 ILP</h2>
+            </div>
+
+            <p>超标量能否真正加速，取决于代码中的<strong>指令级并行度 (ILP)</strong>。数据依赖越多，能并行的指令就越少。</p>
+
+            <div class="dep-example-selector controls-row">
+                <span style="color:var(--text-secondary); font-size:0.9rem;">选择示例：</span>
+                <button class="btn btn-sm active" data-example="high" id="depExHigh">高 ILP 代码</button>
+                <button class="btn btn-sm" data-example="low" id="depExLow">低 ILP 代码</button>
+                <button class="btn btn-sm" data-example="mixed" id="depExMixed">混合代码</button>
+            </div>
+
+            <div class="compare-panels" style="margin-top:1rem;">
+                <div class="compare-panel">
+                    <h4>指令序列</h4>
+                    <div class="code-block" id="s2CodeBlock"></div>
+                </div>
+                <div class="compare-panel">
+                    <h4>依赖关系图 (DAG)</h4>
+                    <div class="canvas-container" style="min-height:320px;">
+                        <canvas id="s2Canvas"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <div class="metric-row" style="margin-top:1rem;">
+                <div class="metric-card">
+                    <div class="label">指令数</div>
+                    <div class="value" id="s2MetricInst">6</div>
+                </div>
+                <div class="metric-card">
+                    <div class="label">关键路径长度</div>
+                    <div class="value red" id="s2MetricCritical">3</div>
+                </div>
+                <div class="metric-card">
+                    <div class="label">理论最大 IPC</div>
+                    <div class="value blue" id="s2MetricIPC">2.00</div>
+                </div>
+                <div class="metric-card">
+                    <div class="label">ILP 级别</div>
+                    <div class="value purple" id="s2MetricLevel">高</div>
+                </div>
+            </div>
+
+            <div class="info-box" style="margin-top:1rem;">
+                <p><strong>关键路径</strong>：依赖图中最长路径决定了执行的最少周期数。$$\text{理论最大 IPC} = \frac{N}{\text{关键路径长度}}$$ 关键路径越短，ILP 越高，超标量受益越大。</p>
+            </div>
+        </div>
+
+        <!-- ===================== Section 3 ===================== -->
+        <div class="section" id="sec-func-units">
+            <div class="section-title">
+                <div class="icon">3</div>
+                <h2>多功能单元</h2>
+            </div>
+
+            <p>超标量处理器配备多个功能单元，每种单元处理不同类型的操作。当所有单元都被占用时，会发生<strong>结构冒险</strong>。</p>
+
+            <div class="controls-row">
+                <button class="btn btn-primary" id="s3AutoBtn">自动调度</button>
+                <button class="btn" id="s3StepBtn">逐步执行</button>
+                <button class="btn" id="s3ResetBtn">重置</button>
+                <span class="cycle-num" id="s3CycleLabel">周期: 0</span>
+            </div>
+
+            <div class="canvas-container" style="min-height:420px;">
+                <canvas id="s3Canvas"></canvas>
+            </div>
+
+            <div class="fu-grid" id="s3FuGrid">
+                <div class="fu-block" id="fu-alu1">
+                    <div class="fu-name">ALU #1</div>
+                    <div class="fu-inst" id="fu-alu1-inst">空闲</div>
+                </div>
+                <div class="fu-block" id="fu-alu2">
+                    <div class="fu-name">ALU #2</div>
+                    <div class="fu-inst" id="fu-alu2-inst">空闲</div>
+                </div>
+                <div class="fu-block" id="fu-lsu">
+                    <div class="fu-name">Load/Store</div>
+                    <div class="fu-inst" id="fu-lsu-inst">空闲</div>
+                </div>
+                <div class="fu-block" id="fu-branch">
+                    <div class="fu-name">分支单元</div>
+                    <div class="fu-inst" id="fu-branch-inst">空闲</div>
+                </div>
+                <div class="fu-block" id="fu-fp">
+                    <div class="fu-name">浮点单元</div>
+                    <div class="fu-inst" id="fu-fp-inst">空闲</div>
+                </div>
+            </div>
+
+            <div class="info-box warning" style="margin-top:0.5rem;">
+                <p><strong>结构冒险</strong>：当多条就绪指令需要同一功能单元时，只有一条可以发射，其余必须等待。功能单元的种类与数量直接影响超标量处理器的性能上限。</p>
+            </div>
+        </div>
+
+        <!-- ===================== Section 4 ===================== -->
+        <div class="section section-alt" id="sec-issue-policy">
+            <div class="section-title">
+                <div class="icon">4</div>
+                <h2>发射策略</h2>
+            </div>
+
+            <p>超标量处理器需要决定每个周期发射哪些指令。<strong>顺序发射</strong>遇到依赖就阻塞后续指令，而<strong>乱序发射</strong>可以跳过被阻塞的指令，发射后续就绪的指令。</p>
+
+            <div class="controls-row">
+                <div class="btn-group">
+                    <button class="btn active" id="s4InOrderBtn">顺序发射</button>
+                    <button class="btn" id="s4OoOBtn">乱序发射</button>
+                </div>
+                <button class="btn btn-primary" id="s4StepBtn">下一周期</button>
+                <button class="btn" id="s4ResetBtn">重置</button>
+                <span class="cycle-num" id="s4CycleLabel">周期: 0</span>
+            </div>
+
+            <div class="compare-panels" style="margin-top:1rem;">
+                <div class="compare-panel">
+                    <h4>发射窗口（宽度 = 2）</h4>
+                    <div id="s4IssueWindow"></div>
+                </div>
+                <div class="compare-panel">
+                    <h4>时序图</h4>
+                    <div class="canvas-container" style="min-height: 300px;">
+                        <canvas id="s4Canvas"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <div class="metric-row" style="margin-top:1rem;">
+                <div class="metric-card">
+                    <div class="label">已完成指令</div>
+                    <div class="value" id="s4MetricDone">0</div>
+                </div>
+                <div class="metric-card">
+                    <div class="label">当前周期</div>
+                    <div class="value blue" id="s4MetricCycle">0</div>
+                </div>
+                <div class="metric-card">
+                    <div class="label">实际 IPC</div>
+                    <div class="value purple" id="s4MetricIPC">0.00</div>
+                </div>
+                <div class="metric-card">
+                    <div class="label">空闲发射槽</div>
+                    <div class="value orange" id="s4MetricWaste">0</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===================== Section 5 ===================== -->
+        <div class="section" id="sec-timing">
+            <div class="section-title">
+                <div class="icon">5</div>
+                <h2>超标量流水线时序</h2>
+            </div>
+
+            <p>超标量流水线时序图展示了多条指令如何在同一周期内并行通过流水线各阶段。依赖关系会导致实际 IPC 低于理论最大值。</p>
+
+            <div class="controls-row">
+                <div class="slider-group" style="max-width:300px;">
+                    <label>发射宽度：</label>
+                    <input type="range" id="s5WidthSlider" min="2" max="4" value="2" step="1">
+                    <span class="slider-value" id="s5WidthVal">2</span>
+                </div>
+                <button class="btn btn-primary" id="s5AnimBtn">动画演示</button>
+                <button class="btn" id="s5ResetBtn">重置</button>
+            </div>
+
+            <div class="canvas-container" style="min-height:450px;">
+                <canvas id="s5Canvas"></canvas>
+            </div>
+
+            <div class="metric-row" style="margin-top:1rem;">
+                <div class="metric-card">
+                    <div class="label">指令数</div>
+                    <div class="value" id="s5MetricInst">8</div>
+                </div>
+                <div class="metric-card">
+                    <div class="label">总周期数</div>
+                    <div class="value blue" id="s5MetricCycles">0</div>
+                </div>
+                <div class="metric-card">
+                    <div class="label">实际 IPC</div>
+                    <div class="value purple" id="s5MetricIPC">0.00</div>
+                </div>
+                <div class="metric-card">
+                    <div class="label">流水线利用率</div>
+                    <div class="value orange" id="s5MetricUtil">0%</div>
+                </div>
+                <div class="metric-card">
+                    <div class="label">停顿周期</div>
+                    <div class="value red" id="s5MetricStalls">0</div>
+                </div>
+            </div>
+
+            <div class="legend">
+                <div class="legend-item"><div class="swatch" style="background:#4fc3f7"></div>取指</div>
+                <div class="legend-item"><div class="swatch" style="background:#b388ff"></div>译码</div>
+                <div class="legend-item"><div class="swatch" style="background:#16c79a"></div>执行</div>
+                <div class="legend-item"><div class="swatch" style="background:#ffab40"></div>访存</div>
+                <div class="legend-item"><div class="swatch" style="background:#ff80ab"></div>写回</div>
+                <div class="legend-item"><div class="swatch" style="background:#ff5252"></div>停顿</div>
+                <div class="legend-item"><div class="swatch" style="background:rgba(108,108,124,0.4)"></div>空泡</div>
+            </div>
+        </div>
+
+        <!-- ===================== Section 6 ===================== -->
+        <div class="section section-alt" id="sec-limits">
+            <div class="section-title">
+                <div class="icon">6</div>
+                <h2>ILP 的极限</h2>
+            </div>
+
+            <p>随着发射宽度增加，实际加速比增长越来越慢——这就是 <strong>Amdahl 定律</strong>在 ILP 领域的体现。多个"墙"限制了超标量的进一步发展。</p>
+
+            <div class="controls-row">
+                <div class="slider-group" style="max-width:350px;">
+                    <label>依赖比例：</label>
+                    <input type="range" id="s6DepSlider" min="10" max="80" value="30" step="5">
+                    <span class="slider-value" id="s6DepVal">30%</span>
+                </div>
+            </div>
+
+            <div class="canvas-container" style="min-height:380px;">
+                <canvas id="s6Canvas"></canvas>
+            </div>
+
+            <h3 style="margin-top:2rem; margin-bottom:1rem;">三面"墙"</h3>
+            <div class="wall-cards">
+                <div class="wall-card">
+                    <div class="wall-icon">🔥</div>
+                    <h4>功耗墙 (Power Wall)</h4>
+                    <p>更宽的发射意味着更多硬件和更高功耗，散热成为瓶颈。</p>
+                </div>
+                <div class="wall-card">
+                    <div class="wall-icon">🧱</div>
+                    <h4>存储墙 (Memory Wall)</h4>
+                    <p>处理器速度远超内存速度，加宽发射后内存延迟成为主要瓶颈。</p>
+                </div>
+                <div class="wall-card">
+                    <div class="wall-icon">📊</div>
+                    <h4>ILP 墙 (ILP Wall)</h4>
+                    <p>真实程序中数据依赖和控制依赖限制了可用的指令级并行度。</p>
+                </div>
+            </div>
+
+            <div class="info-box" style="margin-top:1.5rem;">
+                <p><strong>超越 ILP：</strong>当指令级并行的收益递减后，现代处理器转向<strong>线程级并行 (TLP)</strong>（多核、超线程）和<strong>数据级并行 (DLP)</strong>（SIMD、向量化）来继续提升性能。</p>
+            </div>
+
+            <h3 style="margin-top:2rem; margin-bottom:1rem;">总结测验</h3>
+            <div class="quiz-container" id="quizContainer"></div>
+        </div>
+
+    </div><!-- /page-container -->
+
+    <!-- Shared Scripts -->
+    <script src="../shared/scripts/isa-utils.js"></script>
+    <script src="../shared/scripts/nav.js"></script>
+    <script>
+    /* ====================================================================
+     *  超标量 (Superscalar) — Interactive Module
+     * ==================================================================== */
+    document.addEventListener('DOMContentLoaded', () => {
+        // KaTeX auto-render
+        if (typeof renderMathInElement === 'function') {
+            renderMathInElement(document.body, {
+                delimiters: [
+                    { left: '$$', right: '$$', display: true },
+                    { left: '\\(', right: '\\)', display: false },
+                ],
+                throwOnError: false,
+            });
+        }
+
+        const C = ISAUtils.COLORS;
+        const STAGES = ISAUtils.STAGES;
+        const SCOL = ISAUtils.STAGE_COLORS;
+
+        /* ================================================================
+         *  SECTION 1 — 从标量到超标量
+         * ================================================================ */
+        (() => {
+            const canvas = document.getElementById('s1Canvas');
+            const slider = document.getElementById('issueWidthSlider');
+            const valSpan = document.getElementById('issueWidthVal');
+            const playBtn = document.getElementById('s1PlayBtn');
+            const resetBtn = document.getElementById('s1ResetBtn');
+
+            const INST_COUNT = 8;
+            const PIPE_STAGES = 5;
+            let issueWidth = 1;
+            let animFrame = null;
+            let animProgress = 0;
+            let isPlaying = false;
+
+            function calcMetrics(w) {
+                const totalScalar = INST_COUNT + PIPE_STAGES - 1;
+                const totalSuper = Math.ceil(INST_COUNT / w) + PIPE_STAGES - 1;
+                const ipc = INST_COUNT / totalSuper;
+                const speedup = totalScalar / totalSuper;
+                return { totalScalar, totalSuper, ipc, speedup };
+            }
+
+            function updateMetrics() {
+                const m = calcMetrics(issueWidth);
+                document.getElementById('s1MetricWidth').textContent = issueWidth;
+                document.getElementById('s1MetricIPC').textContent = m.ipc.toFixed(2);
+                document.getElementById('s1MetricSpeedup').textContent = m.speedup.toFixed(1) + 'x';
+                document.getElementById('s1MetricCycles').textContent = m.totalSuper;
+            }
+
+            function draw() {
+                const { ctx, w, h } = ISAUtils.initCanvas(canvas, 400);
+                ctx.clearRect(0, 0, w, h);
+
+                const m = calcMetrics(issueWidth);
+                const cellW = Math.min(50, (w - 180) / (m.totalSuper + 1));
+                const cellH = 22;
+                const offsetX = 120;
+                const groupOffsetY = 30;
+
+                // Title for superscalar
+                ctx.font = 'bold 13px "Noto Sans SC", sans-serif';
+                ctx.fillStyle = C.textPri;
+                ctx.textAlign = 'left';
+                ctx.fillText(issueWidth === 1 ? '标量流水线 (单发射)' : `超标量流水线 (${issueWidth}-发射)`, 10, 20);
+
+                // Cycle headers
+                ctx.font = '10px "JetBrains Mono", monospace';
+                ctx.fillStyle = C.textMut;
+                ctx.textAlign = 'center';
+                for (let c = 0; c < m.totalSuper; c++) {
+                    ctx.fillText('C' + (c + 1), offsetX + c * cellW + cellW / 2, groupOffsetY);
+                }
+
+                // Draw pipeline grid for superscalar
+                const instLabels = [];
+                for (let i = 0; i < INST_COUNT; i++) {
+                    instLabels.push('I' + (i + 1));
+                }
+
+                // Calculate start cycle for each instruction in superscalar
+                for (let i = 0; i < INST_COUNT; i++) {
+                    const groupIdx = Math.floor(i / issueWidth);
+                    const startCycle = groupIdx;
+
+                    // Instruction label
+                    const rowY = groupOffsetY + 12 + i * (cellH + 3);
+                    ctx.font = '11px "JetBrains Mono", monospace';
+                    ctx.fillStyle = C.textSec;
+                    ctx.textAlign = 'right';
+                    ctx.fillText(instLabels[i], offsetX - 10, rowY + cellH / 2 + 1);
+
+                    // Pipeline stages
+                    for (let s = 0; s < PIPE_STAGES; s++) {
+                        const cycle = startCycle + s;
+                        const cx = offsetX + cycle * cellW;
+
+                        // Animation: only show stages that have been reached
+                        const stageTime = (cycle / m.totalSuper);
+                        if (isPlaying && stageTime > animProgress) continue;
+
+                        ISAUtils.drawPipelineStage(ctx, cx + 1, rowY, cellW - 2, cellH, s, STAGES[s]);
+                    }
+                }
+
+                // Show theoretical total cycles text
+                const summaryY = groupOffsetY + 12 + INST_COUNT * (cellH + 3) + 20;
+                ctx.font = '12px "Noto Sans SC", sans-serif';
+                ctx.fillStyle = C.textSec;
+                ctx.textAlign = 'left';
+                ctx.fillText(`总周期: ${m.totalSuper}  |  IPC: ${m.ipc.toFixed(2)}  |  加速比: ${m.speedup.toFixed(2)}x`, 10, summaryY);
+
+                // Draw bracket showing parallel issue groups
+                if (issueWidth > 1) {
+                    const numGroups = Math.ceil(INST_COUNT / issueWidth);
+                    for (let g = 0; g < numGroups; g++) {
+                        const startI = g * issueWidth;
+                        const endI = Math.min(startI + issueWidth - 1, INST_COUNT - 1);
+                        const topY = groupOffsetY + 12 + startI * (cellH + 3);
+                        const botY = groupOffsetY + 12 + endI * (cellH + 3) + cellH;
+                        const bx = offsetX - 25;
+
+                        ctx.strokeStyle = ISAUtils.hexToRgba(C.green, 0.6);
+                        ctx.lineWidth = 1.5;
+                        ctx.beginPath();
+                        ctx.moveTo(bx + 6, topY);
+                        ctx.lineTo(bx, topY);
+                        ctx.lineTo(bx, botY);
+                        ctx.lineTo(bx + 6, botY);
+                        ctx.stroke();
+                    }
+                }
+            }
+
+            function animate() {
+                if (!isPlaying) return;
+                animProgress += 0.008;
+                if (animProgress > 1.2) {
+                    animProgress = 1.2;
+                    isPlaying = false;
+                    playBtn.textContent = '播放动画';
+                }
+                draw();
+                if (isPlaying) animFrame = requestAnimationFrame(animate);
+            }
+
+            slider.addEventListener('input', () => {
+                issueWidth = parseInt(slider.value);
+                valSpan.textContent = issueWidth;
+                updateMetrics();
+                isPlaying = false;
+                animProgress = 2;
+                draw();
+            });
+
+            playBtn.addEventListener('click', () => {
+                if (isPlaying) {
+                    isPlaying = false;
+                    playBtn.textContent = '播放动画';
+                    return;
+                }
+                animProgress = 0;
+                isPlaying = true;
+                playBtn.textContent = '暂停';
+                animate();
+            });
+
+            resetBtn.addEventListener('click', () => {
+                isPlaying = false;
+                animProgress = 2;
+                playBtn.textContent = '播放动画';
+                draw();
+            });
+
+            updateMetrics();
+            animProgress = 2;
+            draw();
+
+            window.addEventListener('resize', () => { if (!isPlaying) draw(); });
+        })();
+
+        /* ================================================================
+         *  SECTION 2 — 指令级并行 ILP
+         * ================================================================ */
+        (() => {
+            const canvas = document.getElementById('s2Canvas');
+            const codeBlock = document.getElementById('s2CodeBlock');
+
+            const examples = {
+                high: {
+                    insts: [
+                        { text: 'add  x1, x10, x11', rd: 'x1',  rs: ['x10','x11'], label: 'I1' },
+                        { text: 'add  x2, x12, x13', rd: 'x2',  rs: ['x12','x13'], label: 'I2' },
+                        { text: 'add  x3, x14, x15', rd: 'x3',  rs: ['x14','x15'], label: 'I3' },
+                        { text: 'add  x4, x16, x17', rd: 'x4',  rs: ['x16','x17'], label: 'I4' },
+                        { text: 'add  x5, x18, x19', rd: 'x5',  rs: ['x18','x19'], label: 'I5' },
+                        { text: 'add  x6, x20, x21', rd: 'x6',  rs: ['x20','x21'], label: 'I6' },
+                    ],
+                    comment: '// 无数据依赖，所有指令可并行',
+                },
+                low: {
+                    insts: [
+                        { text: 'add  x1, x10, x11', rd: 'x1', rs: ['x10','x11'], label: 'I1' },
+                        { text: 'add  x2, x1,  x12', rd: 'x2', rs: ['x1','x12'],  label: 'I2' },
+                        { text: 'add  x3, x2,  x13', rd: 'x3', rs: ['x2','x13'],  label: 'I3' },
+                        { text: 'add  x4, x3,  x14', rd: 'x4', rs: ['x3','x14'],  label: 'I4' },
+                        { text: 'add  x5, x4,  x15', rd: 'x5', rs: ['x4','x15'],  label: 'I5' },
+                        { text: 'add  x6, x5,  x16', rd: 'x6', rs: ['x5','x16'],  label: 'I6' },
+                    ],
+                    comment: '// 链式依赖，每条依赖前一条',
+                },
+                mixed: {
+                    insts: [
+                        { text: 'add  x1, x10, x11', rd: 'x1', rs: ['x10','x11'], label: 'I1' },
+                        { text: 'add  x2, x12, x13', rd: 'x2', rs: ['x12','x13'], label: 'I2' },
+                        { text: 'add  x3, x1,  x2',  rd: 'x3', rs: ['x1','x2'],   label: 'I3' },
+                        { text: 'add  x4, x14, x15', rd: 'x4', rs: ['x14','x15'], label: 'I4' },
+                        { text: 'add  x5, x3,  x4',  rd: 'x5', rs: ['x3','x4'],   label: 'I5' },
+                        { text: 'add  x6, x16, x17', rd: 'x6', rs: ['x16','x17'], label: 'I6' },
+                    ],
+                    comment: '// 混合：部分独立、部分依赖',
+                },
+            };
+
+            let currentExample = 'high';
+
+            function getDeps(insts) {
+                const edges = [];
+                for (let i = 0; i < insts.length; i++) {
+                    for (let j = 0; j < i; j++) {
+                        if (insts[i].rs.includes(insts[j].rd)) {
+                            edges.push([j, i]);
+                        }
+                    }
+                }
+                return edges;
+            }
+
+            function getCriticalPathLength(insts, edges) {
+                const n = insts.length;
+                const dist = new Array(n).fill(1);
+                for (let i = 0; i < n; i++) {
+                    for (const [from, to] of edges) {
+                        if (to === i) {
+                            dist[i] = Math.max(dist[i], dist[from] + 1);
+                        }
+                    }
+                }
+                return Math.max(...dist);
+            }
+
+            function getCriticalPath(insts, edges) {
+                const n = insts.length;
+                const dist = new Array(n).fill(1);
+                const prev = new Array(n).fill(-1);
+                for (let i = 0; i < n; i++) {
+                    for (const [from, to] of edges) {
+                        if (to === i && dist[from] + 1 > dist[i]) {
+                            dist[i] = dist[from] + 1;
+                            prev[i] = from;
+                        }
+                    }
+                }
+                let maxIdx = 0;
+                for (let i = 1; i < n; i++) {
+                    if (dist[i] > dist[maxIdx]) maxIdx = i;
+                }
+                const path = new Set();
+                let cur = maxIdx;
+                while (cur !== -1) {
+                    path.add(cur);
+                    cur = prev[cur];
+                }
+                return path;
+            }
+
+            function renderCode(ex) {
+                const lines = [
+                    `<span class="comment">${ex.comment}</span>`,
+                ];
+                ex.insts.forEach((inst, i) => {
+                    const parts = inst.text.split(/\s+/);
+                    const mnemonic = `<span class="keyword">${parts[0]}</span>`;
+                    const operands = parts.slice(1).join(' ')
+                        .replace(/(x\d+)/g, '<span class="reg">$1</span>');
+                    lines.push(`<span class="line-num">${i + 1}</span>${mnemonic}  ${operands}`);
+                });
+                codeBlock.innerHTML = lines.join('\n');
+            }
+
+            function drawDepGraph() {
+                const { ctx, w, h } = ISAUtils.initCanvas(canvas, 320);
+                ctx.clearRect(0, 0, w, h);
+
+                const ex = examples[currentExample];
+                const insts = ex.insts;
+                const edges = getDeps(insts);
+                const critPath = getCriticalPath(insts, edges);
+                const critLen = getCriticalPathLength(insts, edges);
+
+                // Layout nodes in levels (topological)
+                const n = insts.length;
+                const level = new Array(n).fill(0);
+                for (let i = 0; i < n; i++) {
+                    for (const [from, to] of edges) {
+                        if (to === i) {
+                            level[i] = Math.max(level[i], level[from] + 1);
+                        }
+                    }
+                }
+                const maxLevel = Math.max(...level);
+                const levelGroups = {};
+                for (let i = 0; i < n; i++) {
+                    if (!levelGroups[level[i]]) levelGroups[level[i]] = [];
+                    levelGroups[level[i]].push(i);
+                }
+
+                const nodeR = 22;
+                const levelSpacing = (h - 80) / Math.max(maxLevel, 1);
+                const positions = [];
+                for (let i = 0; i < n; i++) {
+                    const group = levelGroups[level[i]];
+                    const idx = group.indexOf(i);
+                    const count = group.length;
+                    const xSpacing = (w - 60) / (count + 1);
+                    positions.push({
+                        x: 30 + xSpacing * (idx + 1),
+                        y: 40 + level[i] * levelSpacing,
+                    });
+                }
+
+                // Draw edges
+                for (const [from, to] of edges) {
+                    const isCrit = critPath.has(from) && critPath.has(to);
+                    const p1 = positions[from];
+                    const p2 = positions[to];
+                    const dx = p2.x - p1.x;
+                    const dy = p2.y - p1.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    const nx = dx / dist;
+                    const ny = dy / dist;
+
+                    ISAUtils.drawArrow(
+                        ctx,
+                        p1.x + nx * nodeR,
+                        p1.y + ny * nodeR,
+                        p2.x - nx * nodeR,
+                        p2.y - ny * nodeR,
+                        isCrit ? C.red : ISAUtils.hexToRgba(C.blue, 0.5),
+                        { width: isCrit ? 2.5 : 1.5 }
+                    );
+                }
+
+                // Draw nodes
+                for (let i = 0; i < n; i++) {
+                    const p = positions[i];
+                    const isCrit = critPath.has(i);
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, nodeR, 0, Math.PI * 2);
+                    ctx.fillStyle = isCrit
+                        ? ISAUtils.hexToRgba(C.red, 0.2)
+                        : ISAUtils.hexToRgba(C.blue, 0.12);
+                    ctx.fill();
+                    ctx.strokeStyle = isCrit ? C.red : C.blue;
+                    ctx.lineWidth = isCrit ? 2.5 : 1.5;
+                    ctx.stroke();
+
+                    ctx.font = 'bold 12px "JetBrains Mono", monospace';
+                    ctx.fillStyle = isCrit ? C.red : C.blue;
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText(insts[i].label, p.x, p.y);
+                }
+
+                // Legend
+                ctx.font = '11px "Noto Sans SC", sans-serif';
+                ctx.textAlign = 'left';
+                ctx.fillStyle = C.red;
+                ctx.fillText('● 关键路径', 10, h - 10);
+                ctx.fillStyle = C.blue;
+                ctx.fillText('● 非关键节点', 110, h - 10);
+
+                // Update metrics
+                document.getElementById('s2MetricInst').textContent = n;
+                document.getElementById('s2MetricCritical').textContent = critLen;
+                document.getElementById('s2MetricIPC').textContent = (n / critLen).toFixed(2);
+                const ilpLevel = (n / critLen) >= 2 ? '高' : (n / critLen) >= 1.5 ? '中' : '低';
+                document.getElementById('s2MetricLevel').textContent = ilpLevel;
+            }
+
+            function selectExample(key) {
+                currentExample = key;
+                document.querySelectorAll('.dep-example-selector .btn').forEach(b => b.classList.remove('active'));
+                document.querySelector(`[data-example="${key}"]`).classList.add('active');
+                renderCode(examples[key]);
+                drawDepGraph();
+            }
+
+            document.getElementById('depExHigh').addEventListener('click', () => selectExample('high'));
+            document.getElementById('depExLow').addEventListener('click', () => selectExample('low'));
+            document.getElementById('depExMixed').addEventListener('click', () => selectExample('mixed'));
+
+            selectExample('high');
+            window.addEventListener('resize', drawDepGraph);
+        })();
+
+        /* ================================================================
+         *  SECTION 3 — 多功能单元
+         * ================================================================ */
+        (() => {
+            const canvas = document.getElementById('s3Canvas');
+            const autoBtn = document.getElementById('s3AutoBtn');
+            const stepBtn = document.getElementById('s3StepBtn');
+            const resetBtn = document.getElementById('s3ResetBtn');
+            const cycleLabel = document.getElementById('s3CycleLabel');
+
+            const instructions = [
+                { text: 'add x1,x2,x3',   type: 'alu',    fu: 'alu1',   label: 'I1', color: C.green },
+                { text: 'sub x4,x5,x6',   type: 'alu',    fu: 'alu2',   label: 'I2', color: C.green },
+                { text: 'lw  x7,0(x8)',    type: 'load',   fu: 'lsu',    label: 'I3', color: C.orange },
+                { text: 'beq x1,x0,+8',   type: 'branch', fu: 'branch', label: 'I4', color: C.purple },
+                { text: 'fadd f1,f2,f3',   type: 'fp',     fu: 'fp',     label: 'I5', color: C.pink },
+                { text: 'add x9,x10,x11',  type: 'alu',    fu: 'alu1',  label: 'I6', color: C.green },
+                { text: 'sw  x7,4(x8)',    type: 'store',  fu: 'lsu',    label: 'I7', color: C.orange },
+                { text: 'mul x12,x1,x4',  type: 'alu',    fu: 'alu2',   label: 'I8', color: C.green },
+            ];
+
+            const fuMap = {
+                alu1: { name: 'ALU #1', elemId: 'fu-alu1-inst' },
+                alu2: { name: 'ALU #2', elemId: 'fu-alu2-inst' },
+                lsu:  { name: 'Load/Store', elemId: 'fu-lsu-inst' },
+                branch: { name: '分支单元', elemId: 'fu-branch-inst' },
+                fp:   { name: '浮点单元', elemId: 'fu-fp-inst' },
+            };
+
+            let currentCycle = 0;
+            let history = []; // each cycle: which instructions are dispatched
+            let autoTimer = null;
+
+            // Group instructions into dispatch cycles (resource-based)
+            function buildSchedule() {
+                const schedule = [];
+                let remaining = [...instructions.map((inst, i) => ({ ...inst, idx: i }))];
+                while (remaining.length > 0) {
+                    const usedFUs = new Set();
+                    const dispatched = [];
+                    const next = [];
+                    for (const inst of remaining) {
+                        if (!usedFUs.has(inst.fu)) {
+                            usedFUs.add(inst.fu);
+                            dispatched.push(inst);
+                        } else {
+                            next.push(inst);
+                        }
+                    }
+                    schedule.push(dispatched);
+                    remaining = next;
+                }
+                return schedule;
+            }
+
+            const schedule = buildSchedule();
+
+            function updateFUDisplay(cycle) {
+                // Clear all
+                Object.values(fuMap).forEach(fu => {
+                    document.getElementById(fu.elemId).textContent = '空闲';
+                    document.getElementById(fu.elemId).parentElement.classList.remove('active');
+                });
+
+                if (cycle > 0 && cycle <= schedule.length) {
+                    const dispatched = schedule[cycle - 1];
+                    for (const inst of dispatched) {
+                        const fuInfo = fuMap[inst.fu];
+                        if (fuInfo) {
+                            document.getElementById(fuInfo.elemId).textContent = inst.text;
+                            document.getElementById(fuInfo.elemId).parentElement.classList.add('active');
+                        }
+                    }
+                }
+            }
+
+            function draw() {
+                const { ctx, w, h } = ISAUtils.initCanvas(canvas, 420);
+                ctx.clearRect(0, 0, w, h);
+
+                const padding = 20;
+                const fuWidth = 100;
+                const fuHeight = 50;
+                const fuGap = 15;
+                const fuNames = ['ALU #1', 'ALU #2', 'L/S', '分支', '浮点'];
+                const fuKeys = ['alu1', 'alu2', 'lsu', 'branch', 'fp'];
+                const fuColors = [C.green, C.green, C.orange, C.purple, C.pink];
+
+                const totalFUWidth = fuNames.length * fuWidth + (fuNames.length - 1) * fuGap;
+                const startX = (w - totalFUWidth) / 2;
+                const fuY = 200;
+
+                // Draw "Fetch/Decode" box at top
+                const fdWidth = totalFUWidth;
+                const fdHeight = 40;
+                const fdX = startX;
+                const fdY = 40;
+
+                ctx.fillStyle = ISAUtils.hexToRgba(C.blue, 0.1);
+                ctx.strokeStyle = C.blue;
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                ctx.roundRect(fdX, fdY, fdWidth, fdHeight, 6);
+                ctx.fill();
+                ctx.stroke();
+                ctx.font = 'bold 13px "Noto Sans SC", sans-serif';
+                ctx.fillStyle = C.blue;
+                ctx.textAlign = 'center';
+                ctx.fillText('取指 / 译码 / 分派', fdX + fdWidth / 2, fdY + fdHeight / 2 + 1);
+
+                // Draw dispatch arrows
+                for (let i = 0; i < fuNames.length; i++) {
+                    const fx = startX + i * (fuWidth + fuGap) + fuWidth / 2;
+                    ISAUtils.drawArrow(ctx, fdX + fdWidth / 2, fdY + fdHeight, fx, fuY, ISAUtils.hexToRgba(C.textMut, 0.4), { width: 1 });
+                }
+
+                // Draw functional units
+                for (let i = 0; i < fuNames.length; i++) {
+                    const fx = startX + i * (fuWidth + fuGap);
+                    const isActive = currentCycle > 0 && currentCycle <= schedule.length &&
+                        schedule[currentCycle - 1].some(inst => inst.fu === fuKeys[i]);
+
+                    ctx.fillStyle = isActive
+                        ? ISAUtils.hexToRgba(fuColors[i], 0.2)
+                        : ISAUtils.hexToRgba(C.textMut, 0.05);
+                    ctx.strokeStyle = isActive ? fuColors[i] : C.border;
+                    ctx.lineWidth = isActive ? 2 : 1;
+                    ctx.beginPath();
+                    ctx.roundRect(fx, fuY, fuWidth, fuHeight, 6);
+                    ctx.fill();
+                    ctx.stroke();
+
+                    ctx.font = 'bold 11px "Noto Sans SC", sans-serif';
+                    ctx.fillStyle = isActive ? fuColors[i] : C.textMut;
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'top';
+                    ctx.fillText(fuNames[i], fx + fuWidth / 2, fuY + 8);
+
+                    // Show instruction in unit
+                    if (isActive) {
+                        const dispatched = schedule[currentCycle - 1].find(inst => inst.fu === fuKeys[i]);
+                        if (dispatched) {
+                            ctx.font = '10px "JetBrains Mono", monospace';
+                            ctx.fillStyle = C.textPri;
+                            ctx.fillText(dispatched.label + ': ' + dispatched.text, fx + fuWidth / 2, fuY + 28);
+                        }
+                    } else {
+                        ctx.font = '10px "JetBrains Mono", monospace';
+                        ctx.fillStyle = C.textMut;
+                        ctx.fillText('空闲', fx + fuWidth / 2, fuY + 28);
+                    }
+                }
+
+                // Draw "Writeback / Commit" at bottom
+                const wbY = fuY + fuHeight + 60;
+                ctx.fillStyle = ISAUtils.hexToRgba(C.pink, 0.1);
+                ctx.strokeStyle = C.pink;
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                ctx.roundRect(fdX, wbY, fdWidth, fdHeight, 6);
+                ctx.fill();
+                ctx.stroke();
+                ctx.font = 'bold 13px "Noto Sans SC", sans-serif';
+                ctx.fillStyle = C.pink;
+                ctx.textAlign = 'center';
+                ctx.fillText('写回 / 提交', fdX + fdWidth / 2, wbY + fdHeight / 2 + 1);
+
+                // Draw arrows from FUs to writeback
+                for (let i = 0; i < fuNames.length; i++) {
+                    const fx = startX + i * (fuWidth + fuGap) + fuWidth / 2;
+                    ISAUtils.drawArrow(ctx, fx, fuY + fuHeight, fdX + fdWidth / 2, wbY, ISAUtils.hexToRgba(C.textMut, 0.4), { width: 1 });
+                }
+
+                // Instruction queue on the left
+                const qX = 10;
+                const qY = 90;
+                ctx.font = 'bold 11px "Noto Sans SC", sans-serif';
+                ctx.fillStyle = C.textSec;
+                ctx.textAlign = 'left';
+                ctx.fillText('指令队列', qX, qY);
+
+                for (let i = 0; i < instructions.length; i++) {
+                    const iy = qY + 16 + i * 20;
+                    const dispatched = currentCycle > 0 && schedule.slice(0, currentCycle).flat().some(d => d.idx === i);
+
+                    ctx.font = '10px "JetBrains Mono", monospace';
+                    ctx.fillStyle = dispatched ? ISAUtils.hexToRgba(C.green, 0.5) : C.textSec;
+                    ctx.textAlign = 'left';
+                    const prefix = dispatched ? '✓ ' : '  ';
+                    ctx.fillText(prefix + instructions[i].label + ' ' + instructions[i].text, qX, iy);
+                }
+
+                // Current cycle
+                ctx.font = 'bold 14px "JetBrains Mono", monospace';
+                ctx.fillStyle = C.blue;
+                ctx.textAlign = 'right';
+                ctx.fillText('周期 ' + currentCycle, w - 10, 25);
+            }
+
+            function stepForward() {
+                if (currentCycle < schedule.length) {
+                    currentCycle++;
+                    cycleLabel.textContent = '周期: ' + currentCycle;
+                    updateFUDisplay(currentCycle);
+                    draw();
+                }
+            }
+
+            function resetS3() {
+                clearInterval(autoTimer);
+                autoTimer = null;
+                currentCycle = 0;
+                cycleLabel.textContent = '周期: 0';
+                updateFUDisplay(0);
+                autoBtn.textContent = '自动调度';
+                draw();
+            }
+
+            autoBtn.addEventListener('click', () => {
+                if (autoTimer) {
+                    clearInterval(autoTimer);
+                    autoTimer = null;
+                    autoBtn.textContent = '自动调度';
+                    return;
+                }
+                resetS3();
+                autoBtn.textContent = '停止';
+                autoTimer = setInterval(() => {
+                    if (currentCycle >= schedule.length) {
+                        clearInterval(autoTimer);
+                        autoTimer = null;
+                        autoBtn.textContent = '自动调度';
+                        return;
+                    }
+                    stepForward();
+                }, 1200);
+            });
+
+            stepBtn.addEventListener('click', stepForward);
+            resetBtn.addEventListener('click', resetS3);
+
+            draw();
+            window.addEventListener('resize', draw);
+        })();
+
+        /* ================================================================
+         *  SECTION 4 — 发射策略
+         * ================================================================ */
+        (() => {
+            const canvas = document.getElementById('s4Canvas');
+            const inOrderBtn = document.getElementById('s4InOrderBtn');
+            const oooBtn = document.getElementById('s4OoOBtn');
+            const stepBtn = document.getElementById('s4StepBtn');
+            const resetBtn = document.getElementById('s4ResetBtn');
+            const cycleLabel = document.getElementById('s4CycleLabel');
+            const issueWindowDiv = document.getElementById('s4IssueWindow');
+
+            const ISSUE_WIDTH = 2;
+            const instructions = [
+                { text: 'add x1,x2,x3',  rd: 'x1', rs: ['x2','x3'],  label: 'I1' },
+                { text: 'sub x4,x1,x5',  rd: 'x4', rs: ['x1','x5'],  label: 'I2' }, // depends on I1
+                { text: 'add x6,x7,x8',  rd: 'x6', rs: ['x7','x8'],  label: 'I3' }, // independent
+                { text: 'mul x9,x6,x4',  rd: 'x9', rs: ['x6','x4'],  label: 'I4' }, // depends on I2, I3
+                { text: 'add x10,x11,x12',rd:'x10',rs: ['x11','x12'], label: 'I5' }, // independent
+                { text: 'sub x13,x9,x10',rd:'x13',rs: ['x9','x10'],  label: 'I6' }, // depends on I4, I5
+            ];
+
+            let isOoO = false;
+            let cycle = 0;
+            let issueLog = []; // each cycle: array of issued instruction indices
+            let issued = new Set();
+            let completed = new Set();
+            let wastedSlots = 0;
+
+            function canIssue(idx) {
+                if (issued.has(idx)) return false;
+                // Check all dependencies resolved
+                for (let j = 0; j < idx; j++) {
+                    if (instructions[idx].rs.includes(instructions[j].rd) && !completed.has(j)) {
+                        return false;
+                    }
+                }
+                return true;
+            }
+
+            function doStep() {
+                if (issued.size >= instructions.length) return;
+                cycle++;
+                cycleLabel.textContent = '周期: ' + cycle;
+
+                // Move previously issued to completed (1-cycle latency)
+                const prevIssued = issueLog.length > 0 ? issueLog[issueLog.length - 1] : [];
+                for (const idx of prevIssued) {
+                    completed.add(idx);
+                }
+
+                const thisIssue = [];
+                if (isOoO) {
+                    // Out-of-order: scan all, pick up to ISSUE_WIDTH ready ones
+                    for (let i = 0; i < instructions.length && thisIssue.length < ISSUE_WIDTH; i++) {
+                        if (canIssue(i)) {
+                            thisIssue.push(i);
+                            issued.add(i);
+                        }
+                    }
+                } else {
+                    // In-order: must issue in order, stop at first blocked
+                    let nextToIssue = 0;
+                    for (let i = 0; i < instructions.length; i++) {
+                        if (!issued.has(i)) { nextToIssue = i; break; }
+                    }
+                    for (let i = nextToIssue; i < instructions.length && thisIssue.length < ISSUE_WIDTH; i++) {
+                        if (issued.has(i)) continue;
+                        if (canIssue(i)) {
+                            thisIssue.push(i);
+                            issued.add(i);
+                        } else {
+                            break; // in-order: blocked
+                        }
+                    }
+                }
+
+                wastedSlots += (ISSUE_WIDTH - thisIssue.length);
+                issueLog.push(thisIssue);
+                updateS4Display();
+                drawS4();
+            }
+
+            function resetS4() {
+                cycle = 0;
+                issueLog = [];
+                issued = new Set();
+                completed = new Set();
+                wastedSlots = 0;
+                cycleLabel.textContent = '周期: 0';
+                updateS4Display();
+                drawS4();
+            }
+
+            function updateS4Display() {
+                // Issue window
+                let html = '<ul class="inst-list">';
+                for (let i = 0; i < instructions.length; i++) {
+                    const inst = instructions[i];
+                    let status = '';
+                    let cls = '';
+                    if (completed.has(i)) {
+                        status = '<span class="status-pill done">完成</span>';
+                    } else if (issued.has(i)) {
+                        status = '<span class="status-pill issuing">执行中</span>';
+                        cls = 'highlight';
+                    } else if (canIssue(i)) {
+                        status = '<span class="status-pill waiting">就绪</span>';
+                    } else {
+                        status = '<span class="status-pill stalled">等待</span>';
+                    }
+                    html += `<li class="${cls}"><span class="idx">${inst.label}</span>${inst.text} ${status}</li>`;
+                }
+                html += '</ul>';
+                issueWindowDiv.innerHTML = html;
+
+                // Metrics
+                const totalDone = completed.size + (issueLog.length > 0 ? issueLog[issueLog.length - 1].length : 0);
+                document.getElementById('s4MetricDone').textContent = completed.size;
+                document.getElementById('s4MetricCycle').textContent = cycle;
+                document.getElementById('s4MetricIPC').textContent = cycle > 0 ? (completed.size / cycle).toFixed(2) : '0.00';
+                document.getElementById('s4MetricWaste').textContent = wastedSlots;
+            }
+
+            function drawS4() {
+                const { ctx, w, h } = ISAUtils.initCanvas(canvas, 300);
+                ctx.clearRect(0, 0, w, h);
+
+                if (issueLog.length === 0) {
+                    ctx.font = '13px "Noto Sans SC", sans-serif';
+                    ctx.fillStyle = C.textMut;
+                    ctx.textAlign = 'center';
+                    ctx.fillText('点击"下一周期"开始模拟', w / 2, h / 2);
+                    return;
+                }
+
+                const cellW = Math.min(60, (w - 130) / (issueLog.length + 1));
+                const cellH = 24;
+                const offsetX = 70;
+                const offsetY = 40;
+
+                // Column headers (cycles)
+                ctx.font = '10px "JetBrains Mono", monospace';
+                ctx.fillStyle = C.textMut;
+                ctx.textAlign = 'center';
+                for (let c = 0; c < issueLog.length; c++) {
+                    ctx.fillText('C' + (c + 1), offsetX + c * cellW + cellW / 2, offsetY - 8);
+                }
+
+                // Row labels (instructions)
+                ctx.textAlign = 'right';
+                for (let i = 0; i < instructions.length; i++) {
+                    ctx.fillStyle = C.textSec;
+                    ctx.fillText(instructions[i].label, offsetX - 10, offsetY + i * (cellH + 4) + cellH / 2 + 2);
+                }
+
+                // Fill cells
+                for (let c = 0; c < issueLog.length; c++) {
+                    const issuedThisCycle = issueLog[c];
+                    for (let i = 0; i < instructions.length; i++) {
+                        const cx = offsetX + c * cellW;
+                        const cy = offsetY + i * (cellH + 4);
+                        if (issuedThisCycle.includes(i)) {
+                            // Issued this cycle
+                            ISAUtils.drawPipelineStage(ctx, cx + 1, cy, cellW - 2, cellH, 2, instructions[i].label, { color: C.green });
+                        }
+                    }
+
+                    // Show empty slots
+                    if (issuedThisCycle.length < ISSUE_WIDTH) {
+                        // Draw a small bubble indicator
+                        const bx = offsetX + c * cellW + cellW / 2;
+                        const by = offsetY + instructions.length * (cellH + 4) + 10;
+                        ctx.font = '9px "JetBrains Mono", monospace';
+                        ctx.fillStyle = C.stall;
+                        ctx.textAlign = 'center';
+                        ctx.fillText('空', bx, by);
+                    }
+                }
+
+                // Title
+                ctx.font = 'bold 12px "Noto Sans SC", sans-serif';
+                ctx.fillStyle = C.textPri;
+                ctx.textAlign = 'left';
+                ctx.fillText(isOoO ? '乱序发射时序' : '顺序发射时序', 10, 20);
+            }
+
+            inOrderBtn.addEventListener('click', () => {
+                isOoO = false;
+                inOrderBtn.classList.add('active');
+                oooBtn.classList.remove('active');
+                resetS4();
+            });
+            oooBtn.addEventListener('click', () => {
+                isOoO = true;
+                oooBtn.classList.add('active');
+                inOrderBtn.classList.remove('active');
+                resetS4();
+            });
+            stepBtn.addEventListener('click', doStep);
+            resetBtn.addEventListener('click', resetS4);
+
+            resetS4();
+            window.addEventListener('resize', drawS4);
+        })();
+
+        /* ================================================================
+         *  SECTION 5 — 超标量流水线时序
+         * ================================================================ */
+        (() => {
+            const canvas = document.getElementById('s5Canvas');
+            const widthSlider = document.getElementById('s5WidthSlider');
+            const widthVal = document.getElementById('s5WidthVal');
+            const animBtn = document.getElementById('s5AnimBtn');
+            const resetBtn = document.getElementById('s5ResetBtn');
+
+            const instructions = [
+                { text: 'add x1,x2,x3',   rd: 'x1', rs: ['x2','x3'],   label: 'I1' },
+                { text: 'sub x4,x5,x6',   rd: 'x4', rs: ['x5','x6'],   label: 'I2' },
+                { text: 'add x7,x1,x8',   rd: 'x7', rs: ['x1','x8'],   label: 'I3' }, // dep I1
+                { text: 'or  x9,x10,x11',  rd: 'x9', rs: ['x10','x11'], label: 'I4' },
+                { text: 'add x12,x4,x7',  rd: 'x12',rs: ['x4','x7'],   label: 'I5' }, // dep I2, I3
+                { text: 'xor x13,x14,x15',rd: 'x13',rs: ['x14','x15'], label: 'I6' },
+                { text: 'sub x16,x12,x13',rd: 'x16',rs: ['x12','x13'], label: 'I7' }, // dep I5, I6
+                { text: 'add x17,x18,x19',rd: 'x17',rs: ['x18','x19'], label: 'I8' },
+            ];
+
+            let issueWidth = 2;
+            let animProgress = 0;
+            let isAnimating = false;
+            let animFrame = null;
+
+            function buildTimeline(width) {
+                const n = instructions.length;
+                const PIPE = 5;
+                const startCycle = new Array(n).fill(0);
+
+                // Determine issue cycle respecting dependencies and issue width
+                const issueSlots = []; // issueSlots[cycle] = count of instructions issued
+                for (let i = 0; i < n; i++) {
+                    let earliest = 0;
+
+                    // Check data deps - need result from EX stage (cycle + 2 assuming IF,ID,EX)
+                    for (let j = 0; j < i; j++) {
+                        if (instructions[i].rs.includes(instructions[j].rd)) {
+                            // Need to wait for j to finish EX (startCycle[j] + 2)
+                            // Then i can start IF at startCycle[j] + 2 for forwarding
+                            earliest = Math.max(earliest, startCycle[j] + 1);
+                        }
+                    }
+
+                    // Check issue width constraint
+                    // Find the earliest cycle >= earliest where there's an available slot
+                    let issueCycle = earliest;
+                    while (true) {
+                        const count = issueSlots[issueCycle] || 0;
+                        if (count < width) {
+                            issueSlots[issueCycle] = count + 1;
+                            break;
+                        }
+                        issueCycle++;
+                    }
+                    startCycle[i] = issueCycle;
+                }
+
+                const maxStart = Math.max(...startCycle);
+                const totalCycles = maxStart + PIPE;
+
+                // Count stall cycles (cycles where we issue fewer than width due to deps, excluding final partial group)
+                let stallSlots = 0;
+                let totalSlots = 0;
+                for (let c = 0; c <= maxStart; c++) {
+                    const issued = issueSlots[c] || 0;
+                    totalSlots += width;
+                    stallSlots += (width - issued);
+                }
+
+                return {
+                    startCycle,
+                    totalCycles,
+                    stallSlots,
+                    totalSlots,
+                    ipc: n / totalCycles,
+                    utilization: (n * PIPE) / (totalCycles * width * 1.0),
+                };
+            }
+
+            function draw() {
+                const { ctx, w, h } = ISAUtils.initCanvas(canvas, 450);
+                ctx.clearRect(0, 0, w, h);
+
+                const timeline = buildTimeline(issueWidth);
+                const n = instructions.length;
+                const PIPE = 5;
+
+                const cellW = Math.min(48, (w - 120) / (timeline.totalCycles + 1));
+                const cellH = 22;
+                const offsetX = 90;
+                const offsetY = 45;
+
+                // Title
+                ctx.font = 'bold 13px "Noto Sans SC", sans-serif';
+                ctx.fillStyle = C.textPri;
+                ctx.textAlign = 'left';
+                ctx.fillText(`${issueWidth}-发射超标量流水线时序`, 10, 20);
+
+                // Cycle headers
+                ctx.font = '10px "JetBrains Mono", monospace';
+                ctx.fillStyle = C.textMut;
+                ctx.textAlign = 'center';
+                for (let c = 0; c < timeline.totalCycles; c++) {
+                    ctx.fillText('C' + (c + 1), offsetX + c * cellW + cellW / 2, offsetY - 8);
+                }
+
+                // Instruction rows
+                for (let i = 0; i < n; i++) {
+                    const rowY = offsetY + i * (cellH + 3);
+
+                    // Label
+                    ctx.font = '11px "JetBrains Mono", monospace';
+                    ctx.fillStyle = C.textSec;
+                    ctx.textAlign = 'right';
+                    ctx.fillText(instructions[i].label, offsetX - 10, rowY + cellH / 2 + 1);
+
+                    // Pipeline stages
+                    for (let s = 0; s < PIPE; s++) {
+                        const cyc = timeline.startCycle[i] + s;
+                        const cx = offsetX + cyc * cellW;
+
+                        // Animation check
+                        const progress = cyc / timeline.totalCycles;
+                        if (isAnimating && progress > animProgress) continue;
+
+                        ISAUtils.drawPipelineStage(ctx, cx + 1, rowY, cellW - 2, cellH, s, STAGES[s]);
+                    }
+                }
+
+                // Show issue group brackets
+                const maxCycle = Math.max(...timeline.startCycle);
+                for (let c = 0; c <= maxCycle; c++) {
+                    const group = [];
+                    for (let i = 0; i < n; i++) {
+                        if (timeline.startCycle[i] === c) group.push(i);
+                    }
+                    if (group.length > 1) {
+                        const topY = offsetY + group[0] * (cellH + 3);
+                        const botY = offsetY + group[group.length - 1] * (cellH + 3) + cellH;
+                        const bx = offsetX + c * cellW - 4;
+
+                        ctx.strokeStyle = ISAUtils.hexToRgba(C.green, 0.5);
+                        ctx.lineWidth = 1.5;
+                        ctx.beginPath();
+                        ctx.moveTo(bx + 4, topY);
+                        ctx.lineTo(bx, topY);
+                        ctx.lineTo(bx, botY);
+                        ctx.lineTo(bx + 4, botY);
+                        ctx.stroke();
+                    }
+                }
+
+                // Summary at bottom
+                const summaryY = offsetY + n * (cellH + 3) + 25;
+                ctx.font = '12px "Noto Sans SC", sans-serif';
+                ctx.fillStyle = C.textSec;
+                ctx.textAlign = 'left';
+                const util = ((n * PIPE) / (timeline.totalCycles * issueWidth) * 100);
+                ctx.fillText(
+                    `总周期: ${timeline.totalCycles}  |  IPC: ${timeline.ipc.toFixed(2)}  |  利用率: ${util.toFixed(0)}%  |  空闲槽: ${timeline.stallSlots}`,
+                    10, summaryY
+                );
+
+                // Update metrics
+                document.getElementById('s5MetricInst').textContent = n;
+                document.getElementById('s5MetricCycles').textContent = timeline.totalCycles;
+                document.getElementById('s5MetricIPC').textContent = timeline.ipc.toFixed(2);
+                document.getElementById('s5MetricUtil').textContent = util.toFixed(0) + '%';
+                document.getElementById('s5MetricStalls').textContent = timeline.stallSlots;
+            }
+
+            function animate() {
+                if (!isAnimating) return;
+                animProgress += 0.006;
+                if (animProgress > 1.2) {
+                    animProgress = 1.2;
+                    isAnimating = false;
+                    animBtn.textContent = '动画演示';
+                }
+                draw();
+                if (isAnimating) animFrame = requestAnimationFrame(animate);
+            }
+
+            widthSlider.addEventListener('input', () => {
+                issueWidth = parseInt(widthSlider.value);
+                widthVal.textContent = issueWidth;
+                isAnimating = false;
+                animProgress = 2;
+                draw();
+            });
+
+            animBtn.addEventListener('click', () => {
+                if (isAnimating) {
+                    isAnimating = false;
+                    animBtn.textContent = '动画演示';
+                    return;
+                }
+                animProgress = 0;
+                isAnimating = true;
+                animBtn.textContent = '暂停';
+                animate();
+            });
+
+            resetBtn.addEventListener('click', () => {
+                isAnimating = false;
+                animProgress = 2;
+                animBtn.textContent = '动画演示';
+                draw();
+            });
+
+            animProgress = 2;
+            draw();
+            window.addEventListener('resize', () => { if (!isAnimating) draw(); });
+        })();
+
+        /* ================================================================
+         *  SECTION 6 — ILP 的极限
+         * ================================================================ */
+        (() => {
+            const canvas = document.getElementById('s6Canvas');
+            const depSlider = document.getElementById('s6DepSlider');
+            const depVal = document.getElementById('s6DepVal');
+
+            let depRatio = 0.3;
+
+            function calcSpeedup(width, dep) {
+                // Simplified model: with dep% of instructions having dependencies,
+                // effective IPC = width * (1 - dep_penalty)
+                // where dep_penalty grows with width
+                const parallelFraction = 1 - dep;
+                const serialFraction = dep;
+                // Amdahl's law variant
+                const effectiveIPC = 1 / (serialFraction + parallelFraction / width);
+                return effectiveIPC;
+            }
+
+            function draw() {
+                const { ctx, w, h } = ISAUtils.initCanvas(canvas, 380);
+                ctx.clearRect(0, 0, w, h);
+
+                const padding = { top: 50, right: 40, bottom: 60, left: 65 };
+                const plotW = w - padding.left - padding.right;
+                const plotH = h - padding.top - padding.bottom;
+
+                // Title
+                ctx.font = 'bold 13px "Noto Sans SC", sans-serif';
+                ctx.fillStyle = C.textPri;
+                ctx.textAlign = 'center';
+                ctx.fillText('发射宽度 vs 实际加速比 (Amdahl 定律)', w / 2, 25);
+
+                // Axes
+                ctx.strokeStyle = C.border;
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(padding.left, padding.top);
+                ctx.lineTo(padding.left, padding.top + plotH);
+                ctx.lineTo(padding.left + plotW, padding.top + plotH);
+                ctx.stroke();
+
+                // X-axis labels (issue width: 1-16)
+                const maxWidth = 16;
+                const maxSpeedup = calcSpeedup(maxWidth, 0); // ideal case
+                const yMax = Math.ceil(maxSpeedup) + 1;
+
+                ctx.font = '10px "JetBrains Mono", monospace';
+                ctx.fillStyle = C.textMut;
+                ctx.textAlign = 'center';
+                for (let x = 1; x <= maxWidth; x += (maxWidth > 8 ? 2 : 1)) {
+                    const px = padding.left + ((x - 1) / (maxWidth - 1)) * plotW;
+                    ctx.fillText(x.toString(), px, padding.top + plotH + 18);
+                    // Grid line
+                    ctx.strokeStyle = ISAUtils.hexToRgba(C.border, 0.3);
+                    ctx.beginPath();
+                    ctx.moveTo(px, padding.top);
+                    ctx.lineTo(px, padding.top + plotH);
+                    ctx.stroke();
+                }
+                ctx.font = '11px "Noto Sans SC", sans-serif';
+                ctx.fillText('发射宽度', w / 2, padding.top + plotH + 42);
+
+                // Y-axis labels
+                ctx.textAlign = 'right';
+                for (let y = 0; y <= yMax; y++) {
+                    const py = padding.top + plotH - (y / yMax) * plotH;
+                    ctx.fillStyle = C.textMut;
+                    ctx.font = '10px "JetBrains Mono", monospace';
+                    ctx.fillText(y + 'x', padding.left - 8, py + 3);
+                    ctx.strokeStyle = ISAUtils.hexToRgba(C.border, 0.2);
+                    ctx.beginPath();
+                    ctx.moveTo(padding.left, py);
+                    ctx.lineTo(padding.left + plotW, py);
+                    ctx.stroke();
+                }
+                ctx.save();
+                ctx.translate(15, padding.top + plotH / 2);
+                ctx.rotate(-Math.PI / 2);
+                ctx.font = '11px "Noto Sans SC", sans-serif';
+                ctx.fillStyle = C.textMut;
+                ctx.textAlign = 'center';
+                ctx.fillText('加速比', 0, 0);
+                ctx.restore();
+
+                // Ideal line (no deps)
+                ctx.beginPath();
+                ctx.strokeStyle = ISAUtils.hexToRgba(C.textMut, 0.3);
+                ctx.setLineDash([4, 4]);
+                ctx.lineWidth = 1;
+                for (let x = 1; x <= maxWidth; x++) {
+                    const px = padding.left + ((x - 1) / (maxWidth - 1)) * plotW;
+                    const py = padding.top + plotH - (x / yMax) * plotH;
+                    if (x === 1) ctx.moveTo(px, py);
+                    else ctx.lineTo(px, py);
+                }
+                ctx.stroke();
+                ctx.setLineDash([]);
+
+                // Actual curve with current dep ratio
+                const depRatios = [0.1, 0.3, 0.5, 0.7];
+                const curveColors = [C.green, C.blue, C.orange, C.red];
+
+                for (let d = 0; d < depRatios.length; d++) {
+                    const dep = depRatios[d];
+                    const isActive = Math.abs(dep - depRatio) < 0.01;
+                    ctx.beginPath();
+                    ctx.strokeStyle = isActive ? curveColors[d] : ISAUtils.hexToRgba(curveColors[d], 0.3);
+                    ctx.lineWidth = isActive ? 3 : 1;
+
+                    for (let xi = 0; xi <= 100; xi++) {
+                        const x = 1 + (xi / 100) * (maxWidth - 1);
+                        const speedup = calcSpeedup(x, dep);
+                        const px = padding.left + ((x - 1) / (maxWidth - 1)) * plotW;
+                        const py = padding.top + plotH - (speedup / yMax) * plotH;
+                        if (xi === 0) ctx.moveTo(px, py);
+                        else ctx.lineTo(px, py);
+                    }
+                    ctx.stroke();
+
+                    // Label at end
+                    const endSpeedup = calcSpeedup(maxWidth, dep);
+                    const labelY = padding.top + plotH - (endSpeedup / yMax) * plotH;
+                    ctx.font = '10px "JetBrains Mono", monospace';
+                    ctx.fillStyle = isActive ? curveColors[d] : ISAUtils.hexToRgba(curveColors[d], 0.5);
+                    ctx.textAlign = 'left';
+                    ctx.fillText(`${(dep * 100).toFixed(0)}%`, padding.left + plotW + 4, labelY + 3);
+                }
+
+                // Current value marker
+                const markerX = 4; // show for width=4
+                const markerSpeedup = calcSpeedup(markerX, depRatio);
+                const mx = padding.left + ((markerX - 1) / (maxWidth - 1)) * plotW;
+                const my = padding.top + plotH - (markerSpeedup / yMax) * plotH;
+                ctx.beginPath();
+                ctx.arc(mx, my, 5, 0, Math.PI * 2);
+                ctx.fillStyle = C.yellow;
+                ctx.fill();
+                ctx.strokeStyle = C.yellow;
+                ctx.lineWidth = 1;
+                ctx.stroke();
+
+                ctx.font = '10px "Noto Sans SC", sans-serif';
+                ctx.fillStyle = C.yellow;
+                ctx.textAlign = 'left';
+                ctx.fillText(`宽度=4, 加速比=${markerSpeedup.toFixed(2)}x`, mx + 10, my - 5);
+
+                // Legend
+                ctx.font = '10px "Noto Sans SC", sans-serif';
+                const legX = padding.left + 10;
+                const legY = padding.top + 10;
+                ctx.fillStyle = C.textMut;
+                ctx.textAlign = 'left';
+                ctx.setLineDash([4, 4]);
+                ctx.strokeStyle = ISAUtils.hexToRgba(C.textMut, 0.5);
+                ctx.beginPath();
+                ctx.moveTo(legX, legY + 3);
+                ctx.lineTo(legX + 20, legY + 3);
+                ctx.stroke();
+                ctx.setLineDash([]);
+                ctx.fillText('理想线性加速', legX + 25, legY + 6);
+
+                ctx.fillStyle = C.textSec;
+                ctx.fillText('依赖比例:', legX, legY + 22);
+            }
+
+            depSlider.addEventListener('input', () => {
+                depRatio = parseInt(depSlider.value) / 100;
+                depVal.textContent = parseInt(depSlider.value) + '%';
+                draw();
+            });
+
+            draw();
+            window.addEventListener('resize', draw);
+        })();
+
+        /* ================================================================
+         *  QUIZ
+         * ================================================================ */
+        (() => {
+            const container = document.getElementById('quizContainer');
+            const questions = [
+                {
+                    q: '超标量处理器的核心特点是什么？',
+                    opts: [
+                        '使用更高的时钟频率',
+                        '每个周期可发射多条指令',
+                        '使用更大的缓存',
+                        '使用更多的寄存器',
+                    ],
+                    answer: 1,
+                },
+                {
+                    q: '以下哪个因素最直接限制了超标量处理器的实际 IPC？',
+                    opts: [
+                        '寄存器数量',
+                        '缓存大小',
+                        '数据依赖',
+                        '时钟频率',
+                    ],
+                    answer: 2,
+                },
+                {
+                    q: '相比顺序发射，乱序发射的主要优势是什么？',
+                    opts: [
+                        '硬件更简单',
+                        '功耗更低',
+                        '可以跳过被阻塞的指令，发射后续就绪指令',
+                        '不需要依赖检测',
+                    ],
+                    answer: 2,
+                },
+                {
+                    q: '当超标量宽度持续增加但收益递减时，现代处理器转向了哪些技术？',
+                    opts: [
+                        '增加更多流水线级数',
+                        '线程级并行 (TLP) 和数据级并行 (DLP)',
+                        '减少功能单元数量',
+                        '降低时钟频率',
+                    ],
+                    answer: 1,
+                },
+            ];
+
+            let html = '';
+            questions.forEach((q, qi) => {
+                html += `<div class="quiz-question" id="quiz-q${qi}">`;
+                html += `<p>${qi + 1}. ${q.q}</p>`;
+                html += `<div class="quiz-options">`;
+                q.opts.forEach((opt, oi) => {
+                    html += `<button class="quiz-option" data-qi="${qi}" data-oi="${oi}">${opt}</button>`;
+                });
+                html += `</div></div>`;
+            });
+            container.innerHTML = html;
+
+            container.addEventListener('click', (e) => {
+                const btn = e.target.closest('.quiz-option');
+                if (!btn) return;
+                const qi = parseInt(btn.dataset.qi);
+                const oi = parseInt(btn.dataset.oi);
+                const qDiv = document.getElementById('quiz-q' + qi);
+                const allBtns = qDiv.querySelectorAll('.quiz-option');
+
+                // Already answered?
+                if (allBtns[0].disabled) return;
+
+                allBtns.forEach(b => {
+                    b.disabled = true;
+                    const idx = parseInt(b.dataset.oi);
+                    if (idx === questions[qi].answer) {
+                        b.classList.add('correct');
+                    } else if (idx === oi) {
+                        b.classList.add('wrong');
+                    }
+                });
+            });
+        })();
+
+    }); // DOMContentLoaded
+    </script>
+</body>
+</html>

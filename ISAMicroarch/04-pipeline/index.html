@@ -1,0 +1,1861 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>流水线 — 指令集与微架构</title>
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+SC:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+    <script defer src="../shared/scripts/isa-utils.js"></script>
+    <script defer src="../shared/scripts/nav.js"></script>
+    <style>
+        /* ===== Hero ===== */
+        .hero {
+            text-align: center;
+            padding: 2rem 2rem 2.5rem;
+            position: relative;
+        }
+        .hero h1 {
+            font-size: 2.4rem;
+            margin-bottom: 0.5rem;
+            background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple), var(--accent-green));
+            background-size: 200% 200%;
+            animation: heroGrad 6s ease infinite;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        @keyframes heroGrad {
+            0%,100% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+        }
+        .hero .subtitle {
+            font-size: 1.05rem;
+            color: var(--text-secondary);
+            max-width: 640px;
+            margin: 0 auto;
+        }
+
+        /* ===== Sections alternating bg ===== */
+        .sec {
+            padding: 3rem 0;
+        }
+        .sec:nth-child(even) {
+            background: var(--bg-secondary);
+        }
+        .sec-inner {
+            max-width: 1300px;
+            margin: 0 auto;
+            padding: 0 2rem;
+        }
+        .sec-header {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            margin-bottom: 1.5rem;
+            padding-bottom: 0.75rem;
+            border-bottom: 2px solid var(--border-color);
+        }
+        .sec-header .num {
+            width: 32px; height: 32px;
+            border-radius: 50%;
+            background: rgba(22,199,154,0.15);
+            color: var(--accent-green);
+            display: flex; align-items: center; justify-content: center;
+            font-weight: 700; font-size: 0.9rem;
+            font-family: var(--font-mono);
+        }
+        .sec-header h2 { margin-bottom: 0; }
+
+        /* ===== Generic helpers ===== */
+        .desc-text {
+            color: var(--text-secondary);
+            margin-bottom: 1.25rem;
+            max-width: 820px;
+            line-height: 1.8;
+        }
+        .canvas-wrap { margin-bottom: 1rem; }
+        .controls-row {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 0.75rem;
+            margin-bottom: 1rem;
+        }
+        .metric-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+        .metric-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            padding: 0.6rem 1rem;
+            min-width: 120px;
+            text-align: center;
+        }
+        .metric-card .label {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            margin-bottom: 0.2rem;
+        }
+        .metric-card .value {
+            font-family: var(--font-mono);
+            font-size: 1.2rem;
+            font-weight: 700;
+            color: var(--accent-green);
+        }
+        .metric-card .value.blue { color: var(--accent-blue); }
+        .metric-card .value.purple { color: var(--accent-purple); }
+        .metric-card .value.orange { color: var(--accent-orange); }
+
+        /* ===== Tooltip floating ===== */
+        .float-tip {
+            position: absolute;
+            padding: 0.4rem 0.7rem;
+            background: rgba(15,52,96,0.95);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            font-size: 0.78rem;
+            color: var(--text-primary);
+            pointer-events: none;
+            z-index: 50;
+            white-space: nowrap;
+            display: none;
+            font-family: var(--font-mono);
+        }
+
+        /* ===== Stage detail panel ===== */
+        .stage-detail {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1.25rem;
+            margin-top: 1rem;
+            min-height: 100px;
+        }
+        .stage-detail h4 {
+            margin-bottom: 0.5rem;
+        }
+        .stage-detail ul {
+            padding-left: 1.2rem;
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
+        .stage-detail ul li {
+            margin-bottom: 0.3rem;
+        }
+
+        /* ===== Instruction list editor ===== */
+        .inst-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.4rem;
+            margin-bottom: 0.75rem;
+        }
+        .inst-tag {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.3rem;
+            padding: 0.3rem 0.6rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            color: var(--text-primary);
+        }
+        .inst-tag .remove-inst {
+            cursor: pointer;
+            color: var(--text-muted);
+            font-size: 0.9rem;
+            line-height: 1;
+        }
+        .inst-tag .remove-inst:hover { color: var(--accent-red); }
+
+        /* ===== S5 datapath ===== */
+        .reg-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-family: var(--font-mono);
+            font-size: 0.82rem;
+            margin-top: 0.75rem;
+        }
+        .reg-table th, .reg-table td {
+            padding: 0.35rem 0.6rem;
+            border: 1px solid rgba(42,42,74,0.5);
+            text-align: center;
+        }
+        .reg-table th {
+            background: var(--bg-card);
+            color: var(--accent-green);
+            font-weight: 600;
+        }
+        .reg-table td.hl {
+            background: rgba(22,199,154,0.12);
+            color: var(--accent-green);
+            font-weight: 600;
+        }
+
+        /* ===== S6 challenge grid ===== */
+        .challenge-grid {
+            display: grid;
+            gap: 2px;
+            margin: 1rem 0;
+            user-select: none;
+        }
+        .challenge-cell {
+            width: 100%;
+            aspect-ratio: 2/1;
+            border: 1px solid var(--border-color);
+            border-radius: 3px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            cursor: pointer;
+            transition: all 0.15s;
+            background: transparent;
+            color: var(--text-muted);
+        }
+        .challenge-cell.filled {
+            font-weight: 600;
+        }
+        .challenge-cell:hover:not(.header-cell):not(.label-cell) {
+            border-color: var(--accent-green);
+            background: rgba(22,199,154,0.08);
+        }
+        .challenge-cell.header-cell {
+            background: var(--bg-card);
+            color: var(--text-secondary);
+            cursor: default;
+            font-weight: 600;
+        }
+        .challenge-cell.label-cell {
+            background: transparent;
+            color: var(--text-secondary);
+            cursor: default;
+            font-size: 0.7rem;
+            justify-content: flex-end;
+            padding-right: 0.3rem;
+        }
+        .challenge-cell.correct {
+            border-color: var(--accent-green);
+            background: rgba(22,199,154,0.15);
+        }
+        .challenge-cell.wrong {
+            border-color: var(--accent-red);
+            background: rgba(255,82,82,0.15);
+        }
+
+        /* ===== Score banner ===== */
+        .score-banner {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            padding: 0.75rem 1rem;
+            border-radius: var(--radius-md);
+            border: 1px solid var(--border-color);
+            margin-top: 1rem;
+        }
+        .score-banner.pass {
+            border-color: var(--accent-green);
+            background: rgba(22,199,154,0.08);
+        }
+        .score-banner.fail {
+            border-color: var(--accent-orange);
+            background: rgba(255,171,64,0.08);
+        }
+
+        /* ===== Formula block ===== */
+        .formula-block {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1rem 1.25rem;
+            margin: 1rem 0;
+            overflow-x: auto;
+        }
+
+        /* ===== Two-col layout ===== */
+        .two-col {
+            display: grid;
+            grid-template-columns: 1fr 1.2fr;
+            gap: 1.5rem;
+            align-items: start;
+        }
+        @media (max-width: 900px) {
+            .two-col { grid-template-columns: 1fr; }
+        }
+
+        /* ===== Difficulty selector ===== */
+        .diff-tabs {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+        }
+        .diff-tab {
+            padding: 0.35rem 0.8rem;
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border-color);
+            background: transparent;
+            color: var(--text-secondary);
+            font-family: inherit;
+            font-size: 0.85rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .diff-tab.active {
+            background: rgba(22,199,154,0.15);
+            border-color: var(--accent-green);
+            color: var(--accent-green);
+        }
+        .diff-tab:hover:not(.active) {
+            border-color: var(--text-muted);
+        }
+
+        /* ===== Responsive ===== */
+        @media (max-width: 768px) {
+            .hero h1 { font-size: 1.8rem; }
+            .sec-inner { padding: 0 1rem; }
+            .metric-row { gap: 0.5rem; }
+            .metric-card { min-width: 90px; padding: 0.4rem 0.6rem; }
+        }
+    </style>
+</head>
+<body>
+<!-- nav.js auto-injects navigation -->
+
+<div class="page-container">
+    <div class="hero">
+        <h1>流水线 Pipeline</h1>
+        <p class="subtitle">
+            流水线是现代处理器提升吞吐量的核心技术。将指令执行分解为多个阶段，
+            让不同指令的不同阶段同时进行，从而大幅提高处理器的指令吞吐率。
+        </p>
+    </div>
+</div>
+
+<!-- ============================================================
+     SECTION 1: 洗衣房类比
+     ============================================================ -->
+<div class="sec" id="s1">
+    <div class="sec-inner">
+        <div class="sec-header">
+            <div class="num">1</div>
+            <h2>洗衣房类比</h2>
+        </div>
+        <p class="desc-text">
+            想象一个洗衣房有四个步骤：洗涤、烘干、折叠、存放。
+            如果按顺序处理每一批衣物，必须等一批全部完成才能开始下一批。
+            但如果采用流水线方式，当第一批进入烘干时，第二批就可以开始洗涤——这就是流水线的核心思想。
+        </p>
+        <div class="controls-row">
+            <div class="btn-group">
+                <button class="btn active" id="btn-seq" onclick="S1.setMode('seq')">顺序模式</button>
+                <button class="btn" id="btn-pipe" onclick="S1.setMode('pipe')">流水线模式</button>
+            </div>
+            <button class="btn btn-primary" onclick="S1.play()">播放动画</button>
+            <button class="btn" onclick="S1.reset()">重置</button>
+        </div>
+        <div class="canvas-wrap">
+            <canvas id="c1"></canvas>
+            <div class="float-tip" id="tip1"></div>
+        </div>
+        <div class="metric-row" id="m1">
+            <div class="metric-card"><div class="label">衣物批次</div><div class="value" id="m1-n">4</div></div>
+            <div class="metric-card"><div class="label">顺序总时间</div><div class="value blue" id="m1-seq">16</div></div>
+            <div class="metric-card"><div class="label">流水线总时间</div><div class="value purple" id="m1-pipe">7</div></div>
+            <div class="metric-card"><div class="label">加速比</div><div class="value orange" id="m1-speedup">2.29x</div></div>
+        </div>
+    </div>
+</div>
+
+<!-- ============================================================
+     SECTION 2: 五级流水线结构
+     ============================================================ -->
+<div class="sec" id="s2">
+    <div class="sec-inner">
+        <div class="sec-header">
+            <div class="num">2</div>
+            <h2>五级流水线结构</h2>
+        </div>
+        <p class="desc-text">
+            经典 RISC 处理器采用五级流水线：取指 (IF)、译码 (ID)、执行 (EX)、访存 (MEM)、写回 (WB)。
+            每级之间有流水线寄存器保存中间结果。点击各阶段查看详细说明。
+        </p>
+        <div class="controls-row">
+            <button class="btn btn-primary" onclick="S2.animate()">演示数据流动</button>
+            <button class="btn" onclick="S2.reset()">重置</button>
+            <span class="text-sm text-muted" style="margin-left:0.5rem;">点击各阶段查看说明</span>
+        </div>
+        <div class="canvas-wrap">
+            <canvas id="c2"></canvas>
+        </div>
+        <div class="stage-detail" id="s2-detail">
+            <h4>点击上方流水线的任意阶段</h4>
+            <p style="color:var(--text-muted);font-size:0.9rem;">将显示该阶段的详细工作内容、涉及硬件和信号。</p>
+        </div>
+    </div>
+</div>
+
+<!-- ============================================================
+     SECTION 3: 流水线时序图
+     ============================================================ -->
+<div class="sec" id="s3">
+    <div class="sec-inner">
+        <div class="sec-header">
+            <div class="num">3</div>
+            <h2>流水线时序图</h2>
+        </div>
+        <p class="desc-text">
+            时序图展示了多条指令在流水线中的执行过程。每一行代表一条指令，每一列代表一个时钟周期。
+            可以添加或删除指令，观察时序图如何变化。
+        </p>
+        <div class="controls-row">
+            <button class="btn btn-primary" onclick="S3.addInst()">+ 添加指令</button>
+            <button class="btn" onclick="S3.removeInst()">- 删除指令</button>
+            <button class="btn" onclick="S3.resetInsts()">重置</button>
+        </div>
+        <div class="inst-list" id="s3-insts"></div>
+        <div class="canvas-wrap" style="position:relative;">
+            <canvas id="c3"></canvas>
+            <div class="float-tip" id="tip3"></div>
+        </div>
+        <div class="metric-row" id="m3">
+            <div class="metric-card"><div class="label">指令数</div><div class="value" id="m3-n">4</div></div>
+            <div class="metric-card"><div class="label">总周期</div><div class="value blue" id="m3-cycles">8</div></div>
+            <div class="metric-card"><div class="label">吞吐量 (IPC)</div><div class="value purple" id="m3-ipc">0.50</div></div>
+            <div class="metric-card"><div class="label">加速比</div><div class="value orange" id="m3-speedup">2.50x</div></div>
+        </div>
+        <div class="legend" style="margin-top:0.75rem;">
+            <div class="legend-item"><div class="swatch" style="background:#4fc3f7;"></div>IF 取指</div>
+            <div class="legend-item"><div class="swatch" style="background:#b388ff;"></div>ID 译码</div>
+            <div class="legend-item"><div class="swatch" style="background:#16c79a;"></div>EX 执行</div>
+            <div class="legend-item"><div class="swatch" style="background:#ffab40;"></div>MEM 访存</div>
+            <div class="legend-item"><div class="swatch" style="background:#ff80ab;"></div>WB 写回</div>
+        </div>
+    </div>
+</div>
+
+<!-- ============================================================
+     SECTION 4: 吞吐量与延迟
+     ============================================================ -->
+<div class="sec" id="s4">
+    <div class="sec-inner">
+        <div class="sec-header">
+            <div class="num">4</div>
+            <h2>吞吐量与延迟</h2>
+        </div>
+        <p class="desc-text">
+            流水线不会减少单条指令的执行延迟，但能显著提高指令吞吐量。
+            当指令数量趋于无穷大时，加速比趋近于流水线级数（理想情况下为 5）。
+        </p>
+        <div class="two-col">
+            <div>
+                <div class="slider-group" style="margin-bottom:1rem;">
+                    <label>指令数量 (n):</label>
+                    <input type="range" min="1" max="20" value="5" id="s4-slider" oninput="S4.update()">
+                    <span class="slider-value" id="s4-nval">5</span>
+                </div>
+                <div class="formula-block" id="s4-formulas">
+                </div>
+                <div class="metric-row" id="m4">
+                    <div class="metric-card"><div class="label">顺序周期</div><div class="value blue" id="m4-seq">25</div></div>
+                    <div class="metric-card"><div class="label">流水线周期</div><div class="value purple" id="m4-pipe">9</div></div>
+                    <div class="metric-card"><div class="label">IPC</div><div class="value" id="m4-ipc">0.56</div></div>
+                    <div class="metric-card"><div class="label">加速比</div><div class="value orange" id="m4-speedup">2.78x</div></div>
+                </div>
+                <div class="info-box" style="margin-top:1rem;">
+                    <p>当 <code>n → ∞</code> 时，加速比 → <strong>k</strong> (流水线级数)。对于五级流水线，理论最大加速比为 <strong>5x</strong>。</p>
+                </div>
+            </div>
+            <div>
+                <div class="canvas-wrap">
+                    <canvas id="c4"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ============================================================
+     SECTION 5: 流水线数据通路详解
+     ============================================================ -->
+<div class="sec" id="s5">
+    <div class="sec-inner">
+        <div class="sec-header">
+            <div class="num">5</div>
+            <h2>流水线数据通路详解</h2>
+        </div>
+        <p class="desc-text">
+            详细展示五级流水线的完整数据通路，包括所有多路选择器 (MUX)、控制信号、流水线寄存器的数据内容。
+            逐时钟周期观察 <code>add x1, x2, x3</code> 如何通过流水线的每个阶段。
+        </p>
+        <div class="controls-row">
+            <button class="btn" onclick="S5.prevCycle()">上一周期</button>
+            <button class="btn btn-primary" onclick="S5.nextCycle()">下一周期</button>
+            <button class="btn" onclick="S5.resetCycle()">重置</button>
+            <span class="badge badge-green" id="s5-cycle-badge">周期 0 / 5</span>
+            <span class="text-sm text-muted" style="margin-left:0.5rem;">指令: <code>add x1, x2, x3</code></span>
+        </div>
+        <div class="canvas-wrap">
+            <canvas id="c5"></canvas>
+        </div>
+        <div class="two-col" style="margin-top:1rem;">
+            <div>
+                <h4 style="margin-bottom:0.5rem;">流水线寄存器内容</h4>
+                <table class="reg-table" id="s5-regs">
+                    <thead>
+                        <tr><th>寄存器</th><th>字段</th><th>值</th></tr>
+                    </thead>
+                    <tbody id="s5-regs-body">
+                        <tr><td colspan="3" style="color:var(--text-muted);">按"下一周期"开始执行</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div>
+                <h4 style="margin-bottom:0.5rem;">控制信号</h4>
+                <table class="reg-table" id="s5-ctrl">
+                    <thead>
+                        <tr><th>信号</th><th>值</th><th>说明</th></tr>
+                    </thead>
+                    <tbody id="s5-ctrl-body">
+                        <tr><td colspan="3" style="color:var(--text-muted);">等待指令进入流水线</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ============================================================
+     SECTION 6: 流水线设计挑战
+     ============================================================ -->
+<div class="sec" id="s6">
+    <div class="sec-inner">
+        <div class="sec-header">
+            <div class="num">6</div>
+            <h2>流水线设计挑战</h2>
+        </div>
+        <p class="desc-text">
+            来测试你的理解！给定一组指令，手动填写流水线时序图。
+            点击空白格子为其分配阶段，完成后检查正确性。
+        </p>
+        <div class="diff-tabs" id="s6-diff">
+            <button class="diff-tab active" onclick="S6.setDifficulty(0)">基础</button>
+            <button class="diff-tab" onclick="S6.setDifficulty(1)">进阶</button>
+            <button class="diff-tab" onclick="S6.setDifficulty(2)">挑战</button>
+        </div>
+        <div class="info-box" id="s6-desc">
+            <p>将下列指令填入时序图。点击格子循环切换阶段 (IF → ID → EX → MEM → WB → 清空)。</p>
+        </div>
+        <div class="inst-list" id="s6-insts"></div>
+        <div id="s6-grid-wrap" style="overflow-x:auto;"></div>
+        <div class="controls-row" style="margin-top:1rem;">
+            <button class="btn btn-primary" onclick="S6.check()">检查答案</button>
+            <button class="btn" onclick="S6.showAnswer()">显示正确答案</button>
+            <button class="btn" onclick="S6.resetGrid()">重置</button>
+        </div>
+        <div id="s6-feedback"></div>
+    </div>
+</div>
+
+<!-- ===== Footer ===== -->
+<footer style="text-align:center;padding:2rem;color:var(--text-muted);font-size:0.8rem;">
+    流水线 — 指令集与微架构 交互式学习
+</footer>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    /* Wait for ISAUtils to load */
+    const waitISA = setInterval(() => {
+        if (typeof ISAUtils !== 'undefined') {
+            clearInterval(waitISA);
+            initAll();
+        }
+    }, 50);
+});
+
+function initAll() {
+    const C = ISAUtils.COLORS;
+    const STAGES = ISAUtils.STAGES;
+    const SC = ISAUtils.STAGE_COLORS;
+
+    /* ======================================================================
+       SECTION 1: 洗衣房类比
+       ====================================================================== */
+    window.S1 = (() => {
+        const canvas = document.getElementById('c1');
+        let ctx, W, H;
+        let mode = 'seq'; // 'seq' or 'pipe'
+        let animProgress = 0;
+        let animId = null;
+        let playing = false;
+        const LOADS = 4;
+        const STEPS = ['洗涤', '烘干', '折叠', '存放'];
+        const STEP_COLORS = ['#4fc3f7', '#b388ff', '#16c79a', '#ffab40'];
+
+        function init() {
+            const r = ISAUtils.initCanvas(canvas, 340);
+            ctx = r.ctx; W = r.w; H = r.h;
+            draw();
+            updateMetrics();
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, W, H);
+            const leftPad = 80, topPad = 50;
+            const cellW = Math.min(60, (W - leftPad - 20) / (mode === 'seq' ? LOADS * STEPS.length : LOADS + STEPS.length - 1));
+            const cellH = 36;
+            const gap = 3;
+
+            /* Title */
+            ctx.font = 'bold 14px "Noto Sans SC", sans-serif';
+            ctx.fillStyle = C.textPri;
+            ctx.textAlign = 'left';
+            ctx.fillText(mode === 'seq' ? '顺序处理' : '流水线处理', leftPad, 25);
+
+            /* Time axis */
+            const totalSlots = mode === 'seq' ? LOADS * STEPS.length : LOADS + STEPS.length - 1;
+            ctx.font = '11px "JetBrains Mono", monospace';
+            ctx.fillStyle = C.textMut;
+            ctx.textAlign = 'center';
+            for (let t = 0; t < totalSlots; t++) {
+                ctx.fillText(String(t + 1), leftPad + t * (cellW + gap) + cellW / 2, topPad - 8);
+            }
+            ctx.fillStyle = C.textSec;
+            ctx.font = '10px "Noto Sans SC", sans-serif';
+            ctx.fillText('时间单位 →', leftPad + totalSlots * (cellW + gap) / 2, topPad - 25);
+
+            /* Row labels */
+            ctx.textAlign = 'right';
+            ctx.font = '12px "Noto Sans SC", sans-serif';
+            for (let i = 0; i < LOADS; i++) {
+                ctx.fillStyle = C.textSec;
+                ctx.fillText(`批次 ${i + 1}`, leftPad - 10, topPad + i * (cellH + gap + 8) + cellH / 2 + 4);
+            }
+
+            /* Draw cells */
+            for (let i = 0; i < LOADS; i++) {
+                for (let s = 0; s < STEPS.length; s++) {
+                    let t;
+                    if (mode === 'seq') {
+                        t = i * STEPS.length + s;
+                    } else {
+                        t = i + s;
+                    }
+                    const x = leftPad + t * (cellW + gap);
+                    const y = topPad + i * (cellH + gap + 8);
+
+                    /* Check animation progress */
+                    const cellIdx = (mode === 'seq') ? (i * STEPS.length + s) : (i + s);
+                    const visible = cellIdx < animProgress;
+
+                    if (visible) {
+                        const alpha = Math.min(1, animProgress - cellIdx);
+                        ctx.globalAlpha = alpha;
+                        ctx.fillStyle = ISAUtils.hexToRgba(STEP_COLORS[s], 0.2);
+                        ctx.strokeStyle = STEP_COLORS[s];
+                        ctx.lineWidth = 1.5;
+                        ctx.beginPath();
+                        ctx.roundRect(x, y, cellW, cellH, 4);
+                        ctx.fill();
+                        ctx.stroke();
+
+                        ctx.fillStyle = STEP_COLORS[s];
+                        ctx.font = `bold ${Math.min(11, cellW * 0.2)}px "Noto Sans SC", sans-serif`;
+                        ctx.textAlign = 'center';
+                        ctx.textBaseline = 'middle';
+                        ctx.fillText(STEPS[s], x + cellW / 2, y + cellH / 2);
+                        ctx.globalAlpha = 1;
+                    } else {
+                        ctx.strokeStyle = ISAUtils.hexToRgba(C.border, 0.5);
+                        ctx.lineWidth = 1;
+                        ctx.beginPath();
+                        ctx.roundRect(x, y, cellW, cellH, 4);
+                        ctx.stroke();
+                    }
+                }
+            }
+            ctx.textBaseline = 'alphabetic';
+        }
+
+        function setMode(m) {
+            mode = m;
+            document.getElementById('btn-seq').classList.toggle('active', m === 'seq');
+            document.getElementById('btn-pipe').classList.toggle('active', m === 'pipe');
+            animProgress = 0;
+            if (animId) { cancelAnimationFrame(animId); animId = null; playing = false; }
+            const r = ISAUtils.initCanvas(canvas, 340);
+            ctx = r.ctx; W = r.w; H = r.h;
+            draw();
+            updateMetrics();
+        }
+
+        function play() {
+            if (playing) return;
+            playing = true;
+            animProgress = 0;
+            const totalSlots = mode === 'seq' ? LOADS * STEPS.length : LOADS + STEPS.length - 1;
+            const speed = 0.06;
+            function step() {
+                animProgress += speed;
+                const r = ISAUtils.initCanvas(canvas, 340);
+                ctx = r.ctx; W = r.w; H = r.h;
+                draw();
+                if (animProgress < totalSlots + 1) {
+                    animId = requestAnimationFrame(step);
+                } else {
+                    playing = false;
+                    animId = null;
+                }
+            }
+            animId = requestAnimationFrame(step);
+        }
+
+        function reset() {
+            if (animId) { cancelAnimationFrame(animId); animId = null; }
+            playing = false;
+            animProgress = 0;
+            const r = ISAUtils.initCanvas(canvas, 340);
+            ctx = r.ctx; W = r.w; H = r.h;
+            draw();
+        }
+
+        function updateMetrics() {
+            const n = LOADS;
+            const k = STEPS.length;
+            const seqTime = n * k;
+            const pipeTime = k + (n - 1);
+            const speedup = seqTime / pipeTime;
+            document.getElementById('m1-n').textContent = n;
+            document.getElementById('m1-seq').textContent = seqTime;
+            document.getElementById('m1-pipe').textContent = pipeTime;
+            document.getElementById('m1-speedup').textContent = speedup.toFixed(2) + 'x';
+        }
+
+        return { init, setMode, play, reset };
+    })();
+
+    /* ======================================================================
+       SECTION 2: 五级流水线结构
+       ====================================================================== */
+    window.S2 = (() => {
+        const canvas = document.getElementById('c2');
+        let ctx, W, H;
+        let activeStage = -1;
+        let animPhase = -1;
+        let animTimer = null;
+
+        const stageNames = ['取指 (IF)', '译码 (ID)', '执行 (EX)', '访存 (MEM)', '写回 (WB)'];
+        const stageHW = [
+            ['PC', '指令存储器', '+4 加法器'],
+            ['寄存器文件', '符号扩展', '控制单元'],
+            ['ALU', 'ALU 控制', '操作数选择 MUX'],
+            ['数据存储器', '地址计算'],
+            ['写回 MUX', '寄存器文件写端口']
+        ];
+        const pipeRegs = ['IF/ID', 'ID/EX', 'EX/MEM', 'MEM/WB'];
+        const stageDetails = [
+            {
+                title: '取指阶段 (IF — Instruction Fetch)',
+                items: [
+                    'PC 提供当前指令地址',
+                    '从指令存储器中读取 32 位指令',
+                    'PC + 4 计算下一条指令地址',
+                    '将指令和 PC+4 写入 IF/ID 流水线寄存器'
+                ]
+            },
+            {
+                title: '译码阶段 (ID — Instruction Decode)',
+                items: [
+                    '解析指令的操作码、功能码',
+                    '从寄存器文件读取源操作数 rs1, rs2',
+                    '符号扩展立即数字段',
+                    '控制单元生成各阶段控制信号',
+                    '将操作数和控制信号写入 ID/EX 流水线寄存器'
+                ]
+            },
+            {
+                title: '执行阶段 (EX — Execute)',
+                items: [
+                    'ALU 执行运算（加减、逻辑、比较、移位）',
+                    'MUX 选择 ALU 的第二个操作数（寄存器值或立即数）',
+                    '分支条件判断和目标地址计算',
+                    '将 ALU 结果写入 EX/MEM 流水线寄存器'
+                ]
+            },
+            {
+                title: '访存阶段 (MEM — Memory Access)',
+                items: [
+                    'Load 指令：从数据存储器读取数据',
+                    'Store 指令：将数据写入数据存储器',
+                    '非访存指令：直接传递 ALU 结果',
+                    '将结果写入 MEM/WB 流水线寄存器'
+                ]
+            },
+            {
+                title: '写回阶段 (WB — Write Back)',
+                items: [
+                    'MUX 选择写回数据（ALU 结果或存储器数据）',
+                    '将结果写回寄存器文件的目标寄存器 rd',
+                    '至此一条指令完成执行'
+                ]
+            }
+        ];
+
+        /* Stage box positions (for click detection) */
+        let stageBoxes = [];
+
+        function init() {
+            const r = ISAUtils.initCanvas(canvas, 320);
+            ctx = r.ctx; W = r.w; H = r.h;
+            draw();
+
+            canvas.addEventListener('click', (e) => {
+                const rect = canvas.getBoundingClientRect();
+                const mx = e.clientX - rect.left;
+                const my = e.clientY - rect.top;
+                for (let i = 0; i < stageBoxes.length; i++) {
+                    const b = stageBoxes[i];
+                    if (mx >= b.x && mx <= b.x + b.w && my >= b.y && my <= b.y + b.h) {
+                        activeStage = i;
+                        draw();
+                        showDetail(i);
+                        return;
+                    }
+                }
+            });
+
+            canvas.style.cursor = 'pointer';
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, W, H);
+            const pad = 30;
+            const stageW = (W - pad * 2 - 4 * 30) / 5; // 30px gap for pipe regs
+            const stageH = 180;
+            const topY = 60;
+            const pipeRegW = 16;
+            stageBoxes = [];
+
+            /* Title labels */
+            ctx.font = '11px "Noto Sans SC", sans-serif';
+            ctx.textAlign = 'center';
+
+            for (let i = 0; i < 5; i++) {
+                const x = pad + i * (stageW + 30);
+                const y = topY;
+                const color = SC[i];
+
+                stageBoxes.push({ x, y, w: stageW, h: stageH });
+
+                /* Stage box */
+                const isActive = i === activeStage;
+                const isAnim = i === animPhase;
+                ctx.fillStyle = ISAUtils.hexToRgba(color, isActive ? 0.25 : (isAnim ? 0.3 : 0.1));
+                ctx.strokeStyle = isActive ? color : ISAUtils.hexToRgba(color, 0.6);
+                ctx.lineWidth = isActive ? 2.5 : 1.5;
+                ctx.beginPath();
+                ctx.roundRect(x, y, stageW, stageH, 8);
+                ctx.fill();
+                ctx.stroke();
+
+                /* Glow effect on active/anim */
+                if (isActive || isAnim) {
+                    ctx.save();
+                    ctx.shadowColor = color;
+                    ctx.shadowBlur = 15;
+                    ctx.strokeStyle = color;
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.roundRect(x, y, stageW, stageH, 8);
+                    ctx.stroke();
+                    ctx.restore();
+                }
+
+                /* Stage name */
+                ctx.fillStyle = color;
+                ctx.font = 'bold 13px "Noto Sans SC", sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText(stageNames[i], x + stageW / 2, y + 24);
+
+                /* Hardware blocks inside stage */
+                ctx.font = '10px "Noto Sans SC", sans-serif';
+                ctx.fillStyle = C.textSec;
+                const hw = stageHW[i];
+                for (let j = 0; j < hw.length; j++) {
+                    const bx = x + 10;
+                    const by = y + 44 + j * 38;
+                    const bw = stageW - 20;
+                    const bh = 30;
+                    ctx.fillStyle = ISAUtils.hexToRgba(color, 0.08);
+                    ctx.strokeStyle = ISAUtils.hexToRgba(color, 0.3);
+                    ctx.lineWidth = 1;
+                    ctx.beginPath();
+                    ctx.roundRect(bx, by, bw, bh, 4);
+                    ctx.fill();
+                    ctx.stroke();
+                    ctx.fillStyle = C.textSec;
+                    ctx.textAlign = 'center';
+                    ctx.fillText(hw[j], bx + bw / 2, by + bh / 2 + 4);
+                }
+
+                /* STAGES label at top */
+                ctx.fillStyle = color;
+                ctx.font = 'bold 12px "JetBrains Mono", monospace';
+                ctx.textAlign = 'center';
+                ctx.fillText(STAGES[i], x + stageW / 2, y - 10);
+            }
+
+            /* Pipeline registers between stages */
+            ctx.font = 'bold 9px "JetBrains Mono", monospace';
+            for (let i = 0; i < 4; i++) {
+                const x = pad + (i + 1) * stageW + i * 30 + (stageW * 0) + 7;
+                const rx = x + stageW * 0;
+                const rMid = pad + (i + 1) * (stageW + 30) - 15;
+                ctx.fillStyle = ISAUtils.hexToRgba(C.yellow, 0.15);
+                ctx.strokeStyle = ISAUtils.hexToRgba(C.yellow, 0.6);
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.roundRect(rMid, topY + 10, pipeRegW, stageH - 20, 3);
+                ctx.fill();
+                ctx.stroke();
+
+                ctx.save();
+                ctx.translate(rMid + pipeRegW / 2, topY + stageH / 2);
+                ctx.rotate(-Math.PI / 2);
+                ctx.fillStyle = C.yellow;
+                ctx.textAlign = 'center';
+                ctx.fillText(pipeRegs[i], 0, 3);
+                ctx.restore();
+            }
+
+            /* Arrows connecting stages */
+            for (let i = 0; i < 4; i++) {
+                const fromX = pad + i * (stageW + 30) + stageW;
+                const toX = pad + (i + 1) * (stageW + 30);
+                const midY = topY + stageH / 2;
+                const arrColor = (animPhase >= 0 && i < animPhase) ? SC[i] : ISAUtils.hexToRgba(C.textMut, 0.4);
+                ISAUtils.drawArrow(ctx, fromX + 2, midY, toX - 2, midY, arrColor, { headLen: 6, width: 1.5 });
+            }
+        }
+
+        function showDetail(idx) {
+            const det = stageDetails[idx];
+            const el = document.getElementById('s2-detail');
+            el.innerHTML = `
+                <h4 style="color:${SC[idx]}">${det.title}</h4>
+                <ul>${det.items.map(it => `<li>${it}</li>`).join('')}</ul>
+            `;
+        }
+
+        function animate() {
+            if (animTimer) { clearInterval(animTimer); }
+            animPhase = -1;
+            let step = 0;
+            animTimer = setInterval(() => {
+                animPhase = step;
+                const r = ISAUtils.initCanvas(canvas, 320);
+                ctx = r.ctx; W = r.w; H = r.h;
+                draw();
+                step++;
+                if (step > 5) {
+                    clearInterval(animTimer);
+                    animTimer = null;
+                    animPhase = -1;
+                    const r2 = ISAUtils.initCanvas(canvas, 320);
+                    ctx = r2.ctx; W = r2.w; H = r2.h;
+                    draw();
+                }
+            }, 700);
+        }
+
+        function reset() {
+            if (animTimer) { clearInterval(animTimer); animTimer = null; }
+            activeStage = -1;
+            animPhase = -1;
+            const r = ISAUtils.initCanvas(canvas, 320);
+            ctx = r.ctx; W = r.w; H = r.h;
+            draw();
+            document.getElementById('s2-detail').innerHTML = `
+                <h4>点击上方流水线的任意阶段</h4>
+                <p style="color:var(--text-muted);font-size:0.9rem;">将显示该阶段的详细工作内容、涉及硬件和信号。</p>`;
+        }
+
+        return { init, animate, reset };
+    })();
+
+    /* ======================================================================
+       SECTION 3: 流水线时序图
+       ====================================================================== */
+    window.S3 = (() => {
+        const canvas = document.getElementById('c3');
+        const tip = document.getElementById('tip3');
+        let ctx, W, H;
+        const sampleInsts = [
+            'add x1, x2, x3',
+            'sub x4, x1, x5',
+            'and x6, x7, x8',
+            'or  x9, x10, x11',
+            'lw  x12, 0(x13)',
+            'sw  x14, 4(x15)',
+            'addi x16, x17, 10',
+            'xor x18, x19, x20'
+        ];
+        let instructions = sampleInsts.slice(0, 4);
+        let grid = null;
+
+        function init() {
+            rebuildGrid();
+            drawAll();
+            renderInstList();
+
+            canvas.addEventListener('mousemove', (e) => {
+                if (!grid) return;
+                const rect = canvas.getBoundingClientRect();
+                const mx = e.clientX - rect.left;
+                const my = e.clientY - rect.top;
+                const info = hitTest(mx, my);
+                if (info) {
+                    tip.style.display = 'block';
+                    tip.textContent = `${instructions[info.inst]} — ${stageNamesCN[info.stage]}`;
+                    tip.style.left = (e.clientX - canvas.parentElement.getBoundingClientRect().left + 10) + 'px';
+                    tip.style.top = (e.clientY - canvas.parentElement.getBoundingClientRect().top - 30) + 'px';
+                } else {
+                    tip.style.display = 'none';
+                }
+            });
+            canvas.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
+        }
+
+        const stageNamesCN = ['取指 (IF)', '译码 (ID)', '执行 (EX)', '访存 (MEM)', '写回 (WB)'];
+        let cellPositions = [];
+
+        function hitTest(mx, my) {
+            for (const cp of cellPositions) {
+                if (mx >= cp.x && mx <= cp.x + cp.w && my >= cp.y && my <= cp.y + cp.h) {
+                    return { inst: cp.inst, stage: cp.stage };
+                }
+            }
+            return null;
+        }
+
+        function rebuildGrid() {
+            grid = ISAUtils.createPipeline(instructions);
+        }
+
+        function drawAll() {
+            const totalCycles = grid.length;
+            const canvasH = Math.max(300, 60 + instructions.length * 40 + 40);
+            const r = ISAUtils.initCanvas(canvas, canvasH);
+            ctx = r.ctx; W = r.w; H = r.h;
+            cellPositions = [];
+
+            const leftPad = 140, topPad = 40;
+            const cellW = Math.min(55, (W - leftPad - 20) / totalCycles);
+            const cellH = 30;
+            const rowGap = 8;
+
+            /* Column headers (cycles) */
+            ctx.font = '10px "JetBrains Mono", monospace';
+            ctx.fillStyle = C.textMut;
+            ctx.textAlign = 'center';
+            for (let c = 0; c < totalCycles; c++) {
+                ctx.fillText(`CC${c + 1}`, leftPad + c * (cellW + 2) + cellW / 2, topPad - 8);
+            }
+
+            /* Row labels (instructions) */
+            ctx.textAlign = 'right';
+            ctx.font = '11px "JetBrains Mono", monospace';
+            for (let i = 0; i < instructions.length; i++) {
+                ctx.fillStyle = C.textSec;
+                const label = instructions[i].length > 16 ? instructions[i].substring(0, 16) + '...' : instructions[i];
+                ctx.fillText(label, leftPad - 10, topPad + i * (cellH + rowGap) + cellH / 2 + 4);
+            }
+
+            /* Draw grid cells */
+            for (let c = 0; c < totalCycles; c++) {
+                for (let i = 0; i < instructions.length; i++) {
+                    /* Find which stage instruction i is in at cycle c */
+                    let stageIdx = -1;
+                    for (let s = 0; s < 5; s++) {
+                        if (c < grid.length && grid[c][s] === i) {
+                            stageIdx = s;
+                            break;
+                        }
+                    }
+
+                    const x = leftPad + c * (cellW + 2);
+                    const y = topPad + i * (cellH + rowGap);
+
+                    if (stageIdx >= 0) {
+                        cellPositions.push({ x, y, w: cellW, h: cellH, inst: i, stage: stageIdx });
+                        ISAUtils.drawPipelineStage(ctx, x, y, cellW, cellH, stageIdx);
+                    }
+                }
+            }
+
+            updateMetrics3();
+        }
+
+        function updateMetrics3() {
+            const n = instructions.length;
+            const totalCycles = grid.length;
+            const seqCycles = n * 5;
+            const ipc = n / totalCycles;
+            const speedup = seqCycles / totalCycles;
+            document.getElementById('m3-n').textContent = n;
+            document.getElementById('m3-cycles').textContent = totalCycles;
+            document.getElementById('m3-ipc').textContent = ipc.toFixed(2);
+            document.getElementById('m3-speedup').textContent = speedup.toFixed(2) + 'x';
+        }
+
+        function renderInstList() {
+            const el = document.getElementById('s3-insts');
+            el.innerHTML = instructions.map((inst, i) => `
+                <div class="inst-tag">
+                    <span style="color:${SC[i % 5]}">${inst}</span>
+                    <span class="remove-inst" onclick="S3.removeSpecific(${i})">×</span>
+                </div>
+            `).join('');
+        }
+
+        function addInst() {
+            if (instructions.length >= 8) return;
+            instructions.push(sampleInsts[instructions.length % sampleInsts.length]);
+            rebuildGrid();
+            drawAll();
+            renderInstList();
+        }
+
+        function removeInst() {
+            if (instructions.length <= 1) return;
+            instructions.pop();
+            rebuildGrid();
+            drawAll();
+            renderInstList();
+        }
+
+        function removeSpecific(idx) {
+            if (instructions.length <= 1) return;
+            instructions.splice(idx, 1);
+            rebuildGrid();
+            drawAll();
+            renderInstList();
+        }
+
+        function resetInsts() {
+            instructions = sampleInsts.slice(0, 4);
+            rebuildGrid();
+            drawAll();
+            renderInstList();
+        }
+
+        return { init, addInst, removeInst, removeSpecific, resetInsts };
+    })();
+
+    /* ======================================================================
+       SECTION 4: 吞吐量与延迟
+       ====================================================================== */
+    window.S4 = (() => {
+        const canvas = document.getElementById('c4');
+        let ctx, W, H;
+        const k = 5; // pipeline stages
+
+        function init() {
+            renderFormulas();
+            update();
+        }
+
+        function renderFormulas() {
+            const el = document.getElementById('s4-formulas');
+            el.innerHTML = `
+                <div style="margin-bottom:0.6rem;" id="f4-1"></div>
+                <div style="margin-bottom:0.6rem;" id="f4-2"></div>
+                <div id="f4-3"></div>
+            `;
+            /* Render after KaTeX loads */
+            const wait = setInterval(() => {
+                if (typeof katex !== 'undefined') {
+                    clearInterval(wait);
+                    katex.render('T_{\\text{seq}} = n \\times k', document.getElementById('f4-1'), { displayMode: true });
+                    katex.render('T_{\\text{pipe}} = k + (n - 1)', document.getElementById('f4-2'), { displayMode: true });
+                    katex.render('S = \\frac{T_{\\text{seq}}}{T_{\\text{pipe}}} = \\frac{n \\cdot k}{k + n - 1} \\xrightarrow{n \\to \\infty} k', document.getElementById('f4-3'), { displayMode: true });
+                }
+            }, 100);
+        }
+
+        function update() {
+            const n = parseInt(document.getElementById('s4-slider').value);
+            document.getElementById('s4-nval').textContent = n;
+
+            const seqCycles = n * k;
+            const pipeCycles = k + (n - 1);
+            const ipc = n / pipeCycles;
+            const speedup = seqCycles / pipeCycles;
+
+            document.getElementById('m4-seq').textContent = seqCycles;
+            document.getElementById('m4-pipe').textContent = pipeCycles;
+            document.getElementById('m4-ipc').textContent = ipc.toFixed(2);
+            document.getElementById('m4-speedup').textContent = speedup.toFixed(2) + 'x';
+
+            drawGraph(n);
+        }
+
+        function drawGraph(currentN) {
+            const r = ISAUtils.initCanvas(canvas, 360);
+            ctx = r.ctx; W = r.w; H = r.h;
+
+            const pad = { top: 40, right: 30, bottom: 50, left: 60 };
+            const gW = W - pad.left - pad.right;
+            const gH = H - pad.top - pad.bottom;
+
+            /* Axes */
+            ctx.strokeStyle = C.border;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(pad.left, pad.top);
+            ctx.lineTo(pad.left, pad.top + gH);
+            ctx.lineTo(pad.left + gW, pad.top + gH);
+            ctx.stroke();
+
+            /* Labels */
+            ctx.fillStyle = C.textSec;
+            ctx.font = '11px "Noto Sans SC", sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('指令数 (n)', pad.left + gW / 2, H - 8);
+            ctx.save();
+            ctx.translate(15, pad.top + gH / 2);
+            ctx.rotate(-Math.PI / 2);
+            ctx.fillText('周期数', 0, 0);
+            ctx.restore();
+
+            const maxN = 20;
+            const maxCycles = maxN * k;
+
+            /* Grid lines */
+            ctx.strokeStyle = ISAUtils.hexToRgba(C.border, 0.4);
+            ctx.lineWidth = 0.5;
+            for (let i = 0; i <= 4; i++) {
+                const y = pad.top + gH - (i / 4) * gH;
+                ctx.beginPath();
+                ctx.moveTo(pad.left, y);
+                ctx.lineTo(pad.left + gW, y);
+                ctx.stroke();
+                ctx.fillStyle = C.textMut;
+                ctx.font = '10px "JetBrains Mono", monospace';
+                ctx.textAlign = 'right';
+                ctx.fillText(String(Math.round(maxCycles * i / 4)), pad.left - 8, y + 3);
+            }
+
+            /* X axis ticks */
+            ctx.textAlign = 'center';
+            for (let n = 0; n <= maxN; n += 5) {
+                const x = pad.left + (n / maxN) * gW;
+                ctx.fillStyle = C.textMut;
+                ctx.fillText(String(n), x, pad.top + gH + 18);
+            }
+
+            function toX(n) { return pad.left + (n / maxN) * gW; }
+            function toY(c) { return pad.top + gH - (c / maxCycles) * gH; }
+
+            /* Sequential line */
+            ctx.strokeStyle = C.blue;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            for (let n = 1; n <= maxN; n++) {
+                const x = toX(n);
+                const y = toY(n * k);
+                if (n === 1) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+
+            /* Pipeline line */
+            ctx.strokeStyle = C.purple;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            for (let n = 1; n <= maxN; n++) {
+                const x = toX(n);
+                const y = toY(k + (n - 1));
+                if (n === 1) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+
+            /* Ideal line (slope 1 through origin, for reference) */
+            ctx.strokeStyle = ISAUtils.hexToRgba(C.green, 0.3);
+            ctx.lineWidth = 1;
+            ctx.setLineDash([4, 4]);
+            ctx.beginPath();
+            for (let n = 1; n <= maxN; n++) {
+                const x = toX(n);
+                const y = toY(n);
+                if (n === 1) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            /* Current N marker */
+            if (currentN >= 1 && currentN <= maxN) {
+                const sx = toX(currentN);
+                const seqY = toY(currentN * k);
+                const pipeY = toY(k + (currentN - 1));
+
+                /* Vertical dashed line */
+                ctx.strokeStyle = ISAUtils.hexToRgba(C.textMut, 0.5);
+                ctx.lineWidth = 1;
+                ctx.setLineDash([3, 3]);
+                ctx.beginPath();
+                ctx.moveTo(sx, seqY);
+                ctx.lineTo(sx, pad.top + gH);
+                ctx.stroke();
+                ctx.setLineDash([]);
+
+                /* Dots */
+                ctx.beginPath();
+                ctx.arc(sx, seqY, 5, 0, Math.PI * 2);
+                ctx.fillStyle = C.blue;
+                ctx.fill();
+
+                ctx.beginPath();
+                ctx.arc(sx, pipeY, 5, 0, Math.PI * 2);
+                ctx.fillStyle = C.purple;
+                ctx.fill();
+
+                /* Gap annotation */
+                const midY = (seqY + pipeY) / 2;
+                const gap = currentN * k - (k + (currentN - 1));
+                ctx.fillStyle = C.orange;
+                ctx.font = 'bold 11px "JetBrains Mono", monospace';
+                ctx.textAlign = 'left';
+                ctx.fillText(`节省 ${gap} 周期`, sx + 8, midY);
+
+                /* Arrow showing gap */
+                ISAUtils.drawArrow(ctx, sx + 2, seqY + 6, sx + 2, pipeY - 6, C.orange, { headLen: 5, width: 1 });
+            }
+
+            /* Legend */
+            const lx = pad.left + 15, ly = pad.top + 10;
+            ctx.font = '11px "Noto Sans SC", sans-serif';
+            [
+                { color: C.blue, label: '顺序执行 (n × 5)' },
+                { color: C.purple, label: '流水线 (5 + n - 1)' },
+                { color: ISAUtils.hexToRgba(C.green, 0.5), label: '理想 (n)' },
+            ].forEach((item, i) => {
+                ctx.strokeStyle = item.color;
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(lx, ly + i * 20);
+                ctx.lineTo(lx + 20, ly + i * 20);
+                ctx.stroke();
+                ctx.fillStyle = C.textSec;
+                ctx.textAlign = 'left';
+                ctx.fillText(item.label, lx + 28, ly + i * 20 + 4);
+            });
+        }
+
+        return { init, update };
+    })();
+
+    /* ======================================================================
+       SECTION 5: 流水线数据通路详解
+       ====================================================================== */
+    window.S5 = (() => {
+        const canvas = document.getElementById('c5');
+        let ctx, W, H;
+        let cycle = 0;
+        const totalCycles = 5;
+
+        /* Simulated data for add x1, x2, x3 */
+        /* x2 = 7, x3 = 5 → x1 = 12 */
+        const regFile = { x0: 0, x1: 0, x2: 7, x3: 5 };
+        const instBits = '0000000_00011_00010_000_00001_0110011'; // R-type add
+
+        const cycleData = [
+            { /* Cycle 1: IF */
+                stage: 'IF',
+                highlight: 0,
+                regs: [
+                    { reg: 'PC', field: 'addr', val: '0x0000' },
+                    { reg: 'IF/ID', field: 'inst', val: '0x003100B3' },
+                    { reg: 'IF/ID', field: 'PC+4', val: '0x0004' },
+                ],
+                ctrl: [
+                    { sig: 'MemRead', val: '1', desc: '读指令存储器' },
+                    { sig: 'PCWrite', val: '1', desc: 'PC 更新为 PC+4' },
+                ],
+                desc: '从地址 0x0000 取出 add 指令，PC 更新为 0x0004'
+            },
+            { /* Cycle 2: ID */
+                stage: 'ID',
+                highlight: 1,
+                regs: [
+                    { reg: 'ID/EX', field: 'rs1 (x2)', val: '7' },
+                    { reg: 'ID/EX', field: 'rs2 (x3)', val: '5' },
+                    { reg: 'ID/EX', field: 'rd', val: 'x1' },
+                    { reg: 'ID/EX', field: 'funct', val: 'ADD' },
+                ],
+                ctrl: [
+                    { sig: 'RegRead', val: '1', desc: '读寄存器 x2, x3' },
+                    { sig: 'ALUOp', val: '10', desc: 'R-type 运算' },
+                    { sig: 'ALUSrc', val: '0', desc: '第二操作数来自寄存器' },
+                    { sig: 'RegWrite', val: '1', desc: '目标 rd=x1 将被写入' },
+                ],
+                desc: '读取 x2=7, x3=5，解析为 ADD 运算，生成控制信号'
+            },
+            { /* Cycle 3: EX */
+                stage: 'EX',
+                highlight: 2,
+                regs: [
+                    { reg: 'EX/MEM', field: 'ALU结果', val: '12' },
+                    { reg: 'EX/MEM', field: 'rd', val: 'x1' },
+                    { reg: 'EX/MEM', field: 'Zero', val: '0' },
+                ],
+                ctrl: [
+                    { sig: 'ALUOp', val: 'ADD', desc: '7 + 5 = 12' },
+                    { sig: 'MemWrite', val: '0', desc: '不写存储器' },
+                    { sig: 'MemRead', val: '0', desc: '不读存储器' },
+                ],
+                desc: 'ALU 计算 7 + 5 = 12，结果传入 EX/MEM 寄存器'
+            },
+            { /* Cycle 4: MEM */
+                stage: 'MEM',
+                highlight: 3,
+                regs: [
+                    { reg: 'MEM/WB', field: 'ALU结果', val: '12' },
+                    { reg: 'MEM/WB', field: 'rd', val: 'x1' },
+                ],
+                ctrl: [
+                    { sig: 'MemWrite', val: '0', desc: 'ADD 不访问存储器' },
+                    { sig: 'MemRead', val: '0', desc: '直接传递结果' },
+                    { sig: 'MemToReg', val: '0', desc: '选择 ALU 结果' },
+                ],
+                desc: 'ADD 指令不访问数据存储器，ALU 结果 12 直接传递'
+            },
+            { /* Cycle 5: WB */
+                stage: 'WB',
+                highlight: 4,
+                regs: [
+                    { reg: '寄存器文件', field: 'x1', val: '12 ← 写入' },
+                ],
+                ctrl: [
+                    { sig: 'RegWrite', val: '1', desc: '写回 x1 = 12' },
+                    { sig: 'MemToReg', val: '0', desc: '数据来自 ALU' },
+                ],
+                desc: '将结果 12 写回寄存器 x1，指令执行完毕'
+            }
+        ];
+
+        function init() {
+            drawDatapath();
+        }
+
+        function drawDatapath() {
+            const r = ISAUtils.initCanvas(canvas, 280);
+            ctx = r.ctx; W = r.w; H = r.h;
+
+            const pad = 25;
+            const stageW = (W - pad * 2 - 4 * 24) / 5;
+            const stageH = 200;
+            const topY = 40;
+            const pipeRegW = 12;
+
+            const stageNames = ['IF 取指', 'ID 译码', 'EX 执行', 'MEM 访存', 'WB 写回'];
+            const stageBlocks = [
+                [{ name: 'PC', h: 30 }, { name: '指令存储器', h: 55 }, { name: '+4', h: 25 }],
+                [{ name: '寄存器文件', h: 50 }, { name: '控制单元', h: 30 }, { name: '符号扩展', h: 25 }],
+                [{ name: 'MUX', h: 20 }, { name: 'ALU', h: 60 }, { name: 'ALU控制', h: 25 }],
+                [{ name: '数据存储器', h: 70 }, { name: 'MUX', h: 20 }],
+                [{ name: 'MUX', h: 25 }, { name: '→ 寄存器文件', h: 30 }]
+            ];
+
+            for (let i = 0; i < 5; i++) {
+                const x = pad + i * (stageW + 24);
+                const y = topY;
+                const color = SC[i];
+                const isActive = i === (cycle > 0 ? cycle - 1 : -1);
+
+                /* Stage background */
+                ctx.fillStyle = ISAUtils.hexToRgba(color, isActive ? 0.2 : 0.06);
+                ctx.strokeStyle = isActive ? color : ISAUtils.hexToRgba(color, 0.4);
+                ctx.lineWidth = isActive ? 2.5 : 1;
+                ctx.beginPath();
+                ctx.roundRect(x, y, stageW, stageH, 6);
+                ctx.fill();
+                ctx.stroke();
+
+                if (isActive) {
+                    ctx.save();
+                    ctx.shadowColor = color;
+                    ctx.shadowBlur = 12;
+                    ctx.strokeStyle = color;
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.roundRect(x, y, stageW, stageH, 6);
+                    ctx.stroke();
+                    ctx.restore();
+                }
+
+                /* Stage title */
+                ctx.fillStyle = color;
+                ctx.font = 'bold 11px "Noto Sans SC", sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText(stageNames[i], x + stageW / 2, y + 16);
+
+                /* Internal blocks */
+                let by = y + 28;
+                for (const block of stageBlocks[i]) {
+                    const bx = x + 6;
+                    const bw = stageW - 12;
+                    ctx.fillStyle = ISAUtils.hexToRgba(color, 0.1);
+                    ctx.strokeStyle = ISAUtils.hexToRgba(color, 0.3);
+                    ctx.lineWidth = 1;
+                    ctx.beginPath();
+                    ctx.roundRect(bx, by, bw, block.h, 3);
+                    ctx.fill();
+                    ctx.stroke();
+                    ctx.fillStyle = C.textSec;
+                    ctx.font = '9px "Noto Sans SC", sans-serif';
+                    ctx.textAlign = 'center';
+                    ctx.fillText(block.name, bx + bw / 2, by + block.h / 2 + 3);
+                    by += block.h + 5;
+                }
+            }
+
+            /* Pipeline registers */
+            const pipeRegNames = ['IF/ID', 'ID/EX', 'EX/MEM', 'MEM/WB'];
+            ctx.font = 'bold 8px "JetBrains Mono", monospace';
+            for (let i = 0; i < 4; i++) {
+                const rx = pad + (i + 1) * (stageW + 24) - 18;
+                const isHL = cycle > 0 && i === cycle - 1;
+                ctx.fillStyle = ISAUtils.hexToRgba(C.yellow, isHL ? 0.3 : 0.1);
+                ctx.strokeStyle = isHL ? C.yellow : ISAUtils.hexToRgba(C.yellow, 0.4);
+                ctx.lineWidth = isHL ? 2 : 1;
+                ctx.beginPath();
+                ctx.roundRect(rx, topY + 15, pipeRegW, stageH - 30, 3);
+                ctx.fill();
+                ctx.stroke();
+
+                ctx.save();
+                ctx.translate(rx + pipeRegW / 2, topY + stageH / 2);
+                ctx.rotate(-Math.PI / 2);
+                ctx.fillStyle = isHL ? C.yellow : ISAUtils.hexToRgba(C.yellow, 0.6);
+                ctx.textAlign = 'center';
+                ctx.fillText(pipeRegNames[i], 0, 3);
+                ctx.restore();
+            }
+
+            /* Connecting arrows */
+            for (let i = 0; i < 4; i++) {
+                const fromX = pad + i * (stageW + 24) + stageW;
+                const toX = pad + (i + 1) * (stageW + 24);
+                const midY = topY + stageH / 2;
+                const active = cycle > 0 && i < cycle;
+                ISAUtils.drawArrow(ctx, fromX + 2, midY, toX - 2, midY,
+                    active ? SC[i] : ISAUtils.hexToRgba(C.textMut, 0.3), { headLen: 5, width: 1.5 });
+            }
+
+            /* Cycle description */
+            if (cycle > 0) {
+                const data = cycleData[cycle - 1];
+                ctx.fillStyle = C.textSec;
+                ctx.font = '12px "Noto Sans SC", sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText(data.desc, W / 2, H - 10);
+            }
+        }
+
+        function updateTables() {
+            const badge = document.getElementById('s5-cycle-badge');
+            badge.textContent = `周期 ${cycle} / ${totalCycles}`;
+
+            const regsBody = document.getElementById('s5-regs-body');
+            const ctrlBody = document.getElementById('s5-ctrl-body');
+
+            if (cycle === 0) {
+                regsBody.innerHTML = '<tr><td colspan="3" style="color:var(--text-muted);">按"下一周期"开始执行</td></tr>';
+                ctrlBody.innerHTML = '<tr><td colspan="3" style="color:var(--text-muted);">等待指令进入流水线</td></tr>';
+                return;
+            }
+
+            const data = cycleData[cycle - 1];
+            regsBody.innerHTML = data.regs.map(r =>
+                `<tr><td>${r.reg}</td><td>${r.field}</td><td class="hl">${r.val}</td></tr>`
+            ).join('');
+            ctrlBody.innerHTML = data.ctrl.map(c =>
+                `<tr><td style="color:${SC[data.highlight]}">${c.sig}</td><td class="hl">${c.val}</td><td>${c.desc}</td></tr>`
+            ).join('');
+        }
+
+        function nextCycle() {
+            if (cycle < totalCycles) cycle++;
+            drawDatapath();
+            updateTables();
+        }
+
+        function prevCycle() {
+            if (cycle > 0) cycle--;
+            drawDatapath();
+            updateTables();
+        }
+
+        function resetCycle() {
+            cycle = 0;
+            drawDatapath();
+            updateTables();
+        }
+
+        return { init, nextCycle, prevCycle, resetCycle };
+    })();
+
+    /* ======================================================================
+       SECTION 6: 流水线设计挑战
+       ====================================================================== */
+    window.S6 = (() => {
+        let difficulty = 0;
+        const challenges = [
+            {
+                name: '基础',
+                desc: '3 条独立指令，无任何冒险，填写标准五级流水线时序。',
+                instructions: ['add x1, x2, x3', 'sub x4, x5, x6', 'and x7, x8, x9'],
+            },
+            {
+                name: '进阶',
+                desc: '4 条指令，仍无冒险，但需要正确处理更多的流水线阶段重叠。',
+                instructions: ['add x1, x2, x3', 'sub x4, x5, x6', 'or x7, x8, x9', 'xor x10, x11, x12'],
+            },
+            {
+                name: '挑战',
+                desc: '5 条指令！注意每条指令的各阶段必须在正确的时钟周期内。',
+                instructions: ['add x1, x2, x3', 'sub x4, x5, x6', 'and x7, x8, x9', 'or x10, x11, x12', 'slt x13, x14, x15'],
+            }
+        ];
+        let userGrid = []; // userGrid[instIdx][cycleIdx] = stageIdx or -1
+        let correctGrid = [];
+        let totalCols = 0;
+
+        function init() {
+            setDifficulty(0);
+        }
+
+        function setDifficulty(d) {
+            difficulty = d;
+            document.querySelectorAll('#s6-diff .diff-tab').forEach((el, i) => {
+                el.classList.toggle('active', i === d);
+            });
+            const ch = challenges[d];
+            document.getElementById('s6-desc').innerHTML = `<p>${ch.desc}</p>`;
+            buildChallenge();
+        }
+
+        function buildChallenge() {
+            const ch = challenges[difficulty];
+            const n = ch.instructions.length;
+            totalCols = n + 5 - 1;
+
+            /* Compute correct grid using ISAUtils */
+            const rawGrid = ISAUtils.createPipeline(ch.instructions);
+            correctGrid = [];
+            for (let i = 0; i < n; i++) {
+                correctGrid[i] = new Array(totalCols).fill(-1);
+                for (let c = 0; c < rawGrid.length; c++) {
+                    for (let s = 0; s < 5; s++) {
+                        if (rawGrid[c][s] === i) {
+                            correctGrid[i][c] = s;
+                        }
+                    }
+                }
+            }
+
+            /* Initialize user grid */
+            userGrid = [];
+            for (let i = 0; i < n; i++) {
+                userGrid[i] = new Array(totalCols).fill(-1);
+            }
+
+            renderInstTags();
+            renderGrid();
+            document.getElementById('s6-feedback').innerHTML = '';
+        }
+
+        function renderInstTags() {
+            const ch = challenges[difficulty];
+            document.getElementById('s6-insts').innerHTML = ch.instructions.map((inst, i) =>
+                `<div class="inst-tag"><span style="color:${SC[i % 5]}">${inst}</span></div>`
+            ).join('');
+        }
+
+        function renderGrid() {
+            const ch = challenges[difficulty];
+            const n = ch.instructions.length;
+            const wrap = document.getElementById('s6-grid-wrap');
+
+            const cols = totalCols + 1; // +1 for label column
+            let html = `<div class="challenge-grid" style="grid-template-columns: 140px repeat(${totalCols}, 1fr);">`;
+
+            /* Header row */
+            html += `<div class="challenge-cell header-cell">指令 \\ 周期</div>`;
+            for (let c = 0; c < totalCols; c++) {
+                html += `<div class="challenge-cell header-cell">CC${c + 1}</div>`;
+            }
+
+            /* Instruction rows */
+            for (let i = 0; i < n; i++) {
+                const lbl = ch.instructions[i].length > 14 ? ch.instructions[i].substring(0, 14) + '..' : ch.instructions[i];
+                html += `<div class="challenge-cell label-cell" style="font-family:var(--font-mono);color:${SC[i % 5]}">${lbl}</div>`;
+                for (let c = 0; c < totalCols; c++) {
+                    const val = userGrid[i][c];
+                    const stageLabel = val >= 0 ? STAGES[val] : '';
+                    const stageColor = val >= 0 ? SC[val] : '';
+                    const bgStyle = val >= 0 ? `background:${ISAUtils.hexToRgba(stageColor, 0.2)};color:${stageColor};border-color:${ISAUtils.hexToRgba(stageColor, 0.5)};` : '';
+                    html += `<div class="challenge-cell ${val >= 0 ? 'filled' : ''}" style="${bgStyle}" data-i="${i}" data-c="${c}" onclick="S6.cycleCell(${i},${c})">${stageLabel}</div>`;
+                }
+            }
+            html += '</div>';
+            wrap.innerHTML = html;
+        }
+
+        function cycleCell(i, c) {
+            const cur = userGrid[i][c];
+            userGrid[i][c] = cur >= 4 ? -1 : cur + 1;
+            renderGrid();
+        }
+
+        function check() {
+            const ch = challenges[difficulty];
+            const n = ch.instructions.length;
+            let correct = 0, total = 0;
+
+            const cells = document.querySelectorAll('#s6-grid-wrap .challenge-cell[data-i]');
+            cells.forEach(cell => {
+                const i = parseInt(cell.dataset.i);
+                const c = parseInt(cell.dataset.c);
+                const expected = correctGrid[i][c];
+                const got = userGrid[i][c];
+
+                if (expected >= 0 || got >= 0) {
+                    total++;
+                    if (expected === got) {
+                        cell.classList.add('correct');
+                        cell.classList.remove('wrong');
+                        correct++;
+                    } else if (got >= 0 || expected >= 0) {
+                        cell.classList.add('wrong');
+                        cell.classList.remove('correct');
+                    }
+                }
+            });
+
+            const totalExpected = n * 5;
+            const score = Math.round(correct / totalExpected * 100);
+            const pass = score === 100;
+
+            document.getElementById('s6-feedback').innerHTML = `
+                <div class="score-banner ${pass ? 'pass' : 'fail'}">
+                    <div style="font-size:1.5rem;">${pass ? '🎉' : '🤔'}</div>
+                    <div>
+                        <div style="font-weight:600;font-size:1.1rem;">
+                            ${pass ? '完美！所有阶段都正确！' : `得分：${score}%`}
+                        </div>
+                        <div style="font-size:0.85rem;color:var(--text-secondary);">
+                            ${pass ? `你已经掌握了 ${ch.name} 级别的流水线时序！` : `正确 ${correct} / ${totalExpected} 个阶段。绿色 = 正确，红色 = 错误。`}
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function showAnswer() {
+            const ch = challenges[difficulty];
+            const n = ch.instructions.length;
+            for (let i = 0; i < n; i++) {
+                for (let c = 0; c < totalCols; c++) {
+                    userGrid[i][c] = correctGrid[i][c];
+                }
+            }
+            renderGrid();
+
+            /* Mark all as correct */
+            const cells = document.querySelectorAll('#s6-grid-wrap .challenge-cell[data-i]');
+            cells.forEach(cell => {
+                const i = parseInt(cell.dataset.i);
+                const c = parseInt(cell.dataset.c);
+                if (correctGrid[i][c] >= 0) {
+                    cell.classList.add('correct');
+                }
+            });
+
+            document.getElementById('s6-feedback').innerHTML = `
+                <div class="score-banner pass">
+                    <div style="font-size:1.5rem;">💡</div>
+                    <div>
+                        <div style="font-weight:600;">正确答案已显示</div>
+                        <div style="font-size:0.85rem;color:var(--text-secondary);">注意观察每条指令的对角线排列模式——这是无冒险流水线的特征。</div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function resetGrid() {
+            const ch = challenges[difficulty];
+            const n = ch.instructions.length;
+            for (let i = 0; i < n; i++) {
+                userGrid[i] = new Array(totalCols).fill(-1);
+            }
+            renderGrid();
+            document.getElementById('s6-feedback').innerHTML = '';
+        }
+
+        return { init, setDifficulty, cycleCell, check, showAnswer, resetGrid };
+    })();
+
+    /* ===== Initialize all sections ===== */
+    S1.init();
+    S2.init();
+    S3.init();
+    S4.init();
+    S5.init();
+    S6.init();
+
+    /* ===== Window resize handler ===== */
+    let resizeTimer;
+    window.addEventListener('resize', () => {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(() => {
+            S1.setMode(document.getElementById('btn-pipe').classList.contains('active') ? 'pipe' : 'seq');
+            S2.reset();
+            S3.resetInsts();
+            S4.update();
+            S5.resetCycle();
+        }, 200);
+    });
+
+    /* ===== KaTeX auto-render on load ===== */
+    const katexWait = setInterval(() => {
+        if (typeof renderMathInElement !== 'undefined') {
+            clearInterval(katexWait);
+            renderMathInElement(document.body, {
+                delimiters: [
+                    { left: '$$', right: '$$', display: true },
+                    { left: '$', right: '$', display: false },
+                ]
+            });
+        }
+    }, 200);
+}
+</script>
+</body>
+</html>
