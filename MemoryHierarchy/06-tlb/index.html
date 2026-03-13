@@ -1,0 +1,1980 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TLB — 存储层级 · 交互式学习</title>
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+SC:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+    <script defer src="../shared/scripts/mem-utils.js"></script>
+    <script defer src="../shared/scripts/nav.js"></script>
+    <style>
+        /* ===== Page Hero ===== */
+        .hero {
+            text-align: center;
+            padding: calc(var(--header-height) + 2rem) 2rem 2.5rem;
+        }
+        .hero h1 {
+            font-size: 2.6rem;
+            margin-bottom: 0.5rem;
+            background: linear-gradient(135deg, #16c79a, #4fc3f7, #b388ff);
+            background-size: 200% 200%;
+            animation: heroGrad 6s ease infinite;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        @keyframes heroGrad {
+            0%, 100% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+        }
+        .hero .subtitle {
+            color: var(--text-secondary);
+            max-width: 660px;
+            margin: 0 auto 1.5rem;
+            font-size: 1.05rem;
+        }
+        .hero .tags {
+            display: flex;
+            justify-content: center;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+
+        /* ===== Section Alternating BG ===== */
+        .section { padding: 3rem 0; }
+        .section:nth-child(even) { background: var(--bg-secondary); }
+        .section:nth-child(odd) { background: var(--bg-primary); }
+        .section-inner {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 0 2rem;
+        }
+
+        /* ===== Canvas containers ===== */
+        .canvas-wrap { margin: 1rem 0; }
+        .canvas-wrap canvas { display: block; width: 100%; }
+
+        /* ===== Controls Row ===== */
+        .controls-row {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 1rem;
+            margin: 1rem 0;
+        }
+        .control-group {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .control-group label {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            white-space: nowrap;
+        }
+        .control-group select,
+        .control-group input[type="number"] {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 0.35rem 0.5rem;
+            border-radius: var(--radius-sm);
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+        }
+        .control-group input[type="number"] {
+            width: 80px;
+        }
+        .control-group select:focus,
+        .control-group input:focus {
+            outline: none;
+            border-color: var(--accent-green);
+        }
+
+        /* ===== Stats Bar ===== */
+        .stats-bar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1rem;
+            margin: 1rem 0;
+        }
+        .stat-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.4rem 0.75rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+        }
+        .stat-label { color: var(--text-muted); }
+        .stat-value { color: var(--accent-green); font-weight: 600; }
+        .stat-value.miss { color: var(--accent-red); }
+        .stat-value.neutral { color: var(--accent-blue); }
+
+        /* ===== Access Log ===== */
+        .access-log {
+            max-height: 200px;
+            overflow-y: auto;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            padding: 0.5rem;
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            margin: 0.75rem 0;
+        }
+        .access-log .log-entry {
+            padding: 0.2rem 0.5rem;
+            border-radius: 3px;
+            margin-bottom: 2px;
+        }
+        .access-log .log-entry.hit { color: #16c79a; background: rgba(22,199,154,0.08); }
+        .access-log .log-entry.miss { color: #ff5252; background: rgba(255,82,82,0.08); }
+        .access-log .log-entry.info { color: #4fc3f7; background: rgba(79,195,247,0.08); }
+
+        /* ===== TLB Table Visual ===== */
+        .tlb-table-visual {
+            width: 100%;
+            border-collapse: collapse;
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            margin: 0.75rem 0;
+        }
+        .tlb-table-visual th {
+            background: var(--bg-card);
+            color: var(--accent-blue);
+            padding: 0.4rem 0.6rem;
+            text-align: center;
+            border: 1px solid var(--border-color);
+            font-weight: 600;
+        }
+        .tlb-table-visual td {
+            padding: 0.35rem 0.6rem;
+            text-align: center;
+            border: 1px solid var(--border-color);
+            transition: background 0.3s, color 0.3s;
+        }
+        .tlb-table-visual tr.highlight-hit {
+            background: rgba(22,199,154,0.2);
+        }
+        .tlb-table-visual tr.highlight-miss {
+            background: rgba(255,82,82,0.15);
+        }
+        .tlb-table-visual td.valid-1 { color: var(--accent-green); }
+        .tlb-table-visual td.valid-0 { color: var(--text-muted); }
+
+        /* ===== Comparison Panels ===== */
+        .compare-panels {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5rem;
+            margin: 1rem 0;
+        }
+        .compare-panel {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1.25rem;
+        }
+        .compare-panel h4 {
+            text-align: center;
+            margin-bottom: 0.75rem;
+        }
+        .compare-panel.pipt { border-color: var(--accent-blue); }
+        .compare-panel.vipt { border-color: var(--accent-purple); }
+
+        /* ===== Process Colors ===== */
+        .process-a { color: #4fc3f7; }
+        .process-b { color: #ff80ab; }
+        .process-c { color: #ffd740; }
+
+        /* ===== Timing bar ===== */
+        .timing-bar {
+            display: flex;
+            align-items: center;
+            height: 32px;
+            border-radius: 4px;
+            overflow: hidden;
+            margin: 0.5rem 0;
+        }
+        .timing-segment {
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.7rem;
+            font-family: var(--font-mono);
+            font-weight: 600;
+            color: #1a1a2e;
+            transition: width 0.5s ease;
+            min-width: 0;
+            overflow: hidden;
+        }
+
+        /* ===== Responsive ===== */
+        @media (max-width: 1024px) {
+            .split-layout { grid-template-columns: 1fr; }
+            .compare-panels { grid-template-columns: 1fr; }
+        }
+        @media (max-width: 768px) {
+            .hero h1 { font-size: 1.8rem; }
+            .section-inner { padding: 0 1rem; }
+        }
+
+        /* ===== Flowchart highlight ===== */
+        .flow-step {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.3rem;
+            padding: 0.2rem 0.5rem;
+            border-radius: 4px;
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+        }
+        .flow-step.active-step {
+            background: rgba(22,199,154,0.2);
+            color: var(--accent-green);
+            font-weight: 600;
+        }
+
+        /* ===== Input Group ===== */
+        .input-row {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin: 0.5rem 0;
+        }
+        .input-row input[type="text"] {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 0.4rem 0.6rem;
+            border-radius: var(--radius-sm);
+            font-family: var(--font-mono);
+            font-size: 0.9rem;
+            width: 120px;
+        }
+        .input-row input[type="text"]:focus {
+            outline: none;
+            border-color: var(--accent-green);
+        }
+    </style>
+</head>
+<body>
+    <!-- nav.js auto-injects navigation -->
+
+    <!-- ===== Hero ===== -->
+    <header class="hero">
+        <h1>TLB — 快表</h1>
+        <p class="subtitle">
+            Translation Lookaside Buffer: 虚拟地址到物理地址的硬件加速器。
+            每次内存访问都依赖它 —— 理解 TLB 就理解了现代处理器性能的关键。
+        </p>
+        <div class="tags">
+            <span class="badge badge-green">地址翻译加速</span>
+            <span class="badge badge-blue">内容寻址存储器</span>
+            <span class="badge badge-purple">ASID 标签</span>
+            <span class="badge badge-orange">VIPT / PIPT</span>
+        </div>
+    </header>
+
+    <!-- =============================================== -->
+    <!-- Section 1: 为什么需要 TLB                       -->
+    <!-- =============================================== -->
+    <section class="section" id="sec-why-tlb">
+        <div class="section-inner">
+            <div class="section-title">
+                <div class="icon">1</div>
+                <h2>为什么需要 TLB</h2>
+            </div>
+            <div class="split-layout">
+                <div class="text-panel">
+                    <div class="info-box">
+                        <p>页表存放在主存中。没有 TLB 时，<strong>每次</strong>数据访问都需要先访问页表（一次额外的内存访问），有效访问时间翻倍。</p>
+                    </div>
+                    <p>TLB 是 CPU 内部的<strong>高速缓存</strong>，专门缓存最近使用的页表项，让绝大部分地址翻译在 1 个时钟周期内完成。</p>
+                    <div class="mb-2" id="formula-why-tlb"></div>
+                    <div class="controls-row">
+                        <label class="toggle" id="tlb-toggle">
+                            <input type="checkbox" checked>
+                            <span class="track"></span>
+                        </label>
+                        <span id="tlb-toggle-label" style="font-size:0.9rem;color:var(--accent-green);font-weight:600;">TLB 已启用</span>
+                    </div>
+                    <div class="controls-row">
+                        <div class="control-group">
+                            <label>内存访问时间 (ns):</label>
+                            <input type="number" id="mem-time" value="100" min="10" max="500" step="10">
+                        </div>
+                        <div class="control-group">
+                            <label>TLB 命中率:</label>
+                            <input type="number" id="tlb-hit-rate" value="95" min="0" max="100" step="1">
+                            <span style="color:var(--text-muted)">%</span>
+                        </div>
+                        <div class="control-group">
+                            <label>TLB 访问时间 (ns):</label>
+                            <input type="number" id="tlb-time" value="1" min="1" max="20" step="1">
+                        </div>
+                    </div>
+                    <div class="stats-bar" id="why-tlb-stats">
+                        <div class="stat-item"><span class="stat-label">无 TLB:</span><span class="stat-value miss" id="stat-no-tlb">200 ns</span></div>
+                        <div class="stat-item"><span class="stat-label">有 TLB:</span><span class="stat-value" id="stat-with-tlb">106 ns</span></div>
+                        <div class="stat-item"><span class="stat-label">加速比:</span><span class="stat-value neutral" id="stat-speedup">1.89x</span></div>
+                    </div>
+                </div>
+                <div class="viz-panel">
+                    <div class="canvas-wrap">
+                        <canvas id="canvas-why-tlb"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- =============================================== -->
+    <!-- Section 2: TLB 结构                             -->
+    <!-- =============================================== -->
+    <section class="section" id="sec-tlb-structure">
+        <div class="section-inner">
+            <div class="section-title">
+                <div class="icon">2</div>
+                <h2>TLB 结构</h2>
+            </div>
+            <div class="split-layout">
+                <div class="text-panel">
+                    <p>TLB 本质上是一个<strong>内容寻址存储器 (CAM)</strong>：输入 VPN，所有表项<strong>同时</strong>比较，命中时直接输出对应的 PPN。</p>
+                    <div class="info-box success">
+                        <p>每个 TLB 表项包含：<code>Valid</code> · <code>VPN Tag</code> · <code>PPN</code> · <code>Dirty</code> · <code>ASID</code></p>
+                    </div>
+                    <div class="controls-row">
+                        <div class="control-group">
+                            <label>TLB 容量:</label>
+                            <select id="tlb-size-select">
+                                <option value="4">4 项</option>
+                                <option value="8" selected>8 项</option>
+                                <option value="16">16 项</option>
+                            </select>
+                        </div>
+                        <div class="control-group">
+                            <label>相联度:</label>
+                            <select id="tlb-assoc-select">
+                                <option value="1">直接映射</option>
+                                <option value="2">2 路组相联</option>
+                                <option value="4">4 路组相联</option>
+                                <option value="0">全相联</option>
+                            </select>
+                        </div>
+                        <button class="btn btn-primary btn-sm" id="btn-parallel-lookup">并行查找动画</button>
+                    </div>
+                    <div class="input-row">
+                        <label style="font-size:0.85rem;color:var(--text-secondary);">查找 VPN:</label>
+                        <input type="text" id="struct-vpn-input" placeholder="0x03" value="0x03">
+                        <button class="btn btn-sm" id="btn-struct-lookup">查找</button>
+                        <button class="btn btn-sm" id="btn-struct-populate">填充随机数据</button>
+                    </div>
+                    <div id="struct-tlb-table-container"></div>
+                </div>
+                <div class="viz-panel">
+                    <div class="canvas-wrap">
+                        <canvas id="canvas-tlb-structure"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- =============================================== -->
+    <!-- Section 3: TLB 查找流程                         -->
+    <!-- =============================================== -->
+    <section class="section" id="sec-tlb-lookup">
+        <div class="section-inner">
+            <div class="section-title">
+                <div class="icon">3</div>
+                <h2>TLB 查找流程</h2>
+            </div>
+            <div class="split-layout">
+                <div class="text-panel">
+                    <p>完整的地址翻译流程：VA → TLB 查找 → 命中则直接获得 PA；未命中则查询页表 → 更新 TLB → 获得 PA。</p>
+                    <div class="controls-row">
+                        <div class="input-row">
+                            <label style="font-size:0.85rem;color:var(--text-secondary);">虚拟地址:</label>
+                            <input type="text" id="lookup-va-input" placeholder="0x1A00" value="0x1A00">
+                            <button class="btn btn-primary btn-sm" id="btn-lookup-translate">翻译</button>
+                            <button class="btn btn-sm" id="btn-lookup-random">随机地址</button>
+                            <button class="btn btn-sm" id="btn-lookup-reset">重置</button>
+                        </div>
+                    </div>
+                    <div class="stats-bar" id="lookup-stats">
+                        <div class="stat-item"><span class="stat-label">访问次数:</span><span class="stat-value neutral" id="stat-lookup-total">0</span></div>
+                        <div class="stat-item"><span class="stat-label">TLB 命中:</span><span class="stat-value" id="stat-lookup-hits">0</span></div>
+                        <div class="stat-item"><span class="stat-label">TLB 未命中:</span><span class="stat-value miss" id="stat-lookup-misses">0</span></div>
+                        <div class="stat-item"><span class="stat-label">命中率:</span><span class="stat-value neutral" id="stat-lookup-rate">0%</span></div>
+                    </div>
+                    <div class="access-log" id="lookup-log"></div>
+                </div>
+                <div class="viz-panel">
+                    <div class="canvas-wrap">
+                        <canvas id="canvas-tlb-lookup"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- =============================================== -->
+    <!-- Section 4: TLB Miss 处理                        -->
+    <!-- =============================================== -->
+    <section class="section" id="sec-tlb-miss">
+        <div class="section-inner">
+            <div class="section-title">
+                <div class="icon">4</div>
+                <h2>TLB Miss 处理</h2>
+            </div>
+            <div class="split-layout">
+                <div class="text-panel">
+                    <p>TLB 未命中后，需要<strong>遍历页表 (Page Table Walk)</strong> 来找到正确的物理帧号。</p>
+                    <div class="info-box warning">
+                        <p><strong>x86 (硬件管理)</strong>：MMU 硬件自动遍历页表，透明地填充 TLB。<br>
+                        <strong>MIPS / RISC-V (软件管理)</strong>：TLB 未命中触发异常，由 OS 处理。</p>
+                    </div>
+                    <div class="controls-row">
+                        <div class="control-group">
+                            <label>页表级数:</label>
+                            <select id="pt-levels">
+                                <option value="1">单级页表</option>
+                                <option value="2" selected>两级页表</option>
+                                <option value="3">三级页表</option>
+                                <option value="4">四级页表 (x86-64)</option>
+                            </select>
+                        </div>
+                        <div class="control-group">
+                            <label>管理方式:</label>
+                            <select id="miss-handler">
+                                <option value="hardware" selected>硬件管理 (x86)</option>
+                                <option value="software">软件管理 (MIPS)</option>
+                            </select>
+                        </div>
+                        <button class="btn btn-primary btn-sm" id="btn-miss-animate">播放动画</button>
+                    </div>
+                    <div class="stats-bar">
+                        <div class="stat-item"><span class="stat-label">页表查找代价:</span><span class="stat-value miss" id="stat-walk-cost">200 ns</span></div>
+                        <div class="stat-item"><span class="stat-label">额外内存访问:</span><span class="stat-value neutral" id="stat-walk-accesses">2 次</span></div>
+                    </div>
+                    <div id="miss-formula" class="mb-2"></div>
+                    <div class="access-log" id="miss-log"></div>
+                </div>
+                <div class="viz-panel">
+                    <div class="canvas-wrap">
+                        <canvas id="canvas-tlb-miss"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- =============================================== -->
+    <!-- Section 5: 上下文切换与 ASID                     -->
+    <!-- =============================================== -->
+    <section class="section" id="sec-asid">
+        <div class="section-inner">
+            <div class="section-title">
+                <div class="icon">5</div>
+                <h2>上下文切换与 ASID</h2>
+            </div>
+            <div class="split-layout">
+                <div class="text-panel">
+                    <p>进程切换时，TLB 中的映射属于旧进程，新进程不能使用。</p>
+                    <div class="info-box">
+                        <p><strong>方案 A：</strong>切换时刷新整个 TLB —— 简单但代价高昂（冷启动）。<br>
+                        <strong>方案 B：</strong>为每条 TLB 表项添加 <code>ASID</code>（Address Space Identifier），不同进程共存于 TLB。</p>
+                    </div>
+                    <div class="controls-row">
+                        <div class="control-group">
+                            <label>策略:</label>
+                            <select id="asid-mode">
+                                <option value="flush">刷新 TLB</option>
+                                <option value="asid" selected>使用 ASID</option>
+                            </select>
+                        </div>
+                        <div class="control-group">
+                            <label>切换频率:</label>
+                            <select id="switch-freq">
+                                <option value="low">低 (每 20 次访问)</option>
+                                <option value="medium" selected>中 (每 10 次访问)</option>
+                                <option value="high">高 (每 5 次访问)</option>
+                            </select>
+                        </div>
+                        <button class="btn btn-primary btn-sm" id="btn-asid-run">运行模拟</button>
+                        <button class="btn btn-sm" id="btn-asid-reset">重置</button>
+                    </div>
+                    <div class="stats-bar">
+                        <div class="stat-item"><span class="stat-label">总访问:</span><span class="stat-value neutral" id="stat-asid-total">0</span></div>
+                        <div class="stat-item"><span class="stat-label">TLB 命中:</span><span class="stat-value" id="stat-asid-hits">0</span></div>
+                        <div class="stat-item"><span class="stat-label">命中率:</span><span class="stat-value neutral" id="stat-asid-rate">0%</span></div>
+                        <div class="stat-item"><span class="stat-label">刷新次数:</span><span class="stat-value miss" id="stat-asid-flushes">0</span></div>
+                    </div>
+                    <div class="access-log" id="asid-log"></div>
+                </div>
+                <div class="viz-panel">
+                    <div class="canvas-wrap">
+                        <canvas id="canvas-asid"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- =============================================== -->
+    <!-- Section 6: TLB 与 Cache 联动                     -->
+    <!-- =============================================== -->
+    <section class="section" id="sec-tlb-cache">
+        <div class="section-inner">
+            <div class="section-title">
+                <div class="icon">6</div>
+                <h2>TLB 与 Cache 联动</h2>
+            </div>
+            <p>完整内存访问路径：VA → TLB → PA → Cache → 数据。TLB 和 Cache 的配合方式决定了总延迟。</p>
+
+            <div class="compare-panels">
+                <div class="compare-panel pipt">
+                    <h4 style="color:var(--accent-blue)">PIPT — 物理索引物理标签</h4>
+                    <p class="text-sm" style="color:var(--text-secondary)">安全：Cache 使用物理地址，无别名问题。<br>串行：必须先完成 TLB 翻译，再查 Cache。</p>
+                    <div class="timing-bar" id="pipt-timing"></div>
+                    <div class="stat-item" style="margin-top:0.5rem"><span class="stat-label">总延迟:</span><span class="stat-value neutral" id="stat-pipt-total">—</span></div>
+                </div>
+                <div class="compare-panel vipt">
+                    <h4 style="color:var(--accent-purple)">VIPT — 虚拟索引物理标签</h4>
+                    <p class="text-sm" style="color:var(--text-secondary)">快速：Cache 索引用虚拟地址（与 TLB 并行），标签比较用物理地址。<br>约束：Cache 大小 / 相联度 ≤ 页大小时无别名。</p>
+                    <div class="timing-bar" id="vipt-timing"></div>
+                    <div class="stat-item" style="margin-top:0.5rem"><span class="stat-label">总延迟:</span><span class="stat-value neutral" id="stat-vipt-total">—</span></div>
+                </div>
+            </div>
+
+            <div class="controls-row">
+                <div class="control-group">
+                    <label>TLB 延迟 (ns):</label>
+                    <input type="number" id="tc-tlb-lat" value="1" min="1" max="10" step="1">
+                </div>
+                <div class="control-group">
+                    <label>Cache 延迟 (ns):</label>
+                    <input type="number" id="tc-cache-lat" value="3" min="1" max="20" step="1">
+                </div>
+                <div class="control-group">
+                    <label>内存延迟 (ns):</label>
+                    <input type="number" id="tc-mem-lat" value="100" min="10" max="500" step="10">
+                </div>
+                <div class="control-group">
+                    <label>Cache 命中率:</label>
+                    <input type="number" id="tc-cache-hr" value="90" min="0" max="100" step="5">
+                    <span style="color:var(--text-muted)">%</span>
+                </div>
+                <button class="btn btn-primary btn-sm" id="btn-tc-simulate">模拟访问</button>
+            </div>
+
+            <div class="canvas-wrap">
+                <canvas id="canvas-tlb-cache"></canvas>
+            </div>
+
+            <div class="stats-bar" id="tc-stats">
+                <div class="stat-item"><span class="stat-label">PIPT 有效延迟:</span><span class="stat-value neutral" id="stat-tc-pipt">—</span></div>
+                <div class="stat-item"><span class="stat-label">VIPT 有效延迟:</span><span class="stat-value" id="stat-tc-vipt">—</span></div>
+                <div class="stat-item"><span class="stat-label">VIPT 加速比:</span><span class="stat-value neutral" id="stat-tc-speedup">—</span></div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ===== Footer ===== -->
+    <footer style="text-align:center;padding:2rem;color:var(--text-muted);font-size:0.8rem;">
+        存储层级 · 模块 06 — TLB (Translation Lookaside Buffer)
+    </footer>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    'use strict';
+
+    const C = MemUtils.COLORS;
+
+    /* ====================================================================
+       Helper: render KaTeX
+    ==================================================================== */
+    function renderKaTeX() {
+        if (typeof renderMathInElement === 'function') {
+            renderMathInElement(document.body, {
+                delimiters: [
+                    { left: '$$', right: '$$', display: true },
+                    { left: '$', right: '$', display: false },
+                ],
+                throwOnError: false
+            });
+        }
+    }
+
+    /* ====================================================================
+       SECTION 1: 为什么需要 TLB
+    ==================================================================== */
+    (() => {
+        const canvas = document.getElementById('canvas-why-tlb');
+        const toggleInput = document.querySelector('#tlb-toggle input');
+        const toggleLabel = document.getElementById('tlb-toggle-label');
+        const memTimeInput = document.getElementById('mem-time');
+        const hitRateInput = document.getElementById('tlb-hit-rate');
+        const tlbTimeInput = document.getElementById('tlb-time');
+
+        let tlbEnabled = true;
+        let animPhase = 0;
+        let animId = null;
+
+        // Formula
+        const formulaEl = document.getElementById('formula-why-tlb');
+        formulaEl.innerHTML = `
+            <p style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:0.3rem;">有效访问时间（无 TLB）：</p>
+            <p>$$T_{\\text{eff}} = T_{\\text{mem}} + T_{\\text{mem}} = 2 \\times T_{\\text{mem}}$$</p>
+            <p style="font-size:0.85rem;color:var(--text-secondary);margin-bottom:0.3rem;">有效访问时间（有 TLB）：</p>
+            <p>$$T_{\\text{eff}} = h \\times (T_{\\text{TLB}} + T_{\\text{mem}}) + (1 - h) \\times (T_{\\text{TLB}} + T_{\\text{mem}} + T_{\\text{mem}})$$</p>
+        `;
+
+        function calcTimes() {
+            const Tmem = parseFloat(memTimeInput.value) || 100;
+            const h = (parseFloat(hitRateInput.value) || 95) / 100;
+            const Ttlb = parseFloat(tlbTimeInput.value) || 1;
+            const noTlb = 2 * Tmem;
+            const withTlb = h * (Ttlb + Tmem) + (1 - h) * (Ttlb + 2 * Tmem);
+            return { noTlb, withTlb, speedup: noTlb / withTlb, Tmem, h, Ttlb };
+        }
+
+        function updateStats() {
+            const t = calcTimes();
+            document.getElementById('stat-no-tlb').textContent = t.noTlb.toFixed(0) + ' ns';
+            document.getElementById('stat-with-tlb').textContent = t.withTlb.toFixed(1) + ' ns';
+            document.getElementById('stat-speedup').textContent = t.speedup.toFixed(2) + 'x';
+        }
+
+        function draw() {
+            const { ctx, w, h } = MemUtils.initCanvas(canvas, 380);
+            ctx.clearRect(0, 0, w, h);
+
+            const cx = w / 2;
+            // Components positions
+            const cpuX = 60, cpuY = h / 2 - 25, cpuW = 80, cpuH = 50;
+            const tlbX = cpuX + cpuW + 60, tlbY = h / 2 - 90, tlbW = 90, tlbH = 50;
+            const ptX = cpuX + cpuW + 60, ptY = h / 2 + 40, ptW = 90, ptH = 50;
+            const memX = tlbX + tlbW + 80, memY = h / 2 - 25, memW = 100, memH = 50;
+
+            // Draw CPU
+            MemUtils.drawMemoryBlock(ctx, cpuX, cpuY, cpuW, cpuH, 'CPU', C.pink, { highlight: true });
+
+            // Draw TLB
+            const tlbColor = tlbEnabled ? C.green : C.textMut;
+            const tlbAlpha = tlbEnabled ? 1 : 0.4;
+            ctx.globalAlpha = tlbAlpha;
+            MemUtils.drawMemoryBlock(ctx, tlbX, tlbY, tlbW, tlbH, 'TLB', tlbColor, { highlight: tlbEnabled });
+            ctx.globalAlpha = 1;
+
+            // Draw Page Table
+            MemUtils.drawMemoryBlock(ctx, ptX, ptY, ptW, ptH, '页表', C.orange);
+
+            // Draw Main Memory
+            MemUtils.drawMemoryBlock(ctx, memX, memY, memW, memH, '主存', C.blue, { highlight: true });
+
+            // Labels
+            ctx.font = '11px "JetBrains Mono", monospace';
+            ctx.textAlign = 'center';
+
+            // Animated data path
+            const t = performance.now() / 1000;
+            const pulse = (Math.sin(t * 3) + 1) / 2;
+
+            if (tlbEnabled) {
+                // Fast path: CPU → TLB → Memory
+                const hitColor = MemUtils.hexToRgba(C.green, 0.5 + pulse * 0.5);
+                ctx.strokeStyle = hitColor;
+                ctx.lineWidth = 3;
+                ctx.setLineDash([]);
+
+                // CPU → TLB
+                MemUtils.drawArrow(ctx, cpuX + cpuW, cpuY + cpuH / 2 - 10, tlbX, tlbY + tlbH / 2, C.green, { width: 2.5 });
+                ctx.fillStyle = C.green;
+                ctx.font = 'bold 10px "JetBrains Mono", monospace';
+                ctx.fillText('快速 ~1ns', (cpuX + cpuW + tlbX) / 2, tlbY - 5);
+
+                // TLB → Memory (data fetch)
+                MemUtils.drawArrow(ctx, tlbX + tlbW, tlbY + tlbH / 2, memX, memY + memH / 2 - 10, C.green, { width: 2 });
+                ctx.fillStyle = C.green;
+                ctx.fillText('PA', (tlbX + tlbW + memX) / 2, tlbY + 15);
+
+                // Miss path (dashed)
+                MemUtils.drawArrow(ctx, cpuX + cpuW, cpuY + cpuH / 2 + 10, ptX, ptY + ptH / 2, C.red, { width: 1.5, dashed: true });
+                ctx.fillStyle = MemUtils.hexToRgba(C.red, 0.7);
+                ctx.font = '10px "JetBrains Mono", monospace';
+                ctx.fillText('miss时', (cpuX + cpuW + ptX) / 2, ptY + ptH + 15);
+                MemUtils.drawArrow(ctx, ptX + ptW, ptY + ptH / 2, memX, memY + memH / 2 + 10, C.red, { width: 1.5, dashed: true });
+            } else {
+                // Slow path only: CPU → Page Table → Memory
+                MemUtils.drawArrow(ctx, cpuX + cpuW, cpuY + cpuH / 2, ptX, ptY + ptH / 2, C.red, { width: 2.5 });
+                ctx.fillStyle = C.red;
+                ctx.font = 'bold 10px "JetBrains Mono", monospace';
+                ctx.fillText('慢 ~100ns', (cpuX + cpuW + ptX) / 2, ptY + ptH + 18);
+                MemUtils.drawArrow(ctx, ptX + ptW, ptY + ptH / 2, memX, memY + memH / 2, C.red, { width: 2.5 });
+                ctx.fillStyle = C.red;
+                ctx.fillText('再 ~100ns', (ptX + ptW + memX) / 2, ptY + 15);
+            }
+
+            // Draw effective time comparison bars at bottom
+            const times = calcTimes();
+            const barY = h - 70;
+            const barMaxW = w - 40;
+            const maxTime = times.noTlb;
+            const barH = 20;
+
+            // No TLB bar
+            ctx.fillStyle = MemUtils.hexToRgba(C.red, 0.3);
+            ctx.fillRect(20, barY, barMaxW, barH);
+            ctx.fillStyle = C.red;
+            ctx.fillRect(20, barY, barMaxW, barH);
+            ctx.globalAlpha = 0.3;
+            ctx.fillRect(20, barY, barMaxW, barH);
+            ctx.globalAlpha = 1;
+            ctx.fillStyle = C.red;
+            ctx.fillRect(20, barY, barMaxW, barH);
+            ctx.fillStyle = MemUtils.hexToRgba(C.red, 0.7);
+            ctx.fillRect(20, barY, barMaxW, barH);
+
+            // Redraw properly
+            ctx.clearRect(0, barY - 5, w, h - barY + 5);
+            ctx.font = '11px "Noto Sans SC", sans-serif';
+            ctx.textAlign = 'left';
+            ctx.fillStyle = C.textSec;
+            ctx.fillText('无 TLB', 20, barY);
+            ctx.fillText('有 TLB', 20, barY + 30);
+
+            const barStartX = 110;
+            const availW = w - barStartX - 20;
+
+            // No TLB bar
+            const noTlbW = availW;
+            ctx.fillStyle = MemUtils.hexToRgba(C.red, 0.25);
+            ctx.beginPath();
+            ctx.roundRect(barStartX, barY - 10, noTlbW, barH, 4);
+            ctx.fill();
+            ctx.fillStyle = MemUtils.hexToRgba(C.red, 0.8);
+            ctx.beginPath();
+            ctx.roundRect(barStartX, barY - 10, noTlbW, barH, 4);
+            ctx.fill();
+
+            ctx.fillStyle = '#fff';
+            ctx.font = 'bold 11px "JetBrains Mono", monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText(times.noTlb.toFixed(0) + ' ns', barStartX + noTlbW / 2, barY + 4);
+
+            // With TLB bar
+            const withTlbW = (times.withTlb / maxTime) * availW;
+            ctx.fillStyle = MemUtils.hexToRgba(C.green, 0.8);
+            ctx.beginPath();
+            ctx.roundRect(barStartX, barY + 20, withTlbW, barH, 4);
+            ctx.fill();
+
+            ctx.fillStyle = '#fff';
+            ctx.fillText(times.withTlb.toFixed(1) + ' ns', barStartX + withTlbW / 2, barY + 34);
+
+            ctx.textAlign = 'left';
+        }
+
+        function animate() {
+            draw();
+            animId = requestAnimationFrame(animate);
+        }
+
+        toggleInput.addEventListener('change', () => {
+            tlbEnabled = toggleInput.checked;
+            toggleLabel.textContent = tlbEnabled ? 'TLB 已启用' : 'TLB 已禁用';
+            toggleLabel.style.color = tlbEnabled ? C.green : C.red;
+            updateStats();
+        });
+
+        [memTimeInput, hitRateInput, tlbTimeInput].forEach(el => {
+            el.addEventListener('input', updateStats);
+        });
+
+        updateStats();
+        animate();
+
+        // Resize
+        window.addEventListener('resize', () => { /* animate loop handles */ });
+    })();
+
+    /* ====================================================================
+       SECTION 2: TLB 结构
+    ==================================================================== */
+    (() => {
+        const canvas = document.getElementById('canvas-tlb-structure');
+        const sizeSelect = document.getElementById('tlb-size-select');
+        const assocSelect = document.getElementById('tlb-assoc-select');
+        const vpnInput = document.getElementById('struct-vpn-input');
+        const btnLookup = document.getElementById('btn-struct-lookup');
+        const btnPopulate = document.getElementById('btn-struct-populate');
+        const btnParallel = document.getElementById('btn-parallel-lookup');
+        const tableContainer = document.getElementById('struct-tlb-table-container');
+
+        let tlbSize = 8;
+        let assoc = 8; // default full-assoc
+        let tlbData = []; // {valid, vpn, ppn, dirty, asid}
+        let highlightIdx = -1;
+        let parallelAnim = false;
+        let parallelProgress = 0;
+        let parallelTarget = -1;
+
+        function getAssoc() {
+            const v = parseInt(assocSelect.value);
+            return v === 0 ? parseInt(sizeSelect.value) : v;
+        }
+
+        function initTLBData() {
+            tlbSize = parseInt(sizeSelect.value);
+            assoc = getAssoc();
+            tlbData = [];
+            for (let i = 0; i < tlbSize; i++) {
+                tlbData.push({ valid: 0, vpn: 0, ppn: 0, dirty: 0, asid: 0 });
+            }
+            highlightIdx = -1;
+            renderTable();
+            drawStructure();
+        }
+
+        function populateRandom() {
+            initTLBData();
+            const rng = MemUtils.seededRandom(Date.now());
+            for (let i = 0; i < tlbSize; i++) {
+                if (rng() < 0.7) {
+                    tlbData[i].valid = 1;
+                    tlbData[i].vpn = Math.floor(rng() * 16);
+                    tlbData[i].ppn = Math.floor(rng() * 32);
+                    tlbData[i].dirty = rng() < 0.3 ? 1 : 0;
+                    tlbData[i].asid = Math.floor(rng() * 4);
+                }
+            }
+            renderTable();
+            drawStructure();
+        }
+
+        function renderTable() {
+            const numSets = Math.max(1, tlbSize / assoc);
+            let html = '<table class="tlb-table-visual"><thead><tr>';
+            html += '<th>组</th><th>路</th><th>Valid</th><th>VPN</th><th>PPN</th><th>Dirty</th><th>ASID</th>';
+            html += '</tr></thead><tbody>';
+            for (let i = 0; i < tlbSize; i++) {
+                const setIdx = Math.floor(i / assoc);
+                const wayIdx = i % assoc;
+                const e = tlbData[i];
+                const hlClass = i === highlightIdx ? (e.valid && e.vpn === parallelTarget ? ' highlight-hit' : ' highlight-miss') : '';
+                html += `<tr class="${hlClass}" id="tlb-row-${i}">`;
+                html += `<td>${setIdx}</td>`;
+                html += `<td>${wayIdx}</td>`;
+                html += `<td class="${e.valid ? 'valid-1' : 'valid-0'}">${e.valid}</td>`;
+                html += `<td>0x${e.vpn.toString(16).toUpperCase().padStart(2, '0')}</td>`;
+                html += `<td>0x${e.ppn.toString(16).toUpperCase().padStart(2, '0')}</td>`;
+                html += `<td>${e.dirty}</td>`;
+                html += `<td>${e.asid}</td>`;
+                html += '</tr>';
+            }
+            html += '</tbody></table>';
+            tableContainer.innerHTML = html;
+        }
+
+        function doLookup() {
+            const vpnStr = vpnInput.value.trim();
+            const vpn = parseInt(vpnStr, 16) || parseInt(vpnStr, 10) || 0;
+            parallelTarget = vpn;
+
+            const numSets = Math.max(1, tlbSize / assoc);
+            const setIdx = vpn % numSets;
+            const startWay = setIdx * assoc;
+
+            highlightIdx = -1;
+            for (let i = startWay; i < startWay + assoc; i++) {
+                if (tlbData[i].valid && tlbData[i].vpn === vpn) {
+                    highlightIdx = i;
+                    break;
+                }
+            }
+            renderTable();
+            drawStructure();
+        }
+
+        function drawStructure() {
+            const { ctx, w, h } = MemUtils.initCanvas(canvas, 420);
+            ctx.clearRect(0, 0, w, h);
+
+            const numSets = Math.max(1, tlbSize / assoc);
+            const entryW = Math.min(100, (w - 140) / assoc - 10);
+            const entryH = 36;
+            const setGap = 8;
+            const startX = 120;
+            const startY = 60;
+
+            // Title
+            ctx.font = 'bold 14px "Noto Sans SC", sans-serif';
+            ctx.fillStyle = C.textPri;
+            ctx.textAlign = 'center';
+            ctx.fillText(`TLB: ${tlbSize} 项, ${assoc === tlbSize ? '全相联' : assoc + ' 路组相联'}, ${numSets} 组`, w / 2, 30);
+
+            // Draw CAM label
+            ctx.font = '11px "Noto Sans SC", sans-serif';
+            ctx.fillStyle = C.textMut;
+            ctx.textAlign = 'right';
+
+            // Draw entries
+            for (let s = 0; s < numSets; s++) {
+                const y = startY + s * (assoc * (entryH + 4) + setGap + 25);
+
+                ctx.font = 'bold 11px "JetBrains Mono", monospace';
+                ctx.fillStyle = C.blue;
+                ctx.textAlign = 'right';
+                ctx.fillText(`组 ${s}`, startX - 15, y + entryH / 2 + 4);
+
+                for (let way = 0; way < assoc; way++) {
+                    const idx = s * assoc + way;
+                    if (idx >= tlbSize) break;
+                    const e = tlbData[idx];
+                    const ey = y + way * (entryH + 4);
+
+                    // Highlight
+                    const isHighlight = idx === highlightIdx;
+                    const isParallelScan = parallelAnim && parallelProgress > way;
+
+                    let color = e.valid ? C.blue : C.textMut;
+                    if (isHighlight && e.valid && e.vpn === parallelTarget) color = C.green;
+                    else if (isParallelScan && e.valid && e.vpn === parallelTarget) color = C.green;
+                    else if (isParallelScan) color = C.orange;
+
+                    // Entry box
+                    const totalEntryW = entryW * 4 + 15;
+                    ctx.fillStyle = MemUtils.hexToRgba(color, isHighlight ? 0.2 : 0.08);
+                    ctx.strokeStyle = color;
+                    ctx.lineWidth = isHighlight ? 2 : 1;
+                    ctx.beginPath();
+                    ctx.roundRect(startX, ey, totalEntryW, entryH, 4);
+                    ctx.fill();
+                    ctx.stroke();
+
+                    // Fields
+                    const fields = [
+                        { label: 'V', val: e.valid, w: entryW * 0.5 },
+                        { label: 'VPN', val: '0x' + e.vpn.toString(16).toUpperCase().padStart(2, '0'), w: entryW * 1.2 },
+                        { label: 'PPN', val: '0x' + e.ppn.toString(16).toUpperCase().padStart(2, '0'), w: entryW * 1.2 },
+                        { label: 'D', val: e.dirty, w: entryW * 0.5 },
+                    ];
+
+                    let fx = startX + 5;
+                    ctx.font = '10px "JetBrains Mono", monospace';
+                    ctx.textAlign = 'center';
+                    for (const f of fields) {
+                        ctx.fillStyle = C.textMut;
+                        ctx.fillText(f.label, fx + f.w / 2, ey + 12);
+                        ctx.fillStyle = e.valid ? color : C.textMut;
+                        ctx.font = 'bold 11px "JetBrains Mono", monospace';
+                        ctx.fillText(String(f.val), fx + f.w / 2, ey + 27);
+                        ctx.font = '10px "JetBrains Mono", monospace';
+                        fx += f.w + 3;
+                    }
+                }
+            }
+
+            // Parallel lookup indicator
+            if (parallelAnim) {
+                ctx.font = 'bold 12px "Noto Sans SC", sans-serif';
+                ctx.fillStyle = C.orange;
+                ctx.textAlign = 'left';
+                ctx.fillText(`并行比较中... (${parallelProgress}/${assoc})`, startX, h - 20);
+            }
+        }
+
+        function runParallelAnim() {
+            const vpnStr = vpnInput.value.trim();
+            const vpn = parseInt(vpnStr, 16) || parseInt(vpnStr, 10) || 0;
+            parallelTarget = vpn;
+            parallelAnim = true;
+            parallelProgress = 0;
+
+            const numSets = Math.max(1, tlbSize / assoc);
+            const setIdx = vpn % numSets;
+            const startWay = setIdx * assoc;
+
+            let foundIdx = -1;
+            let step = 0;
+            const interval = setInterval(() => {
+                if (step >= assoc) {
+                    parallelAnim = false;
+                    highlightIdx = foundIdx;
+                    renderTable();
+                    drawStructure();
+                    clearInterval(interval);
+                    return;
+                }
+                const idx = startWay + step;
+                if (idx < tlbSize && tlbData[idx].valid && tlbData[idx].vpn === vpn) {
+                    foundIdx = idx;
+                }
+                parallelProgress = step + 1;
+                drawStructure();
+                step++;
+            }, 300);
+        }
+
+        sizeSelect.addEventListener('change', initTLBData);
+        assocSelect.addEventListener('change', initTLBData);
+        btnLookup.addEventListener('click', doLookup);
+        btnPopulate.addEventListener('click', populateRandom);
+        btnParallel.addEventListener('click', runParallelAnim);
+
+        initTLBData();
+        populateRandom();
+    })();
+
+    /* ====================================================================
+       SECTION 3: TLB 查找流程
+    ==================================================================== */
+    (() => {
+        const canvas = document.getElementById('canvas-tlb-lookup');
+        const vaInput = document.getElementById('lookup-va-input');
+        const btnTranslate = document.getElementById('btn-lookup-translate');
+        const btnRandom = document.getElementById('btn-lookup-random');
+        const btnReset = document.getElementById('btn-lookup-reset');
+        const logEl = document.getElementById('lookup-log');
+
+        const PAGE_SIZE = 4096; // 4KB pages
+        const PAGE_BITS = 12;
+        const NUM_PAGES = 16;
+
+        let tlb = MemUtils.createTLB(8, 8); // 8-entry fully-assoc
+        let pt = MemUtils.createPageTable(NUM_PAGES, PAGE_SIZE);
+
+        // Pre-load some pages
+        const rng = MemUtils.seededRandom(42);
+        for (let i = 0; i < NUM_PAGES; i++) {
+            if (rng() < 0.7) {
+                pt.loadPage(i, Math.floor(rng() * 32));
+            }
+        }
+
+        let flowState = null; // {step, va, vpn, offset, tlbResult, ptResult, pa}
+        let animTimer = null;
+
+        function updateStats() {
+            const s = tlb.getStats();
+            document.getElementById('stat-lookup-total').textContent = s.accesses;
+            document.getElementById('stat-lookup-hits').textContent = s.hits;
+            document.getElementById('stat-lookup-misses').textContent = s.misses;
+            document.getElementById('stat-lookup-rate').textContent = s.accesses > 0 ? (s.hits / s.accesses * 100).toFixed(1) + '%' : '0%';
+        }
+
+        function addLog(msg, type) {
+            const div = document.createElement('div');
+            div.className = 'log-entry ' + type;
+            div.textContent = msg;
+            logEl.prepend(div);
+            if (logEl.children.length > 50) logEl.removeChild(logEl.lastChild);
+        }
+
+        function doTranslate() {
+            const vaStr = vaInput.value.trim();
+            const va = parseInt(vaStr, 16) || parseInt(vaStr, 10) || 0;
+            const vpn = va >>> PAGE_BITS;
+            const offset = va & (PAGE_SIZE - 1);
+
+            // TLB lookup
+            const tlbResult = tlb.lookup(vpn);
+
+            if (tlbResult.hit) {
+                const pa = (tlbResult.frame << PAGE_BITS) | offset;
+                addLog(`[命中] VA=0x${va.toString(16).toUpperCase()} → VPN=0x${vpn.toString(16).toUpperCase()} → TLB 命中! PPN=0x${tlbResult.frame.toString(16).toUpperCase()} → PA=0x${pa.toString(16).toUpperCase()}`, 'hit');
+                flowState = { step: 'hit', va, vpn, offset, frame: tlbResult.frame, pa };
+            } else {
+                // Page table walk
+                const ptResult = pt.translate(va);
+                if (ptResult.fault) {
+                    addLog(`[缺页] VA=0x${va.toString(16).toUpperCase()} → VPN=0x${vpn.toString(16).toUpperCase()} → TLB 未命中 → 页表查询 → 缺页错误!`, 'miss');
+                    flowState = { step: 'fault', va, vpn, offset };
+                } else {
+                    tlb.insert(vpn, ptResult.frame);
+                    addLog(`[未命中] VA=0x${va.toString(16).toUpperCase()} → VPN=0x${vpn.toString(16).toUpperCase()} → TLB 未命中 → 页表查询 → PPN=0x${ptResult.frame.toString(16).toUpperCase()} → 更新TLB → PA=0x${ptResult.physAddr.toString(16).toUpperCase()}`, 'miss');
+                    flowState = { step: 'miss-resolved', va, vpn, offset, frame: ptResult.frame, pa: ptResult.physAddr };
+                }
+            }
+
+            updateStats();
+            animateFlow();
+        }
+
+        function animateFlow() {
+            drawLookupFlow();
+        }
+
+        function drawLookupFlow() {
+            const { ctx, w, h } = MemUtils.initCanvas(canvas, 420);
+            ctx.clearRect(0, 0, w, h);
+
+            // Component positions
+            const compH = 44;
+            const cpuBox = { x: 20, y: h / 2 - compH / 2, w: 70, h: compH };
+            const tlbBox = { x: 130, y: h / 2 - 90, w: 80, h: compH };
+            const ptBox = { x: 130, y: h / 2 + 46, w: 80, h: compH };
+            const mmuBox = { x: 260, y: h / 2 - compH / 2, w: 80, h: compH };
+            const memBox = { x: 390, y: h / 2 - compH / 2, w: 80, h: compH };
+
+            // Adjust for width
+            const scale = Math.min(1, (w - 40) / 500);
+            const boxes = [cpuBox, tlbBox, ptBox, mmuBox, memBox];
+            if (scale < 1) {
+                boxes.forEach(b => {
+                    b.x = b.x * scale + 10;
+                    b.w *= scale;
+                });
+            }
+
+            // Draw components
+            MemUtils.drawMemoryBlock(ctx, cpuBox.x, cpuBox.y, cpuBox.w, cpuBox.h, 'CPU', C.pink, { highlight: true });
+
+            const isHit = flowState && flowState.step === 'hit';
+            const isMiss = flowState && (flowState.step === 'miss-resolved' || flowState.step === 'fault');
+            MemUtils.drawMemoryBlock(ctx, tlbBox.x, tlbBox.y, tlbBox.w, tlbBox.h, 'TLB', isHit ? C.green : (isMiss ? C.red : C.green), { highlight: isHit });
+            MemUtils.drawMemoryBlock(ctx, ptBox.x, ptBox.y, ptBox.w, ptBox.h, '页表', isMiss ? C.orange : C.orange);
+            MemUtils.drawMemoryBlock(ctx, mmuBox.x, mmuBox.y, mmuBox.w, mmuBox.h, 'MMU', C.purple);
+            MemUtils.drawMemoryBlock(ctx, memBox.x, memBox.y, memBox.w, memBox.h, '主存', C.blue);
+
+            // Arrows
+            // CPU → TLB (always)
+            MemUtils.drawArrow(ctx, cpuBox.x + cpuBox.w, cpuBox.y + cpuBox.h / 2 - 8, tlbBox.x, tlbBox.y + tlbBox.h / 2, C.textSec, { width: 1.5 });
+            ctx.font = '9px "Noto Sans SC", sans-serif';
+            ctx.fillStyle = C.textMut;
+            ctx.textAlign = 'center';
+            ctx.fillText('VA', (cpuBox.x + cpuBox.w + tlbBox.x) / 2 - 5, tlbBox.y - 2);
+
+            // TLB → MMU (hit)
+            MemUtils.drawArrow(ctx, tlbBox.x + tlbBox.w, tlbBox.y + tlbBox.h / 2, mmuBox.x, mmuBox.y + mmuBox.h / 2 - 8, isHit ? C.green : C.textMut, { width: isHit ? 2.5 : 1, dashed: !isHit });
+            ctx.fillStyle = isHit ? C.green : C.textMut;
+            ctx.fillText('命中→PA', (tlbBox.x + tlbBox.w + mmuBox.x) / 2, tlbBox.y + tlbBox.h / 2 - 12);
+
+            // TLB miss → Page Table
+            MemUtils.drawArrow(ctx, tlbBox.x + tlbBox.w / 2, tlbBox.y + tlbBox.h, ptBox.x + ptBox.w / 2, ptBox.y, isMiss ? C.red : C.textMut, { width: isMiss ? 2.5 : 1, dashed: !isMiss });
+            ctx.fillStyle = isMiss ? C.red : C.textMut;
+            ctx.fillText('未命中', tlbBox.x + tlbBox.w + 5, (tlbBox.y + tlbBox.h + ptBox.y) / 2);
+
+            // Page Table → MMU
+            MemUtils.drawArrow(ctx, ptBox.x + ptBox.w, ptBox.y + ptBox.h / 2, mmuBox.x, mmuBox.y + mmuBox.h / 2 + 8, isMiss ? C.orange : C.textMut, { width: isMiss ? 2 : 1, dashed: !isMiss });
+            ctx.fillStyle = isMiss ? C.orange : C.textMut;
+            ctx.fillText('PPN', (ptBox.x + ptBox.w + mmuBox.x) / 2, ptBox.y + ptBox.h / 2 + 15);
+
+            // MMU → Memory
+            MemUtils.drawArrow(ctx, mmuBox.x + mmuBox.w, mmuBox.y + mmuBox.h / 2, memBox.x, memBox.y + memBox.h / 2, C.blue, { width: 2 });
+            ctx.fillStyle = C.blue;
+            ctx.fillText('PA', (mmuBox.x + mmuBox.w + memBox.x) / 2, mmuBox.y - 5);
+
+            // Flow state info
+            if (flowState) {
+                const infoY = h - 80;
+                ctx.font = 'bold 12px "JetBrains Mono", monospace';
+                ctx.textAlign = 'left';
+
+                ctx.fillStyle = C.textSec;
+                ctx.fillText(`VA: 0x${flowState.va.toString(16).toUpperCase().padStart(4, '0')}`, 20, infoY);
+                ctx.fillText(`VPN: 0x${flowState.vpn.toString(16).toUpperCase().padStart(2, '0')}`, 20, infoY + 18);
+                ctx.fillText(`Offset: 0x${flowState.offset.toString(16).toUpperCase().padStart(3, '0')}`, 20, infoY + 36);
+
+                if (flowState.step === 'hit') {
+                    ctx.fillStyle = C.green;
+                    ctx.fillText(`TLB 命中! PPN: 0x${flowState.frame.toString(16).toUpperCase().padStart(2, '0')}`, 200, infoY);
+                    ctx.fillText(`PA: 0x${flowState.pa.toString(16).toUpperCase().padStart(5, '0')}`, 200, infoY + 18);
+                } else if (flowState.step === 'miss-resolved') {
+                    ctx.fillStyle = C.orange;
+                    ctx.fillText(`TLB 未命中 → 查页表`, 200, infoY);
+                    ctx.fillStyle = C.green;
+                    ctx.fillText(`PPN: 0x${flowState.frame.toString(16).toUpperCase().padStart(2, '0')}  PA: 0x${flowState.pa.toString(16).toUpperCase().padStart(5, '0')}`, 200, infoY + 18);
+                    ctx.fillStyle = C.blue;
+                    ctx.fillText('已更新 TLB', 200, infoY + 36);
+                } else if (flowState.step === 'fault') {
+                    ctx.fillStyle = C.red;
+                    ctx.fillText('TLB 未命中 → 页表查询 → 缺页错误!', 200, infoY);
+                }
+            }
+
+            // Draw TLB content summary
+            const sets = tlb.getSets();
+            const tableY = 15;
+            ctx.font = '9px "JetBrains Mono", monospace';
+            ctx.textAlign = 'right';
+            ctx.fillStyle = C.textMut;
+            ctx.fillText('TLB 内容:', w - 10, tableY);
+            let ty = tableY + 14;
+            for (const set of sets) {
+                for (const entry of set) {
+                    if (entry.valid) {
+                        const isCurrentHit = flowState && flowState.step === 'hit' && entry.vpn === flowState.vpn;
+                        ctx.fillStyle = isCurrentHit ? C.green : C.textSec;
+                        ctx.fillText(`VPN 0x${entry.vpn.toString(16).toUpperCase().padStart(2,'0')} → PPN 0x${entry.frame.toString(16).toUpperCase().padStart(2,'0')}`, w - 10, ty);
+                        ty += 13;
+                    }
+                }
+            }
+        }
+
+        function generateRandomVA() {
+            const vpn = Math.floor(Math.random() * NUM_PAGES);
+            const offset = Math.floor(Math.random() * PAGE_SIZE);
+            const va = (vpn << PAGE_BITS) | offset;
+            vaInput.value = '0x' + va.toString(16).toUpperCase();
+        }
+
+        btnTranslate.addEventListener('click', doTranslate);
+        btnRandom.addEventListener('click', () => {
+            generateRandomVA();
+            doTranslate();
+        });
+        btnReset.addEventListener('click', () => {
+            tlb.flush();
+            flowState = null;
+            logEl.innerHTML = '';
+            updateStats();
+            drawLookupFlow();
+        });
+
+        vaInput.addEventListener('keydown', e => { if (e.key === 'Enter') doTranslate(); });
+
+        updateStats();
+        drawLookupFlow();
+    })();
+
+    /* ====================================================================
+       SECTION 4: TLB Miss 处理
+    ==================================================================== */
+    (() => {
+        const canvas = document.getElementById('canvas-tlb-miss');
+        const levelsSelect = document.getElementById('pt-levels');
+        const handlerSelect = document.getElementById('miss-handler');
+        const btnAnimate = document.getElementById('btn-miss-animate');
+        const logEl = document.getElementById('miss-log');
+        const formulaEl = document.getElementById('miss-formula');
+
+        const MEM_LATENCY = 100; // ns per memory access
+        let animStep = -1;
+        let animTimer = null;
+
+        function getConfig() {
+            const levels = parseInt(levelsSelect.value);
+            const handler = handlerSelect.value;
+            return { levels, handler };
+        }
+
+        function updateCosts() {
+            const { levels, handler } = getConfig();
+            const walkAccesses = levels;
+            const walkCost = walkAccesses * MEM_LATENCY;
+            const softwareOverhead = handler === 'software' ? 50 : 0;
+
+            document.getElementById('stat-walk-cost').textContent = (walkCost + softwareOverhead) + ' ns';
+            document.getElementById('stat-walk-accesses').textContent = walkAccesses + ' 次';
+
+            formulaEl.innerHTML = `
+                <p style="font-size:0.85rem;color:var(--text-secondary);">TLB Miss 代价 = ${levels} 级页表 × ${MEM_LATENCY} ns${handler === 'software' ? ' + 50 ns (异常处理开销)' : ''} = <strong style="color:${C.red}">${walkCost + softwareOverhead} ns</strong></p>
+            `;
+        }
+
+        function drawMissFlow() {
+            const { ctx, w, h } = MemUtils.initCanvas(canvas, 440);
+            ctx.clearRect(0, 0, w, h);
+            const { levels, handler } = getConfig();
+
+            const compW = 80;
+            const compH = 40;
+            const startX = 30;
+            const gapX = Math.min(90, (w - startX - compW - 20) / (levels + 2));
+
+            // CPU
+            const cpuX = startX;
+            const cpuY = 50;
+            MemUtils.drawMemoryBlock(ctx, cpuX, cpuY, compW, compH, 'CPU', C.pink, { highlight: true });
+
+            // TLB (miss)
+            const tlbX = cpuX + compW + gapX;
+            MemUtils.drawMemoryBlock(ctx, tlbX, cpuY, compW, compH, 'TLB', C.red, { highlight: animStep >= 0 });
+
+            // Arrow CPU → TLB
+            MemUtils.drawArrow(ctx, cpuX + compW, cpuY + compH / 2, tlbX, cpuY + compH / 2, C.textSec, { width: 1.5 });
+
+            // Miss label
+            ctx.font = 'bold 11px "Noto Sans SC", sans-serif';
+            ctx.fillStyle = C.red;
+            ctx.textAlign = 'center';
+            ctx.fillText('未命中!', tlbX + compW / 2, cpuY - 8);
+
+            // Page table levels
+            const ptStartY = cpuY + compH + 60;
+            const ptBoxes = [];
+            for (let i = 0; i < levels; i++) {
+                const px = startX + i * (compW + gapX * 0.8);
+                const py = ptStartY + (i % 2 === 0 ? 0 : 40);
+                const label = levels === 1 ? '页表' : `L${i + 1} 页表`;
+                const isActive = animStep > i;
+                const color = isActive ? C.orange : C.textMut;
+                MemUtils.drawMemoryBlock(ctx, px, py, compW, compH, label, color, { highlight: isActive });
+                ptBoxes.push({ x: px, y: py, w: compW, h: compH });
+
+                if (i > 0) {
+                    MemUtils.drawArrow(ctx, ptBoxes[i - 1].x + compW, ptBoxes[i - 1].y + compH / 2, px, py + compH / 2, isActive ? C.orange : C.textMut, { width: isActive ? 2 : 1 });
+                }
+
+                // Memory access label
+                ctx.font = '10px "JetBrains Mono", monospace';
+                ctx.fillStyle = isActive ? C.orange : C.textMut;
+                ctx.textAlign = 'center';
+                ctx.fillText(`${MEM_LATENCY}ns`, px + compW / 2, py + compH + 15);
+            }
+
+            // TLB → first page table level
+            if (ptBoxes.length > 0) {
+                const midX = tlbX + compW / 2;
+                ctx.strokeStyle = animStep >= 0 ? C.red : C.textMut;
+                ctx.lineWidth = animStep >= 0 ? 2 : 1;
+                ctx.setLineDash(animStep >= 0 ? [] : [4, 4]);
+                ctx.beginPath();
+                ctx.moveTo(midX, cpuY + compH);
+                ctx.lineTo(midX, ptStartY - 20);
+                ctx.lineTo(ptBoxes[0].x + compW / 2, ptStartY - 20);
+                ctx.lineTo(ptBoxes[0].x + compW / 2, ptBoxes[0].y);
+                ctx.stroke();
+                ctx.setLineDash([]);
+                // Arrowhead
+                const tipX = ptBoxes[0].x + compW / 2;
+                const tipY = ptBoxes[0].y;
+                ctx.fillStyle = animStep >= 0 ? C.red : C.textMut;
+                ctx.beginPath();
+                ctx.moveTo(tipX, tipY);
+                ctx.lineTo(tipX - 5, tipY - 8);
+                ctx.lineTo(tipX + 5, tipY - 8);
+                ctx.closePath();
+                ctx.fill();
+            }
+
+            // Result: PPN found, update TLB
+            if (animStep > levels) {
+                const lastBox = ptBoxes[ptBoxes.length - 1];
+                const resX = lastBox.x + lastBox.w + gapX * 0.8;
+                const resY = lastBox.y;
+                MemUtils.drawMemoryBlock(ctx, resX, resY, compW, compH, 'PPN', C.green, { highlight: true });
+                MemUtils.drawArrow(ctx, lastBox.x + lastBox.w, lastBox.y + compH / 2, resX, resY + compH / 2, C.green, { width: 2 });
+
+                // Update TLB arrow
+                ctx.strokeStyle = C.green;
+                ctx.lineWidth = 2;
+                ctx.setLineDash([6, 3]);
+                ctx.beginPath();
+                ctx.moveTo(resX + compW / 2, resY);
+                ctx.lineTo(resX + compW / 2, cpuY + compH / 2);
+                ctx.lineTo(tlbX + compW, cpuY + compH / 2);
+                ctx.stroke();
+                ctx.setLineDash([]);
+
+                ctx.font = 'bold 11px "Noto Sans SC", sans-serif';
+                ctx.fillStyle = C.green;
+                ctx.textAlign = 'center';
+                ctx.fillText('填入 TLB', resX + compW / 2 + 40, cpuY + compH / 2 - 8);
+            }
+
+            // Handler type annotation
+            ctx.font = '11px "Noto Sans SC", sans-serif';
+            ctx.fillStyle = C.purple;
+            ctx.textAlign = 'left';
+            if (handler === 'hardware') {
+                ctx.fillText('硬件自动遍历页表 (MMU Page Walker)', startX, h - 30);
+            } else {
+                ctx.fillText('TLB Miss → 触发异常 → OS 软件处理', startX, h - 30);
+                ctx.fillStyle = C.textMut;
+                ctx.fillText('额外开销: ~50ns (中断处理 + 上下文保存)', startX, h - 12);
+            }
+
+            // Total cost bar
+            const softwareOverhead = handler === 'software' ? 50 : 0;
+            const totalCost = levels * MEM_LATENCY + softwareOverhead;
+            const barY = h - 65;
+            const barW = Math.min(w - 40, 400);
+            const maxCost = 4 * MEM_LATENCY + 50;
+
+            ctx.fillStyle = MemUtils.hexToRgba(C.red, 0.2);
+            ctx.beginPath();
+            ctx.roundRect(startX, barY, barW, 18, 3);
+            ctx.fill();
+
+            const fillW = (totalCost / maxCost) * barW;
+            ctx.fillStyle = MemUtils.hexToRgba(C.red, 0.7);
+            ctx.beginPath();
+            ctx.roundRect(startX, barY, fillW, 18, 3);
+            ctx.fill();
+
+            ctx.font = 'bold 10px "JetBrains Mono", monospace';
+            ctx.fillStyle = '#fff';
+            ctx.textAlign = 'center';
+            ctx.fillText(`${totalCost} ns`, startX + fillW / 2, barY + 13);
+        }
+
+        function runAnimation() {
+            const { levels } = getConfig();
+            animStep = -1;
+            if (animTimer) clearInterval(animTimer);
+
+            logEl.innerHTML = '';
+            const addLog = (msg, cls) => {
+                const d = document.createElement('div');
+                d.className = 'log-entry ' + cls;
+                d.textContent = msg;
+                logEl.appendChild(d);
+            };
+
+            addLog('CPU 发出虚拟地址，查找 TLB...', 'info');
+
+            let step = 0;
+            animTimer = setInterval(() => {
+                if (step === 0) {
+                    animStep = 0;
+                    addLog('TLB 未命中! 开始页表遍历...', 'miss');
+                } else if (step <= levels) {
+                    animStep = step;
+                    addLog(`访问 L${step} 页表 (+${MEM_LATENCY}ns)`, 'info');
+                } else if (step === levels + 1) {
+                    animStep = levels + 1;
+                    addLog('找到 PPN，填入 TLB', 'hit');
+                    addLog(`总代价: ${levels * MEM_LATENCY}ns (${levels} 次内存访问)`, 'info');
+                } else {
+                    clearInterval(animTimer);
+                    animTimer = null;
+                    return;
+                }
+                drawMissFlow();
+                step++;
+            }, 600);
+        }
+
+        levelsSelect.addEventListener('change', () => { updateCosts(); animStep = -1; drawMissFlow(); });
+        handlerSelect.addEventListener('change', () => { updateCosts(); animStep = -1; drawMissFlow(); });
+        btnAnimate.addEventListener('click', runAnimation);
+
+        updateCosts();
+        drawMissFlow();
+    })();
+
+    /* ====================================================================
+       SECTION 5: 上下文切换与 ASID
+    ==================================================================== */
+    (() => {
+        const canvas = document.getElementById('canvas-asid');
+        const modeSelect = document.getElementById('asid-mode');
+        const freqSelect = document.getElementById('switch-freq');
+        const btnRun = document.getElementById('btn-asid-run');
+        const btnReset = document.getElementById('btn-asid-reset');
+        const logEl = document.getElementById('asid-log');
+
+        const TLB_SIZE = 8;
+        const PROCESSES = [
+            { name: 'A', color: '#4fc3f7', asid: 1, pages: [0, 1, 2, 3] },
+            { name: 'B', color: '#ff80ab', asid: 2, pages: [4, 5, 6, 7] },
+            { name: 'C', color: '#ffd740', asid: 3, pages: [8, 9, 10, 11] },
+        ];
+
+        // Extended TLB with ASID support
+        let tlbEntries = [];
+        let stats = { total: 0, hits: 0, flushes: 0 };
+        let simRunning = false;
+        let simTimer = null;
+        let currentProcess = 0;
+        let accessCount = 0;
+        let simLog = []; // {process, vpn, hit, asid}
+
+        function getFreq() {
+            const v = freqSelect.value;
+            return v === 'low' ? 20 : v === 'medium' ? 10 : 5;
+        }
+
+        function initSim() {
+            tlbEntries = [];
+            for (let i = 0; i < TLB_SIZE; i++) {
+                tlbEntries.push({ valid: false, vpn: -1, ppn: -1, asid: -1 });
+            }
+            stats = { total: 0, hits: 0, flushes: 0 };
+            currentProcess = 0;
+            accessCount = 0;
+            simLog = [];
+            logEl.innerHTML = '';
+            updateASIDStats();
+            drawASID();
+        }
+
+        function flushTLB() {
+            for (const e of tlbEntries) {
+                e.valid = false;
+                e.vpn = -1;
+                e.ppn = -1;
+                e.asid = -1;
+            }
+            stats.flushes++;
+        }
+
+        function tlbLookup(vpn, asid, useASID) {
+            for (let i = 0; i < tlbEntries.length; i++) {
+                const e = tlbEntries[i];
+                if (e.valid && e.vpn === vpn) {
+                    if (useASID) {
+                        if (e.asid === asid) return { hit: true, idx: i };
+                    } else {
+                        return { hit: true, idx: i };
+                    }
+                }
+            }
+            return { hit: false };
+        }
+
+        function tlbInsert(vpn, ppn, asid) {
+            // Find empty slot
+            for (let i = 0; i < tlbEntries.length; i++) {
+                if (!tlbEntries[i].valid) {
+                    tlbEntries[i] = { valid: true, vpn, ppn, asid };
+                    return i;
+                }
+            }
+            // Evict random
+            const idx = Math.floor(Math.random() * TLB_SIZE);
+            tlbEntries[idx] = { valid: true, vpn, ppn, asid };
+            return idx;
+        }
+
+        function runSimulation() {
+            if (simRunning) return;
+            initSim();
+            simRunning = true;
+
+            const useASID = modeSelect.value === 'asid';
+            const freq = getFreq();
+            const totalAccesses = 60;
+            let step = 0;
+
+            simTimer = setInterval(() => {
+                if (step >= totalAccesses) {
+                    simRunning = false;
+                    clearInterval(simTimer);
+                    addASIDLog('模拟完成', 'info');
+                    return;
+                }
+
+                // Context switch?
+                if (step > 0 && step % freq === 0) {
+                    const oldProc = currentProcess;
+                    currentProcess = (currentProcess + 1) % PROCESSES.length;
+                    if (!useASID) {
+                        flushTLB();
+                        addASIDLog(`上下文切换: ${PROCESSES[oldProc].name} → ${PROCESSES[currentProcess].name} (刷新TLB)`, 'miss');
+                    } else {
+                        addASIDLog(`上下文切换: ${PROCESSES[oldProc].name} → ${PROCESSES[currentProcess].name} (ASID保留)`, 'info');
+                    }
+                }
+
+                const proc = PROCESSES[currentProcess];
+                const vpn = proc.pages[Math.floor(Math.random() * proc.pages.length)];
+                const asid = proc.asid;
+
+                stats.total++;
+                const result = tlbLookup(vpn, asid, useASID);
+                if (result.hit) {
+                    stats.hits++;
+                    simLog.push({ process: currentProcess, vpn, hit: true, asid });
+                    addASIDLog(`[${proc.name}] VPN=0x${vpn.toString(16).toUpperCase()} → TLB 命中`, 'hit');
+                } else {
+                    const ppn = vpn + 0x10;
+                    tlbInsert(vpn, ppn, asid);
+                    simLog.push({ process: currentProcess, vpn, hit: false, asid });
+                    addASIDLog(`[${proc.name}] VPN=0x${vpn.toString(16).toUpperCase()} → TLB 未命中`, 'miss');
+                }
+
+                updateASIDStats();
+                drawASID();
+                step++;
+            }, 150);
+        }
+
+        function addASIDLog(msg, cls) {
+            const d = document.createElement('div');
+            d.className = 'log-entry ' + cls;
+            d.textContent = msg;
+            logEl.prepend(d);
+            if (logEl.children.length > 60) logEl.removeChild(logEl.lastChild);
+        }
+
+        function updateASIDStats() {
+            document.getElementById('stat-asid-total').textContent = stats.total;
+            document.getElementById('stat-asid-hits').textContent = stats.hits;
+            document.getElementById('stat-asid-rate').textContent = stats.total > 0 ? (stats.hits / stats.total * 100).toFixed(1) + '%' : '0%';
+            document.getElementById('stat-asid-flushes').textContent = stats.flushes;
+        }
+
+        function drawASID() {
+            const { ctx, w, h } = MemUtils.initCanvas(canvas, 420);
+            ctx.clearRect(0, 0, w, h);
+
+            const useASID = modeSelect.value === 'asid';
+
+            // Title
+            ctx.font = 'bold 13px "Noto Sans SC", sans-serif';
+            ctx.fillStyle = C.textPri;
+            ctx.textAlign = 'center';
+            ctx.fillText(useASID ? 'TLB 使用 ASID 标签' : 'TLB 每次切换时刷新', w / 2, 25);
+
+            // Draw TLB entries
+            const entryW = Math.min(w - 40, 500);
+            const entryH = 30;
+            const startX = (w - entryW) / 2;
+            const startY = 50;
+
+            // Header
+            ctx.font = 'bold 10px "JetBrains Mono", monospace';
+            ctx.fillStyle = C.blue;
+            ctx.textAlign = 'center';
+            const colWidths = useASID ? [40, 60, 80, 80, 60, entryW - 320] : [40, 60, 100, 100, entryW - 300];
+            const colLabels = useASID ? ['#', 'V', 'VPN', 'PPN', 'ASID', '进程'] : ['#', 'V', 'VPN', 'PPN', '进程'];
+
+            let cx = startX;
+            for (let i = 0; i < colLabels.length; i++) {
+                ctx.fillText(colLabels[i], cx + colWidths[i] / 2, startY);
+                cx += colWidths[i];
+            }
+
+            // Entries
+            for (let i = 0; i < TLB_SIZE; i++) {
+                const e = tlbEntries[i];
+                const ey = startY + 10 + i * (entryH + 4);
+
+                // Find which process
+                let procIdx = -1;
+                if (e.valid) {
+                    for (let p = 0; p < PROCESSES.length; p++) {
+                        if (PROCESSES[p].pages.includes(e.vpn) && (!useASID || PROCESSES[p].asid === e.asid)) {
+                            procIdx = p;
+                            break;
+                        }
+                    }
+                }
+
+                const color = procIdx >= 0 ? PROCESSES[procIdx].color : C.textMut;
+                ctx.fillStyle = MemUtils.hexToRgba(color, e.valid ? 0.1 : 0.03);
+                ctx.strokeStyle = e.valid ? color : MemUtils.hexToRgba(C.textMut, 0.3);
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.roundRect(startX, ey, entryW, entryH, 4);
+                ctx.fill();
+                ctx.stroke();
+
+                ctx.font = '11px "JetBrains Mono", monospace';
+                ctx.textAlign = 'center';
+                let ccx = startX;
+
+                const vals = useASID
+                    ? [i, e.valid ? '1' : '0', e.valid ? '0x' + e.vpn.toString(16).toUpperCase().padStart(2, '0') : '—', e.valid ? '0x' + e.ppn.toString(16).toUpperCase().padStart(2, '0') : '—', e.valid ? e.asid : '—', procIdx >= 0 ? PROCESSES[procIdx].name : '—']
+                    : [i, e.valid ? '1' : '0', e.valid ? '0x' + e.vpn.toString(16).toUpperCase().padStart(2, '0') : '—', e.valid ? '0x' + e.ppn.toString(16).toUpperCase().padStart(2, '0') : '—', procIdx >= 0 ? PROCESSES[procIdx].name : '—'];
+
+                for (let j = 0; j < vals.length; j++) {
+                    ctx.fillStyle = e.valid ? color : C.textMut;
+                    ctx.fillText(String(vals[j]), ccx + colWidths[j] / 2, ey + entryH / 2 + 4);
+                    ccx += colWidths[j];
+                }
+            }
+
+            // Process legend
+            const legendY = startY + 10 + TLB_SIZE * (entryH + 4) + 20;
+            ctx.font = 'bold 11px "Noto Sans SC", sans-serif';
+            ctx.textAlign = 'left';
+            let lx = startX;
+            for (const p of PROCESSES) {
+                ctx.fillStyle = p.color;
+                ctx.fillRect(lx, legendY, 12, 12);
+                ctx.fillText(`进程 ${p.name} (ASID=${p.asid})`, lx + 16, legendY + 10);
+                lx += 160;
+            }
+
+            // Current process indicator
+            const proc = PROCESSES[currentProcess];
+            ctx.font = 'bold 12px "Noto Sans SC", sans-serif';
+            ctx.fillStyle = proc.color;
+            ctx.textAlign = 'center';
+            ctx.fillText(`当前进程: ${proc.name}`, w / 2, legendY + 35);
+
+            // Hit rate history mini-chart
+            if (simLog.length > 1) {
+                const chartX = startX;
+                const chartY = legendY + 55;
+                const chartW = entryW;
+                const chartH = 60;
+
+                ctx.fillStyle = MemUtils.hexToRgba(C.bgCard, 0.5);
+                ctx.beginPath();
+                ctx.roundRect(chartX, chartY, chartW, chartH, 4);
+                ctx.fill();
+
+                ctx.font = '9px "Noto Sans SC", sans-serif';
+                ctx.fillStyle = C.textMut;
+                ctx.textAlign = 'left';
+                ctx.fillText('命中率趋势', chartX + 5, chartY + 12);
+
+                // Moving average hit rate
+                const windowSize = 5;
+                const rates = [];
+                for (let i = 0; i < simLog.length; i++) {
+                    const start = Math.max(0, i - windowSize + 1);
+                    const window = simLog.slice(start, i + 1);
+                    const hits = window.filter(e => e.hit).length;
+                    rates.push(hits / window.length);
+                }
+
+                if (rates.length > 1) {
+                    const stepX = chartW / Math.max(rates.length - 1, 1);
+                    ctx.strokeStyle = C.green;
+                    ctx.lineWidth = 1.5;
+                    ctx.beginPath();
+                    for (let i = 0; i < rates.length; i++) {
+                        const x = chartX + i * stepX;
+                        const y = chartY + chartH - 10 - rates[i] * (chartH - 20);
+                        if (i === 0) ctx.moveTo(x, y);
+                        else ctx.lineTo(x, y);
+                    }
+                    ctx.stroke();
+                }
+            }
+        }
+
+        modeSelect.addEventListener('change', () => { initSim(); });
+        freqSelect.addEventListener('change', () => { /* no reset needed */ });
+        btnRun.addEventListener('click', runSimulation);
+        btnReset.addEventListener('click', () => {
+            if (simTimer) { clearInterval(simTimer); simTimer = null; }
+            simRunning = false;
+            initSim();
+        });
+
+        initSim();
+    })();
+
+    /* ====================================================================
+       SECTION 6: TLB + Cache 联动
+    ==================================================================== */
+    (() => {
+        const canvas = document.getElementById('canvas-tlb-cache');
+        const tlbLatInput = document.getElementById('tc-tlb-lat');
+        const cacheLatInput = document.getElementById('tc-cache-lat');
+        const memLatInput = document.getElementById('tc-mem-lat');
+        const cacheHRInput = document.getElementById('tc-cache-hr');
+        const btnSimulate = document.getElementById('btn-tc-simulate');
+        const piptTiming = document.getElementById('pipt-timing');
+        const viptTiming = document.getElementById('vipt-timing');
+
+        let animPhase = 'idle'; // idle, pipt, vipt
+        let animStep = 0;
+        let animTimer = null;
+
+        function getConfig() {
+            return {
+                tlbLat: parseFloat(tlbLatInput.value) || 1,
+                cacheLat: parseFloat(cacheLatInput.value) || 3,
+                memLat: parseFloat(memLatInput.value) || 100,
+                cacheHR: (parseFloat(cacheHRInput.value) || 90) / 100,
+            };
+        }
+
+        function updateTimings() {
+            const c = getConfig();
+
+            // PIPT: serial TLB → Cache
+            const piptHit = c.tlbLat + c.cacheLat;
+            const piptMiss = c.tlbLat + c.cacheLat + c.memLat;
+            const piptEff = c.cacheHR * piptHit + (1 - c.cacheHR) * piptMiss;
+
+            // VIPT: parallel TLB + Cache index, then tag compare
+            const viptHit = Math.max(c.tlbLat, c.cacheLat); // parallel
+            const viptMiss = Math.max(c.tlbLat, c.cacheLat) + c.memLat;
+            const viptEff = c.cacheHR * viptHit + (1 - c.cacheHR) * viptMiss;
+
+            const speedup = piptEff / viptEff;
+
+            document.getElementById('stat-tc-pipt').textContent = piptEff.toFixed(1) + ' ns';
+            document.getElementById('stat-tc-vipt').textContent = viptEff.toFixed(1) + ' ns';
+            document.getElementById('stat-tc-speedup').textContent = speedup.toFixed(2) + 'x';
+            document.getElementById('stat-pipt-total').textContent = piptEff.toFixed(1) + ' ns';
+            document.getElementById('stat-vipt-total').textContent = viptEff.toFixed(1) + ' ns';
+
+            // Timing bars
+            const maxTime = piptMiss;
+
+            piptTiming.innerHTML = '';
+            addTimingSegment(piptTiming, 'TLB', c.tlbLat, maxTime, C.green);
+            addTimingSegment(piptTiming, 'Cache', c.cacheLat, maxTime, C.blue);
+            if (c.cacheHR < 1) {
+                addTimingSegment(piptTiming, `Miss (${((1-c.cacheHR)*100).toFixed(0)}%)`, c.memLat * (1 - c.cacheHR), maxTime, C.red);
+            }
+
+            viptTiming.innerHTML = '';
+            const parallelTime = Math.max(c.tlbLat, c.cacheLat);
+            addTimingSegment(viptTiming, 'TLB+Cache', parallelTime, maxTime, C.purple);
+            if (c.cacheHR < 1) {
+                addTimingSegment(viptTiming, `Miss (${((1-c.cacheHR)*100).toFixed(0)}%)`, c.memLat * (1 - c.cacheHR), maxTime, C.red);
+            }
+        }
+
+        function addTimingSegment(container, label, time, maxTime, color) {
+            const pct = (time / maxTime) * 100;
+            const seg = document.createElement('div');
+            seg.className = 'timing-segment';
+            seg.style.width = Math.max(pct, 8) + '%';
+            seg.style.background = color;
+            seg.textContent = pct > 15 ? `${label} ${time.toFixed(0)}ns` : '';
+            seg.title = `${label}: ${time.toFixed(1)}ns`;
+            container.appendChild(seg);
+        }
+
+        function drawTLBCache() {
+            const { ctx, w, h } = MemUtils.initCanvas(canvas, 380);
+            ctx.clearRect(0, 0, w, h);
+
+            const c = getConfig();
+            const midY = h / 2;
+            const compW = 80;
+            const compH = 38;
+
+            // ===== PIPT diagram (top half) =====
+            const piptY = 50;
+            ctx.font = 'bold 13px "Noto Sans SC", sans-serif';
+            ctx.fillStyle = C.blue;
+            ctx.textAlign = 'center';
+            ctx.fillText('PIPT: 串行 TLB → Cache', w / 2, piptY - 15);
+
+            const piptBoxes = [
+                { x: 30, y: piptY, label: 'VA', color: C.pink },
+                { x: 140, y: piptY, label: 'TLB', color: C.green },
+                { x: 250, y: piptY, label: 'PA', color: C.orange },
+                { x: 340, y: piptY, label: 'Cache', color: C.blue },
+                { x: 460, y: piptY, label: '数据', color: C.purple },
+            ];
+
+            // Scale for narrow screens
+            const scale = Math.min(1, (w - 20) / 560);
+            piptBoxes.forEach(b => { b.x = b.x * scale + 10; });
+
+            for (let i = 0; i < piptBoxes.length; i++) {
+                const b = piptBoxes[i];
+                MemUtils.drawMemoryBlock(ctx, b.x, b.y, compW * scale, compH, b.label, b.color);
+                if (i < piptBoxes.length - 1) {
+                    MemUtils.drawArrow(ctx, b.x + compW * scale, b.y + compH / 2, piptBoxes[i + 1].x, piptBoxes[i + 1].y + compH / 2, C.textMut, { width: 1.5 });
+                }
+            }
+
+            // Time annotations
+            ctx.font = '10px "JetBrains Mono", monospace';
+            ctx.fillStyle = C.green;
+            ctx.textAlign = 'center';
+            ctx.fillText(`${c.tlbLat}ns`, (piptBoxes[0].x + compW * scale + piptBoxes[1].x) / 2, piptY - 3);
+            ctx.fillStyle = C.blue;
+            ctx.fillText(`${c.cacheLat}ns`, (piptBoxes[2].x + compW * scale + piptBoxes[3].x) / 2, piptY - 3);
+
+            // ===== VIPT diagram (bottom half) =====
+            const viptY = midY + 40;
+            ctx.font = 'bold 13px "Noto Sans SC", sans-serif';
+            ctx.fillStyle = C.purple;
+            ctx.textAlign = 'center';
+            ctx.fillText('VIPT: 并行 TLB + Cache 索引', w / 2, viptY - 15);
+
+            // VA splits into two parallel paths
+            const vaBox = { x: 30 * scale + 10, y: viptY + 20, label: 'VA' };
+            MemUtils.drawMemoryBlock(ctx, vaBox.x, vaBox.y, compW * scale, compH, vaBox.label, C.pink);
+
+            const tlbBox = { x: 150 * scale + 10, y: viptY - 5, label: 'TLB' };
+            const cacheIdxBox = { x: 150 * scale + 10, y: viptY + 45, label: 'Cache索引' };
+            MemUtils.drawMemoryBlock(ctx, tlbBox.x, tlbBox.y, compW * scale, compH, tlbBox.label, C.green);
+            MemUtils.drawMemoryBlock(ctx, cacheIdxBox.x, cacheIdxBox.y, compW * scale, compH, cacheIdxBox.label, C.blue);
+
+            // Arrows from VA to both
+            MemUtils.drawArrow(ctx, vaBox.x + compW * scale, vaBox.y + compH / 2 - 8, tlbBox.x, tlbBox.y + compH / 2, C.textSec, { width: 1.5 });
+            MemUtils.drawArrow(ctx, vaBox.x + compW * scale, vaBox.y + compH / 2 + 8, cacheIdxBox.x, cacheIdxBox.y + compH / 2, C.textSec, { width: 1.5 });
+
+            // Both converge at tag compare
+            const tagBox = { x: 290 * scale + 10, y: viptY + 20, label: '标签比较' };
+            MemUtils.drawMemoryBlock(ctx, tagBox.x, tagBox.y, compW * scale, compH, tagBox.label, C.orange);
+
+            MemUtils.drawArrow(ctx, tlbBox.x + compW * scale, tlbBox.y + compH / 2, tagBox.x, tagBox.y + compH / 2 - 8, C.green, { width: 1.5 });
+            MemUtils.drawArrow(ctx, cacheIdxBox.x + compW * scale, cacheIdxBox.y + compH / 2, tagBox.x, tagBox.y + compH / 2 + 8, C.blue, { width: 1.5 });
+
+            const dataBox = { x: 410 * scale + 10, y: viptY + 20, label: '数据' };
+            MemUtils.drawMemoryBlock(ctx, dataBox.x, dataBox.y, compW * scale, compH, dataBox.label, C.purple);
+            MemUtils.drawArrow(ctx, tagBox.x + compW * scale, tagBox.y + compH / 2, dataBox.x, dataBox.y + compH / 2, C.textSec, { width: 1.5 });
+
+            // Parallel annotation
+            ctx.strokeStyle = MemUtils.hexToRgba(C.purple, 0.4);
+            ctx.lineWidth = 1;
+            ctx.setLineDash([4, 3]);
+            const pStartX = tlbBox.x - 5;
+            const pEndX = tlbBox.x + compW * scale + 5;
+            ctx.strokeRect(pStartX, tlbBox.y - 8, pEndX - pStartX, cacheIdxBox.y + compH - tlbBox.y + 16);
+            ctx.setLineDash([]);
+
+            ctx.font = '9px "Noto Sans SC", sans-serif';
+            ctx.fillStyle = C.purple;
+            ctx.textAlign = 'center';
+            ctx.fillText('并行', pStartX + (pEndX - pStartX) / 2, tlbBox.y - 12);
+
+            // Time annotation for parallel
+            ctx.font = '10px "JetBrains Mono", monospace';
+            ctx.fillStyle = C.purple;
+            ctx.fillText(`max(${c.tlbLat}, ${c.cacheLat}) = ${Math.max(c.tlbLat, c.cacheLat)}ns`, (vaBox.x + compW * scale + tlbBox.x) / 2, viptY - 3);
+        }
+
+        function simulate() {
+            updateTimings();
+            drawTLBCache();
+        }
+
+        [tlbLatInput, cacheLatInput, memLatInput, cacheHRInput].forEach(el => {
+            el.addEventListener('input', simulate);
+        });
+        btnSimulate.addEventListener('click', simulate);
+
+        simulate();
+    })();
+
+    /* ====================================================================
+       Global: Resize handler
+    ==================================================================== */
+    let resizeTimeout;
+    window.addEventListener('resize', () => {
+        clearTimeout(resizeTimeout);
+        resizeTimeout = setTimeout(() => {
+            // Sections 2-6 redraw on resize; Section 1 has its own loop
+        }, 200);
+    });
+
+    /* ====================================================================
+       KaTeX deferred rendering
+    ==================================================================== */
+    if (typeof renderMathInElement === 'function') {
+        renderKaTeX();
+    } else {
+        document.addEventListener('DOMContentLoaded', () => {
+            setTimeout(renderKaTeX, 200);
+        });
+        window.addEventListener('load', renderKaTeX);
+    }
+
+});
+</script>
+</body>
+</html>

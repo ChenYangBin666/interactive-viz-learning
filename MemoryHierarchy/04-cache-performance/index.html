@@ -1,0 +1,1940 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cache性能分析 — 存储层级</title>
+<link rel="stylesheet" href="../shared/styles/common.css">
+<link rel="stylesheet" href="../shared/styles/components.css">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+<script src="../shared/scripts/mem-utils.js"></script>
+<script src="../shared/scripts/nav.js"></script>
+<style>
+/* ===== Page-specific styles ===== */
+.hero {
+    text-align: center;
+    padding: 3rem 1rem 2rem;
+}
+.hero h1 {
+    font-size: 2.2rem;
+    background: linear-gradient(135deg, var(--accent-green), var(--accent-blue));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin-bottom: 0.5rem;
+}
+.hero .subtitle {
+    color: var(--text-secondary);
+    font-size: 1.05rem;
+}
+
+.section {
+    max-width: 1200px;
+    margin: 0 auto 3rem;
+    padding: 0 1.5rem;
+}
+.section:nth-child(even) > .card {
+    background: var(--bg-card);
+}
+
+.formula-box {
+    background: rgba(79, 195, 247, 0.06);
+    border: 1px solid rgba(79, 195, 247, 0.2);
+    border-radius: var(--radius-md);
+    padding: 1.2rem 1.5rem;
+    margin: 1rem 0;
+    text-align: center;
+}
+
+.controls-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    align-items: end;
+    margin: 1rem 0;
+}
+.control-item {
+    flex: 1;
+    min-width: 180px;
+}
+.control-item label {
+    display: block;
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    margin-bottom: 0.3rem;
+}
+.control-item .val-display {
+    font-family: var(--font-mono);
+    color: var(--accent-green);
+    font-size: 0.85rem;
+    float: right;
+}
+
+.result-box {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 1rem 1.5rem;
+    background: rgba(22, 199, 154, 0.08);
+    border: 1px solid rgba(22, 199, 154, 0.25);
+    border-radius: var(--radius-md);
+    margin: 1rem 0;
+}
+.result-box .result-label {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+}
+.result-box .result-value {
+    font-family: var(--font-mono);
+    font-size: 1.4rem;
+    font-weight: 700;
+    color: var(--accent-green);
+}
+
+.canvas-container {
+    position: relative;
+    width: 100%;
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+}
+.canvas-container canvas {
+    display: block;
+    width: 100%;
+}
+
+.split-two {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.5rem;
+    margin: 1rem 0;
+}
+@media (max-width: 768px) {
+    .split-two { grid-template-columns: 1fr; }
+}
+
+.miss-type-card {
+    padding: 1rem;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+}
+.miss-type-card h4 {
+    display: flex; align-items: center; gap: 0.5rem;
+    margin-bottom: 0.5rem;
+}
+.miss-type-card .dot {
+    width: 10px; height: 10px; border-radius: 50%; display: inline-block;
+}
+
+.log-area {
+    max-height: 200px;
+    overflow-y: auto;
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    padding: 0.75rem;
+    background: rgba(0,0,0,0.2);
+    border-radius: var(--radius-sm);
+    margin-top: 0.75rem;
+}
+.log-area .log-hit { color: var(--accent-green); }
+.log-area .log-compulsory { color: var(--accent-orange); }
+.log-area .log-capacity { color: var(--accent-purple); }
+.log-area .log-conflict { color: var(--accent-red); }
+
+.code-compare {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    margin: 1rem 0;
+}
+@media (max-width: 768px) {
+    .code-compare { grid-template-columns: 1fr; }
+}
+.code-block {
+    background: rgba(0,0,0,0.3);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+}
+.code-block .code-header {
+    padding: 0.5rem 1rem;
+    background: rgba(0,0,0,0.2);
+    font-size: 0.82rem;
+    font-weight: 600;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+.code-block .code-header .tag-good {
+    color: var(--accent-green);
+}
+.code-block .code-header .tag-bad {
+    color: var(--accent-red);
+}
+.code-block pre {
+    padding: 1rem;
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    line-height: 1.6;
+    color: var(--text-secondary);
+    overflow-x: auto;
+    margin: 0;
+}
+.code-block pre .hl { color: var(--accent-green); font-weight: 600; }
+.code-block pre .kw { color: var(--accent-purple); }
+.code-block pre .cm { color: var(--text-muted); }
+
+.stat-row {
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+    margin: 1rem 0;
+}
+.stat-item {
+    flex: 1;
+    min-width: 120px;
+    padding: 0.8rem;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    text-align: center;
+}
+.stat-item .stat-num {
+    font-family: var(--font-mono);
+    font-size: 1.3rem;
+    font-weight: 700;
+}
+.stat-item .stat-label {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    margin-top: 0.2rem;
+}
+
+.challenge-panel {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 1.5rem;
+    margin: 1rem 0;
+}
+.budget-bar {
+    height: 20px;
+    background: var(--border-color);
+    border-radius: 10px;
+    overflow: hidden;
+    margin: 0.5rem 0;
+}
+.budget-bar .fill {
+    height: 100%;
+    border-radius: 10px;
+    transition: width 0.3s, background 0.3s;
+}
+.score-display {
+    font-family: var(--font-mono);
+    font-size: 2rem;
+    font-weight: 700;
+    text-align: center;
+    padding: 1rem;
+}
+.difficulty-btns {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+}
+
+.sensitivity-bars {
+    display: flex;
+    gap: 0.5rem;
+    align-items: end;
+    height: 100px;
+    margin: 1rem 0;
+    padding: 0 0.5rem;
+}
+.sens-bar {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.3rem;
+}
+.sens-bar .bar {
+    width: 100%;
+    max-width: 60px;
+    border-radius: 4px 4px 0 0;
+    transition: height 0.5s;
+}
+.sens-bar .bar-label {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    text-align: center;
+}
+.sens-bar .bar-val {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--text-secondary);
+}
+
+.tradeoff-note {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    padding: 0.75rem 1rem;
+    background: rgba(255,171,64,0.06);
+    border-left: 3px solid var(--accent-orange);
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+    margin: 1rem 0;
+}
+
+.wall-viz {
+    display: flex;
+    align-items: end;
+    gap: 2px;
+    height: 180px;
+    padding: 0 0.5rem;
+    margin: 1rem 0;
+}
+.wall-bar {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    align-items: center;
+    height: 100%;
+}
+.wall-bar .cpu-part, .wall-bar .mem-part {
+    width: 100%;
+    transition: height 0.5s;
+    max-width: 40px;
+}
+.wall-bar .year-label {
+    font-size: 0.65rem;
+    color: var(--text-muted);
+    margin-top: 0.3rem;
+    writing-mode: vertical-rl;
+    transform: rotate(180deg);
+    height: 40px;
+}
+</style>
+</head>
+<body>
+<div class="page-container">
+
+<!-- Hero -->
+<div class="hero">
+    <h1>Cache 性能分析</h1>
+    <p class="subtitle">深入理解缓存性能模型、缺失分类、优化技术与缓存友好编程</p>
+</div>
+
+<!-- ===== Section 1: AMAT 模型 ===== -->
+<div class="section" id="sec-amat">
+    <div class="section-title">
+        <div class="icon">1</div>
+        <h2>AMAT 模型</h2>
+        <span class="badge badge-green">Average Memory Access Time</span>
+    </div>
+    <div class="card">
+        <p>平均存储访问时间 (AMAT) 是衡量缓存性能的核心指标，综合考虑了命中时间、缺失率和缺失惩罚三个因素。</p>
+        <div class="formula-box" id="amat-formula"></div>
+        <div class="info-box">
+            <p><strong>含义：</strong>AMAT 越小，缓存系统性能越好。它由三个参数共同决定 —— 命中时间（访问缓存的固有延迟）、缺失率（访问未命中的比例）和缺失惩罚（未命中时需额外付出的代价）。</p>
+        </div>
+
+        <h3 style="margin-top:1.5rem;">交互计算器</h3>
+        <div class="controls-row">
+            <div class="control-item">
+                <label>命中时间 (Hit Time) <span class="val-display" id="ht-val">1 ns</span></label>
+                <input type="range" id="slider-ht" min="0.5" max="5" step="0.1" value="1">
+            </div>
+            <div class="control-item">
+                <label>缺失率 (Miss Rate) <span class="val-display" id="mr-val">5%</span></label>
+                <input type="range" id="slider-mr" min="0.5" max="30" step="0.5" value="5">
+            </div>
+            <div class="control-item">
+                <label>缺失惩罚 (Miss Penalty) <span class="val-display" id="mp-val">100 ns</span></label>
+                <input type="range" id="slider-mp" min="10" max="300" step="5" value="100">
+            </div>
+        </div>
+        <div class="result-box">
+            <div>
+                <div class="result-label">AMAT =</div>
+            </div>
+            <div class="result-value" id="amat-result">6.00 ns</div>
+        </div>
+
+        <h3 style="margin-top:1.5rem;">瀑布图：各分量贡献</h3>
+        <div class="canvas-container">
+            <canvas id="canvas-waterfall"></canvas>
+        </div>
+
+        <h3 style="margin-top:1.5rem;">敏感度分析</h3>
+        <p style="font-size:0.88rem;">将每个参数增加 10%，观察 AMAT 变化量。哪个参数影响最大？</p>
+        <div class="sensitivity-bars" id="sensitivity-bars"></div>
+    </div>
+</div>
+
+<!-- ===== Section 2: 3C 模型 ===== -->
+<div class="section" id="sec-3c">
+    <div class="section-title">
+        <div class="icon">2</div>
+        <h2>3C 模型</h2>
+        <span class="badge badge-purple">Compulsory · Capacity · Conflict</span>
+    </div>
+    <div class="card">
+        <p>所有缓存缺失可分为三类（3C 模型），理解它们有助于针对性优化。</p>
+        <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap:1rem; margin:1rem 0;">
+            <div class="miss-type-card">
+                <h4><span class="dot" style="background:var(--accent-orange)"></span> 强制缺失 (Compulsory)</h4>
+                <p style="font-size:0.85rem;">首次访问某块数据时必然发生的缺失，也叫冷启动缺失。无论缓存多大都无法避免。</p>
+            </div>
+            <div class="miss-type-card">
+                <h4><span class="dot" style="background:var(--accent-purple)"></span> 容量缺失 (Capacity)</h4>
+                <p style="font-size:0.85rem;">工作集超出缓存容量时，即使是全相联缓存也会发生的缺失。</p>
+            </div>
+            <div class="miss-type-card">
+                <h4><span class="dot" style="background:var(--accent-red)"></span> 冲突缺失 (Conflict)</h4>
+                <p style="font-size:0.85rem;">多个块映射到同一组，即使缓存整体未满也发生淘汰。仅在非全相联缓存中出现。</p>
+            </div>
+        </div>
+
+        <h3 style="margin-top:1.5rem;">交互模拟：缺失分类</h3>
+        <div class="controls-row">
+            <div class="control-item" style="min-width:120px; flex:0.5;">
+                <label>缓存组数</label>
+                <select id="sel-3c-sets" class="btn" style="width:100%">
+                    <option value="2">2 组</option>
+                    <option value="4" selected>4 组</option>
+                    <option value="8">8 组</option>
+                </select>
+            </div>
+            <div class="control-item" style="min-width:120px; flex:0.5;">
+                <label>相联度</label>
+                <select id="sel-3c-ways" class="btn" style="width:100%">
+                    <option value="1" selected>直接映射</option>
+                    <option value="2">2 路</option>
+                    <option value="4">4 路</option>
+                </select>
+            </div>
+            <div class="control-item" style="flex:1;">
+                <label>访问序列（块号，逗号分隔）</label>
+                <input type="text" id="input-3c-seq" value="0,1,2,3,4,0,1,2,3,4,0,1" class="btn" style="width:100%;text-align:left;font-family:var(--font-mono);">
+            </div>
+            <button class="btn btn-primary" id="btn-3c-run">运行模拟</button>
+        </div>
+
+        <div class="stat-row" id="stats-3c">
+            <div class="stat-item"><div class="stat-num" style="color:var(--accent-green)" id="stat-3c-hits">0</div><div class="stat-label">命中</div></div>
+            <div class="stat-item"><div class="stat-num" style="color:var(--accent-orange)" id="stat-3c-comp">0</div><div class="stat-label">强制缺失</div></div>
+            <div class="stat-item"><div class="stat-num" style="color:var(--accent-purple)" id="stat-3c-cap">0</div><div class="stat-label">容量缺失</div></div>
+            <div class="stat-item"><div class="stat-num" style="color:var(--accent-red)" id="stat-3c-conf">0</div><div class="stat-label">冲突缺失</div></div>
+        </div>
+
+        <div class="canvas-container">
+            <canvas id="canvas-3c"></canvas>
+        </div>
+        <div class="log-area" id="log-3c"></div>
+    </div>
+</div>
+
+<!-- ===== Section 3: 缺失率优化 ===== -->
+<div class="section" id="sec-optimize">
+    <div class="section-title">
+        <div class="icon">3</div>
+        <h2>缺失率优化</h2>
+        <span class="badge badge-orange">减少 3C 缺失</span>
+    </div>
+    <div class="card">
+        <p>针对三种缺失类型，有不同的优化策略。调节下方参数，观察各类缺失的变化。</p>
+
+        <div class="info-box">
+            <p><strong>优化方向：</strong>强制缺失 → 预取 (Prefetching)；容量缺失 → 增大缓存；冲突缺失 → 提高相联度。</p>
+        </div>
+
+        <div class="controls-row">
+            <div class="control-item">
+                <label>缓存大小 (块数) <span class="val-display" id="opt-size-val">8</span></label>
+                <input type="range" id="slider-opt-size" min="4" max="32" step="1" value="8">
+            </div>
+            <div class="control-item">
+                <label>相联度 <span class="val-display" id="opt-assoc-val">1</span></label>
+                <input type="range" id="slider-opt-assoc" min="1" max="8" step="1" value="1">
+            </div>
+            <div class="control-item">
+                <label>预取距离 <span class="val-display" id="opt-pf-val">0</span></label>
+                <input type="range" id="slider-opt-pf" min="0" max="4" step="1" value="0">
+            </div>
+        </div>
+
+        <div class="canvas-container">
+            <canvas id="canvas-optimize"></canvas>
+        </div>
+
+        <div class="tradeoff-note">
+            <strong>权衡：</strong>增大缓存和提高相联度能有效降低缺失率，但存在硬件成本增加和访问延迟上升等代价。注意观察图中的收益递减现象。
+        </div>
+    </div>
+</div>
+
+<!-- ===== Section 4: 缓存友好编程 ===== -->
+<div class="section" id="sec-friendly">
+    <div class="section-title">
+        <div class="icon">4</div>
+        <h2>缓存友好编程</h2>
+        <span class="badge badge-blue">Cache-Friendly Programming</span>
+    </div>
+    <div class="card">
+        <p>程序的内存访问模式直接影响缓存命中率。空间局部性好的代码能充分利用缓存行。</p>
+
+        <h3>示例 1：行优先 vs 列优先遍历</h3>
+        <div class="code-compare">
+            <div class="code-block">
+                <div class="code-header"><span>行优先遍历</span><span class="tag-good">缓存友好</span></div>
+                <pre><span class="cm">// 按行遍历：步长 = 1</span>
+<span class="kw">for</span> (i = 0; i &lt; N; i++)
+  <span class="kw">for</span> (j = 0; j &lt; N; j++)
+    <span class="hl">sum += a[i][j];</span>
+<span class="cm">// 连续访问相邻内存</span></pre>
+            </div>
+            <div class="code-block">
+                <div class="code-header"><span>列优先遍历</span><span class="tag-bad">缓存不友好</span></div>
+                <pre><span class="cm">// 按列遍历：步长 = N</span>
+<span class="kw">for</span> (j = 0; j &lt; N; j++)
+  <span class="kw">for</span> (i = 0; i &lt; N; i++)
+    <span class="hl">sum += a[i][j];</span>
+<span class="cm">// 每次跳跃 N 个元素</span></pre>
+            </div>
+        </div>
+
+        <h3 style="margin-top:1.5rem;">示例 2：AoS vs SoA</h3>
+        <div class="code-compare">
+            <div class="code-block">
+                <div class="code-header"><span>Array of Structures</span><span class="tag-bad">AoS - 分散</span></div>
+                <pre><span class="kw">struct</span> Particle {
+  <span class="kw">float</span> x, y, z, vx, vy, vz;
+};
+Particle p[N];
+<span class="cm">// 只需 x 却加载全部字段</span>
+<span class="kw">for</span> (i = 0; i &lt; N; i++)
+  <span class="hl">process(p[i].x);</span></pre>
+            </div>
+            <div class="code-block">
+                <div class="code-header"><span>Structure of Arrays</span><span class="tag-good">SoA - 紧凑</span></div>
+                <pre><span class="kw">struct</span> Particles {
+  <span class="kw">float</span> x[N], y[N], z[N];
+  <span class="kw">float</span> vx[N], vy[N], vz[N];
+};
+Particles p;
+<span class="cm">// x 数组连续，充分利用缓存行</span>
+<span class="kw">for</span> (i = 0; i &lt; N; i++)
+  <span class="hl">process(p.x[i]);</span></pre>
+            </div>
+        </div>
+
+        <h3 style="margin-top:1.5rem;">访问模式可视化</h3>
+        <div class="controls-row">
+            <div class="control-item" style="min-width:140px; flex:0.6;">
+                <label>数组大小 N <span class="val-display" id="friendly-n-val">8</span></label>
+                <input type="range" id="slider-friendly-n" min="4" max="16" step="1" value="8">
+            </div>
+            <div class="control-item" style="min-width:140px; flex:0.6;">
+                <label>缓存行大小（元素数） <span class="val-display" id="friendly-cl-val">4</span></label>
+                <input type="range" id="slider-friendly-cl" min="2" max="8" step="1" value="4">
+            </div>
+            <button class="btn btn-primary" id="btn-friendly-run">播放动画</button>
+            <button class="btn" id="btn-friendly-reset">重置</button>
+        </div>
+        <div class="split-two">
+            <div>
+                <p style="text-align:center;font-size:0.85rem;color:var(--accent-green);font-weight:600;">行优先 (Stride=1)</p>
+                <div class="canvas-container"><canvas id="canvas-friendly-row"></canvas></div>
+                <div class="stat-row">
+                    <div class="stat-item"><div class="stat-num" style="color:var(--accent-green)" id="friendly-row-rate">0%</div><div class="stat-label">命中率</div></div>
+                </div>
+            </div>
+            <div>
+                <p style="text-align:center;font-size:0.85rem;color:var(--accent-red);font-weight:600;">列优先 (Stride=N)</p>
+                <div class="canvas-container"><canvas id="canvas-friendly-col"></canvas></div>
+                <div class="stat-row">
+                    <div class="stat-item"><div class="stat-num" style="color:var(--accent-red)" id="friendly-col-rate">0%</div><div class="stat-label">命中率</div></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ===== Section 5: 执行时间分析 ===== -->
+<div class="section" id="sec-time">
+    <div class="section-title">
+        <div class="icon">5</div>
+        <h2>执行时间分析</h2>
+        <span class="badge badge-green">CPU Time Equation</span>
+    </div>
+    <div class="card">
+        <p>将缓存性能与 CPU 执行时间关联起来，理解存储墙 (Memory Wall) 问题。</p>
+        <div class="formula-box" id="cputime-formula"></div>
+        <div class="formula-box" id="memstall-formula"></div>
+
+        <h3 style="margin-top:1.5rem;">交互计算器</h3>
+        <div class="controls-row">
+            <div class="control-item">
+                <label>指令数 (百万) <span class="val-display" id="et-ic-val">100</span></label>
+                <input type="range" id="slider-et-ic" min="10" max="500" step="10" value="100">
+            </div>
+            <div class="control-item">
+                <label>基础 CPI <span class="val-display" id="et-cpi-val">1.0</span></label>
+                <input type="range" id="slider-et-cpi" min="0.5" max="3" step="0.1" value="1.0">
+            </div>
+            <div class="control-item">
+                <label>内存访问比例 <span class="val-display" id="et-mf-val">30%</span></label>
+                <input type="range" id="slider-et-mf" min="5" max="60" step="1" value="30">
+            </div>
+        </div>
+        <div class="controls-row">
+            <div class="control-item">
+                <label>缺失率 <span class="val-display" id="et-mr-val">5%</span></label>
+                <input type="range" id="slider-et-mr" min="0.5" max="20" step="0.5" value="5">
+            </div>
+            <div class="control-item">
+                <label>缺失惩罚 (周期) <span class="val-display" id="et-mp-val">100</span></label>
+                <input type="range" id="slider-et-mp" min="10" max="300" step="5" value="100">
+            </div>
+            <div class="control-item">
+                <label>时钟周期 (ns) <span class="val-display" id="et-clk-val">0.5</span></label>
+                <input type="range" id="slider-et-clk" min="0.1" max="2" step="0.05" value="0.5">
+            </div>
+        </div>
+
+        <div class="stat-row">
+            <div class="stat-item"><div class="stat-num" style="color:var(--accent-blue)" id="et-cpu-cycles">100M</div><div class="stat-label">CPU 执行周期</div></div>
+            <div class="stat-item"><div class="stat-num" style="color:var(--accent-red)" id="et-mem-cycles">150M</div><div class="stat-label">内存停顿周期</div></div>
+            <div class="stat-item"><div class="stat-num" style="color:var(--accent-green)" id="et-total-time">125 ms</div><div class="stat-label">总执行时间</div></div>
+            <div class="stat-item"><div class="stat-num" style="color:var(--accent-orange)" id="et-mem-pct">60%</div><div class="stat-label">内存占比</div></div>
+        </div>
+
+        <div class="canvas-container">
+            <canvas id="canvas-exectime"></canvas>
+        </div>
+
+        <h3 style="margin-top:1.5rem;">存储墙可视化</h3>
+        <p style="font-size:0.88rem;">随着处理器速度不断提升（时钟周期缩短），内存停顿在总执行时间中的占比越来越大。</p>
+        <div class="canvas-container">
+            <canvas id="canvas-memwall"></canvas>
+        </div>
+    </div>
+</div>
+
+<!-- ===== Section 6: 性能优化挑战 ===== -->
+<div class="section" id="sec-challenge">
+    <div class="section-title">
+        <div class="icon">6</div>
+        <h2>性能优化挑战</h2>
+        <span class="badge badge-orange">Performance Challenge</span>
+    </div>
+    <div class="card">
+        <p>在预算约束下配置缓存参数，使执行时间最短。缓存越大、相联度越高，面积和延迟成本越大。</p>
+
+        <div class="difficulty-btns">
+            <button class="btn btn-primary" data-diff="easy" id="diff-easy">简单</button>
+            <button class="btn" data-diff="medium" id="diff-medium">中等</button>
+            <button class="btn" data-diff="hard" id="diff-hard">困难</button>
+        </div>
+
+        <div class="challenge-panel" id="challenge-info">
+            <h4 id="challenge-title">工作负载描述</h4>
+            <p id="challenge-desc" style="font-size:0.88rem;"></p>
+            <div class="stat-row" id="challenge-workload-stats"></div>
+        </div>
+
+        <div class="controls-row">
+            <div class="control-item">
+                <label>缓存大小 <span class="val-display" id="ch-size-val">8 KB</span></label>
+                <input type="range" id="slider-ch-size" min="2" max="64" step="1" value="8">
+            </div>
+            <div class="control-item">
+                <label>相联度 <span class="val-display" id="ch-assoc-val">1</span></label>
+                <input type="range" id="slider-ch-assoc" min="1" max="16" step="1" value="1">
+            </div>
+            <div class="control-item">
+                <label>块大小 (字节) <span class="val-display" id="ch-block-val">32</span></label>
+                <input type="range" id="slider-ch-block" min="8" max="128" step="8" value="32">
+            </div>
+        </div>
+
+        <div style="margin:0.75rem 0;">
+            <div style="display:flex;justify-content:space-between;font-size:0.82rem;">
+                <span style="color:var(--text-secondary);">预算使用</span>
+                <span id="budget-text" style="font-family:var(--font-mono);color:var(--accent-green);">0 / 1000</span>
+            </div>
+            <div class="budget-bar"><div class="fill" id="budget-fill" style="width:0%;background:var(--accent-green)"></div></div>
+        </div>
+
+        <div class="stat-row">
+            <div class="stat-item"><div class="stat-num" style="color:var(--accent-blue)" id="ch-miss-rate">0%</div><div class="stat-label">预估缺失率</div></div>
+            <div class="stat-item"><div class="stat-num" style="color:var(--accent-orange)" id="ch-amat">0 ns</div><div class="stat-label">AMAT</div></div>
+            <div class="stat-item"><div class="stat-num" style="color:var(--accent-green)" id="ch-exec-time">0 ms</div><div class="stat-label">执行时间</div></div>
+        </div>
+
+        <div class="score-display">
+            得分：<span id="ch-score" style="color:var(--accent-green);">0</span>
+        </div>
+
+        <div class="canvas-container">
+            <canvas id="canvas-challenge"></canvas>
+        </div>
+    </div>
+</div>
+
+</div><!-- page-container -->
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    'use strict';
+    const C = MemUtils.COLORS;
+
+    /* ==============================
+       Render KaTeX formulas
+       ============================== */
+    katex.render(
+        '\\text{AMAT} = \\text{Hit Time} + \\text{Miss Rate} \\times \\text{Miss Penalty}',
+        document.getElementById('amat-formula'),
+        { displayMode: true }
+    );
+    katex.render(
+        '\\text{CPU Time} = (\\text{CPU Cycles} + \\text{Memory Stall Cycles}) \\times \\text{Clock Period}',
+        document.getElementById('cputime-formula'),
+        { displayMode: true }
+    );
+    katex.render(
+        '\\text{Memory Stall Cycles} = \\text{Instructions} \\times \\text{Mem Access/Inst} \\times \\text{Miss Rate} \\times \\text{Miss Penalty}',
+        document.getElementById('memstall-formula'),
+        { displayMode: true }
+    );
+
+    /* ==============================
+       Helper: HiDPI canvas init
+       ============================== */
+    function initCanvas(canvas, height) {
+        return MemUtils.initCanvas(canvas, height || 300);
+    }
+
+    function roundRect(ctx, x, y, w, h, r) {
+        ctx.beginPath();
+        ctx.roundRect(x, y, w, h, r || 4);
+    }
+
+    /* ==============================
+       Section 1: AMAT Calculator
+       ============================== */
+    const sliderHT = document.getElementById('slider-ht');
+    const sliderMR = document.getElementById('slider-mr');
+    const sliderMP = document.getElementById('slider-mp');
+    const amatResult = document.getElementById('amat-result');
+
+    function updateAMAT() {
+        const ht = parseFloat(sliderHT.value);
+        const mr = parseFloat(sliderMR.value) / 100;
+        const mp = parseFloat(sliderMP.value);
+        document.getElementById('ht-val').textContent = ht.toFixed(1) + ' ns';
+        document.getElementById('mr-val').textContent = (mr * 100).toFixed(1) + '%';
+        document.getElementById('mp-val').textContent = mp + ' ns';
+
+        const amat = MemUtils.calcAMAT(ht, mr, mp);
+        amatResult.textContent = amat.toFixed(2) + ' ns';
+        drawWaterfall(ht, mr, mp, amat);
+        drawSensitivity(ht, mr, mp);
+    }
+
+    [sliderHT, sliderMR, sliderMP].forEach(s => s.addEventListener('input', updateAMAT));
+
+    /* Waterfall chart */
+    function drawWaterfall(ht, mr, mp, amat) {
+        const canvas = document.getElementById('canvas-waterfall');
+        const { ctx, w, h } = initCanvas(canvas, 220);
+        ctx.clearRect(0, 0, w, h);
+
+        const pad = { l: 80, r: 40, t: 30, b: 50 };
+        const cw = w - pad.l - pad.r;
+        const ch = h - pad.t - pad.b;
+        const maxVal = amat * 1.2;
+        const scale = ch / maxVal;
+
+        const missContrib = mr * mp;
+        const items = [
+            { label: '命中时间', value: ht, color: C.blue, cum: 0 },
+            { label: '缺失贡献', value: missContrib, color: C.red, cum: ht },
+            { label: 'AMAT', value: amat, color: C.green, cum: 0 },
+        ];
+
+        const barW = Math.min(80, cw / items.length * 0.5);
+        const gap = (cw - barW * items.length) / (items.length + 1);
+
+        items.forEach((item, i) => {
+            const x = pad.l + gap + i * (barW + gap);
+            const barH = item.value * scale;
+            const y = pad.t + ch - barH - item.cum * scale;
+
+            ctx.fillStyle = MemUtils.hexToRgba(item.color, 0.25);
+            ctx.strokeStyle = item.color;
+            ctx.lineWidth = 1.5;
+            roundRect(ctx, x, y, barW, barH, 4);
+            ctx.fill();
+            ctx.stroke();
+
+            ctx.fillStyle = item.color;
+            ctx.font = 'bold 12px "JetBrains Mono", monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText(item.value.toFixed(2), x + barW / 2, y - 8);
+
+            ctx.fillStyle = C.textSec;
+            ctx.font = '11px "Noto Sans SC", sans-serif';
+            ctx.fillText(item.label, x + barW / 2, pad.t + ch + 20);
+        });
+
+        /* Dashed connector line from first two bars stacked to AMAT bar */
+        const x0end = pad.l + gap + barW;
+        const x1start = pad.l + gap + barW + gap;
+        const lineY = pad.t + ch - amat * scale;
+        ctx.setLineDash([4, 4]);
+        ctx.strokeStyle = MemUtils.hexToRgba(C.green, 0.4);
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(x1start + barW, lineY);
+        ctx.lineTo(pad.l + gap + 2 * (barW + gap), lineY);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        /* y-axis */
+        ctx.strokeStyle = MemUtils.hexToRgba(C.textMut, 0.3);
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(pad.l, pad.t);
+        ctx.lineTo(pad.l, pad.t + ch);
+        ctx.stroke();
+
+        const ticks = 5;
+        for (let i = 0; i <= ticks; i++) {
+            const val = (maxVal / ticks) * i;
+            const yy = pad.t + ch - val * scale;
+            ctx.fillStyle = C.textMut;
+            ctx.font = '10px "JetBrains Mono", monospace';
+            ctx.textAlign = 'right';
+            ctx.fillText(val.toFixed(1), pad.l - 8, yy + 4);
+            ctx.strokeStyle = MemUtils.hexToRgba(C.textMut, 0.1);
+            ctx.beginPath();
+            ctx.moveTo(pad.l, yy);
+            ctx.lineTo(w - pad.r, yy);
+            ctx.stroke();
+        }
+    }
+
+    /* Sensitivity analysis */
+    function drawSensitivity(ht, mr, mp) {
+        const container = document.getElementById('sensitivity-bars');
+        const baseAMAT = MemUtils.calcAMAT(ht, mr / 100, mp);
+        const deltas = [
+            { label: '命中时间 +10%', val: MemUtils.calcAMAT(ht * 1.1, mr / 100, mp) - baseAMAT, color: C.blue },
+            { label: '缺失率 +10%', val: MemUtils.calcAMAT(ht, (mr * 1.1) / 100, mp) - baseAMAT, color: C.purple },
+            { label: '缺失惩罚 +10%', val: MemUtils.calcAMAT(ht, mr / 100, mp * 1.1) - baseAMAT, color: C.orange },
+        ];
+        const maxDelta = Math.max(...deltas.map(d => d.val), 0.01);
+
+        container.innerHTML = deltas.map(d => {
+            const pct = (d.val / maxDelta) * 80;
+            return `<div class="sens-bar">
+                <div class="bar-val">${d.val.toFixed(3)} ns</div>
+                <div class="bar" style="height:${pct}px;background:${MemUtils.hexToRgba(d.color, 0.5)};border:1px solid ${d.color}"></div>
+                <div class="bar-label">${d.label}</div>
+            </div>`;
+        }).join('');
+    }
+
+    updateAMAT();
+
+    /* ==============================
+       Section 2: 3C Model Simulation
+       ============================== */
+    function run3CSimulation() {
+        const numSets = parseInt(document.getElementById('sel-3c-sets').value);
+        const ways = parseInt(document.getElementById('sel-3c-ways').value);
+        const seqStr = document.getElementById('input-3c-seq').value.trim();
+        const seq = seqStr.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+        if (seq.length === 0) return;
+
+        const totalBlocks = numSets * ways;
+
+        /* Fully associative simulation for capacity miss baseline */
+        function simFullAssoc(sequence, cacheBlocks) {
+            const cache = [];
+            const results = [];
+            const seen = new Set();
+            for (const block of sequence) {
+                const inCache = cache.includes(block);
+                if (inCache) {
+                    results.push('hit');
+                    cache.splice(cache.indexOf(block), 1);
+                    cache.push(block);
+                } else if (!seen.has(block)) {
+                    results.push('compulsory');
+                    seen.add(block);
+                    cache.push(block);
+                    if (cache.length > cacheBlocks) cache.shift();
+                } else {
+                    results.push('capacity');
+                    cache.push(block);
+                    if (cache.length > cacheBlocks) cache.shift();
+                }
+                seen.add(block);
+            }
+            return results;
+        }
+
+        /* Set-associative simulation */
+        function simSetAssoc(sequence, nSets, nWays) {
+            const sets = Array.from({ length: nSets }, () => []);
+            const results = [];
+            const seen = new Set();
+            for (const block of sequence) {
+                const setIdx = block % nSets;
+                const set = sets[setIdx];
+                const inCache = set.includes(block);
+                if (inCache) {
+                    results.push('hit');
+                    set.splice(set.indexOf(block), 1);
+                    set.push(block);
+                } else if (!seen.has(block)) {
+                    results.push('compulsory');
+                    seen.add(block);
+                    if (set.length >= nWays) set.shift();
+                    set.push(block);
+                } else {
+                    results.push('miss');
+                    seen.add(block);
+                    if (set.length >= nWays) set.shift();
+                    set.push(block);
+                }
+            }
+            return results;
+        }
+
+        const faResults = simFullAssoc(seq, totalBlocks);
+        const saResults = simSetAssoc(seq, numSets, ways);
+
+        /* Classify: if set-assoc misses but full-assoc hits => conflict miss
+           if full-assoc also misses (and not compulsory) => capacity miss */
+        const classified = [];
+        for (let i = 0; i < seq.length; i++) {
+            if (saResults[i] === 'hit') {
+                classified.push('hit');
+            } else if (saResults[i] === 'compulsory') {
+                classified.push('compulsory');
+            } else {
+                /* saResults[i] is 'miss' */
+                if (faResults[i] === 'hit') {
+                    classified.push('conflict');
+                } else if (faResults[i] === 'compulsory') {
+                    classified.push('compulsory');
+                } else {
+                    classified.push('capacity');
+                }
+            }
+        }
+
+        const counts = { hit: 0, compulsory: 0, capacity: 0, conflict: 0 };
+        classified.forEach(c => counts[c]++);
+
+        document.getElementById('stat-3c-hits').textContent = counts.hit;
+        document.getElementById('stat-3c-comp').textContent = counts.compulsory;
+        document.getElementById('stat-3c-cap').textContent = counts.capacity;
+        document.getElementById('stat-3c-conf').textContent = counts.conflict;
+
+        /* Log */
+        const logArea = document.getElementById('log-3c');
+        logArea.innerHTML = classified.map((c, i) => {
+            const cls = c === 'hit' ? 'log-hit' : c === 'compulsory' ? 'log-compulsory' : c === 'capacity' ? 'log-capacity' : 'log-conflict';
+            const label = c === 'hit' ? '命中' : c === 'compulsory' ? '强制缺失' : c === 'capacity' ? '容量缺失' : '冲突缺失';
+            return `<div class="${cls}">[${i}] 访问块 ${seq[i]} → ${label}</div>`;
+        }).join('');
+        logArea.scrollTop = logArea.scrollHeight;
+
+        /* Draw stacked bar chart */
+        draw3CChart(seq, classified, counts);
+    }
+
+    function draw3CChart(seq, classified, counts) {
+        const canvas = document.getElementById('canvas-3c');
+        const { ctx, w, h } = initCanvas(canvas, 260);
+        ctx.clearRect(0, 0, w, h);
+
+        const pad = { l: 50, r: 30, t: 30, b: 55 };
+        const cw = w - pad.l - pad.r;
+        const ch = h - pad.t - pad.b;
+
+        const total = seq.length;
+        const barW = Math.min(30, (cw / total) * 0.75);
+        const gap = (cw - barW * total) / (total + 1);
+
+        const colorMap = {
+            hit: C.green,
+            compulsory: C.orange,
+            capacity: C.purple,
+            conflict: C.red,
+        };
+
+        /* Individual bars: each access result */
+        seq.forEach((block, i) => {
+            const x = pad.l + gap + i * (barW + gap);
+            const color = colorMap[classified[i]];
+            const barH = ch * 0.7;
+            const y = pad.t + ch - barH;
+
+            ctx.fillStyle = MemUtils.hexToRgba(color, 0.3);
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 1.5;
+            roundRect(ctx, x, y, barW, barH, 3);
+            ctx.fill();
+            ctx.stroke();
+
+            /* Block label */
+            ctx.fillStyle = C.textSec;
+            ctx.font = '10px "JetBrains Mono", monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText(block, x + barW / 2, pad.t + ch + 15);
+
+            /* Index label */
+            ctx.fillStyle = C.textMut;
+            ctx.font = '9px "JetBrains Mono", monospace';
+            ctx.fillText('#' + i, x + barW / 2, pad.t + ch + 28);
+        });
+
+        /* Summary stacked bar on right */
+        const summaryX = w - pad.r - 60;
+        const summaryW = 40;
+        const parts = [
+            { key: 'hit', color: C.green },
+            { key: 'compulsory', color: C.orange },
+            { key: 'capacity', color: C.purple },
+            { key: 'conflict', color: C.red },
+        ];
+        let cumH = 0;
+        parts.forEach(p => {
+            const frac = counts[p.key] / total;
+            const barH = frac * ch;
+            const y = pad.t + ch - cumH - barH;
+            ctx.fillStyle = MemUtils.hexToRgba(p.color, 0.35);
+            ctx.strokeStyle = p.color;
+            ctx.lineWidth = 1;
+            roundRect(ctx, summaryX, y, summaryW, Math.max(barH, 0), 2);
+            ctx.fill();
+            ctx.stroke();
+            if (frac > 0.05) {
+                ctx.fillStyle = p.color;
+                ctx.font = '10px "JetBrains Mono", monospace';
+                ctx.textAlign = 'center';
+                ctx.fillText((frac * 100).toFixed(0) + '%', summaryX + summaryW / 2, y + barH / 2 + 4);
+            }
+            cumH += barH;
+        });
+        ctx.fillStyle = C.textMut;
+        ctx.font = '10px "Noto Sans SC", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('汇总', summaryX + summaryW / 2, pad.t + ch + 15);
+
+        /* Legend */
+        const legendY = pad.t + 5;
+        const legendItems = [
+            { label: '命中', color: C.green },
+            { label: '强制', color: C.orange },
+            { label: '容量', color: C.purple },
+            { label: '冲突', color: C.red },
+        ];
+        let lx = pad.l;
+        legendItems.forEach(item => {
+            ctx.fillStyle = item.color;
+            ctx.fillRect(lx, legendY, 10, 10);
+            ctx.fillStyle = C.textSec;
+            ctx.font = '10px "Noto Sans SC", sans-serif';
+            ctx.textAlign = 'left';
+            ctx.fillText(item.label, lx + 14, legendY + 9);
+            lx += 60;
+        });
+    }
+
+    document.getElementById('btn-3c-run').addEventListener('click', run3CSimulation);
+    run3CSimulation();
+
+    /* ==============================
+       Section 3: Miss Rate Optimization
+       ============================== */
+    function updateOptimization() {
+        const cacheBlocks = parseInt(document.getElementById('slider-opt-size').value);
+        const assoc = parseInt(document.getElementById('slider-opt-assoc').value);
+        const prefetch = parseInt(document.getElementById('slider-opt-pf').value);
+
+        document.getElementById('opt-size-val').textContent = cacheBlocks;
+        document.getElementById('opt-assoc-val').textContent = assoc;
+        document.getElementById('opt-pf-val').textContent = prefetch;
+
+        /* Generate a representative workload: cyclic pattern with working set larger than small caches */
+        const workingSet = 16;
+        const seq = [];
+        for (let round = 0; round < 4; round++) {
+            for (let i = 0; i < workingSet; i++) {
+                seq.push(i);
+            }
+        }
+
+        /* Full-assoc simulation for capacity baseline */
+        function simFA(sequence, nBlocks) {
+            const cache = [];
+            const seen = new Set();
+            const counts = { compulsory: 0, capacity: 0 };
+            let hits = 0;
+            for (const b of sequence) {
+                if (cache.includes(b)) {
+                    hits++;
+                    cache.splice(cache.indexOf(b), 1);
+                    cache.push(b);
+                } else {
+                    if (!seen.has(b)) {
+                        counts.compulsory++;
+                    } else {
+                        counts.capacity++;
+                    }
+                    seen.add(b);
+                    cache.push(b);
+                    if (cache.length > nBlocks) cache.shift();
+                }
+            }
+            return { hits, ...counts, total: sequence.length };
+        }
+
+        /* Set-assoc simulation */
+        function simSA(sequence, nBlocks, nWays, pf) {
+            const nSets = Math.max(1, Math.floor(nBlocks / nWays));
+            const sets = Array.from({ length: nSets }, () => []);
+            const seen = new Set();
+            const counts = { hit: 0, compulsory: 0, capacity: 0, conflict: 0 };
+
+            /* Also run FA for classification */
+            const faCache = [];
+            const faSeen = new Set();
+
+            /* Apply prefetch: when accessing block b, also bring in b+1..b+pf */
+            const prefetched = new Set();
+
+            for (let idx = 0; idx < sequence.length; idx++) {
+                const b = sequence[idx];
+                const setIdx = b % nSets;
+                const set = sets[setIdx];
+
+                if (set.includes(b) || prefetched.has(b)) {
+                    counts.hit++;
+                    if (set.includes(b)) {
+                        set.splice(set.indexOf(b), 1);
+                        set.push(b);
+                    }
+                    /* FA track */
+                    if (faCache.includes(b)) {
+                        faCache.splice(faCache.indexOf(b), 1);
+                        faCache.push(b);
+                    }
+                    faSeen.add(b);
+                } else {
+                    const faHit = faCache.includes(b);
+                    if (!seen.has(b) && !faSeen.has(b)) {
+                        counts.compulsory++;
+                    } else if (!faHit) {
+                        counts.capacity++;
+                    } else {
+                        counts.conflict++;
+                    }
+
+                    seen.add(b);
+                    if (set.length >= nWays) set.shift();
+                    set.push(b);
+
+                    /* FA */
+                    if (!faCache.includes(b)) {
+                        faCache.push(b);
+                        if (faCache.length > nBlocks) faCache.shift();
+                    } else {
+                        faCache.splice(faCache.indexOf(b), 1);
+                        faCache.push(b);
+                    }
+                    faSeen.add(b);
+                }
+
+                /* Prefetch */
+                if (pf > 0) {
+                    for (let p = 1; p <= pf; p++) {
+                        prefetched.add(b + p);
+                    }
+                }
+            }
+            return counts;
+        }
+
+        const counts = simSA(seq, cacheBlocks, assoc, prefetch);
+        drawOptChart(counts, seq.length, cacheBlocks, assoc);
+    }
+
+    function drawOptChart(counts, total, cacheBlocks, assoc) {
+        const canvas = document.getElementById('canvas-optimize');
+        const { ctx, w, h } = initCanvas(canvas, 300);
+        ctx.clearRect(0, 0, w, h);
+
+        const pad = { l: 60, r: 40, t: 30, b: 50 };
+        const cw = w - pad.l - pad.r;
+        const ch = h - pad.t - pad.b;
+
+        const categories = [
+            { label: '命中', value: counts.hit, color: C.green },
+            { label: '强制缺失', value: counts.compulsory, color: C.orange },
+            { label: '容量缺失', value: counts.capacity, color: C.purple },
+            { label: '冲突缺失', value: counts.conflict, color: C.red },
+        ];
+
+        const maxVal = Math.max(total, 1);
+        const barW = Math.min(80, cw / categories.length * 0.6);
+        const gap = (cw - barW * categories.length) / (categories.length + 1);
+
+        categories.forEach((cat, i) => {
+            const x = pad.l + gap + i * (barW + gap);
+            const barH = (cat.value / maxVal) * ch;
+            const y = pad.t + ch - barH;
+
+            ctx.fillStyle = MemUtils.hexToRgba(cat.color, 0.3);
+            ctx.strokeStyle = cat.color;
+            ctx.lineWidth = 1.5;
+            roundRect(ctx, x, y, barW, Math.max(barH, 1), 4);
+            ctx.fill();
+            ctx.stroke();
+
+            ctx.fillStyle = cat.color;
+            ctx.font = 'bold 12px "JetBrains Mono", monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText(cat.value, x + barW / 2, y - 8);
+
+            ctx.fillStyle = C.textSec;
+            ctx.font = '11px "Noto Sans SC", sans-serif';
+            ctx.fillText(cat.label, x + barW / 2, pad.t + ch + 18);
+
+            const pct = ((cat.value / total) * 100).toFixed(1);
+            ctx.fillStyle = C.textMut;
+            ctx.font = '10px "JetBrains Mono", monospace';
+            ctx.fillText(pct + '%', x + barW / 2, pad.t + ch + 34);
+        });
+
+        /* Y axis */
+        ctx.strokeStyle = MemUtils.hexToRgba(C.textMut, 0.3);
+        ctx.lineWidth = 1;
+        for (let i = 0; i <= 5; i++) {
+            const val = (maxVal / 5) * i;
+            const yy = pad.t + ch - (val / maxVal) * ch;
+            ctx.beginPath();
+            ctx.moveTo(pad.l, yy);
+            ctx.lineTo(w - pad.r, yy);
+            ctx.stroke();
+            ctx.fillStyle = C.textMut;
+            ctx.font = '10px "JetBrains Mono", monospace';
+            ctx.textAlign = 'right';
+            ctx.fillText(Math.round(val), pad.l - 8, yy + 4);
+        }
+
+        /* Info text */
+        ctx.fillStyle = C.textMut;
+        ctx.font = '10px "Noto Sans SC", sans-serif';
+        ctx.textAlign = 'right';
+        ctx.fillText(`缓存: ${cacheBlocks}块, ${assoc}路, 总访问: ${total}`, w - pad.r, pad.t + 12);
+    }
+
+    const optSliders = ['slider-opt-size', 'slider-opt-assoc', 'slider-opt-pf'];
+    optSliders.forEach(id => document.getElementById(id).addEventListener('input', updateOptimization));
+    updateOptimization();
+
+    /* ==============================
+       Section 4: Cache-Friendly
+       ============================== */
+    let friendlyAnim = null;
+    let friendlyAnimId = null;
+
+    function resetFriendly() {
+        if (friendlyAnimId) { cancelAnimationFrame(friendlyAnimId); friendlyAnimId = null; }
+        document.getElementById('friendly-row-rate').textContent = '0%';
+        document.getElementById('friendly-col-rate').textContent = '0%';
+        drawFriendlyGrid('canvas-friendly-row', [], 0, 0);
+        drawFriendlyGrid('canvas-friendly-col', [], 0, 0);
+    }
+
+    function drawFriendlyGrid(canvasId, highlights, N, cacheLineSize) {
+        const canvas = document.getElementById(canvasId);
+        const { ctx, w, h } = initCanvas(canvas, 240);
+        ctx.clearRect(0, 0, w, h);
+
+        if (N === 0) return;
+
+        const pad = 20;
+        const cellSize = Math.min((w - 2 * pad) / N, (h - 2 * pad) / N, 28);
+        const gridW = cellSize * N;
+        const gridH = cellSize * N;
+        const offX = (w - gridW) / 2;
+        const offY = (h - gridH) / 2;
+
+        /* Draw grid */
+        for (let r = 0; r < N; r++) {
+            for (let c = 0; c < N; c++) {
+                const x = offX + c * cellSize;
+                const y = offY + r * cellSize;
+                const flatIdx = r * N + c;
+                const cacheLineIdx = Math.floor(flatIdx / cacheLineSize);
+                const isEvenLine = cacheLineIdx % 2 === 0;
+
+                /* Find if this cell is highlighted */
+                let cellColor = isEvenLine ? MemUtils.hexToRgba(C.blue, 0.08) : MemUtils.hexToRgba(C.purple, 0.08);
+                let borderColor = MemUtils.hexToRgba(C.border, 0.5);
+                let textColor = C.textMut;
+
+                const hl = highlights.find(h => h.r === r && h.c === c);
+                if (hl) {
+                    if (hl.type === 'current') {
+                        cellColor = MemUtils.hexToRgba(C.yellow, 0.5);
+                        borderColor = C.yellow;
+                        textColor = C.yellow;
+                    } else if (hl.type === 'hit') {
+                        cellColor = MemUtils.hexToRgba(C.green, 0.3);
+                        borderColor = C.green;
+                        textColor = C.green;
+                    } else if (hl.type === 'miss') {
+                        cellColor = MemUtils.hexToRgba(C.red, 0.3);
+                        borderColor = C.red;
+                        textColor = C.red;
+                    } else if (hl.type === 'cached') {
+                        cellColor = MemUtils.hexToRgba(C.green, 0.12);
+                        borderColor = MemUtils.hexToRgba(C.green, 0.4);
+                    }
+                }
+
+                ctx.fillStyle = cellColor;
+                ctx.strokeStyle = borderColor;
+                ctx.lineWidth = 1;
+                ctx.fillRect(x, y, cellSize, cellSize);
+                ctx.strokeRect(x, y, cellSize, cellSize);
+
+                if (cellSize > 18) {
+                    ctx.fillStyle = textColor;
+                    ctx.font = `${Math.max(8, cellSize * 0.35)}px "JetBrains Mono", monospace`;
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText(flatIdx, x + cellSize / 2, y + cellSize / 2);
+                }
+            }
+        }
+    }
+
+    function runFriendlyAnimation() {
+        if (friendlyAnimId) { cancelAnimationFrame(friendlyAnimId); friendlyAnimId = null; }
+
+        const N = parseInt(document.getElementById('slider-friendly-n').value);
+        const cacheLineSize = parseInt(document.getElementById('slider-friendly-cl').value);
+
+        document.getElementById('friendly-n-val').textContent = N;
+        document.getElementById('friendly-cl-val').textContent = cacheLineSize;
+
+        /* Row-major order: (0,0),(0,1),...,(0,N-1),(1,0),... */
+        const rowOrder = [];
+        for (let r = 0; r < N; r++)
+            for (let c = 0; c < N; c++)
+                rowOrder.push({ r, c });
+
+        /* Col-major order: (0,0),(1,0),...,(N-1,0),(0,1),... */
+        const colOrder = [];
+        for (let c = 0; c < N; c++)
+            for (let r = 0; r < N; r++)
+                colOrder.push({ r, c });
+
+        /* Simulate cache for each order */
+        function simulateOrder(order) {
+            const cacheLines = new Set();
+            const maxLines = Math.max(2, Math.floor(N * N / cacheLineSize / 2));
+            const lruQueue = [];
+            const results = [];
+
+            for (const cell of order) {
+                const flatIdx = cell.r * N + cell.c;
+                const lineIdx = Math.floor(flatIdx / cacheLineSize);
+                const hit = cacheLines.has(lineIdx);
+                results.push({ ...cell, hit });
+
+                if (!hit) {
+                    if (cacheLines.size >= maxLines) {
+                        const evict = lruQueue.shift();
+                        cacheLines.delete(evict);
+                    }
+                    cacheLines.add(lineIdx);
+                    lruQueue.push(lineIdx);
+                } else {
+                    const idx = lruQueue.indexOf(lineIdx);
+                    if (idx !== -1) {
+                        lruQueue.splice(idx, 1);
+                        lruQueue.push(lineIdx);
+                    }
+                }
+            }
+            return results;
+        }
+
+        const rowResults = simulateOrder(rowOrder);
+        const colResults = simulateOrder(colOrder);
+
+        let step = 0;
+        const totalSteps = N * N;
+        const speed = Math.max(30, 300 - N * 15);
+
+        let lastTime = 0;
+        function animate(timestamp) {
+            if (timestamp - lastTime < speed) {
+                friendlyAnimId = requestAnimationFrame(animate);
+                return;
+            }
+            lastTime = timestamp;
+
+            if (step >= totalSteps) {
+                friendlyAnimId = null;
+                return;
+            }
+
+            /* Build highlights for row canvas */
+            const rowHL = [];
+            for (let i = 0; i <= step; i++) {
+                const r = rowResults[i];
+                if (i === step) {
+                    rowHL.push({ r: r.r, c: r.c, type: 'current' });
+                } else {
+                    rowHL.push({ r: r.r, c: r.c, type: r.hit ? 'hit' : 'miss' });
+                }
+            }
+
+            /* Build highlights for col canvas */
+            const colHL = [];
+            for (let i = 0; i <= step; i++) {
+                const r = colResults[i];
+                if (i === step) {
+                    colHL.push({ r: r.r, c: r.c, type: 'current' });
+                } else {
+                    colHL.push({ r: r.r, c: r.c, type: r.hit ? 'hit' : 'miss' });
+                }
+            }
+
+            drawFriendlyGrid('canvas-friendly-row', rowHL, N, cacheLineSize);
+            drawFriendlyGrid('canvas-friendly-col', colHL, N, cacheLineSize);
+
+            /* Update hit rates */
+            const rowHits = rowResults.slice(0, step + 1).filter(r => r.hit).length;
+            const colHits = colResults.slice(0, step + 1).filter(r => r.hit).length;
+            const cnt = step + 1;
+            document.getElementById('friendly-row-rate').textContent = ((rowHits / cnt) * 100).toFixed(1) + '%';
+            document.getElementById('friendly-col-rate').textContent = ((colHits / cnt) * 100).toFixed(1) + '%';
+
+            step++;
+            friendlyAnimId = requestAnimationFrame(animate);
+        }
+
+        friendlyAnimId = requestAnimationFrame(animate);
+    }
+
+    document.getElementById('btn-friendly-run').addEventListener('click', runFriendlyAnimation);
+    document.getElementById('btn-friendly-reset').addEventListener('click', resetFriendly);
+    ['slider-friendly-n', 'slider-friendly-cl'].forEach(id =>
+        document.getElementById(id).addEventListener('input', () => {
+            document.getElementById('friendly-n-val').textContent = document.getElementById('slider-friendly-n').value;
+            document.getElementById('friendly-cl-val').textContent = document.getElementById('slider-friendly-cl').value;
+        })
+    );
+    resetFriendly();
+
+    /* ==============================
+       Section 5: Execution Time Analysis
+       ============================== */
+    function updateExecTime() {
+        const ic = parseFloat(document.getElementById('slider-et-ic').value);
+        const cpi = parseFloat(document.getElementById('slider-et-cpi').value);
+        const memFrac = parseFloat(document.getElementById('slider-et-mf').value) / 100;
+        const mr = parseFloat(document.getElementById('slider-et-mr').value) / 100;
+        const mp = parseFloat(document.getElementById('slider-et-mp').value);
+        const clk = parseFloat(document.getElementById('slider-et-clk').value);
+
+        document.getElementById('et-ic-val').textContent = ic;
+        document.getElementById('et-cpi-val').textContent = cpi.toFixed(1);
+        document.getElementById('et-mf-val').textContent = (memFrac * 100).toFixed(0) + '%';
+        document.getElementById('et-mr-val').textContent = (mr * 100).toFixed(1) + '%';
+        document.getElementById('et-mp-val').textContent = mp;
+        document.getElementById('et-clk-val').textContent = clk.toFixed(2);
+
+        const icAbs = ic * 1e6;
+        const cpuCycles = icAbs * cpi;
+        const memStallCycles = icAbs * memFrac * mr * mp;
+        const totalCycles = cpuCycles + memStallCycles;
+        const totalTimeNs = totalCycles * clk;
+        const totalTimeMs = totalTimeNs / 1e6;
+        const memPct = (memStallCycles / totalCycles) * 100;
+
+        document.getElementById('et-cpu-cycles').textContent = formatCycles(cpuCycles);
+        document.getElementById('et-mem-cycles').textContent = formatCycles(memStallCycles);
+        document.getElementById('et-total-time').textContent = totalTimeMs.toFixed(2) + ' ms';
+        document.getElementById('et-mem-pct').textContent = memPct.toFixed(1) + '%';
+
+        drawExecTimeChart(cpuCycles, memStallCycles, totalTimeMs);
+        drawMemWall(cpi, memFrac, mr, mp);
+    }
+
+    function formatCycles(n) {
+        if (n >= 1e9) return (n / 1e9).toFixed(1) + 'G';
+        if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+        if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+        return Math.round(n).toString();
+    }
+
+    function drawExecTimeChart(cpuCycles, memCycles, totalMs) {
+        const canvas = document.getElementById('canvas-exectime');
+        const { ctx, w, h } = initCanvas(canvas, 200);
+        ctx.clearRect(0, 0, w, h);
+
+        const pad = { l: 60, r: 40, t: 25, b: 45 };
+        const cw = w - pad.l - pad.r;
+        const ch = h - pad.t - pad.b;
+        const totalCycles = cpuCycles + memCycles;
+
+        /* Stacked horizontal bar */
+        const barH = 50;
+        const barY = pad.t + (ch - barH) / 2;
+        const cpuW = (cpuCycles / totalCycles) * cw;
+        const memW = (memCycles / totalCycles) * cw;
+
+        /* CPU part */
+        ctx.fillStyle = MemUtils.hexToRgba(C.blue, 0.3);
+        ctx.strokeStyle = C.blue;
+        ctx.lineWidth = 1.5;
+        roundRect(ctx, pad.l, barY, cpuW, barH, [6, 0, 0, 6]);
+        ctx.fill();
+        ctx.stroke();
+
+        /* Mem part */
+        ctx.fillStyle = MemUtils.hexToRgba(C.red, 0.3);
+        ctx.strokeStyle = C.red;
+        ctx.lineWidth = 1.5;
+        roundRect(ctx, pad.l + cpuW, barY, memW, barH, [0, 6, 6, 0]);
+        ctx.fill();
+        ctx.stroke();
+
+        /* Labels */
+        ctx.font = 'bold 12px "Noto Sans SC", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        if (cpuW > 60) {
+            ctx.fillStyle = C.blue;
+            ctx.fillText('CPU 执行', pad.l + cpuW / 2, barY + barH / 2 - 8);
+            ctx.font = '11px "JetBrains Mono", monospace';
+            ctx.fillText(formatCycles(cpuCycles), pad.l + cpuW / 2, barY + barH / 2 + 10);
+        }
+        ctx.font = 'bold 12px "Noto Sans SC", sans-serif';
+        if (memW > 60) {
+            ctx.fillStyle = C.red;
+            ctx.fillText('内存停顿', pad.l + cpuW + memW / 2, barY + barH / 2 - 8);
+            ctx.font = '11px "JetBrains Mono", monospace';
+            ctx.fillText(formatCycles(memCycles), pad.l + cpuW + memW / 2, barY + barH / 2 + 10);
+        }
+
+        /* Total label */
+        ctx.fillStyle = C.textSec;
+        ctx.font = '11px "Noto Sans SC", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(`总执行时间: ${totalMs.toFixed(2)} ms (${formatCycles(totalCycles)} 周期)`, w / 2, pad.t + ch + 20);
+    }
+
+    function drawMemWall(baseCpi, memFrac, mr, mp) {
+        const canvas = document.getElementById('canvas-memwall');
+        const { ctx, w, h } = initCanvas(canvas, 260);
+        ctx.clearRect(0, 0, w, h);
+
+        const pad = { l: 50, r: 30, t: 30, b: 60 };
+        const cw = w - pad.l - pad.r;
+        const ch = h - pad.t - pad.b;
+
+        /* Simulate different clock periods (processor getting faster) */
+        const clockPeriods = [2.0, 1.5, 1.0, 0.75, 0.5, 0.35, 0.25, 0.15, 0.1];
+        const labels = clockPeriods.map(c => c + 'ns');
+        const n = clockPeriods.length;
+        const barW = Math.min(35, cw / n * 0.65);
+        const gap = (cw - barW * n) / (n + 1);
+
+        const icAbs = 100e6;
+        /* Assume memory penalty stays roughly the same in ns, convert to cycles */
+        const memPenaltyNs = mp * 0.5; /* base penalty in ns */
+        let maxTime = 0;
+        const data = clockPeriods.map(clk => {
+            const cpuCycles = icAbs * baseCpi;
+            const memPenaltyCycles = memPenaltyNs / clk;
+            const memCycles = icAbs * memFrac * mr * memPenaltyCycles;
+            const cpuTimeNs = cpuCycles * clk;
+            const memTimeNs = memCycles * clk;
+            const total = cpuTimeNs + memTimeNs;
+            if (total > maxTime) maxTime = total;
+            return { cpuTimeNs, memTimeNs, total, memPct: memTimeNs / total };
+        });
+
+        const scale = ch / (maxTime * 1.1);
+
+        data.forEach((d, i) => {
+            const x = pad.l + gap + i * (barW + gap);
+            const cpuH = d.cpuTimeNs * scale;
+            const memH = d.memTimeNs * scale;
+            const totalH = cpuH + memH;
+
+            /* CPU part (bottom) */
+            ctx.fillStyle = MemUtils.hexToRgba(C.blue, 0.3);
+            ctx.fillRect(x, pad.t + ch - cpuH, barW, cpuH);
+            ctx.strokeStyle = C.blue;
+            ctx.lineWidth = 1;
+            ctx.strokeRect(x, pad.t + ch - cpuH, barW, cpuH);
+
+            /* Mem part (top) */
+            ctx.fillStyle = MemUtils.hexToRgba(C.red, 0.3);
+            ctx.fillRect(x, pad.t + ch - totalH, barW, memH);
+            ctx.strokeStyle = C.red;
+            ctx.lineWidth = 1;
+            ctx.strokeRect(x, pad.t + ch - totalH, barW, memH);
+
+            /* Percent label */
+            if (barW > 20) {
+                ctx.fillStyle = C.textSec;
+                ctx.font = '9px "JetBrains Mono", monospace';
+                ctx.textAlign = 'center';
+                ctx.fillText((d.memPct * 100).toFixed(0) + '%', x + barW / 2, pad.t + ch - totalH - 6);
+            }
+
+            /* Clock label */
+            ctx.fillStyle = C.textMut;
+            ctx.font = '9px "JetBrains Mono", monospace';
+            ctx.textAlign = 'center';
+            ctx.save();
+            ctx.translate(x + barW / 2, pad.t + ch + 12);
+            ctx.rotate(-Math.PI / 6);
+            ctx.fillText(labels[i], 0, 0);
+            ctx.restore();
+        });
+
+        /* Legend */
+        ctx.fillStyle = MemUtils.hexToRgba(C.blue, 0.4);
+        ctx.fillRect(pad.l, pad.t, 12, 12);
+        ctx.fillStyle = C.textSec;
+        ctx.font = '10px "Noto Sans SC", sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText('CPU 执行', pad.l + 16, pad.t + 10);
+
+        ctx.fillStyle = MemUtils.hexToRgba(C.red, 0.4);
+        ctx.fillRect(pad.l + 90, pad.t, 12, 12);
+        ctx.fillStyle = C.textSec;
+        ctx.fillText('内存停顿', pad.l + 106, pad.t + 10);
+
+        /* Arrow annotation */
+        ctx.fillStyle = C.textMut;
+        ctx.font = '10px "Noto Sans SC", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('← 处理器越来越快 →', w / 2, h - 8);
+        ctx.fillText('(时钟周期)', w / 2, h - 22);
+    }
+
+    const etSliders = ['slider-et-ic', 'slider-et-cpi', 'slider-et-mf', 'slider-et-mr', 'slider-et-mp', 'slider-et-clk'];
+    etSliders.forEach(id => document.getElementById(id).addEventListener('input', updateExecTime));
+    updateExecTime();
+
+    /* ==============================
+       Section 6: Performance Challenge
+       ============================== */
+    const difficulties = {
+        easy: {
+            title: '简单：顺序访问工作负载',
+            desc: '程序以较好的空间局部性顺序访问数据，工作集较小。',
+            workingSetKB: 4,
+            instrM: 50,
+            memFrac: 0.25,
+            spatialLocality: 0.8,
+            budget: 1200,
+            baseMissPenalty: 80,
+        },
+        medium: {
+            title: '中等：混合访问工作负载',
+            desc: '程序同时包含顺序和随机访问模式，工作集中等大小。',
+            workingSetKB: 16,
+            instrM: 100,
+            memFrac: 0.35,
+            spatialLocality: 0.5,
+            budget: 1000,
+            baseMissPenalty: 100,
+        },
+        hard: {
+            title: '困难：随机访问工作负载',
+            desc: '程序以指针追踪方式随机访问大工作集，空间局部性差。',
+            workingSetKB: 64,
+            instrM: 200,
+            memFrac: 0.45,
+            spatialLocality: 0.2,
+            budget: 800,
+            baseMissPenalty: 150,
+        },
+    };
+
+    let currentDiff = 'easy';
+
+    function setDifficulty(diff) {
+        currentDiff = diff;
+        document.querySelectorAll('.difficulty-btns .btn').forEach(btn => {
+            btn.classList.toggle('btn-primary', btn.dataset.diff === diff);
+        });
+        const d = difficulties[diff];
+        document.getElementById('challenge-title').textContent = d.title;
+        document.getElementById('challenge-desc').textContent = d.desc;
+        document.getElementById('challenge-workload-stats').innerHTML = `
+            <div class="stat-item"><div class="stat-num" style="color:${C.blue}">${d.workingSetKB} KB</div><div class="stat-label">工作集</div></div>
+            <div class="stat-item"><div class="stat-num" style="color:${C.purple}">${d.instrM}M</div><div class="stat-label">指令数</div></div>
+            <div class="stat-item"><div class="stat-num" style="color:${C.orange}">${(d.memFrac * 100).toFixed(0)}%</div><div class="stat-label">内存访问占比</div></div>
+            <div class="stat-item"><div class="stat-num" style="color:${C.red}">${d.baseMissPenalty}</div><div class="stat-label">基础缺失惩罚</div></div>
+        `;
+        updateChallenge();
+    }
+
+    function calcCost(sizeKB, assoc, blockSize) {
+        const areaCost = sizeKB * 10;
+        const assocCost = assoc * assoc * 5;
+        const blockCost = Math.max(0, (blockSize - 16) / 8) * 3;
+        return areaCost + assocCost + blockCost;
+    }
+
+    function estimateMissRate(sizeKB, assoc, blockSize, workload) {
+        const sizeBytes = sizeKB * 1024;
+        const wsBytes = workload.workingSetKB * 1024;
+        const numBlocks = sizeBytes / blockSize;
+        const numSets = numBlocks / assoc;
+
+        /* Compulsory: depends on spatial locality and block size */
+        const compulsoryBase = 0.02 / (blockSize / 32);
+
+        /* Capacity: depends on cache size vs working set */
+        let capacityMR = 0;
+        if (sizeBytes < wsBytes) {
+            capacityMR = Math.pow((wsBytes - sizeBytes) / wsBytes, 0.7) * 0.5;
+        }
+
+        /* Conflict: depends on associativity, spatial locality */
+        let conflictMR = 0;
+        if (assoc < 8) {
+            conflictMR = (1 - workload.spatialLocality) * 0.15 / Math.sqrt(assoc);
+        }
+
+        /* Block size too large can increase miss rate due to fewer blocks */
+        const blockPenalty = blockSize > 64 ? (blockSize - 64) / 256 * 0.05 : 0;
+
+        return Math.max(0.005, Math.min(0.5, compulsoryBase + capacityMR + conflictMR + blockPenalty));
+    }
+
+    function updateChallenge() {
+        const sizeKB = parseInt(document.getElementById('slider-ch-size').value);
+        const assoc = parseInt(document.getElementById('slider-ch-assoc').value);
+        const blockSize = parseInt(document.getElementById('slider-ch-block').value);
+
+        document.getElementById('ch-size-val').textContent = sizeKB + ' KB';
+        document.getElementById('ch-assoc-val').textContent = assoc;
+        document.getElementById('ch-block-val').textContent = blockSize;
+
+        const d = difficulties[currentDiff];
+        const cost = calcCost(sizeKB, assoc, blockSize);
+        const budget = d.budget;
+        const overBudget = cost > budget;
+
+        document.getElementById('budget-text').textContent = `${Math.round(cost)} / ${budget}`;
+        document.getElementById('budget-text').style.color = overBudget ? C.red : C.green;
+        const budgetPct = Math.min(100, (cost / budget) * 100);
+        document.getElementById('budget-fill').style.width = budgetPct + '%';
+        document.getElementById('budget-fill').style.background = overBudget ? C.red : (budgetPct > 80 ? C.orange : C.green);
+
+        const missRate = estimateMissRate(sizeKB, assoc, blockSize, d);
+        /* Hit time increases with size and associativity */
+        const hitTime = 1 + sizeKB * 0.02 + assoc * 0.1;
+        const amat = MemUtils.calcAMAT(hitTime, missRate, d.baseMissPenalty);
+
+        const icAbs = d.instrM * 1e6;
+        const cpuCycles = icAbs * 1.0;
+        const memCycles = icAbs * d.memFrac * missRate * d.baseMissPenalty;
+        const totalCycles = cpuCycles + memCycles;
+        const totalTimeMs = totalCycles * 0.5 / 1e6;
+
+        document.getElementById('ch-miss-rate').textContent = (missRate * 100).toFixed(2) + '%';
+        document.getElementById('ch-amat').textContent = amat.toFixed(2) + ' ns';
+        document.getElementById('ch-exec-time').textContent = totalTimeMs.toFixed(2) + ' ms';
+
+        /* Score: lower exec time = higher score, penalty for over budget */
+        let score = Math.max(0, Math.round(1000 / totalTimeMs * 10));
+        if (overBudget) score = Math.round(score * 0.3);
+        document.getElementById('ch-score').textContent = score;
+        document.getElementById('ch-score').style.color = overBudget ? C.red : (score > 500 ? C.green : C.orange);
+
+        drawChallengeChart(sizeKB, assoc, blockSize, missRate, hitTime, amat, totalTimeMs, d, overBudget);
+    }
+
+    function drawChallengeChart(sizeKB, assoc, blockSize, missRate, hitTime, amat, totalTimeMs, workload, overBudget) {
+        const canvas = document.getElementById('canvas-challenge');
+        const { ctx, w, h } = initCanvas(canvas, 260);
+        ctx.clearRect(0, 0, w, h);
+
+        const pad = { l: 50, r: 30, t: 30, b: 45 };
+        const cw = w - pad.l - pad.r;
+        const ch = h - pad.t - pad.b;
+
+        /* Draw radar-like summary: 5 metrics */
+        const centerX = w * 0.3;
+        const centerY = pad.t + ch / 2;
+        const radius = Math.min(ch / 2 - 10, 90);
+
+        const metrics = [
+            { label: '缺失率', value: 1 - missRate, angle: -Math.PI / 2 },
+            { label: '命中速度', value: Math.max(0, 1 - hitTime / 5), angle: -Math.PI / 2 + 2 * Math.PI / 5 },
+            { label: '容量效率', value: Math.min(1, sizeKB / workload.workingSetKB), angle: -Math.PI / 2 + 4 * Math.PI / 5 },
+            { label: '相联效率', value: Math.min(1, assoc / 8), angle: -Math.PI / 2 + 6 * Math.PI / 5 },
+            { label: '预算剩余', value: overBudget ? 0 : 1 - calcCost(sizeKB, assoc, blockSize) / workload.budget, angle: -Math.PI / 2 + 8 * Math.PI / 5 },
+        ];
+
+        /* Background rings */
+        [0.25, 0.5, 0.75, 1.0].forEach(r => {
+            ctx.strokeStyle = MemUtils.hexToRgba(C.border, 0.3);
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, radius * r, 0, Math.PI * 2);
+            ctx.stroke();
+        });
+
+        /* Axes */
+        metrics.forEach(m => {
+            const ex = centerX + Math.cos(m.angle) * radius;
+            const ey = centerY + Math.sin(m.angle) * radius;
+            ctx.strokeStyle = MemUtils.hexToRgba(C.border, 0.4);
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(centerX, centerY);
+            ctx.lineTo(ex, ey);
+            ctx.stroke();
+
+            /* Label */
+            const lx = centerX + Math.cos(m.angle) * (radius + 18);
+            const ly = centerY + Math.sin(m.angle) * (radius + 18);
+            ctx.fillStyle = C.textSec;
+            ctx.font = '10px "Noto Sans SC", sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(m.label, lx, ly);
+        });
+
+        /* Data polygon */
+        ctx.beginPath();
+        metrics.forEach((m, i) => {
+            const r = Math.max(0, m.value) * radius;
+            const x = centerX + Math.cos(m.angle) * r;
+            const y = centerY + Math.sin(m.angle) * r;
+            if (i === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+        });
+        ctx.closePath();
+        ctx.fillStyle = overBudget ? MemUtils.hexToRgba(C.red, 0.15) : MemUtils.hexToRgba(C.green, 0.15);
+        ctx.fill();
+        ctx.strokeStyle = overBudget ? C.red : C.green;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        /* Dots */
+        metrics.forEach(m => {
+            const r = Math.max(0, m.value) * radius;
+            const x = centerX + Math.cos(m.angle) * r;
+            const y = centerY + Math.sin(m.angle) * r;
+            ctx.fillStyle = overBudget ? C.red : C.green;
+            ctx.beginPath();
+            ctx.arc(x, y, 3, 0, Math.PI * 2);
+            ctx.fill();
+        });
+
+        /* Right side: summary text */
+        const tx = w * 0.6;
+        let ty = pad.t + 20;
+        const lineH = 28;
+        const summaryItems = [
+            { label: '缓存大小', value: sizeKB + ' KB', color: C.blue },
+            { label: '相联度', value: assoc + ' 路', color: C.purple },
+            { label: '块大小', value: blockSize + ' B', color: C.orange },
+            { label: '缺失率', value: (missRate * 100).toFixed(2) + '%', color: C.red },
+            { label: 'AMAT', value: amat.toFixed(2) + ' ns', color: C.green },
+            { label: '执行时间', value: totalTimeMs.toFixed(2) + ' ms', color: C.yellow },
+        ];
+
+        summaryItems.forEach(item => {
+            ctx.fillStyle = C.textMut;
+            ctx.font = '11px "Noto Sans SC", sans-serif';
+            ctx.textAlign = 'left';
+            ctx.fillText(item.label, tx, ty);
+            ctx.fillStyle = item.color;
+            ctx.font = 'bold 12px "JetBrains Mono", monospace';
+            ctx.textAlign = 'right';
+            ctx.fillText(item.value, w - pad.r - 10, ty);
+            ty += lineH;
+        });
+
+        if (overBudget) {
+            ctx.fillStyle = MemUtils.hexToRgba(C.red, 0.15);
+            ctx.fillRect(tx - 10, ty + 5, w - tx - pad.r, 25);
+            ctx.fillStyle = C.red;
+            ctx.font = 'bold 11px "Noto Sans SC", sans-serif';
+            ctx.textAlign = 'left';
+            ctx.fillText('超出预算！得分 x0.3', tx, ty + 22);
+        }
+    }
+
+    document.querySelectorAll('.difficulty-btns .btn').forEach(btn => {
+        btn.addEventListener('click', () => setDifficulty(btn.dataset.diff));
+    });
+
+    ['slider-ch-size', 'slider-ch-assoc', 'slider-ch-block'].forEach(id =>
+        document.getElementById(id).addEventListener('input', updateChallenge)
+    );
+
+    setDifficulty('easy');
+
+    /* ==============================
+       Window resize handler
+       ============================== */
+    let resizeTimer;
+    window.addEventListener('resize', () => {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(() => {
+            updateAMAT();
+            run3CSimulation();
+            updateOptimization();
+            updateExecTime();
+            updateChallenge();
+        }, 200);
+    });
+
+    /* ==============================
+       Smooth scroll for section nav
+       ============================== */
+    document.querySelectorAll('a[href^="#"]').forEach(a => {
+        a.addEventListener('click', e => {
+            e.preventDefault();
+            const target = document.querySelector(a.getAttribute('href'));
+            if (target) target.scrollIntoView({ behavior: 'smooth' });
+        });
+    });
+});
+</script>
+</body>
+</html>

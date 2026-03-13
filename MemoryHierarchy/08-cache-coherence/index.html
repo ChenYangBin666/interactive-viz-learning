@@ -1,0 +1,2077 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cache一致性 — 存储层级</title>
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+SC:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+    <script src="../shared/scripts/mem-utils.js"></script>
+    <script defer src="../shared/scripts/nav.js"></script>
+    <style>
+        /* ===== Page Hero ===== */
+        .hero {
+            text-align: center;
+            padding: calc(var(--header-height) + 3rem) 2rem 2.5rem;
+        }
+        .hero h1 {
+            font-size: 2.4rem;
+            margin-bottom: 0.5rem;
+            background: linear-gradient(135deg, #ff5252, #4fc3f7, #16c79a);
+            background-size: 200% 200%;
+            animation: heroGrad 6s ease infinite;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        @keyframes heroGrad {
+            0%, 100% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+        }
+        .hero .subtitle {
+            color: var(--text-secondary);
+            max-width: 680px;
+            margin: 0 auto;
+            font-size: 1.05rem;
+        }
+        .hero .tags {
+            display: flex;
+            justify-content: center;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+            margin-top: 1rem;
+        }
+
+        /* ===== Section Styles ===== */
+        .module-section {
+            max-width: 1200px;
+            margin: 0 auto 3rem;
+            padding: 2rem;
+        }
+        .module-section:nth-child(even) {
+            background: var(--bg-secondary);
+            border-radius: var(--radius-lg);
+            border: 1px solid var(--border-color);
+        }
+        .module-section h2 {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            margin-bottom: 0.5rem;
+            font-size: 1.5rem;
+        }
+        .module-section h2 .sec-num {
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            color: var(--accent-green);
+            background: rgba(22,199,154,0.12);
+            padding: 0.15rem 0.5rem;
+            border-radius: 4px;
+        }
+        .module-section .sec-desc {
+            color: var(--text-secondary);
+            margin-bottom: 1.5rem;
+            font-size: 0.95rem;
+        }
+
+        /* ===== Canvas Wrapper ===== */
+        .canvas-wrap {
+            position: relative;
+            width: 100%;
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+            margin-bottom: 1rem;
+        }
+        .canvas-wrap canvas {
+            display: block;
+            width: 100%;
+        }
+
+        /* ===== Controls Bar ===== */
+        .controls {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+        }
+
+        /* ===== Log Table ===== */
+        .log-wrap {
+            max-height: 280px;
+            overflow-y: auto;
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            margin-top: 1rem;
+        }
+        .log-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+        }
+        .log-table th, .log-table td {
+            padding: 0.4rem 0.6rem;
+            text-align: center;
+            border-bottom: 1px solid rgba(42,42,74,0.4);
+        }
+        .log-table th {
+            background: var(--bg-card);
+            color: var(--accent-green);
+            font-weight: 600;
+            position: sticky;
+            top: 0;
+            z-index: 2;
+        }
+        .log-table tr:hover {
+            background: rgba(22,199,154,0.05);
+        }
+        .log-table .state-badge {
+            display: inline-block;
+            padding: 0.1rem 0.4rem;
+            border-radius: 3px;
+            font-weight: 600;
+            font-size: 0.75rem;
+            min-width: 1.6rem;
+        }
+
+        /* ===== MESI State Cards ===== */
+        .mesi-cards {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+        .mesi-card {
+            padding: 1.2rem;
+            border-radius: var(--radius-md);
+            border: 2px solid;
+            cursor: pointer;
+            transition: all 0.3s;
+            text-align: center;
+        }
+        .mesi-card:hover, .mesi-card.active {
+            transform: translateY(-3px);
+            box-shadow: 0 6px 24px rgba(0,0,0,0.3);
+        }
+        .mesi-card .state-letter {
+            font-family: var(--font-mono);
+            font-size: 2.2rem;
+            font-weight: 700;
+            line-height: 1;
+            margin-bottom: 0.3rem;
+        }
+        .mesi-card .state-name {
+            font-size: 0.9rem;
+            font-weight: 600;
+            margin-bottom: 0.25rem;
+        }
+        .mesi-card .state-cn {
+            font-size: 0.8rem;
+            opacity: 0.8;
+        }
+        .mesi-card .state-detail {
+            font-size: 0.78rem;
+            margin-top: 0.6rem;
+            opacity: 0;
+            max-height: 0;
+            overflow: hidden;
+            transition: all 0.3s;
+        }
+        .mesi-card.active .state-detail {
+            opacity: 1;
+            max-height: 200px;
+        }
+
+        /* ===== Core display ===== */
+        .cores-display {
+            display: flex;
+            gap: 1rem;
+            flex-wrap: wrap;
+            margin-bottom: 1rem;
+        }
+        .core-box {
+            flex: 1;
+            min-width: 140px;
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 0.8rem;
+            text-align: center;
+        }
+        .core-box .core-title {
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            color: var(--accent-blue);
+        }
+        .core-box .cache-line {
+            padding: 0.4rem;
+            border-radius: 4px;
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            font-weight: 600;
+            margin-bottom: 0.3rem;
+            transition: all 0.3s;
+        }
+
+        /* ===== Comparison grid ===== */
+        .compare-cols {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5rem;
+            margin-top: 1.5rem;
+        }
+        .compare-col {
+            padding: 1.2rem;
+            border-radius: var(--radius-md);
+            border: 1px solid var(--border-color);
+            background: var(--bg-primary);
+        }
+        .compare-col h4 {
+            margin-bottom: 0.75rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        /* ===== Perf bar chart ===== */
+        .perf-bars {
+            margin-top: 1rem;
+        }
+        .perf-bar-row {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            margin-bottom: 0.6rem;
+        }
+        .perf-bar-label {
+            min-width: 100px;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            text-align: right;
+        }
+        .perf-bar-track {
+            flex: 1;
+            height: 24px;
+            background: var(--border-color);
+            border-radius: 4px;
+            overflow: hidden;
+            position: relative;
+        }
+        .perf-bar-fill {
+            height: 100%;
+            border-radius: 4px;
+            transition: width 0.8s var(--anim-ease);
+            display: flex;
+            align-items: center;
+            padding-left: 0.5rem;
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: #fff;
+        }
+
+        /* ===== Quiz ===== */
+        .quiz-wrap {
+            margin-top: 1.5rem;
+            padding: 1.5rem;
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+        }
+        .quiz-q {
+            font-weight: 600;
+            margin-bottom: 0.75rem;
+        }
+        .quiz-opts {
+            display: flex;
+            flex-direction: column;
+            gap: 0.4rem;
+        }
+        .quiz-opt {
+            padding: 0.6rem 1rem;
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 0.9rem;
+        }
+        .quiz-opt:hover {
+            border-color: var(--accent-blue);
+            background: rgba(79,195,247,0.05);
+        }
+        .quiz-opt.correct {
+            border-color: var(--accent-green);
+            background: rgba(22,199,154,0.12);
+            color: var(--accent-green);
+        }
+        .quiz-opt.wrong {
+            border-color: var(--accent-red);
+            background: rgba(255,82,82,0.1);
+            color: var(--accent-red);
+        }
+        .quiz-result {
+            margin-top: 0.75rem;
+            font-size: 0.9rem;
+            font-weight: 600;
+        }
+
+        /* ===== Select ===== */
+        select {
+            padding: 0.4rem 0.8rem;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            font-family: inherit;
+            font-size: 0.85rem;
+            cursor: pointer;
+        }
+        select:focus {
+            outline: none;
+            border-color: var(--accent-green);
+        }
+
+        /* ===== Transition tooltip ===== */
+        .transition-info {
+            min-height: 80px;
+            padding: 1rem;
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            margin-top: 1rem;
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+        }
+        .transition-info strong {
+            color: var(--text-primary);
+        }
+
+        /* ===== Footer ===== */
+        .page-footer {
+            text-align: center;
+            padding: 2rem;
+            color: var(--text-muted);
+            font-size: 0.8rem;
+        }
+
+        /* ===== Responsive ===== */
+        @media (max-width: 768px) {
+            .hero h1 { font-size: 1.8rem; }
+            .module-section { padding: 1.2rem; margin-bottom: 2rem; }
+            .mesi-cards { grid-template-columns: repeat(2, 1fr); }
+            .compare-cols { grid-template-columns: 1fr; }
+            .cores-display { flex-direction: column; }
+        }
+    </style>
+</head>
+<body>
+
+<!-- ===== HERO ===== -->
+<div class="hero">
+    <h1>Cache一致性</h1>
+    <p class="subtitle">
+        多核处理器中，每个核心都有自己的Cache副本。
+        当一个核心修改了数据，其他核心如何感知？MESI协议、总线嗅探和目录协议给出了答案。
+    </p>
+    <div class="tags">
+        <span class="badge badge-green">MESI协议</span>
+        <span class="badge badge-blue">总线嗅探</span>
+        <span class="badge badge-orange">False Sharing</span>
+        <span class="badge badge-purple">目录协议</span>
+    </div>
+</div>
+
+<!-- ================================================================== -->
+<!-- SECTION 1: 一致性问题 -->
+<!-- ================================================================== -->
+<div class="module-section" id="sec1">
+    <h2><span class="sec-num">01</span> 一致性问题 (The Coherence Problem)</h2>
+    <p class="sec-desc">
+        在多核处理器中，每个核心有自己的私有Cache。当多个核心缓存了同一地址的数据，其中一个核心对数据进行写入后，
+        其他核心的Cache副本就变成了"过期数据"（stale data）。这就是 <strong>Cache一致性问题</strong>。
+    </p>
+
+    <div class="info-box warning">
+        <p><strong>一致性定义：</strong>每次读操作都应该看到最近一次写操作的值。
+        即对于同一个内存地址，所有核心最终看到的写入顺序必须一致。</p>
+    </div>
+
+    <div class="canvas-wrap">
+        <canvas id="canvas1"></canvas>
+    </div>
+    <div class="controls">
+        <button class="btn btn-primary" id="s1-play">播放演示</button>
+        <button class="btn" id="s1-step">单步前进</button>
+        <button class="btn" id="s1-reset">重置</button>
+        <span class="text-sm text-muted" id="s1-status">点击"播放演示"查看一致性问题场景</span>
+    </div>
+</div>
+
+<!-- ================================================================== -->
+<!-- SECTION 2: MESI 协议状态 -->
+<!-- ================================================================== -->
+<div class="module-section" id="sec2">
+    <h2><span class="sec-num">02</span> MESI 协议状态 (MESI Protocol States)</h2>
+    <p class="sec-desc">
+        MESI协议用四种状态描述每条Cache Line的状态。点击下方的状态卡片查看详细说明。
+    </p>
+
+    <div class="mesi-cards" id="mesiCards">
+        <div class="mesi-card" data-state="M"
+             style="border-color: #ff5252; background: rgba(255,82,82,0.06);">
+            <div class="state-letter" style="color: #ff5252;">M</div>
+            <div class="state-name" style="color: #ff5252;">Modified</div>
+            <div class="state-cn">已修改</div>
+            <div class="state-detail">
+                <p>该Cache Line是<strong>脏数据</strong>，已被修改但未写回主存。</p>
+                <p>此核心<strong>独占</strong>该数据——没有其他核心拥有该行的有效副本。</p>
+                <p>主存数据<strong>已过时</strong>。</p>
+                <p>若被逐出，必须先写回主存（Flush）。</p>
+            </div>
+        </div>
+        <div class="mesi-card" data-state="E"
+             style="border-color: #16c79a; background: rgba(22,199,154,0.06);">
+            <div class="state-letter" style="color: #16c79a;">E</div>
+            <div class="state-name" style="color: #16c79a;">Exclusive</div>
+            <div class="state-cn">独占</div>
+            <div class="state-detail">
+                <p>该Cache Line是<strong>干净数据</strong>，与主存一致。</p>
+                <p>此核心<strong>独占</strong>该数据——没有其他核心拥有该行的有效副本。</p>
+                <p>可以直接转为Modified（无需总线操作），因为没有其他持有者。</p>
+            </div>
+        </div>
+        <div class="mesi-card" data-state="S"
+             style="border-color: #4fc3f7; background: rgba(79,195,247,0.06);">
+            <div class="state-letter" style="color: #4fc3f7;">S</div>
+            <div class="state-name" style="color: #4fc3f7;">Shared</div>
+            <div class="state-cn">共享</div>
+            <div class="state-detail">
+                <p>该Cache Line是<strong>干净数据</strong>，与主存一致。</p>
+                <p><strong>多个核心</strong>可能同时拥有该行的副本。</p>
+                <p>写入时需要先发送BusRdX使其他核心的副本失效。</p>
+            </div>
+        </div>
+        <div class="mesi-card" data-state="I"
+             style="border-color: #6c6c7c; background: rgba(108,108,124,0.06);">
+            <div class="state-letter" style="color: #6c6c7c;">I</div>
+            <div class="state-name" style="color: #6c6c7c;">Invalid</div>
+            <div class="state-cn">无效</div>
+            <div class="state-detail">
+                <p>该Cache Line<strong>无有效数据</strong>。</p>
+                <p>等同于Cache Miss——如果需要访问该地址，必须从主存或其他核心获取。</p>
+                <p>这是Cache Line的初始状态。</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="canvas-wrap">
+        <canvas id="canvas2"></canvas>
+    </div>
+    <div class="transition-info" id="s2-info">
+        点击上方的MESI状态卡片，或者悬停在状态图中的箭头上查看转移详情。
+    </div>
+</div>
+
+<!-- ================================================================== -->
+<!-- SECTION 3: MESI 状态转移模拟 -->
+<!-- ================================================================== -->
+<div class="module-section" id="sec3">
+    <h2><span class="sec-num">03</span> MESI 状态转移模拟 (MESI Transitions)</h2>
+    <p class="sec-desc">
+        使用 <code>MemUtils.createMESIProtocol()</code> 进行模拟。选择核心和操作（读/写），观察所有核心Cache Line的状态变化和总线事务。
+    </p>
+
+    <div class="controls">
+        <label style="font-size:0.85rem; color:var(--text-secondary);">核心数：</label>
+        <select id="s3-cores">
+            <option value="2">2 核心</option>
+            <option value="3">3 核心</option>
+            <option value="4" selected>4 核心</option>
+        </select>
+        <label style="font-size:0.85rem; color:var(--text-secondary); margin-left:0.5rem;">操作核心：</label>
+        <select id="s3-core-sel"></select>
+        <label style="font-size:0.85rem; color:var(--text-secondary); margin-left:0.5rem;">地址：</label>
+        <select id="s3-addr">
+            <option value="0x100">0x100</option>
+            <option value="0x200">0x200</option>
+            <option value="0x300">0x300</option>
+        </select>
+        <button class="btn btn-primary" id="s3-read">读取 (Read)</button>
+        <button class="btn" style="border-color:#ff5252;color:#ff5252;" id="s3-write">写入 (Write)</button>
+        <button class="btn" id="s3-reset">重置</button>
+    </div>
+
+    <div class="canvas-wrap">
+        <canvas id="canvas3"></canvas>
+    </div>
+
+    <div class="log-wrap">
+        <table class="log-table" id="s3-log">
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>操作</th>
+                    <th>核心</th>
+                    <th>地址</th>
+                    <th>结果</th>
+                    <th>总线事务</th>
+                    <th>前状态</th>
+                    <th>后状态</th>
+                </tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+    </div>
+</div>
+
+<!-- ================================================================== -->
+<!-- SECTION 4: 总线嗅探 -->
+<!-- ================================================================== -->
+<div class="module-section" id="sec4">
+    <h2><span class="sec-num">04</span> 总线嗅探 (Bus Snooping)</h2>
+    <p class="sec-desc">
+        在嗅探协议中，所有核心的Cache控制器都"监听"共享总线上的事务。
+        当某核心发出读/写请求时，其他核心检查自己是否持有该地址的副本并相应地更新状态。
+    </p>
+
+    <div class="canvas-wrap">
+        <canvas id="canvas4"></canvas>
+    </div>
+    <div class="controls">
+        <label style="font-size:0.85rem;color:var(--text-secondary);">核心：</label>
+        <select id="s4-core">
+            <option value="0">Core 0</option>
+            <option value="1">Core 1</option>
+            <option value="2">Core 2</option>
+            <option value="3">Core 3</option>
+        </select>
+        <button class="btn btn-primary" id="s4-read">发送 BusRd</button>
+        <button class="btn" style="border-color:#ff5252;color:#ff5252;" id="s4-write">发送 BusRdX</button>
+        <button class="btn" id="s4-reset">重置</button>
+        <span class="text-sm text-muted" id="s4-status">选择核心和操作，观察总线嗅探过程</span>
+    </div>
+
+    <div class="info-box">
+        <p><strong>带宽问题：</strong>嗅探协议中，所有事务都在共享总线上广播，
+        所有核心都必须监听。随着核心数增多，总线会成为瓶颈——这正是目录协议（Section 6）要解决的问题。</p>
+    </div>
+</div>
+
+<!-- ================================================================== -->
+<!-- SECTION 5: False Sharing -->
+<!-- ================================================================== -->
+<div class="module-section" id="sec5">
+    <h2><span class="sec-num">05</span> False Sharing</h2>
+    <p class="sec-desc">
+        当两个不同的变量恰好位于同一条Cache Line上，而不同的核心分别修改各自的变量时，
+        Cache一致性协议会不断互相使对方的缓存行失效——即使这两个变量逻辑上完全独立。这就是 <strong>False Sharing</strong>。
+    </p>
+
+    <div class="canvas-wrap">
+        <canvas id="canvas5"></canvas>
+    </div>
+    <div class="controls">
+        <button class="btn btn-primary" id="s5-play">模拟 False Sharing</button>
+        <button class="btn" style="border-color:var(--accent-green);color:var(--accent-green);" id="s5-padded">模拟加 Padding</button>
+        <button class="btn" id="s5-reset">重置</button>
+        <span class="text-sm text-muted" id="s5-status">点击按钮观察False Sharing与Padding对比</span>
+    </div>
+
+    <div class="compare-cols">
+        <div class="compare-col">
+            <h4 style="color:var(--accent-red);">无 Padding（False Sharing）</h4>
+            <p class="text-sm" style="color:var(--text-secondary);">
+                变量X和Y在同一Cache Line中。Core 0写X、Core 1写Y时，不断触发一致性失效。
+            </p>
+            <div class="perf-bars" id="s5-perf-bad"></div>
+        </div>
+        <div class="compare-col">
+            <h4 style="color:var(--accent-green);">有 Padding（隔离）</h4>
+            <p class="text-sm" style="color:var(--text-secondary);">
+                X和Y被填充到不同的Cache Line中，各核心独立操作，不会互相干扰。
+            </p>
+            <div class="perf-bars" id="s5-perf-good"></div>
+        </div>
+    </div>
+</div>
+
+<!-- ================================================================== -->
+<!-- SECTION 6: 目录协议 -->
+<!-- ================================================================== -->
+<div class="module-section" id="sec6">
+    <h2><span class="sec-num">06</span> 目录协议简介 (Directory Protocol)</h2>
+    <p class="sec-desc">
+        嗅探协议通过广播实现一致性，但在核心数量增长时总线会成为瓶颈。
+        目录协议使用集中式目录记录每条Cache Line的共享者信息，实现<strong>点对点</strong>通信，避免广播。
+    </p>
+
+    <div class="canvas-wrap">
+        <canvas id="canvas6"></canvas>
+    </div>
+    <div class="controls">
+        <label style="font-size:0.85rem;color:var(--text-secondary);">模式：</label>
+        <div class="btn-group">
+            <button class="btn active" id="s6-snoop">嗅探 (Snooping)</button>
+            <button class="btn" id="s6-dir">目录 (Directory)</button>
+        </div>
+        <button class="btn btn-primary" id="s6-send" style="margin-left:0.5rem;">发送请求</button>
+        <button class="btn" id="s6-reset">重置</button>
+    </div>
+
+    <div class="compare-cols">
+        <div class="compare-col">
+            <h4 style="color:var(--accent-orange);">嗅探协议</h4>
+            <p class="text-sm" style="color:var(--text-secondary);">
+                广播所有事务到共享总线。每个核心都监听。O(N)流量/事务。
+                适合核心数较少（2-8核）的系统。
+            </p>
+        </div>
+        <div class="compare-col">
+            <h4 style="color:var(--accent-green);">目录协议</h4>
+            <p class="text-sm" style="color:var(--text-secondary);">
+                使用目录表记录共享者。点对点消息通信。O(1)流量/事务。
+                适合大规模多核（16+核）系统。支持MOESI扩展。
+            </p>
+        </div>
+    </div>
+
+    <!-- Summary Quiz -->
+    <div class="quiz-wrap" id="quiz">
+        <h3 style="margin-bottom:1rem;">小测验：Cache一致性</h3>
+
+        <div class="quiz-q" id="q1-q">1. 在MESI协议中，某Cache Line处于E（Exclusive）状态。
+        该核心对其写入后，状态变为？</div>
+        <div class="quiz-opts" id="q1-opts">
+            <div class="quiz-opt" data-correct="false" onclick="checkQuiz(this,'q1')">S (Shared)</div>
+            <div class="quiz-opt" data-correct="true" onclick="checkQuiz(this,'q1')">M (Modified)</div>
+            <div class="quiz-opt" data-correct="false" onclick="checkQuiz(this,'q1')">I (Invalid)</div>
+            <div class="quiz-opt" data-correct="false" onclick="checkQuiz(this,'q1')">不变，仍为 E</div>
+        </div>
+        <div class="quiz-result" id="q1-result"></div>
+
+        <div class="quiz-q" id="q2-q" style="margin-top:1.5rem;">2. False Sharing 的根本原因是什么？</div>
+        <div class="quiz-opts" id="q2-opts">
+            <div class="quiz-opt" data-correct="false" onclick="checkQuiz(this,'q2')">多个核心同时写入同一个变量</div>
+            <div class="quiz-opt" data-correct="true" onclick="checkQuiz(this,'q2')">不同变量位于同一Cache Line中，不同核心分别写入</div>
+            <div class="quiz-opt" data-correct="false" onclick="checkQuiz(this,'q2')">Cache容量不足导致冲突缺失</div>
+            <div class="quiz-opt" data-correct="false" onclick="checkQuiz(this,'q2')">TLB未命中引起的性能下降</div>
+        </div>
+        <div class="quiz-result" id="q2-result"></div>
+
+        <div class="quiz-q" id="q3-q" style="margin-top:1.5rem;">3. 目录协议相比嗅探协议的主要优势是？</div>
+        <div class="quiz-opts" id="q3-opts">
+            <div class="quiz-opt" data-correct="false" onclick="checkQuiz(this,'q3')">实现更简单</div>
+            <div class="quiz-opt" data-correct="false" onclick="checkQuiz(this,'q3')">Cache命中率更高</div>
+            <div class="quiz-opt" data-correct="true" onclick="checkQuiz(this,'q3')">可扩展性好，使用点对点通信而非广播</div>
+            <div class="quiz-opt" data-correct="false" onclick="checkQuiz(this,'q3')">不需要额外的硬件支持</div>
+        </div>
+        <div class="quiz-result" id="q3-result"></div>
+    </div>
+</div>
+
+<div class="page-footer">
+    Cache一致性 — 存储层级 08/09 | 纯前端交互式学习
+</div>
+
+<!-- ================================================================== -->
+<!-- MAIN SCRIPT -->
+<!-- ================================================================== -->
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    // Auto-render KaTeX if loaded
+    if (typeof renderMathInElement === 'function') {
+        renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ]
+        });
+    }
+
+    const C = MemUtils.COLORS;
+    const MC = MemUtils.MESI_COLORS;
+    const MN = MemUtils.MESI_NAMES;
+
+    /* ============================================================
+       Helper: state badge HTML
+    ============================================================ */
+    function stateBadge(s) {
+        const bg = MemUtils.hexToRgba(MC[s], 0.2);
+        return `<span class="state-badge" style="background:${bg};color:${MC[s]}">${s}</span>`;
+    }
+
+    /* ============================================================
+       SECTION 1: Coherence Problem Animation
+    ============================================================ */
+    ;(function section1() {
+        const canvas = document.getElementById('canvas1');
+        let ctx, w, h;
+        let step = -1;
+        const maxStep = 5;
+        let animating = false;
+        let autoTimer = null;
+
+        const steps = [
+            { desc: '初始状态：主存 X=0，两个核心的Cache都为空（Invalid）' },
+            { desc: 'Core 0 读取 X → 从主存加载 X=0 到 Core 0 的 Cache' },
+            { desc: 'Core 1 读取 X → 从主存加载 X=0 到 Core 1 的 Cache' },
+            { desc: 'Core 0 写入 X=42 → Core 0 Cache 中 X=42（但 Core 1 不知道！）' },
+            { desc: 'Core 1 读取 X → 看到 X=0（过期数据！）← 一致性问题！' },
+            { desc: '问题总结：没有一致性协议时，Core 1 读到了错误的旧值' },
+        ];
+
+        function init() {
+            const res = MemUtils.initCanvas(canvas, 340);
+            ctx = res.ctx; w = res.w; h = res.h;
+            draw();
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, w, h);
+
+            // Layout
+            const coreW = 140, coreH = 120;
+            const memW = 200, memH = 60;
+            const gap = Math.min(120, (w - coreW * 2) / 3);
+            const c0x = gap, c1x = w - gap - coreW;
+            const coreY = 30;
+            const memX = (w - memW) / 2, memY = h - 90;
+            const busY = coreY + coreH + 30;
+
+            // Draw cores
+            drawCore(c0x, coreY, coreW, coreH, 'Core 0',
+                step >= 1 ? (step >= 3 ? 42 : 0) : null,
+                step >= 3 ? 'M' : (step >= 1 ? 'S' : 'I'));
+            drawCore(c1x, coreY, coreW, coreH, 'Core 1',
+                step >= 2 ? 0 : null,
+                step >= 2 ? 'S' : 'I');
+
+            // Shared bus
+            ctx.save();
+            ctx.strokeStyle = C.border;
+            ctx.lineWidth = 3;
+            ctx.setLineDash([6, 4]);
+            ctx.beginPath();
+            ctx.moveTo(c0x + coreW / 2, busY);
+            ctx.lineTo(c1x + coreW / 2, busY);
+            ctx.stroke();
+            ctx.restore();
+            ctx.fillStyle = C.textMut;
+            ctx.font = '11px "JetBrains Mono", monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText('共享总线 (Shared Bus)', w / 2, busY - 8);
+
+            // Main memory
+            MemUtils.drawMemoryBlock(ctx, memX, memY, memW, memH,
+                `主存 X = 0`, C.mainMem, { radius: 8 });
+
+            // Bus to memory line
+            ctx.save();
+            ctx.strokeStyle = C.border;
+            ctx.lineWidth = 2;
+            ctx.setLineDash([4, 4]);
+            ctx.beginPath();
+            ctx.moveTo(w / 2, busY);
+            ctx.lineTo(w / 2, memY);
+            ctx.stroke();
+            ctx.restore();
+
+            // Highlight problem in step 4
+            if (step === 4) {
+                ctx.save();
+                ctx.strokeStyle = C.red;
+                ctx.lineWidth = 3;
+                ctx.setLineDash([5, 5]);
+                ctx.strokeRect(c1x - 4, coreY - 4, coreW + 8, coreH + 8);
+                ctx.fillStyle = C.red;
+                ctx.font = 'bold 13px "Noto Sans SC", sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('过期数据！', c1x + coreW / 2, coreY + coreH + 18);
+                ctx.restore();
+            }
+
+            // Animated arrows for specific steps
+            if (step === 1) {
+                MemUtils.drawArrow(ctx, memX + memW / 2, memY, c0x + coreW / 2, coreY + coreH, C.green);
+            }
+            if (step === 2) {
+                MemUtils.drawArrow(ctx, memX + memW / 2, memY, c1x + coreW / 2, coreY + coreH, C.blue);
+            }
+            if (step === 3) {
+                // Write arrow from Core 0 cache
+                ctx.save();
+                ctx.fillStyle = C.red;
+                ctx.font = 'bold 12px "JetBrains Mono", monospace';
+                ctx.textAlign = 'center';
+                ctx.fillText('Write X=42', c0x + coreW / 2, coreY - 8);
+                ctx.restore();
+            }
+            if (step === 4) {
+                ctx.save();
+                ctx.fillStyle = C.red;
+                ctx.font = 'bold 12px "JetBrains Mono", monospace';
+                ctx.textAlign = 'center';
+                ctx.fillText('Read X → 看到 0（错误！）', c1x + coreW / 2, coreY - 8);
+                ctx.restore();
+            }
+        }
+
+        function drawCore(x, y, w, h, label, val, state) {
+            ctx.save();
+            const stColor = state === 'I' ? C.invalid : (state === 'M' ? C.red : C.blue);
+            ctx.fillStyle = MemUtils.hexToRgba(stColor, 0.08);
+            ctx.strokeStyle = stColor;
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.roundRect(x, y, w, h, 8);
+            ctx.fill();
+            ctx.stroke();
+
+            ctx.fillStyle = C.textPri;
+            ctx.font = 'bold 13px "JetBrains Mono", monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText(label, x + w / 2, y + 22);
+
+            // Cache line
+            ctx.fillStyle = C.textSec;
+            ctx.font = '11px "Noto Sans SC", sans-serif';
+            ctx.fillText('Cache:', x + w / 2, y + 48);
+
+            if (val !== null) {
+                ctx.fillStyle = stColor;
+                ctx.font = 'bold 16px "JetBrains Mono", monospace';
+                ctx.fillText(`X = ${val}`, x + w / 2, y + 72);
+                ctx.font = '10px "JetBrains Mono", monospace';
+                ctx.fillText(`[${state}]`, x + w / 2, y + 92);
+            } else {
+                ctx.fillStyle = C.textMut;
+                ctx.font = '12px "JetBrains Mono", monospace';
+                ctx.fillText('(empty)', x + w / 2, y + 72);
+                ctx.fillText('[I]', x + w / 2, y + 92);
+            }
+            ctx.restore();
+        }
+
+        function advance() {
+            if (step < maxStep) {
+                step++;
+                document.getElementById('s1-status').textContent = steps[step].desc;
+                draw();
+            }
+        }
+
+        document.getElementById('s1-play').addEventListener('click', () => {
+            step = -1;
+            if (autoTimer) clearInterval(autoTimer);
+            autoTimer = setInterval(() => {
+                advance();
+                if (step >= maxStep) clearInterval(autoTimer);
+            }, 1500);
+        });
+        document.getElementById('s1-step').addEventListener('click', advance);
+        document.getElementById('s1-reset').addEventListener('click', () => {
+            if (autoTimer) clearInterval(autoTimer);
+            step = -1;
+            document.getElementById('s1-status').textContent = '点击"播放演示"查看一致性问题场景';
+            draw();
+        });
+
+        init();
+        window.addEventListener('resize', init);
+    })();
+
+    /* ============================================================
+       SECTION 2: MESI State Diagram
+    ============================================================ */
+    ;(function section2() {
+        const canvas = document.getElementById('canvas2');
+        let ctx, w, h;
+        let activeState = null;
+
+        const states = [
+            { key: 'M', label: 'M\nModified', x: 0.25, y: 0.25 },
+            { key: 'E', label: 'E\nExclusive', x: 0.75, y: 0.25 },
+            { key: 'S', label: 'S\nShared', x: 0.75, y: 0.75 },
+            { key: 'I', label: 'I\nInvalid', x: 0.25, y: 0.75 },
+        ];
+
+        const transitions = [
+            // From M
+            { from: 'M', to: 'S', label: 'BusRd\n(他核读)', side: 'top' },
+            { from: 'M', to: 'I', label: 'BusRdX\n(他核写)', side: 'left' },
+            // From E
+            { from: 'E', to: 'M', label: '本核写\n(无总线)', side: 'top' },
+            { from: 'E', to: 'S', label: 'BusRd\n(他核读)', side: 'right' },
+            { from: 'E', to: 'I', label: 'BusRdX\n(他核写)', side: 'right' },
+            // From S
+            { from: 'S', to: 'M', label: '本核写\nBusRdX', side: 'bottom' },
+            { from: 'S', to: 'I', label: 'BusRdX\n(他核写)', side: 'bottom' },
+            // From I
+            { from: 'I', to: 'E', label: '本核读\n(无他核)', side: 'bottom' },
+            { from: 'I', to: 'S', label: '本核读\n(有他核)', side: 'left' },
+            { from: 'I', to: 'M', label: '本核写\nBusRdX', side: 'left' },
+        ];
+
+        function getStatePos(key) {
+            const s = states.find(st => st.key === key);
+            return { x: s.x * w, y: s.y * h };
+        }
+
+        function init() {
+            const res = MemUtils.initCanvas(canvas, 420);
+            ctx = res.ctx; w = res.w; h = res.h;
+            draw();
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, w, h);
+            const R = Math.min(42, w * 0.06);
+
+            // Draw transitions first (behind states)
+            transitions.forEach(t => {
+                const fromP = getStatePos(t.from);
+                const toP = getStatePos(t.to);
+                drawTransitionArrow(fromP, toP, t, R);
+            });
+
+            // Draw state circles
+            states.forEach(s => {
+                const px = s.x * w, py = s.y * h;
+                const color = MC[s.key];
+                const isActive = activeState === s.key;
+
+                ctx.save();
+                if (isActive) {
+                    ctx.shadowColor = color;
+                    ctx.shadowBlur = 20;
+                }
+                ctx.beginPath();
+                ctx.arc(px, py, R, 0, Math.PI * 2);
+                ctx.fillStyle = MemUtils.hexToRgba(color, isActive ? 0.3 : 0.15);
+                ctx.fill();
+                ctx.strokeStyle = color;
+                ctx.lineWidth = isActive ? 3 : 2;
+                ctx.stroke();
+                ctx.restore();
+
+                // State letter
+                ctx.fillStyle = color;
+                ctx.font = `bold ${R * 0.6}px "JetBrains Mono", monospace`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(s.key, px, py - R * 0.12);
+
+                // State name
+                ctx.font = `${Math.max(9, R * 0.28)}px "JetBrains Mono", monospace`;
+                ctx.fillStyle = MemUtils.hexToRgba(color, 0.8);
+                ctx.fillText(MN[s.key], px, py + R * 0.35);
+            });
+        }
+
+        function drawTransitionArrow(fromP, toP, t, R) {
+            const color = MC[t.from];
+
+            // Calculate direction and offset
+            const dx = toP.x - fromP.x;
+            const dy = toP.y - fromP.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            const nx = dx / dist, ny = dy / dist;
+
+            // Offset perpendicular for curved arrows between same pair
+            let offsetX = 0, offsetY = 0;
+            const perpX = -ny, perpY = nx;
+
+            // Check if reverse transition exists
+            const hasReverse = transitions.some(tr =>
+                tr.from === t.to && tr.to === t.from
+            );
+            if (hasReverse) {
+                offsetX = perpX * 12;
+                offsetY = perpY * 12;
+            }
+
+            const startX = fromP.x + nx * (R + 4) + offsetX;
+            const startY = fromP.y + ny * (R + 4) + offsetY;
+            const endX = toP.x - nx * (R + 4) + offsetX;
+            const endY = toP.y - ny * (R + 4) + offsetY;
+
+            // Control point for curve
+            const midX = (startX + endX) / 2 + offsetX * 2;
+            const midY = (startY + endY) / 2 + offsetY * 2;
+
+            ctx.save();
+            ctx.strokeStyle = MemUtils.hexToRgba(color, 0.5);
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.moveTo(startX, startY);
+            ctx.quadraticCurveTo(midX, midY, endX, endY);
+            ctx.stroke();
+
+            // Arrowhead
+            const angle = Math.atan2(endY - midY, endX - midX);
+            const headLen = 8;
+            ctx.fillStyle = MemUtils.hexToRgba(color, 0.6);
+            ctx.beginPath();
+            ctx.moveTo(endX, endY);
+            ctx.lineTo(endX - headLen * Math.cos(angle - Math.PI / 6), endY - headLen * Math.sin(angle - Math.PI / 6));
+            ctx.lineTo(endX - headLen * Math.cos(angle + Math.PI / 6), endY - headLen * Math.sin(angle + Math.PI / 6));
+            ctx.closePath();
+            ctx.fill();
+
+            // Label
+            const labelX = midX + offsetX * 0.5;
+            const labelY = midY + offsetY * 0.5;
+            ctx.fillStyle = MemUtils.hexToRgba(color, 0.8);
+            ctx.font = `${Math.max(9, Math.min(11, w * 0.012))}px "Noto Sans SC", sans-serif`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            const lines = t.label.split('\n');
+            lines.forEach((line, i) => {
+                ctx.fillText(line, labelX, labelY + (i - (lines.length - 1) / 2) * 13);
+            });
+            ctx.restore();
+        }
+
+        // MESI card clicks
+        document.getElementById('mesiCards').addEventListener('click', (e) => {
+            const card = e.target.closest('.mesi-card');
+            if (!card) return;
+            const st = card.dataset.state;
+            document.querySelectorAll('.mesi-card').forEach(c => c.classList.remove('active'));
+            card.classList.add('active');
+            activeState = st;
+            draw();
+
+            const descs = {
+                M: '<strong>Modified</strong>：此Cache Line已被修改（脏数据），主存过时。此核心独占，无需总线操作即可读写。被逐出时必须写回主存。',
+                E: '<strong>Exclusive</strong>：此Cache Line干净且独占。可以直接转为Modified（无总线开销），因为没有其他持有者。',
+                S: '<strong>Shared</strong>：此Cache Line干净，可能被多个核心持有。写入前需发送BusRdX使其他副本失效。',
+                I: '<strong>Invalid</strong>：此Cache Line无效。访问该地址将产生Cache Miss，需从主存或其他核心获取数据。'
+            };
+            document.getElementById('s2-info').innerHTML = descs[st];
+        });
+
+        init();
+        window.addEventListener('resize', init);
+    })();
+
+    /* ============================================================
+       SECTION 3: MESI Protocol Simulation
+    ============================================================ */
+    ;(function section3() {
+        const canvas = document.getElementById('canvas3');
+        let ctx, ww, hh;
+        let protocol = MemUtils.createMESIProtocol(4);
+        let numCores = 4;
+        let logCount = 0;
+
+        function rebuildCoreSelect() {
+            const sel = document.getElementById('s3-core-sel');
+            sel.innerHTML = '';
+            for (let i = 0; i < numCores; i++) {
+                sel.innerHTML += `<option value="${i}">Core ${i}</option>`;
+            }
+        }
+
+        function init() {
+            const res = MemUtils.initCanvas(canvas, 240);
+            ctx = res.ctx; ww = res.w; hh = res.h;
+            draw();
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, ww, hh);
+            const addrs = ['0x100', '0x200', '0x300'];
+            const coreW = Math.min(120, (ww - 40) / numCores - 10);
+            const startX = (ww - (coreW * numCores + 10 * (numCores - 1))) / 2;
+
+            // Draw each core
+            for (let i = 0; i < numCores; i++) {
+                const cx = startX + i * (coreW + 10);
+                const cy = 15;
+
+                // Core header
+                ctx.fillStyle = C.blue;
+                ctx.font = 'bold 12px "JetBrains Mono", monospace';
+                ctx.textAlign = 'center';
+                ctx.fillText(`Core ${i}`, cx + coreW / 2, cy + 14);
+
+                // Cache lines for each address
+                addrs.forEach((addr, ai) => {
+                    const lineY = cy + 30 + ai * 58;
+                    const states = protocol.getStates(addr);
+                    const st = states[i];
+                    const color = MC[st];
+
+                    ctx.save();
+                    ctx.fillStyle = MemUtils.hexToRgba(color, 0.12);
+                    ctx.strokeStyle = color;
+                    ctx.lineWidth = 1.5;
+                    ctx.beginPath();
+                    ctx.roundRect(cx, lineY, coreW, 48, 6);
+                    ctx.fill();
+                    ctx.stroke();
+
+                    // Address label
+                    ctx.fillStyle = C.textMut;
+                    ctx.font = '10px "JetBrains Mono", monospace';
+                    ctx.textAlign = 'center';
+                    ctx.fillText(addr, cx + coreW / 2, lineY + 16);
+
+                    // State
+                    ctx.fillStyle = color;
+                    ctx.font = 'bold 18px "JetBrains Mono", monospace';
+                    ctx.fillText(st, cx + coreW / 2, lineY + 38);
+                    ctx.restore();
+                });
+            }
+        }
+
+        function addLogEntry(entry) {
+            logCount++;
+            const tbody = document.querySelector('#s3-log tbody');
+            const tr = document.createElement('tr');
+            const beforeStates = entry.before.map(s => stateBadge(s)).join(' ');
+            const afterStates = entry.after.map(s => stateBadge(s)).join(' ');
+            tr.innerHTML = `
+                <td>${logCount}</td>
+                <td style="color:${entry.action === 'write' ? C.red : C.green}">${entry.action === 'write' ? '写' : '读'}</td>
+                <td>Core ${entry.core}</td>
+                <td style="font-family:var(--font-mono)">${entry.addr}</td>
+                <td style="color:${entry.result === 'hit' ? C.green : C.orange}">${entry.result === 'hit' ? '命中' : '缺失'}</td>
+                <td style="font-size:0.75rem">${entry.busAction || '—'}</td>
+                <td>${beforeStates}</td>
+                <td>${afterStates}</td>
+            `;
+            tbody.appendChild(tr);
+            tr.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+
+        document.getElementById('s3-cores').addEventListener('change', (e) => {
+            numCores = parseInt(e.target.value);
+            protocol = MemUtils.createMESIProtocol(numCores);
+            rebuildCoreSelect();
+            logCount = 0;
+            document.querySelector('#s3-log tbody').innerHTML = '';
+            init();
+        });
+
+        document.getElementById('s3-read').addEventListener('click', () => {
+            const core = parseInt(document.getElementById('s3-core-sel').value);
+            const addr = document.getElementById('s3-addr').value;
+            const entry = protocol.read(core, addr);
+            addLogEntry(entry);
+            draw();
+        });
+
+        document.getElementById('s3-write').addEventListener('click', () => {
+            const core = parseInt(document.getElementById('s3-core-sel').value);
+            const addr = document.getElementById('s3-addr').value;
+            const entry = protocol.write(core, addr);
+            addLogEntry(entry);
+            draw();
+        });
+
+        document.getElementById('s3-reset').addEventListener('click', () => {
+            protocol.reset();
+            logCount = 0;
+            document.querySelector('#s3-log tbody').innerHTML = '';
+            draw();
+        });
+
+        rebuildCoreSelect();
+        init();
+        window.addEventListener('resize', init);
+    })();
+
+    /* ============================================================
+       SECTION 4: Bus Snooping Animation
+    ============================================================ */
+    ;(function section4() {
+        const canvas = document.getElementById('canvas4');
+        let ctx, ww, hh;
+        let snoopProtocol = MemUtils.createMESIProtocol(4);
+        let busMessages = []; // {text, x, y, targetX, targetY, color, progress, type}
+        let animFrameId = null;
+
+        function init() {
+            const res = MemUtils.initCanvas(canvas, 380);
+            ctx = res.ctx; ww = res.w; hh = res.h;
+            draw();
+        }
+
+        function getCorePos(i) {
+            const coreW = 100;
+            const totalW = 4 * coreW + 3 * 20;
+            const startX = (ww - totalW) / 2;
+            return {
+                x: startX + i * (coreW + 20),
+                y: 30,
+                w: coreW,
+                h: 100,
+                cx: startX + i * (coreW + 20) + coreW / 2,
+            };
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, ww, hh);
+            const busY = 170;
+            const memY = 270;
+
+            // Draw shared bus
+            const firstCore = getCorePos(0);
+            const lastCore = getCorePos(3);
+            ctx.save();
+            ctx.strokeStyle = C.orange;
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            ctx.moveTo(firstCore.cx - 20, busY);
+            ctx.lineTo(lastCore.cx + 20, busY);
+            ctx.stroke();
+            ctx.restore();
+
+            ctx.fillStyle = C.orange;
+            ctx.font = 'bold 11px "Noto Sans SC", sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('共享总线 (Shared Bus)', ww / 2, busY - 12);
+
+            // Draw cores and connections to bus
+            for (let i = 0; i < 4; i++) {
+                const p = getCorePos(i);
+                const states = snoopProtocol.getStates('0x100');
+                const st = states[i];
+                const color = MC[st];
+
+                // Connection to bus
+                ctx.save();
+                ctx.strokeStyle = MemUtils.hexToRgba(C.textMut, 0.4);
+                ctx.lineWidth = 1.5;
+                ctx.setLineDash([3, 3]);
+                ctx.beginPath();
+                ctx.moveTo(p.cx, p.y + p.h);
+                ctx.lineTo(p.cx, busY);
+                ctx.stroke();
+                ctx.restore();
+
+                // Snoop icon
+                ctx.fillStyle = C.textMut;
+                ctx.font = '9px "Noto Sans SC", sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('嗅探', p.cx, p.y + p.h + 16);
+
+                // Core box
+                ctx.save();
+                ctx.fillStyle = MemUtils.hexToRgba(color, 0.1);
+                ctx.strokeStyle = color;
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                ctx.roundRect(p.x, p.y, p.w, p.h, 8);
+                ctx.fill();
+                ctx.stroke();
+
+                ctx.fillStyle = C.textPri;
+                ctx.font = 'bold 12px "JetBrains Mono", monospace';
+                ctx.textAlign = 'center';
+                ctx.fillText(`Core ${i}`, p.cx, p.y + 20);
+
+                ctx.fillStyle = color;
+                ctx.font = 'bold 22px "JetBrains Mono", monospace';
+                ctx.fillText(st, p.cx, p.y + 55);
+
+                ctx.font = '9px "JetBrains Mono", monospace';
+                ctx.fillStyle = MemUtils.hexToRgba(color, 0.7);
+                ctx.fillText(MN[st], p.cx, p.y + 75);
+                ctx.restore();
+            }
+
+            // Main Memory
+            const memW = 180, memH = 50;
+            const memX = (ww - memW) / 2;
+            MemUtils.drawMemoryBlock(ctx, memX, memY, memW, memH, '主存 (Main Memory)', C.mainMem, { radius: 8 });
+
+            // Bus to memory
+            ctx.save();
+            ctx.strokeStyle = MemUtils.hexToRgba(C.textMut, 0.3);
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([3, 3]);
+            ctx.beginPath();
+            ctx.moveTo(ww / 2, busY);
+            ctx.lineTo(ww / 2, memY);
+            ctx.stroke();
+            ctx.restore();
+
+            // Draw animated bus messages
+            busMessages.forEach(msg => {
+                if (msg.progress < 1) {
+                    const mx = msg.x + (msg.targetX - msg.x) * msg.progress;
+                    const my = msg.y + (msg.targetY - msg.y) * msg.progress;
+
+                    ctx.save();
+                    ctx.fillStyle = msg.color;
+                    ctx.font = 'bold 11px "JetBrains Mono", monospace';
+                    ctx.textAlign = 'center';
+                    ctx.fillText(msg.text, mx, my - 8);
+
+                    // Pulse circle
+                    const pulse = Math.sin(msg.progress * Math.PI) * 8 + 4;
+                    ctx.beginPath();
+                    ctx.arc(mx, my, pulse, 0, Math.PI * 2);
+                    ctx.fillStyle = MemUtils.hexToRgba(msg.color, 0.3);
+                    ctx.fill();
+                    ctx.restore();
+                }
+            });
+        }
+
+        function animateMessages() {
+            let running = false;
+            busMessages.forEach(msg => {
+                if (msg.progress < 1) {
+                    msg.progress += 0.015;
+                    running = true;
+                }
+            });
+            draw();
+            if (running) {
+                animFrameId = requestAnimationFrame(animateMessages);
+            } else {
+                busMessages = [];
+            }
+        }
+
+        function triggerBusAction(core, action) {
+            const addr = '0x100';
+            let entry;
+            if (action === 'read') {
+                entry = snoopProtocol.read(core, addr);
+            } else {
+                entry = snoopProtocol.write(core, addr);
+            }
+
+            const p = getCorePos(core);
+            const busY = 170;
+            const msgColor = action === 'write' ? C.red : C.green;
+            const msgText = action === 'write' ? 'BusRdX' : 'BusRd';
+
+            // Message from core to bus
+            busMessages.push({
+                text: msgText, x: p.cx, y: p.y + 100,
+                targetX: p.cx, targetY: busY,
+                color: msgColor, progress: 0
+            });
+
+            // Message travels along bus to other cores
+            for (let i = 0; i < 4; i++) {
+                if (i !== core) {
+                    const tp = getCorePos(i);
+                    busMessages.push({
+                        text: '嗅探', x: p.cx, y: busY,
+                        targetX: tp.cx, targetY: busY,
+                        color: C.orange, progress: -0.3 // delay
+                    });
+                }
+            }
+
+            document.getElementById('s4-status').textContent =
+                `Core ${core} ${action === 'write' ? '写入' : '读取'} → ${entry.busAction || '命中'} | 结果: ${entry.result === 'hit' ? '命中' : '缺失'}`;
+
+            if (animFrameId) cancelAnimationFrame(animFrameId);
+            animateMessages();
+        }
+
+        document.getElementById('s4-read').addEventListener('click', () => {
+            const core = parseInt(document.getElementById('s4-core').value);
+            triggerBusAction(core, 'read');
+        });
+        document.getElementById('s4-write').addEventListener('click', () => {
+            const core = parseInt(document.getElementById('s4-core').value);
+            triggerBusAction(core, 'write');
+        });
+        document.getElementById('s4-reset').addEventListener('click', () => {
+            snoopProtocol.reset();
+            busMessages = [];
+            document.getElementById('s4-status').textContent = '选择核心和操作，观察总线嗅探过程';
+            draw();
+        });
+
+        init();
+        window.addEventListener('resize', init);
+    })();
+
+    /* ============================================================
+       SECTION 5: False Sharing
+    ============================================================ */
+    ;(function section5() {
+        const canvas = document.getElementById('canvas5');
+        let ctx, ww, hh;
+        let mode = 'idle'; // idle, false-sharing, padded
+        let simStep = 0;
+        let simTimer = null;
+        let invalidations = { bad: 0, good: 0 };
+        let operations = { bad: 0, good: 0 };
+
+        function init() {
+            const res = MemUtils.initCanvas(canvas, 320);
+            ctx = res.ctx; ww = res.w; hh = res.h;
+            draw();
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, ww, hh);
+            const lineW = Math.min(300, ww * 0.4);
+            const lineH = 50;
+
+            if (mode === 'idle' || mode === 'false-sharing') {
+                drawFalseSharingView(lineW, lineH, false);
+            } else {
+                drawFalseSharingView(lineW, lineH, true);
+            }
+        }
+
+        function drawFalseSharingView(lineW, lineH, padded) {
+            const c0x = ww * 0.15, c1x = ww * 0.55;
+            const coreY = 20, coreW = Math.min(130, ww * 0.25), coreH = 90;
+
+            // Core 0
+            ctx.save();
+            ctx.fillStyle = MemUtils.hexToRgba(C.red, 0.08);
+            ctx.strokeStyle = C.red;
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.roundRect(c0x, coreY, coreW, coreH, 8);
+            ctx.fill();
+            ctx.stroke();
+            ctx.fillStyle = C.textPri;
+            ctx.font = 'bold 12px "JetBrains Mono", monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText('Core 0', c0x + coreW / 2, coreY + 20);
+            ctx.fillStyle = C.red;
+            ctx.font = '11px "Noto Sans SC", sans-serif';
+            ctx.fillText('写入变量 X', c0x + coreW / 2, coreY + 45);
+            ctx.restore();
+
+            // Core 1
+            ctx.save();
+            ctx.fillStyle = MemUtils.hexToRgba(C.blue, 0.08);
+            ctx.strokeStyle = C.blue;
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.roundRect(c1x, coreY, coreW, coreH, 8);
+            ctx.fill();
+            ctx.stroke();
+            ctx.fillStyle = C.textPri;
+            ctx.font = 'bold 12px "JetBrains Mono", monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText('Core 1', c1x + coreW / 2, coreY + 20);
+            ctx.fillStyle = C.blue;
+            ctx.font = '11px "Noto Sans SC", sans-serif';
+            ctx.fillText('写入变量 Y', c1x + coreW / 2, coreY + 45);
+            ctx.restore();
+
+            // Cache lines
+            const lineY = coreY + coreH + 50;
+            const lineStartX = (ww - lineW) / 2;
+
+            if (!padded) {
+                // Single cache line with both X and Y
+                ctx.save();
+                ctx.fillStyle = MemUtils.hexToRgba(C.orange, 0.1);
+                ctx.strokeStyle = C.orange;
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.roundRect(lineStartX, lineY, lineW, lineH, 6);
+                ctx.fill();
+                ctx.stroke();
+
+                // X and Y inside same line
+                const halfW = lineW / 2;
+                ctx.fillStyle = MemUtils.hexToRgba(C.red, 0.15);
+                ctx.fillRect(lineStartX + 2, lineY + 2, halfW - 2, lineH - 4);
+                ctx.fillStyle = MemUtils.hexToRgba(C.blue, 0.15);
+                ctx.fillRect(lineStartX + halfW, lineY + 2, halfW - 2, lineH - 4);
+
+                ctx.fillStyle = C.red;
+                ctx.font = 'bold 14px "JetBrains Mono", monospace';
+                ctx.textAlign = 'center';
+                ctx.fillText('X', lineStartX + halfW / 2, lineY + lineH / 2 + 5);
+                ctx.fillStyle = C.blue;
+                ctx.fillText('Y', lineStartX + halfW + halfW / 2, lineY + lineH / 2 + 5);
+
+                ctx.fillStyle = C.orange;
+                ctx.font = '10px "Noto Sans SC", sans-serif';
+                ctx.fillText('同一 Cache Line', lineStartX + lineW / 2, lineY - 8);
+
+                // Ping-pong invalidation arrows if animating
+                if (mode === 'false-sharing' && simStep > 0) {
+                    const pingPong = simStep % 2 === 1;
+                    const arrowColor = pingPong ? C.red : C.blue;
+                    const invalidY = lineY + lineH + 25;
+
+                    ctx.fillStyle = C.red;
+                    ctx.font = 'bold 11px "Noto Sans SC", sans-serif';
+                    ctx.textAlign = 'center';
+                    ctx.fillText(`失效次数: ${invalidations.bad}`, ww / 2, lineY + lineH + 50);
+
+                    // Flash effect
+                    if (simStep > 0) {
+                        ctx.save();
+                        ctx.strokeStyle = C.red;
+                        ctx.lineWidth = 2;
+                        ctx.globalAlpha = 0.3 + 0.3 * Math.sin(simStep * 2);
+                        ctx.setLineDash([4, 4]);
+                        ctx.strokeRect(lineStartX - 3, lineY - 3, lineW + 6, lineH + 6);
+                        ctx.restore();
+                    }
+                }
+                ctx.restore();
+            } else {
+                // Two separate cache lines
+                const gap = 30;
+                const singleW = (lineW - gap) / 2;
+
+                // Cache line 1 (X)
+                ctx.save();
+                ctx.fillStyle = MemUtils.hexToRgba(C.red, 0.12);
+                ctx.strokeStyle = C.red;
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.roundRect(lineStartX, lineY, singleW, lineH, 6);
+                ctx.fill();
+                ctx.stroke();
+                ctx.fillStyle = C.red;
+                ctx.font = 'bold 14px "JetBrains Mono", monospace';
+                ctx.textAlign = 'center';
+                ctx.fillText('X', lineStartX + singleW / 2, lineY + lineH / 2 + 5);
+                ctx.font = '9px "Noto Sans SC", sans-serif';
+                ctx.fillText('Cache Line A', lineStartX + singleW / 2, lineY - 8);
+
+                // Padding indicator
+                ctx.fillStyle = C.textMut;
+                ctx.font = '10px "JetBrains Mono", monospace';
+                ctx.fillText('padding', lineStartX + singleW + gap / 2, lineY + lineH / 2 + 4);
+
+                // Cache line 2 (Y)
+                ctx.fillStyle = MemUtils.hexToRgba(C.blue, 0.12);
+                ctx.strokeStyle = C.blue;
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.roundRect(lineStartX + singleW + gap, lineY, singleW, lineH, 6);
+                ctx.fill();
+                ctx.stroke();
+                ctx.fillStyle = C.blue;
+                ctx.font = 'bold 14px "JetBrains Mono", monospace';
+                ctx.textAlign = 'center';
+                ctx.fillText('Y', lineStartX + singleW + gap + singleW / 2, lineY + lineH / 2 + 5);
+                ctx.font = '9px "Noto Sans SC", sans-serif';
+                ctx.fillText('Cache Line B', lineStartX + singleW + gap + singleW / 2, lineY - 8);
+
+                if (mode === 'padded' && simStep > 0) {
+                    ctx.fillStyle = C.green;
+                    ctx.font = 'bold 11px "Noto Sans SC", sans-serif';
+                    ctx.fillText(`失效次数: ${invalidations.good}`, ww / 2, lineY + lineH + 50);
+
+                    // Green glow
+                    ctx.save();
+                    ctx.strokeStyle = C.green;
+                    ctx.lineWidth = 2;
+                    ctx.globalAlpha = 0.3 + 0.2 * Math.sin(simStep);
+                    ctx.setLineDash([4, 4]);
+                    ctx.strokeRect(lineStartX - 3, lineY - 3, singleW + 6, lineH + 6);
+                    ctx.strokeRect(lineStartX + singleW + gap - 3, lineY - 3, singleW + 6, lineH + 6);
+                    ctx.restore();
+                }
+                ctx.restore();
+            }
+
+            // Arrows from cores to cache lines
+            MemUtils.drawArrow(ctx, c0x + coreW / 2, coreY + coreH, lineStartX + lineW * 0.25, lineY, C.red, { dashed: true });
+            MemUtils.drawArrow(ctx, c1x + coreW / 2, coreY + coreH,
+                padded ? lineStartX + lineW * 0.75 + 15 : lineStartX + lineW * 0.75,
+                lineY, C.blue, { dashed: true });
+        }
+
+        function runSim(isPadded) {
+            if (simTimer) clearInterval(simTimer);
+            mode = isPadded ? 'padded' : 'false-sharing';
+            simStep = 0;
+            invalidations.bad = 0;
+            invalidations.good = 0;
+            operations.bad = 0;
+            operations.good = 0;
+
+            simTimer = setInterval(() => {
+                simStep++;
+                if (!isPadded) {
+                    invalidations.bad += 1; // Each op causes invalidation
+                    operations.bad++;
+                } else {
+                    if (simStep % 5 === 0) invalidations.good++; // Rare invalidations
+                    operations.good++;
+                }
+                draw();
+                updatePerfBars();
+
+                if (simStep >= 40) {
+                    clearInterval(simTimer);
+                    document.getElementById('s5-status').textContent =
+                        isPadded ? '模拟完成：Padding消除了False Sharing' : '模拟完成：频繁失效导致性能下降';
+                }
+            }, 150);
+
+            document.getElementById('s5-status').textContent = isPadded ? '运行中：变量已隔离，各核独立操作...' : '运行中：观察False Sharing导致的频繁失效...';
+        }
+
+        function updatePerfBars() {
+            const badPerf = document.getElementById('s5-perf-bad');
+            const goodPerf = document.getElementById('s5-perf-good');
+
+            const badInvRate = operations.bad > 0 ? (invalidations.bad / operations.bad * 100) : 0;
+            const goodInvRate = operations.good > 0 ? (invalidations.good / operations.good * 100) : 0;
+            const badThroughput = Math.max(5, 100 - badInvRate * 0.8);
+            const goodThroughput = Math.max(5, 100 - goodInvRate * 0.3);
+
+            badPerf.innerHTML = `
+                <div class="perf-bar-row">
+                    <span class="perf-bar-label">失效率</span>
+                    <div class="perf-bar-track">
+                        <div class="perf-bar-fill" style="width:${badInvRate}%;background:${C.red}">${badInvRate.toFixed(0)}%</div>
+                    </div>
+                </div>
+                <div class="perf-bar-row">
+                    <span class="perf-bar-label">吞吐量</span>
+                    <div class="perf-bar-track">
+                        <div class="perf-bar-fill" style="width:${badThroughput}%;background:${C.orange}">${badThroughput.toFixed(0)}%</div>
+                    </div>
+                </div>
+            `;
+
+            goodPerf.innerHTML = `
+                <div class="perf-bar-row">
+                    <span class="perf-bar-label">失效率</span>
+                    <div class="perf-bar-track">
+                        <div class="perf-bar-fill" style="width:${goodInvRate}%;background:${C.green}">${goodInvRate.toFixed(0)}%</div>
+                    </div>
+                </div>
+                <div class="perf-bar-row">
+                    <span class="perf-bar-label">吞吐量</span>
+                    <div class="perf-bar-track">
+                        <div class="perf-bar-fill" style="width:${goodThroughput}%;background:${C.green}">${goodThroughput.toFixed(0)}%</div>
+                    </div>
+                </div>
+            `;
+        }
+
+        document.getElementById('s5-play').addEventListener('click', () => runSim(false));
+        document.getElementById('s5-padded').addEventListener('click', () => runSim(true));
+        document.getElementById('s5-reset').addEventListener('click', () => {
+            if (simTimer) clearInterval(simTimer);
+            mode = 'idle';
+            simStep = 0;
+            invalidations = { bad: 0, good: 0 };
+            operations = { bad: 0, good: 0 };
+            document.getElementById('s5-status').textContent = '点击按钮观察False Sharing与Padding对比';
+            document.getElementById('s5-perf-bad').innerHTML = '';
+            document.getElementById('s5-perf-good').innerHTML = '';
+            draw();
+        });
+
+        init();
+        window.addEventListener('resize', init);
+    })();
+
+    /* ============================================================
+       SECTION 6: Directory Protocol
+    ============================================================ */
+    ;(function section6() {
+        const canvas = document.getElementById('canvas6');
+        let ctx, ww, hh;
+        let mode = 'snoop'; // snoop or directory
+        let messages = [];
+        let animFrameId = null;
+
+        function init() {
+            const res = MemUtils.initCanvas(canvas, 420);
+            ctx = res.ctx; ww = res.w; hh = res.h;
+            draw();
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, ww, hh);
+
+            if (mode === 'snoop') {
+                drawSnoopView();
+            } else {
+                drawDirectoryView();
+            }
+
+            // Draw animated messages
+            messages.forEach(msg => {
+                if (msg.progress >= 0 && msg.progress < 1) {
+                    const mx = msg.sx + (msg.tx - msg.sx) * msg.progress;
+                    const my = msg.sy + (msg.ty - msg.sy) * msg.progress;
+
+                    ctx.save();
+                    ctx.beginPath();
+                    ctx.arc(mx, my, 6, 0, Math.PI * 2);
+                    ctx.fillStyle = MemUtils.hexToRgba(msg.color, 0.6);
+                    ctx.fill();
+                    ctx.fillStyle = msg.color;
+                    ctx.font = 'bold 10px "JetBrains Mono", monospace';
+                    ctx.textAlign = 'center';
+                    ctx.fillText(msg.label, mx, my - 12);
+                    ctx.restore();
+                }
+            });
+        }
+
+        function drawSnoopView() {
+            const numCores = 8;
+            const coreR = 18;
+            const busY = hh * 0.45;
+            const coreY = 50;
+
+            // Title
+            ctx.fillStyle = C.orange;
+            ctx.font = 'bold 14px "Noto Sans SC", sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('嗅探协议 — 广播模式', ww / 2, 25);
+
+            const totalW = ww * 0.85;
+            const startX = (ww - totalW) / 2;
+            const gap = totalW / (numCores - 1);
+
+            // Shared bus
+            ctx.save();
+            ctx.strokeStyle = C.orange;
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            ctx.moveTo(startX - 10, busY);
+            ctx.lineTo(startX + totalW + 10, busY);
+            ctx.stroke();
+            ctx.restore();
+
+            ctx.fillStyle = C.textMut;
+            ctx.font = '10px "Noto Sans SC", sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('共享总线 (Shared Bus)', ww / 2, busY + 18);
+
+            // Cores
+            for (let i = 0; i < numCores; i++) {
+                const cx = startX + i * gap;
+                const cy = coreY;
+
+                // Line to bus
+                ctx.save();
+                ctx.strokeStyle = MemUtils.hexToRgba(C.textMut, 0.3);
+                ctx.lineWidth = 1;
+                ctx.setLineDash([3, 3]);
+                ctx.beginPath();
+                ctx.moveTo(cx, cy + coreR + 5);
+                ctx.lineTo(cx, busY);
+                ctx.stroke();
+                ctx.restore();
+
+                // Core circle
+                ctx.save();
+                ctx.beginPath();
+                ctx.arc(cx, cy, coreR, 0, Math.PI * 2);
+                ctx.fillStyle = MemUtils.hexToRgba(C.blue, 0.1);
+                ctx.fill();
+                ctx.strokeStyle = C.blue;
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+                ctx.fillStyle = C.textPri;
+                ctx.font = 'bold 10px "JetBrains Mono", monospace';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(`C${i}`, cx, cy);
+                ctx.restore();
+            }
+
+            // Traffic indicator
+            ctx.fillStyle = C.red;
+            ctx.font = '12px "Noto Sans SC", sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('每个事务 → 广播到所有核心', ww / 2, busY + 40);
+            ctx.fillText(`总线流量：O(N) = O(${numCores})`, ww / 2, busY + 58);
+
+            // Memory
+            const memW = 140, memH = 40;
+            MemUtils.drawMemoryBlock(ctx, (ww - memW) / 2, hh - 70, memW, memH, '主存', C.mainMem, { radius: 6 });
+
+            ctx.save();
+            ctx.strokeStyle = MemUtils.hexToRgba(C.textMut, 0.3);
+            ctx.lineWidth = 1;
+            ctx.setLineDash([3, 3]);
+            ctx.beginPath();
+            ctx.moveTo(ww / 2, busY);
+            ctx.lineTo(ww / 2, hh - 70);
+            ctx.stroke();
+            ctx.restore();
+        }
+
+        function drawDirectoryView() {
+            const numCores = 8;
+            const coreR = 18;
+            const dirY = hh * 0.5;
+            const dirW = 200, dirH = 80;
+            const dirX = (ww - dirW) / 2;
+
+            // Title
+            ctx.fillStyle = C.green;
+            ctx.font = 'bold 14px "Noto Sans SC", sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('目录协议 — 点对点模式', ww / 2, 25);
+
+            // Draw cores in a ring around directory
+            const ringR = Math.min(140, ww * 0.25);
+            const centerX = ww / 2, centerY = dirY + dirH / 2 - 30;
+
+            for (let i = 0; i < numCores; i++) {
+                const angle = (i / numCores) * Math.PI * 2 - Math.PI / 2;
+                const cx = centerX + Math.cos(angle) * ringR;
+                const cy = centerY + Math.sin(angle) * ringR;
+
+                // Dashed line to directory center
+                ctx.save();
+                ctx.strokeStyle = MemUtils.hexToRgba(C.green, 0.2);
+                ctx.lineWidth = 1;
+                ctx.setLineDash([3, 3]);
+                ctx.beginPath();
+                ctx.moveTo(cx, cy);
+                ctx.lineTo(centerX, centerY);
+                ctx.stroke();
+                ctx.restore();
+
+                // Core circle
+                ctx.save();
+                ctx.beginPath();
+                ctx.arc(cx, cy, coreR, 0, Math.PI * 2);
+                ctx.fillStyle = MemUtils.hexToRgba(C.blue, 0.1);
+                ctx.fill();
+                ctx.strokeStyle = C.blue;
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+                ctx.fillStyle = C.textPri;
+                ctx.font = 'bold 10px "JetBrains Mono", monospace';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(`C${i}`, cx, cy);
+                ctx.restore();
+            }
+
+            // Directory block in center
+            ctx.save();
+            const dBW = 70, dBH = 50;
+            ctx.fillStyle = MemUtils.hexToRgba(C.green, 0.15);
+            ctx.strokeStyle = C.green;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.roundRect(centerX - dBW / 2, centerY - dBH / 2, dBW, dBH, 8);
+            ctx.fill();
+            ctx.stroke();
+            ctx.fillStyle = C.green;
+            ctx.font = 'bold 11px "Noto Sans SC", sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('目录', centerX, centerY - 8);
+            ctx.font = '9px "JetBrains Mono", monospace';
+            ctx.fillText('Directory', centerX, centerY + 10);
+            ctx.restore();
+
+            // Directory table illustration below
+            const tableY = hh - 110;
+            const tableW = Math.min(400, ww * 0.7);
+            const tableX = (ww - tableW) / 2;
+            const rowH = 22;
+            const cols = ['地址', '状态', '共享者'];
+            const data = [
+                ['0x100', 'S', 'C0, C2, C5'],
+                ['0x200', 'M', 'C3'],
+                ['0x300', 'E', 'C7'],
+            ];
+
+            // Header
+            ctx.save();
+            ctx.fillStyle = MemUtils.hexToRgba(C.green, 0.15);
+            ctx.fillRect(tableX, tableY, tableW, rowH);
+            ctx.fillStyle = C.green;
+            ctx.font = 'bold 10px "JetBrains Mono", monospace';
+            ctx.textAlign = 'center';
+            const colW = tableW / 3;
+            cols.forEach((c, i) => {
+                ctx.fillText(c, tableX + colW * i + colW / 2, tableY + rowH / 2 + 4);
+            });
+
+            // Rows
+            data.forEach((row, ri) => {
+                const ry = tableY + rowH * (ri + 1);
+                ctx.fillStyle = ri % 2 === 0 ? 'rgba(255,255,255,0.02)' : 'transparent';
+                ctx.fillRect(tableX, ry, tableW, rowH);
+
+                ctx.fillStyle = C.textSec;
+                ctx.font = '10px "JetBrains Mono", monospace';
+                ctx.textAlign = 'center';
+                ctx.fillText(row[0], tableX + colW * 0 + colW / 2, ry + rowH / 2 + 4);
+
+                const stColor = MC[row[1]];
+                ctx.fillStyle = stColor;
+                ctx.fillText(row[1], tableX + colW * 1 + colW / 2, ry + rowH / 2 + 4);
+                ctx.fillStyle = C.textSec;
+                ctx.fillText(row[2], tableX + colW * 2 + colW / 2, ry + rowH / 2 + 4);
+            });
+
+            // Border
+            ctx.strokeStyle = MemUtils.hexToRgba(C.green, 0.3);
+            ctx.lineWidth = 1;
+            ctx.strokeRect(tableX, tableY, tableW, rowH * 4);
+            ctx.restore();
+
+            // Traffic note
+            ctx.fillStyle = C.green;
+            ctx.font = '12px "Noto Sans SC", sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('点对点通信 → 只通知相关核心', ww / 2, tableY - 16);
+            ctx.fillText('流量：O(1) per transaction', ww / 2, tableY - 2);
+        }
+
+        function sendRequest() {
+            messages = [];
+            if (mode === 'snoop') {
+                // Broadcast to all
+                const numCores = 8;
+                const totalW = ww * 0.85;
+                const startX = (ww - totalW) / 2;
+                const gap = totalW / (numCores - 1);
+                const busY = hh * 0.45;
+                const srcCore = 0;
+                const srcX = startX + srcCore * gap;
+
+                for (let i = 0; i < numCores; i++) {
+                    if (i !== srcCore) {
+                        const tx = startX + i * gap;
+                        messages.push({
+                            sx: srcX, sy: busY,
+                            tx: tx, ty: busY,
+                            color: C.orange, label: 'BusRd',
+                            progress: -i * 0.05
+                        });
+                    }
+                }
+            } else {
+                // Point-to-point
+                const ringR = Math.min(140, ww * 0.25);
+                const centerX = ww / 2, centerY = hh * 0.5 + 80 / 2 - 30;
+                const srcCore = 0;
+                const targets = [2, 5]; // only relevant cores
+
+                const srcAngle = (srcCore / 8) * Math.PI * 2 - Math.PI / 2;
+                const srcCX = centerX + Math.cos(srcAngle) * ringR;
+                const srcCY = centerY + Math.sin(srcAngle) * ringR;
+
+                // Source to directory
+                messages.push({
+                    sx: srcCX, sy: srcCY,
+                    tx: centerX, ty: centerY,
+                    color: C.green, label: 'Req',
+                    progress: 0
+                });
+
+                // Directory to targets (delayed)
+                targets.forEach((t, i) => {
+                    const tAngle = (t / 8) * Math.PI * 2 - Math.PI / 2;
+                    const tCX = centerX + Math.cos(tAngle) * ringR;
+                    const tCY = centerY + Math.sin(tAngle) * ringR;
+                    messages.push({
+                        sx: centerX, sy: centerY,
+                        tx: tCX, ty: tCY,
+                        color: C.green, label: 'Inv',
+                        progress: -0.4 - i * 0.1
+                    });
+                });
+            }
+
+            if (animFrameId) cancelAnimationFrame(animFrameId);
+            animateDir();
+        }
+
+        function animateDir() {
+            let running = false;
+            messages.forEach(msg => {
+                msg.progress += 0.012;
+                if (msg.progress < 1) running = true;
+            });
+            draw();
+            if (running) {
+                animFrameId = requestAnimationFrame(animateDir);
+            } else {
+                messages = [];
+            }
+        }
+
+        document.getElementById('s6-snoop').addEventListener('click', () => {
+            mode = 'snoop';
+            document.getElementById('s6-snoop').classList.add('active');
+            document.getElementById('s6-dir').classList.remove('active');
+            messages = [];
+            draw();
+        });
+        document.getElementById('s6-dir').addEventListener('click', () => {
+            mode = 'directory';
+            document.getElementById('s6-dir').classList.add('active');
+            document.getElementById('s6-snoop').classList.remove('active');
+            messages = [];
+            draw();
+        });
+        document.getElementById('s6-send').addEventListener('click', sendRequest);
+        document.getElementById('s6-reset').addEventListener('click', () => {
+            messages = [];
+            draw();
+        });
+
+        init();
+        window.addEventListener('resize', init);
+    })();
+
+});
+
+/* ============================================================
+   Quiz Logic (global)
+============================================================ */
+function checkQuiz(el, qId) {
+    const opts = document.querySelectorAll(`#${qId}-opts .quiz-opt`);
+    const resultEl = document.getElementById(`${qId}-result`);
+    const isCorrect = el.dataset.correct === 'true';
+
+    // Disable all
+    opts.forEach(o => {
+        o.style.pointerEvents = 'none';
+        if (o.dataset.correct === 'true') {
+            o.classList.add('correct');
+        } else if (o === el && !isCorrect) {
+            o.classList.add('wrong');
+        }
+    });
+
+    if (isCorrect) {
+        resultEl.style.color = '#16c79a';
+        resultEl.textContent = '正确！';
+    } else {
+        resultEl.style.color = '#ff5252';
+        resultEl.textContent = '不正确，正确答案已高亮显示。';
+    }
+}
+</script>
+</body>
+</html>

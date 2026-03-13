@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>存储层级 — 交互式学习</title>
+    <link rel="stylesheet" href="shared/styles/common.css">
+    <link rel="stylesheet" href="shared/styles/components.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+SC:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+    <style>
+        body { overflow-x: hidden; }
+
+        /* ===== Hero ===== */
+        .hero {
+            text-align: center;
+            padding: calc(var(--header-height) + 2rem) 2rem 3rem;
+            position: relative;
+        }
+        .hero h1 {
+            font-size: 2.8rem;
+            margin-bottom: 0.5rem;
+            background: linear-gradient(135deg, #ff80ab, #ff5252, #ffab40, #4fc3f7);
+            background-size: 200% 200%;
+            animation: heroGradient 6s ease infinite;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        @keyframes heroGradient {
+            0%, 100% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+        }
+        .hero .subtitle {
+            font-size: 1.1rem;
+            color: var(--text-secondary);
+            max-width: 640px;
+            margin: 0 auto 2rem;
+        }
+        .hero .tags {
+            display: flex;
+            justify-content: center;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+
+        .hero-formula {
+            margin-top: 1.5rem;
+            font-family: var(--font-mono);
+            font-size: 0.95rem;
+            color: var(--text-muted);
+            letter-spacing: 0.02em;
+            opacity: 0.7;
+        }
+        .hero-formula .hl {
+            color: #ff5252;
+            font-weight: 600;
+        }
+
+        /* ===== Background Canvas ===== */
+        .bg-canvas {
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            pointer-events: none;
+            z-index: -1;
+            opacity: 0.12;
+        }
+
+        .grid-overlay {
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            pointer-events: none;
+            z-index: -2;
+            opacity: 0.03;
+            background-image:
+                linear-gradient(rgba(255, 82, 82, 0.3) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255, 82, 82, 0.3) 1px, transparent 1px);
+            background-size: 60px 60px;
+        }
+
+        /* ===== Hierarchy Pipeline ===== */
+        .arch-diagram {
+            max-width: 900px;
+            margin: 0 auto 2rem;
+            padding: 0 2rem;
+            display: flex;
+            justify-content: center;
+            gap: 0.3rem;
+            flex-wrap: wrap;
+        }
+        .arch-block {
+            padding: 0.35rem 0.7rem;
+            border-radius: var(--radius-sm);
+            font-size: 0.7rem;
+            font-weight: 600;
+            border: 1px solid;
+            opacity: 0.6;
+            transition: opacity 0.3s, transform 0.3s;
+        }
+        .arch-block:hover { opacity: 1; transform: translateY(-2px); }
+        .arch-block.reg { color: #ff80ab; border-color: rgba(255,128,171,0.3); background: rgba(255,128,171,0.06); }
+        .arch-block.cache { color: #ff5252; border-color: rgba(255,82,82,0.3); background: rgba(255,82,82,0.06); }
+        .arch-block.mem { color: #4fc3f7; border-color: rgba(79,195,247,0.3); background: rgba(79,195,247,0.06); }
+        .arch-block.adv { color: #ffab40; border-color: rgba(255,171,64,0.3); background: rgba(255,171,64,0.06); }
+        .arch-arrow {
+            display: flex; align-items: center; color: var(--text-muted); font-size: 0.8rem; opacity: 0.4;
+        }
+
+        /* ===== Metro Roadmap ===== */
+        .roadmap { max-width: 900px; margin: 0 auto; padding: 2rem; position: relative; }
+        .roadmap-title { text-align: center; margin-bottom: 2.5rem; }
+
+        .metro-line { position: relative; padding-left: 60px; }
+        .metro-line::before {
+            content: ''; position: absolute; left: 27px; top: 0; bottom: 0; width: 4px;
+            background: linear-gradient(to bottom,
+                #ff80ab 0%, #ff80ab 11%,
+                #ff5252 11%, #ff5252 44%,
+                #4fc3f7 44%, #4fc3f7 67%,
+                #ffab40 67%, #ffab40 100%
+            );
+            border-radius: 2px;
+        }
+        .metro-line::after {
+            content: ''; position: absolute; left: 22px; top: 0; bottom: 0; width: 14px;
+            background: repeating-linear-gradient(to bottom, transparent 0px, transparent 56px, rgba(255,82,82,0.08) 56px, rgba(255,82,82,0.08) 60px);
+            pointer-events: none;
+        }
+
+        .station { position: relative; margin-bottom: 1rem; cursor: pointer; transition: transform 0.25s var(--anim-ease); }
+        .station:hover { transform: translateX(6px); }
+
+        .station-dot {
+            position: absolute; left: -41px; top: 50%; transform: translateY(-50%);
+            width: 22px; height: 22px; border-radius: 50%;
+            border: 3px solid #ff5252; background: var(--bg-primary);
+            z-index: 2; transition: all 0.3s;
+        }
+        .station:hover .station-dot { background: #ff5252; box-shadow: 0 0 14px rgba(255,82,82,0.5); }
+
+        .station[data-phase="overview"] .station-dot { border-color: #ff80ab; }
+        .station[data-phase="cache"] .station-dot { border-color: #ff5252; }
+        .station[data-phase="vm"] .station-dot { border-color: #4fc3f7; }
+        .station[data-phase="adv"] .station-dot { border-color: #ffab40; }
+
+        .station[data-phase="overview"]:hover .station-dot { background: #ff80ab; box-shadow: 0 0 14px rgba(255,128,171,0.5); }
+        .station[data-phase="cache"]:hover .station-dot { background: #ff5252; box-shadow: 0 0 14px rgba(255,82,82,0.5); }
+        .station[data-phase="vm"]:hover .station-dot { background: #4fc3f7; box-shadow: 0 0 14px rgba(79,195,247,0.5); }
+        .station[data-phase="adv"]:hover .station-dot { background: #ffab40; box-shadow: 0 0 14px rgba(255,171,64,0.5); }
+
+        .station-card {
+            background: var(--bg-secondary); border: 1px solid var(--border-color);
+            border-radius: var(--radius-md); padding: 1.2rem 1.5rem;
+            transition: all 0.3s; position: relative; overflow: hidden;
+        }
+        .station-card::before {
+            content: ''; position: absolute; top: 0; left: 0;
+            width: 100%; height: 2px;
+            background: linear-gradient(90deg, transparent, #ff5252, transparent);
+            opacity: 0; transition: opacity 0.3s;
+        }
+        .station:hover .station-card::before { opacity: 1; }
+        .station:hover .station-card { border-color: #ff5252; box-shadow: 0 0 20px rgba(255,82,82,0.15); }
+
+        .station-header { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.4rem; }
+        .station-icon { font-size: 1.3rem; min-width: 1.5rem; text-align: center; }
+        .station-num { font-family: var(--font-mono); font-size: 0.75rem; color: var(--text-muted); min-width: 2.5rem; }
+        .station-name { font-size: 1.1rem; font-weight: 700; color: var(--text-primary); }
+        .station-eng { font-size: 0.8rem; color: var(--text-muted); font-weight: 400; margin-left: 0.4rem; }
+        .station-desc { font-size: 0.85rem; color: var(--text-secondary); margin: 0; padding-left: 3.25rem; }
+        .station-keywords { display: flex; gap: 0.4rem; flex-wrap: wrap; padding-left: 3.25rem; margin-top: 0.5rem; }
+        .station-keywords span {
+            font-size: 0.7rem; padding: 0.1rem 0.4rem;
+            background: rgba(255,82,82,0.08); border-radius: 4px; color: var(--text-muted);
+        }
+
+        .phase-label { position: relative; padding: 0.5rem 0; margin-bottom: 0.5rem; margin-top: 1rem; }
+        .phase-label span {
+            font-size: 0.75rem; font-weight: 700; text-transform: uppercase;
+            letter-spacing: 0.1em; padding: 0.2rem 0.8rem; border-radius: 4px;
+        }
+        .phase-label.overview span { color: #ff80ab; background: rgba(255,128,171,0.1); }
+        .phase-label.cache span { color: #ff5252; background: rgba(255,82,82,0.1); }
+        .phase-label.vm span { color: #4fc3f7; background: rgba(79,195,247,0.1); }
+        .phase-label.adv span { color: #ffab40; background: rgba(255,171,64,0.1); }
+
+        .protocol-warning {
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.9); display: flex; align-items: center; justify-content: center; z-index: 9999;
+        }
+        .protocol-warning .inner {
+            background: var(--bg-secondary); border: 1px solid var(--accent-orange);
+            border-radius: var(--radius-lg); padding: 2rem 3rem; max-width: 500px; text-align: center;
+        }
+        .protocol-warning h2 { color: var(--accent-orange); }
+        .protocol-warning code {
+            display: block; margin: 1rem 0; padding: 0.75rem;
+            background: var(--bg-primary); border-radius: var(--radius-sm); font-size: 0.9rem;
+        }
+
+        .footer { text-align: center; padding: 3rem 2rem; color: var(--text-muted); font-size: 0.8rem; }
+        .footer a { color: #ff5252; }
+
+        @media (max-width: 768px) {
+            .hero h1 { font-size: 2rem; }
+            .hero .subtitle { font-size: 0.95rem; }
+            .roadmap { padding: 1rem; }
+            .metro-line { padding-left: 50px; }
+            .station-dot { left: -35px; width: 18px; height: 18px; }
+            .station-desc { padding-left: 2.5rem; }
+            .station-keywords { padding-left: 2.5rem; }
+            .arch-diagram { display: none; }
+            .hero-formula { font-size: 0.8rem; }
+        }
+    </style>
+</head>
+<body>
+
+<nav class="top-nav">
+    <div class="nav-left">
+        <a href="../index.html" class="nav-home" title="算法总览">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+                <path d="M3 12l9-8 9 8"/>
+                <path d="M5 10v9a1 1 0 001 1h4v-5h4v5h4a1 1 0 001-1v-9"/>
+            </svg>
+        </a>
+        <span class="nav-sep">&rsaquo;</span>
+        <a href="index.html" class="logo">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="14" width="18" height="6" rx="1"/>
+                <rect x="5" y="8" width="14" height="6" rx="1"/>
+                <rect x="8" y="2" width="8" height="6" rx="1"/>
+            </svg>
+            存储层级
+        </a>
+    </div>
+</nav>
+
+<div id="protocolWarning" class="protocol-warning hidden">
+    <div class="inner">
+        <h2>请使用本地服务器</h2>
+        <p>直接打开 HTML 文件（file:// 协议）会导致跨域问题。请使用以下方式启动：</p>
+        <code>python -m http.server 8080</code>
+        <p class="text-sm text-muted">或使用 VS Code 的 Live Server 插件</p>
+        <button class="btn btn-primary mt-2" onclick="document.getElementById('protocolWarning').classList.add('hidden')">
+            我知道了，继续浏览
+        </button>
+    </div>
+</div>
+
+<div class="grid-overlay"></div>
+<canvas id="bgCanvas" class="bg-canvas"></canvas>
+
+<div class="hero">
+    <h1>存储层级 — 交互式学习</h1>
+    <p class="subtitle">
+        从寄存器到磁盘，从Cache命中到页面置换 ——
+        理解每一次内存访问背后的层层旅程
+    </p>
+    <div class="tags">
+        <span class="badge badge-blue">交互式</span>
+        <span class="badge badge-purple">可视化</span>
+        <span class="badge badge-green">Cache模拟</span>
+        <span class="badge badge-orange">全中文</span>
+    </div>
+    <div class="hero-formula">
+        <span class="hl">AMAT</span> = HitTime + MissRate &times; <span class="hl">MissPenalty</span> &nbsp;|&nbsp;
+        VA &rarr; <span class="hl">TLB</span> &rarr; PA &nbsp;|&nbsp;
+        MESI: <span class="hl">M</span> &harr; E &harr; S &harr; I
+    </div>
+</div>
+
+<div class="arch-diagram">
+    <div class="arch-block reg">寄存器 &lt;1ns</div>
+    <div class="arch-arrow">&rarr;</div>
+    <div class="arch-block cache">L1 Cache 1ns</div>
+    <div class="arch-arrow">&rarr;</div>
+    <div class="arch-block cache">L2 Cache 5ns</div>
+    <div class="arch-arrow">&rarr;</div>
+    <div class="arch-block cache">L3 Cache 20ns</div>
+    <div class="arch-arrow">&rarr;</div>
+    <div class="arch-block mem">主存 100ns</div>
+    <div class="arch-arrow">&rarr;</div>
+    <div class="arch-block adv">磁盘 10ms</div>
+</div>
+
+<div class="roadmap">
+    <div class="roadmap-title">
+        <h2>学习路线图</h2>
+        <p class="text-sm text-muted">按顺序学习效果最佳，也可跳转到感兴趣的模块</p>
+    </div>
+
+    <div class="metro-line">
+        <div class="phase-label overview"><span>全局视角</span></div>
+
+        <div class="station" data-id="01" data-phase="overview" onclick="goTo('01-memory-overview/')">
+            <div class="station-dot"></div>
+            <div class="station-card">
+                <div class="station-header">
+                    <span class="station-num">01</span>
+                    <span class="station-icon">🏔</span>
+                    <span class="station-name">存储层级概览<span class="station-eng">Memory Hierarchy</span></span>
+                </div>
+                <p class="station-desc">金字塔模型、局部性原理、速度-容量-成本的权衡</p>
+                <div class="station-keywords">
+                    <span>时间局部性</span><span>空间局部性</span><span>金字塔</span><span>带宽</span><span>延迟</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="phase-label cache"><span>Cache 技术</span></div>
+
+        <div class="station" data-id="02" data-phase="cache" onclick="goTo('02-cache-basics/')">
+            <div class="station-dot"></div>
+            <div class="station-card">
+                <div class="station-header">
+                    <span class="station-num">02</span>
+                    <span class="station-icon">📦</span>
+                    <span class="station-name">Cache基础<span class="station-eng">Cache Basics</span></span>
+                </div>
+                <p class="station-desc">直接映射、组相联、全相联 — 地址如何找到Cache中的数据</p>
+                <div class="station-keywords">
+                    <span>直接映射</span><span>组相联</span><span>全相联</span><span>Tag</span><span>Index</span><span>Offset</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="station" data-id="03" data-phase="cache" onclick="goTo('03-cache-policies/')">
+            <div class="station-dot"></div>
+            <div class="station-card">
+                <div class="station-header">
+                    <span class="station-num">03</span>
+                    <span class="station-icon">🔄</span>
+                    <span class="station-name">Cache策略<span class="station-eng">Cache Policies</span></span>
+                </div>
+                <p class="station-desc">替换策略(LRU/FIFO/Random)、写策略(Write-Through/Write-Back)</p>
+                <div class="station-keywords">
+                    <span>LRU</span><span>FIFO</span><span>Random</span><span>Write-Through</span><span>Write-Back</span><span>Write-Allocate</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="station" data-id="04" data-phase="cache" onclick="goTo('04-cache-performance/')">
+            <div class="station-dot"></div>
+            <div class="station-card">
+                <div class="station-header">
+                    <span class="station-num">04</span>
+                    <span class="station-icon">📊</span>
+                    <span class="station-name">Cache性能分析<span class="station-eng">Cache Performance</span></span>
+                </div>
+                <p class="station-desc">AMAT模型、3C模型(Compulsory/Capacity/Conflict)、命中率优化</p>
+                <div class="station-keywords">
+                    <span>AMAT</span><span>命中率</span><span>3C模型</span><span>Compulsory</span><span>Capacity</span><span>Conflict</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="phase-label vm"><span>虚拟内存</span></div>
+
+        <div class="station" data-id="05" data-phase="vm" onclick="goTo('05-virtual-memory/')">
+            <div class="station-dot"></div>
+            <div class="station-card">
+                <div class="station-header">
+                    <span class="station-num">05</span>
+                    <span class="station-icon">🗺</span>
+                    <span class="station-name">虚拟内存<span class="station-eng">Virtual Memory</span></span>
+                </div>
+                <p class="station-desc">页表、地址翻译、页面错误、页面置换算法</p>
+                <div class="station-keywords">
+                    <span>页表</span><span>VPN→PPN</span><span>Page Fault</span><span>LRU</span><span>FIFO</span><span>Clock</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="station" data-id="06" data-phase="vm" onclick="goTo('06-tlb/')">
+            <div class="station-dot"></div>
+            <div class="station-card">
+                <div class="station-header">
+                    <span class="station-num">06</span>
+                    <span class="station-icon">⚡</span>
+                    <span class="station-name">TLB<span class="station-eng">Translation Lookaside Buffer</span></span>
+                </div>
+                <p class="station-desc">地址翻译加速、TLB结构、TLB Miss处理、上下文切换</p>
+                <div class="station-keywords">
+                    <span>TLB Hit</span><span>TLB Miss</span><span>ASID</span><span>Flush</span><span>多级TLB</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="phase-label adv"><span>高级主题</span></div>
+
+        <div class="station" data-id="07" data-phase="adv" onclick="goTo('07-multi-level-cache/')">
+            <div class="station-dot"></div>
+            <div class="station-card">
+                <div class="station-header">
+                    <span class="station-num">07</span>
+                    <span class="station-icon">🏗</span>
+                    <span class="station-name">多级Cache<span class="station-eng">Multi-Level Cache</span></span>
+                </div>
+                <p class="station-desc">L1/L2/L3层级、包含/排他策略、多级AMAT</p>
+                <div class="station-keywords">
+                    <span>L1/L2/L3</span><span>Inclusive</span><span>Exclusive</span><span>NINE</span><span>多级AMAT</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="station" data-id="08" data-phase="adv" onclick="goTo('08-cache-coherence/')">
+            <div class="station-dot"></div>
+            <div class="station-card">
+                <div class="station-header">
+                    <span class="station-num">08</span>
+                    <span class="station-icon">🤝</span>
+                    <span class="station-name">Cache一致性<span class="station-eng">Cache Coherence</span></span>
+                </div>
+                <p class="station-desc">MESI协议、总线嗅探、目录协议、False Sharing</p>
+                <div class="station-keywords">
+                    <span>MESI</span><span>Snooping</span><span>Directory</span><span>False Sharing</span><span>BusRd</span><span>BusRdX</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="station" data-id="09" data-phase="adv" onclick="goTo('09-playground/')">
+            <div class="station-dot"></div>
+            <div class="station-card">
+                <div class="station-header">
+                    <span class="station-num">09</span>
+                    <span class="station-icon">⚙</span>
+                    <span class="station-name">存储层级游乐场<span class="station-eng">Playground</span></span>
+                </div>
+                <p class="station-desc">自由配置Cache参数，生成访问序列，观察命中/缺失的全过程</p>
+                <div class="station-keywords">
+                    <span>自由配置</span><span>访问模拟</span><span>命中率分析</span><span>可视化追踪</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="footer">
+    <p>存储层级 — 交互式学习 | 纯前端实现 · 无服务器依赖 · 全中文</p>
+</div>
+
+<script>
+if (window.location.protocol === 'file:') {
+    document.getElementById('protocolWarning').classList.remove('hidden');
+}
+
+function goTo(path) {
+    window.location.href = path + 'index.html';
+}
+
+// Background Animation: Floating Memory Symbols
+(function() {
+    var canvas = document.getElementById('bgCanvas');
+    var ctx = canvas.getContext('2d');
+    var w, h;
+    var particles = [];
+    var PARTICLE_COUNT = 30;
+    var CONNECT_DIST = 150;
+
+    var labels = [
+        'L1', 'L2', 'L3', 'DRAM', 'SRAM', 'SSD',
+        'Tag', 'Index', 'Offset', 'Hit', 'Miss',
+        'LRU', 'FIFO', 'TLB', 'PTE', 'VPN',
+        'PPN', 'AMAT', 'MESI', 'M', 'E', 'S', 'I',
+        'Cache', 'Page', 'Frame', 'Flush',
+        'WB', 'WT', 'Snoop'
+    ];
+
+    function resize() {
+        w = canvas.width = window.innerWidth;
+        h = canvas.height = window.innerHeight;
+    }
+    resize();
+    window.addEventListener('resize', resize);
+
+    for (var i = 0; i < PARTICLE_COUNT; i++) {
+        particles.push({
+            x: Math.random() * w,
+            y: Math.random() * h,
+            vx: (Math.random() - 0.5) * 0.35,
+            vy: (Math.random() - 0.5) * 0.35,
+            size: 24 + Math.random() * 18,
+            label: labels[i % labels.length],
+            hue: [340, 0, 200, 30][Math.floor(Math.random() * 4)],
+            phase: Math.random() * Math.PI * 2
+        });
+    }
+
+    function getColor(hue, alpha) {
+        if (hue === 340) return 'rgba(255, 128, 171, ' + alpha + ')';
+        if (hue === 0) return 'rgba(255, 82, 82, ' + alpha + ')';
+        if (hue === 200) return 'rgba(79, 195, 247, ' + alpha + ')';
+        return 'rgba(255, 171, 64, ' + alpha + ')';
+    }
+
+    function draw() {
+        ctx.clearRect(0, 0, w, h);
+        var time = Date.now() * 0.001;
+
+        for (var i = 0; i < particles.length; i++) {
+            for (var j = i + 1; j < particles.length; j++) {
+                var dx = particles[i].x - particles[j].x;
+                var dy = particles[i].y - particles[j].y;
+                var dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist < CONNECT_DIST) {
+                    var alpha = (1 - dist / CONNECT_DIST) * 0.35;
+                    ctx.save();
+                    ctx.strokeStyle = 'rgba(255, 82, 82, ' + alpha + ')';
+                    ctx.lineWidth = 1;
+                    ctx.setLineDash([3, 5]);
+                    ctx.lineDashOffset = -time * 15;
+                    ctx.beginPath();
+                    ctx.moveTo(particles[i].x, particles[i].y);
+                    ctx.lineTo(particles[j].x, particles[j].y);
+                    ctx.stroke();
+                    ctx.restore();
+
+                    if (dist < CONNECT_DIST * 0.5) {
+                        var mx = (particles[i].x + particles[j].x) / 2;
+                        var my = (particles[i].y + particles[j].y) / 2;
+                        ctx.beginPath();
+                        ctx.arc(mx, my, 1.5, 0, Math.PI * 2);
+                        ctx.fillStyle = 'rgba(255, 171, 64, ' + (alpha * 0.7) + ')';
+                        ctx.fill();
+                    }
+                }
+            }
+        }
+
+        for (var k = 0; k < particles.length; k++) {
+            var p = particles[k];
+            var pulse = Math.sin(time * 1.2 + p.phase) * 0.15 + 0.85;
+            var s = p.size * pulse;
+
+            ctx.globalAlpha = 0.5;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, s * 0.35, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(22, 33, 62, 0.7)';
+            ctx.fill();
+            ctx.strokeStyle = getColor(p.hue, 0.4);
+            ctx.lineWidth = 1;
+            ctx.stroke();
+
+            ctx.globalAlpha = 0.65;
+            ctx.fillStyle = getColor(p.hue, 1);
+            ctx.font = Math.max(8, s * 0.22) + 'px JetBrains Mono, monospace';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(p.label, p.x, p.y);
+
+            ctx.globalAlpha = 1;
+
+            p.x += p.vx;
+            p.y += p.vy;
+            if (p.x < -50) p.x = w + 50;
+            if (p.x > w + 50) p.x = -50;
+            if (p.y < -50) p.y = h + 50;
+            if (p.y > h + 50) p.y = -50;
+        }
+
+        requestAnimationFrame(draw);
+    }
+    draw();
+})();
+</script>
+
+</body>
+</html>

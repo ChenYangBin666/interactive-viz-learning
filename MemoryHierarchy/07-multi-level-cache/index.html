@@ -1,0 +1,2227 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>07 - 多级Cache | 存储层级 交互式学习</title>
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+SC:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+
+    <!-- Shared CSS -->
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+
+    <!-- KaTeX -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body,{delimiters:[{left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false},{left:'\\\\(',right:'\\\\)',display:false},{left:'\\\\[',right:'\\\\]',display:true}],throwOnError:false});"></script>
+
+    <!-- GSAP -->
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+
+    <style>
+        /* ===== Page Header ===== */
+        .page-header {
+            padding-top: 1rem;
+            margin-bottom: 2rem;
+        }
+        .page-header h1 {
+            font-size: 2rem;
+            background: linear-gradient(135deg, #ff5252, #ffab40, #ffd740);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 0.3rem;
+        }
+        .page-header .breadcrumb {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            margin-bottom: 0.5rem;
+        }
+        .page-header .breadcrumb a { color: var(--text-muted); }
+        .page-header .breadcrumb a:hover { color: var(--accent-green); }
+        .page-header .subtitle {
+            color: var(--text-secondary);
+            font-size: 1rem;
+        }
+
+        /* ===== Section layout ===== */
+        .section {
+            margin-bottom: 3.5rem;
+            padding: 2rem;
+            border-radius: var(--radius-lg);
+        }
+        .section:nth-child(odd) {
+            background: rgba(22, 33, 62, 0.3);
+        }
+        .section:nth-child(even) {
+            background: rgba(15, 52, 96, 0.15);
+        }
+        .section-desc {
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+            margin-bottom: 1.25rem;
+            line-height: 1.8;
+        }
+        .section-desc .formula-block {
+            display: block;
+            margin: 0.75rem 0;
+            text-align: center;
+        }
+
+        /* ===== Canvas wrap ===== */
+        .canvas-wrap {
+            position: relative;
+            width: 100%;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+            margin-bottom: 1rem;
+        }
+        .canvas-wrap canvas {
+            width: 100%;
+            display: block;
+        }
+
+        /* ===== Control Panel ===== */
+        .control-panel {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 0.75rem 1rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            margin-bottom: 1rem;
+        }
+        .control-panel label {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            white-space: nowrap;
+        }
+        .control-panel .slider-value {
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            color: var(--accent-green);
+            min-width: 3.5rem;
+            text-align: center;
+        }
+
+        /* ===== Comparison Table ===== */
+        .compare-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.85rem;
+            margin: 1rem 0;
+        }
+        .compare-table th,
+        .compare-table td {
+            padding: 0.6rem 0.8rem;
+            border: 1px solid var(--border-color);
+            text-align: center;
+        }
+        .compare-table th {
+            background: var(--bg-card);
+            font-weight: 600;
+            color: var(--text-primary);
+            position: sticky;
+            top: 0;
+        }
+        .compare-table td {
+            color: var(--text-secondary);
+        }
+        .compare-table tr:hover td {
+            background: rgba(22, 199, 154, 0.05);
+        }
+        .compare-table .l1-color { color: #ff5252; font-weight: 600; }
+        .compare-table .l2-color { color: #ffab40; font-weight: 600; }
+        .compare-table .l3-color { color: #ffd740; font-weight: 600; }
+        .compare-table .mem-color { color: #4fc3f7; font-weight: 600; }
+
+        /* ===== Stats Dashboard ===== */
+        .stats-dashboard {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 0.75rem;
+            margin: 1rem 0;
+        }
+        .stat-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 0.75rem 1rem;
+            text-align: center;
+        }
+        .stat-card .stat-label {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            margin-bottom: 0.25rem;
+        }
+        .stat-card .stat-value {
+            font-family: var(--font-mono);
+            font-size: 1.3rem;
+            font-weight: 700;
+        }
+        .stat-card .stat-sub {
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            margin-top: 0.2rem;
+        }
+
+        /* ===== Policy Tabs ===== */
+        .policy-tabs {
+            display: flex;
+            gap: 0;
+            margin-bottom: 1rem;
+        }
+        .policy-tab {
+            padding: 0.5rem 1.2rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            color: var(--text-muted);
+            font-family: inherit;
+            font-size: 0.85rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .policy-tab:first-child { border-radius: var(--radius-sm) 0 0 var(--radius-sm); }
+        .policy-tab:last-child { border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
+        .policy-tab + .policy-tab { border-left: none; }
+        .policy-tab.active {
+            background: rgba(22, 199, 154, 0.2);
+            border-color: var(--accent-green);
+            color: var(--accent-green);
+        }
+        .policy-tab:hover:not(.active) {
+            background: rgba(22, 199, 154, 0.05);
+        }
+
+        /* ===== Operation Buttons ===== */
+        .op-btns {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+            margin: 0.75rem 0;
+        }
+        .op-btn {
+            padding: 0.4rem 0.8rem;
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            background: var(--bg-secondary);
+            color: var(--text-secondary);
+            font-family: inherit;
+            font-size: 0.8rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .op-btn:hover {
+            border-color: var(--accent-green);
+            color: var(--accent-green);
+            background: rgba(22, 199, 154, 0.1);
+        }
+        .op-btn.active {
+            border-color: var(--accent-green);
+            background: rgba(22, 199, 154, 0.15);
+            color: var(--accent-green);
+        }
+
+        /* ===== Event Log ===== */
+        .event-log {
+            max-height: 200px;
+            overflow-y: auto;
+            background: rgba(0,0,0,0.2);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            padding: 0.5rem 0.75rem;
+            font-family: var(--font-mono);
+            font-size: 0.78rem;
+            color: var(--text-muted);
+            margin-top: 0.75rem;
+        }
+        .event-log .log-entry {
+            padding: 0.15rem 0;
+            border-bottom: 1px solid rgba(42,42,74,0.3);
+        }
+        .event-log .log-hit { color: #16c79a; }
+        .event-log .log-miss { color: #ff5252; }
+        .event-log .log-evict { color: #ffab40; }
+
+        /* ===== Slider Row ===== */
+        .slider-row {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            margin: 0.5rem 0;
+        }
+        .slider-row label {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            min-width: 120px;
+            white-space: nowrap;
+        }
+        .slider-row input[type="range"] {
+            flex: 1;
+        }
+        .slider-row .slider-value {
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            color: var(--accent-green);
+            min-width: 4rem;
+            text-align: right;
+        }
+
+        /* ===== Stacked Bar ===== */
+        .stacked-bar-container {
+            margin: 1.5rem 0;
+        }
+        .stacked-bar {
+            display: flex;
+            height: 40px;
+            border-radius: var(--radius-sm);
+            overflow: hidden;
+            margin-bottom: 0.5rem;
+        }
+        .stacked-bar .bar-seg {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: #1a1a2e;
+            transition: width 0.5s ease;
+            min-width: 0;
+            overflow: hidden;
+        }
+        .stacked-bar-legend {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1rem;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+        }
+        .stacked-bar-legend .leg-item {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+        }
+        .stacked-bar-legend .leg-swatch {
+            width: 12px;
+            height: 12px;
+            border-radius: 3px;
+        }
+
+        /* ===== Address Input ===== */
+        .addr-input-wrap {
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+            margin: 0.75rem 0;
+            flex-wrap: wrap;
+        }
+        .addr-input-wrap input[type="text"] {
+            flex: 1;
+            min-width: 200px;
+            padding: 0.5rem 0.75rem;
+            background: rgba(0,0,0,0.3);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            color: var(--text-primary);
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+        }
+        .addr-input-wrap input[type="text"]:focus {
+            outline: none;
+            border-color: var(--accent-green);
+        }
+        .addr-input-wrap select {
+            padding: 0.5rem 0.75rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            color: var(--text-primary);
+            font-family: inherit;
+            font-size: 0.85rem;
+            cursor: pointer;
+        }
+
+        /* ===== Chip Floorplan ===== */
+        .chip-legend {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1rem;
+            padding: 0.5rem 0;
+            font-size: 0.8rem;
+        }
+        .chip-legend .chip-item {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+        }
+        .chip-legend .chip-swatch {
+            width: 14px;
+            height: 14px;
+            border-radius: 3px;
+        }
+
+        /* ===== Real-world Config Cards ===== */
+        .config-cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 1rem;
+            margin: 1rem 0;
+        }
+        .config-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1rem;
+            transition: border-color 0.2s;
+        }
+        .config-card:hover {
+            border-color: var(--accent-green);
+        }
+        .config-card h4 {
+            color: var(--accent-green);
+            margin-bottom: 0.5rem;
+            font-size: 0.95rem;
+        }
+        .config-card .cfg-row {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.8rem;
+            padding: 0.2rem 0;
+            border-bottom: 1px solid rgba(42,42,74,0.3);
+        }
+        .config-card .cfg-row:last-child { border-bottom: none; }
+        .config-card .cfg-label { color: var(--text-muted); }
+        .config-card .cfg-val { font-family: var(--font-mono); }
+
+        /* ===== Funnel Visual ===== */
+        .funnel-wrap {
+            display: flex;
+            align-items: flex-start;
+            gap: 2rem;
+            margin: 1rem 0;
+        }
+        .funnel-canvas-wrap {
+            flex: 1;
+        }
+        .funnel-stats {
+            min-width: 200px;
+        }
+
+        /* ===== Responsive ===== */
+        @media (max-width: 768px) {
+            .section { padding: 1rem; }
+            .slider-row { flex-wrap: wrap; }
+            .slider-row label { min-width: auto; }
+            .funnel-wrap { flex-direction: column; }
+            .stats-dashboard { grid-template-columns: repeat(2, 1fr); }
+        }
+    </style>
+</head>
+<body>
+    <!-- nav.js auto-injects navigation -->
+    <div class="page-container">
+        <!-- Page Header -->
+        <header class="page-header">
+            <div class="breadcrumb">
+                <a href="../index.html">存储层级</a> / 07 - 多级Cache
+            </div>
+            <h1>多级Cache (Multi-Level Cache)</h1>
+            <p class="subtitle">探索L1/L2/L3多级缓存的设计权衡、缺失率分析、包含策略与性能计算</p>
+        </header>
+
+        <!-- ===== Section 1: 为什么需要多级Cache ===== -->
+        <div class="section" id="sec-why">
+            <div class="section-title">
+                <div class="icon">&#x1F3D7;</div>
+                <h2>1. 为什么需要多级Cache</h2>
+            </div>
+            <div class="section-desc">
+                <p>单级缓存面临一个根本性的矛盾：<strong>容量和速度不可兼得</strong>。小容量Cache访问快但命中率低，大容量Cache命中率高但访问慢。多级Cache架构通过分层设计解决了这个两难困境：</p>
+                <ul style="margin:0.5rem 0 0.5rem 1.5rem; color:var(--text-secondary);">
+                    <li><span style="color:#ff5252; font-weight:600;">L1 Cache</span> — 最小、最快，紧贴CPU核心，容量32-64KB，延迟~1ns</li>
+                    <li><span style="color:#ffab40; font-weight:600;">L2 Cache</span> — 中等容量和速度，256KB-1MB，延迟~3-10ns</li>
+                    <li><span style="color:#ffd740; font-weight:600;">L3 Cache</span> — 最大、多核共享，4-64MB，延迟~10-30ns</li>
+                    <li><span style="color:#4fc3f7; font-weight:600;">主存</span> — 容量最大但最慢，延迟~50-100ns</li>
+                </ul>
+            </div>
+
+            <div class="control-panel">
+                <label>模式：</label>
+                <div class="btn-group">
+                    <button class="btn btn-sm active" id="mode-single" onclick="S1.setMode('single')">单级Cache</button>
+                    <button class="btn btn-sm" id="mode-multi" onclick="S1.setMode('multi')">多级Cache</button>
+                </div>
+                <span style="margin-left:auto; font-family:var(--font-mono); font-size:0.85rem;">
+                    AMAT = <span id="s1-amat" style="color:var(--accent-green); font-weight:600;">--</span> ns
+                </span>
+            </div>
+
+            <div class="canvas-wrap">
+                <canvas id="canvas-why"></canvas>
+            </div>
+
+            <div class="info-box success">
+                <p><strong>关键洞察：</strong>多级Cache利用局部性原理，让大部分访问在最快的L1层完成，只有少量缺失才需要访问更慢的层级，从而在整体上接近"大容量+低延迟"的理想效果。</p>
+            </div>
+        </div>
+
+        <!-- ===== Section 2: L1/L2/L3 设计权衡 ===== -->
+        <div class="section" id="sec-tradeoff">
+            <div class="section-title">
+                <div class="icon">&#x2696;</div>
+                <h2>2. L1/L2/L3 设计权衡</h2>
+            </div>
+            <div class="section-desc">
+                <p>每级Cache的设计目标不同，导致在容量、关联度、延迟等参数上的选择截然不同：</p>
+                <ul style="margin:0.5rem 0 0.5rem 1.5rem; color:var(--text-secondary);">
+                    <li><strong style="color:#ff5252;">L1</strong>：优化速度 — 容量小、低关联度(或直接映射)、分离的指令/数据Cache(Split I/D)</li>
+                    <li><strong style="color:#ffab40;">L2</strong>：优化缺失率 — 容量更大、更高关联度、统一Cache(Unified)</li>
+                    <li><strong style="color:#ffd740;">L3</strong>：多核共享 — 容量最大、最高关联度、用于减少访存</li>
+                </ul>
+            </div>
+
+            <!-- Interactive comparison table -->
+            <div style="overflow-x:auto;">
+                <table class="compare-table" id="tradeoff-table">
+                    <thead>
+                        <tr>
+                            <th>参数</th>
+                            <th class="l1-color">L1 Cache</th>
+                            <th class="l2-color">L2 Cache</th>
+                            <th class="l3-color">L3 Cache</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr><td>设计目标</td><td>最低延迟</td><td>降低缺失率</td><td>减少访存，核间共享</td></tr>
+                        <tr><td>典型容量</td><td>32-64 KB</td><td>256 KB - 1 MB</td><td>4 - 64 MB</td></tr>
+                        <tr><td>访问延迟</td><td>~1 ns (1-4周期)</td><td>~3-10 ns (10-20周期)</td><td>~10-30 ns (30-50周期)</td></tr>
+                        <tr><td>关联度</td><td>2-4路</td><td>4-8路</td><td>8-16路</td></tr>
+                        <tr><td>Cache行大小</td><td>64 B</td><td>64 B</td><td>64 B</td></tr>
+                        <tr><td>是否分离</td><td>Split I-Cache/D-Cache</td><td>统一(Unified)</td><td>统一(Unified)</td></tr>
+                        <tr><td>每核/共享</td><td>每核私有</td><td>每核私有</td><td>多核共享</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <h3 style="margin-top:1.5rem; margin-bottom:0.75rem;">芯片布局示意</h3>
+            <div class="canvas-wrap">
+                <canvas id="canvas-floorplan"></canvas>
+            </div>
+
+            <div class="chip-legend">
+                <div class="chip-item"><div class="chip-swatch" style="background:#ff5252"></div><span>L1 I-Cache / D-Cache</span></div>
+                <div class="chip-item"><div class="chip-swatch" style="background:#ffab40"></div><span>L2 Cache</span></div>
+                <div class="chip-item"><div class="chip-swatch" style="background:#ffd740"></div><span>L3 共享Cache</span></div>
+                <div class="chip-item"><div class="chip-swatch" style="background:#b388ff"></div><span>CPU核心</span></div>
+            </div>
+
+            <h3 style="margin-top:1.5rem; margin-bottom:0.75rem;">真实处理器配置</h3>
+            <div class="config-cards">
+                <div class="config-card">
+                    <h4>Intel Core i9-13900K</h4>
+                    <div class="cfg-row"><span class="cfg-label">L1 I-Cache</span><span class="cfg-val l1-color">32 KB x 24核</span></div>
+                    <div class="cfg-row"><span class="cfg-label">L1 D-Cache</span><span class="cfg-val l1-color">48 KB x 24核</span></div>
+                    <div class="cfg-row"><span class="cfg-label">L2 Cache</span><span class="cfg-val l2-color">2 MB x 8P + 4 MB x 4E</span></div>
+                    <div class="cfg-row"><span class="cfg-label">L3 Cache</span><span class="cfg-val l3-color">36 MB 共享</span></div>
+                    <div class="cfg-row"><span class="cfg-label">架构</span><span class="cfg-val">Raptor Lake</span></div>
+                </div>
+                <div class="config-card">
+                    <h4>AMD Ryzen 9 7950X</h4>
+                    <div class="cfg-row"><span class="cfg-label">L1 I-Cache</span><span class="cfg-val l1-color">32 KB x 16核</span></div>
+                    <div class="cfg-row"><span class="cfg-label">L1 D-Cache</span><span class="cfg-val l1-color">32 KB x 16核</span></div>
+                    <div class="cfg-row"><span class="cfg-label">L2 Cache</span><span class="cfg-val l2-color">1 MB x 16核</span></div>
+                    <div class="cfg-row"><span class="cfg-label">L3 Cache</span><span class="cfg-val l3-color">64 MB (2x32 MB)</span></div>
+                    <div class="cfg-row"><span class="cfg-label">架构</span><span class="cfg-val">Zen 4</span></div>
+                </div>
+                <div class="config-card">
+                    <h4>Apple M2 Pro</h4>
+                    <div class="cfg-row"><span class="cfg-label">L1 I-Cache</span><span class="cfg-val l1-color">192 KB x 12核</span></div>
+                    <div class="cfg-row"><span class="cfg-label">L1 D-Cache</span><span class="cfg-val l1-color">128 KB x 12核</span></div>
+                    <div class="cfg-row"><span class="cfg-label">L2 Cache</span><span class="cfg-val l2-color">16 MB P核 + 4 MB E核</span></div>
+                    <div class="cfg-row"><span class="cfg-label">L3 Cache</span><span class="cfg-val l3-color">无独立L3 (SLC)</span></div>
+                    <div class="cfg-row"><span class="cfg-label">架构</span><span class="cfg-val">ARM, Apple Silicon</span></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== Section 3: 本地缺失率 vs 全局缺失率 ===== -->
+        <div class="section" id="sec-missrate">
+            <div class="section-title">
+                <div class="icon">&#x1F4CA;</div>
+                <h2>3. 本地缺失率 vs 全局缺失率</h2>
+            </div>
+            <div class="section-desc">
+                <p>理解多级Cache性能的关键在于区分两种缺失率：</p>
+                <ul style="margin:0.5rem 0 0.5rem 1.5rem; color:var(--text-secondary);">
+                    <li><strong>本地缺失率 (Local Miss Rate)</strong>：该级缺失次数 / 该级访问次数</li>
+                    <li><strong>全局缺失率 (Global Miss Rate)</strong>：该级缺失次数 / CPU总访问次数</li>
+                </ul>
+                <p>全局缺失率才是衡量性能的关键指标。公式如下：</p>
+                <span class="formula-block">$$\text{Global Miss Rate}_{L2} = \text{Local Miss Rate}_{L1} \times \text{Local Miss Rate}_{L2}$$</span>
+                <span class="formula-block">$$\text{Global Miss Rate}_{L3} = \text{Local Miss Rate}_{L1} \times \text{Local Miss Rate}_{L2} \times \text{Local Miss Rate}_{L3}$$</span>
+            </div>
+
+            <div class="split-layout">
+                <div class="text-panel">
+                    <h3 style="margin-bottom:0.75rem;">交互参数</h3>
+                    <div class="slider-row">
+                        <label style="color:#ff5252;">L1 本地缺失率：</label>
+                        <input type="range" id="s3-l1-miss" min="1" max="30" value="10" oninput="S3.update()">
+                        <span class="slider-value" id="s3-l1-miss-val">10%</span>
+                    </div>
+                    <div class="slider-row">
+                        <label style="color:#ffab40;">L2 本地缺失率：</label>
+                        <input type="range" id="s3-l2-miss" min="5" max="50" value="20" oninput="S3.update()">
+                        <span class="slider-value" id="s3-l2-miss-val">20%</span>
+                    </div>
+                    <div class="slider-row">
+                        <label style="color:#ffd740;">L3 本地缺失率：</label>
+                        <input type="range" id="s3-l3-miss" min="5" max="80" value="30" oninput="S3.update()">
+                        <span class="slider-value" id="s3-l3-miss-val">30%</span>
+                    </div>
+
+                    <div class="stats-dashboard" style="margin-top:1rem;">
+                        <div class="stat-card">
+                            <div class="stat-label">L1 全局缺失率</div>
+                            <div class="stat-value" id="s3-g1" style="color:#ff5252;">10%</div>
+                            <div class="stat-sub">= L1 本地缺失率</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">L2 全局缺失率</div>
+                            <div class="stat-value" id="s3-g2" style="color:#ffab40;">2%</div>
+                            <div class="stat-sub">= L1 x L2 本地</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">L3 全局缺失率</div>
+                            <div class="stat-value" id="s3-g3" style="color:#ffd740;">0.6%</div>
+                            <div class="stat-sub">= L1 x L2 x L3 本地</div>
+                        </div>
+                    </div>
+
+                    <div class="info-box" style="margin-top:1rem;">
+                        <p><strong>为什么全局缺失率更重要？</strong> 因为每一级Cache都在"过滤"访问请求。L2只看到L1缺失的请求，L3只看到L2缺失的请求。即使L2的本地缺失率很高，真正穿透到主存的全局缺失率可能很低。</p>
+                    </div>
+                </div>
+
+                <div class="viz-panel">
+                    <div class="canvas-wrap">
+                        <canvas id="canvas-funnel"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== Section 4: 包含与排他策略 ===== -->
+        <div class="section" id="sec-policy">
+            <div class="section-title">
+                <div class="icon">&#x1F504;</div>
+                <h2>4. 包含与排他策略 (Inclusive vs Exclusive)</h2>
+            </div>
+            <div class="section-desc">
+                <p>多级Cache之间的数据存放关系有三种主要策略：</p>
+                <ul style="margin:0.5rem 0 0.5rem 1.5rem; color:var(--text-secondary);">
+                    <li><strong style="color:var(--accent-green);">包含(Inclusive)</strong>：L2包含L1中所有数据的副本。优点：一致性简单；缺点：有效容量减少。</li>
+                    <li><strong style="color:var(--accent-blue);">排他(Exclusive)</strong>：L1和L2没有重叠，数据只在一个层级。优点：有效容量最大；缺点：驱逐操作复杂。</li>
+                    <li><strong style="color:var(--accent-purple);">NINE (非包含非排他)</strong>：灵活策略，不强制包含或排除关系。实现简单但一致性处理复杂。</li>
+                </ul>
+            </div>
+
+            <div class="policy-tabs">
+                <button class="policy-tab active" onclick="S4.setPolicy('inclusive')">包含 (Inclusive)</button>
+                <button class="policy-tab" onclick="S4.setPolicy('exclusive')">排他 (Exclusive)</button>
+                <button class="policy-tab" onclick="S4.setPolicy('nine')">NINE</button>
+            </div>
+
+            <div class="control-panel">
+                <label>操作：</label>
+                <div class="op-btns" style="margin:0;">
+                    <button class="op-btn" onclick="S4.triggerOp('read-hit')">读命中 L1</button>
+                    <button class="op-btn" onclick="S4.triggerOp('read-miss-l1-hit-l2')">L1缺失 / L2命中</button>
+                    <button class="op-btn" onclick="S4.triggerOp('read-miss-both')">L1+L2缺失</button>
+                    <button class="op-btn" onclick="S4.triggerOp('evict-l1')">L1驱逐</button>
+                    <button class="op-btn" onclick="S4.triggerOp('reset')">重置</button>
+                </div>
+            </div>
+
+            <div class="canvas-wrap">
+                <canvas id="canvas-policy"></canvas>
+            </div>
+
+            <div class="event-log" id="policy-log"></div>
+
+            <!-- Trade-off comparison -->
+            <h3 style="margin-top:1.5rem; margin-bottom:0.75rem;">策略对比</h3>
+            <table class="compare-table">
+                <thead>
+                    <tr>
+                        <th>特性</th>
+                        <th style="color:var(--accent-green);">包含 (Inclusive)</th>
+                        <th style="color:var(--accent-blue);">排他 (Exclusive)</th>
+                        <th style="color:var(--accent-purple);">NINE</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>L1数据在L2中？</td><td>是（完全包含）</td><td>否（互斥）</td><td>可能有也可能没有</td></tr>
+                    <tr><td>有效总容量</td><td>约等于L2容量</td><td>L1 + L2</td><td>L1 ~ L1+L2之间</td></tr>
+                    <tr><td>一致性开销</td><td>低（只查L2即可）</td><td>高（需查两级）</td><td>中等</td></tr>
+                    <tr><td>驱逐复杂度</td><td>中（需反向无效化L1）</td><td>高（L1驱逐→写入L2）</td><td>低</td></tr>
+                    <tr><td>典型应用</td><td>Intel处理器</td><td>AMD Zen系列</td><td>ARM处理器</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- ===== Section 5: 多级AMAT计算 ===== -->
+        <div class="section" id="sec-amat">
+            <div class="section-title">
+                <div class="icon">&#x1F4D0;</div>
+                <h2>5. 多级AMAT计算</h2>
+            </div>
+            <div class="section-desc">
+                <p>多级Cache的平均访存时间 (AMAT) 扩展公式：</p>
+                <span class="formula-block">$$\text{AMAT} = T_{L1} + MR_{L1} \times \left( T_{L2} + MR_{L2} \times \left( T_{L3} + MR_{L3} \times T_{mem} \right) \right)$$</span>
+                <p>其中 \(T\) 为命中时间，\(MR\) 为本地缺失率。每一层的缺失代价就是访问下一层的时间。</p>
+            </div>
+
+            <div class="split-layout">
+                <div class="text-panel">
+                    <h3 style="margin-bottom:0.75rem;">参数设置</h3>
+                    <div class="slider-row">
+                        <label style="color:#ff5252;">L1 命中时间：</label>
+                        <input type="range" id="s5-l1-hit" min="1" max="5" step="0.5" value="1" oninput="S5.update()">
+                        <span class="slider-value" id="s5-l1-hit-val">1 ns</span>
+                    </div>
+                    <div class="slider-row">
+                        <label style="color:#ff5252;">L1 缺失率：</label>
+                        <input type="range" id="s5-l1-miss" min="1" max="30" value="8" oninput="S5.update()">
+                        <span class="slider-value" id="s5-l1-miss-val">8%</span>
+                    </div>
+                    <div class="slider-row">
+                        <label style="color:#ffab40;">L2 命中时间：</label>
+                        <input type="range" id="s5-l2-hit" min="3" max="15" step="1" value="5" oninput="S5.update()">
+                        <span class="slider-value" id="s5-l2-hit-val">5 ns</span>
+                    </div>
+                    <div class="slider-row">
+                        <label style="color:#ffab40;">L2 缺失率：</label>
+                        <input type="range" id="s5-l2-miss" min="5" max="50" value="15" oninput="S5.update()">
+                        <span class="slider-value" id="s5-l2-miss-val">15%</span>
+                    </div>
+                    <div class="slider-row">
+                        <label style="color:#ffd740;">L3 命中时间：</label>
+                        <input type="range" id="s5-l3-hit" min="10" max="40" step="1" value="20" oninput="S5.update()">
+                        <span class="slider-value" id="s5-l3-hit-val">20 ns</span>
+                    </div>
+                    <div class="slider-row">
+                        <label style="color:#ffd740;">L3 缺失率：</label>
+                        <input type="range" id="s5-l3-miss" min="10" max="80" value="30" oninput="S5.update()">
+                        <span class="slider-value" id="s5-l3-miss-val">30%</span>
+                    </div>
+                    <div class="slider-row">
+                        <label style="color:#4fc3f7;">主存延迟：</label>
+                        <input type="range" id="s5-mem" min="50" max="200" step="5" value="100" oninput="S5.update()">
+                        <span class="slider-value" id="s5-mem-val">100 ns</span>
+                    </div>
+
+                    <div class="stat-card" style="margin-top:1rem; border-color:var(--accent-green);">
+                        <div class="stat-label">总 AMAT</div>
+                        <div class="stat-value" id="s5-amat-total" style="color:var(--accent-green); font-size:1.6rem;">--</div>
+                        <div class="stat-sub" id="s5-amat-formula">计算中...</div>
+                    </div>
+                </div>
+
+                <div class="viz-panel">
+                    <h3 style="margin-bottom:0.75rem;">AMAT分解（堆叠柱状图）</h3>
+                    <div class="canvas-wrap">
+                        <canvas id="canvas-amat"></canvas>
+                    </div>
+
+                    <h3 style="margin-top:1.5rem; margin-bottom:0.75rem;">敏感性分析：哪一级缺失率最关键？</h3>
+                    <div class="canvas-wrap">
+                        <canvas id="canvas-sensitivity"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <h3 style="margin-top:1.5rem; margin-bottom:0.75rem;">真实数据示例</h3>
+            <div class="config-cards">
+                <div class="config-card" onclick="S5.loadPreset('server')" style="cursor:pointer;">
+                    <h4>服务器工作负载</h4>
+                    <div class="cfg-row"><span class="cfg-label">L1: 1ns, 5%缺失</span><span class="cfg-val l1-color">命中快</span></div>
+                    <div class="cfg-row"><span class="cfg-label">L2: 5ns, 10%缺失</span><span class="cfg-val l2-color">过滤有效</span></div>
+                    <div class="cfg-row"><span class="cfg-label">L3: 20ns, 20%缺失</span><span class="cfg-val l3-color">大缓存</span></div>
+                    <div class="cfg-row"><span class="cfg-label">主存: 80ns</span><span class="cfg-val mem-color">DDR5</span></div>
+                </div>
+                <div class="config-card" onclick="S5.loadPreset('desktop')" style="cursor:pointer;">
+                    <h4>桌面应用工作负载</h4>
+                    <div class="cfg-row"><span class="cfg-label">L1: 1ns, 8%缺失</span><span class="cfg-val l1-color">标准</span></div>
+                    <div class="cfg-row"><span class="cfg-label">L2: 5ns, 15%缺失</span><span class="cfg-val l2-color">中等</span></div>
+                    <div class="cfg-row"><span class="cfg-label">L3: 20ns, 30%缺失</span><span class="cfg-val l3-color">共享竞争</span></div>
+                    <div class="cfg-row"><span class="cfg-label">主存: 100ns</span><span class="cfg-val mem-color">DDR4</span></div>
+                </div>
+                <div class="config-card" onclick="S5.loadPreset('embedded')" style="cursor:pointer;">
+                    <h4>嵌入式/低功耗</h4>
+                    <div class="cfg-row"><span class="cfg-label">L1: 2ns, 12%缺失</span><span class="cfg-val l1-color">小容量</span></div>
+                    <div class="cfg-row"><span class="cfg-label">L2: 8ns, 25%缺失</span><span class="cfg-val l2-color">功耗优先</span></div>
+                    <div class="cfg-row"><span class="cfg-label">无L3</span><span class="cfg-val l3-color">--</span></div>
+                    <div class="cfg-row"><span class="cfg-label">主存: 120ns</span><span class="cfg-val mem-color">LPDDR</span></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== Section 6: 多级Cache模拟器 ===== -->
+        <div class="section" id="sec-sim">
+            <div class="section-title">
+                <div class="icon">&#x1F3AE;</div>
+                <h2>6. 多级Cache模拟器</h2>
+            </div>
+            <div class="section-desc">
+                <p>完整的三级Cache模拟器：输入地址序列，观察数据在L1→L2→L3→主存之间的流动。每次缺失会级联查找下一级，命中则直接返回。</p>
+            </div>
+
+            <div class="control-panel" style="flex-direction:column; align-items:stretch;">
+                <div style="display:flex; gap:1rem; flex-wrap:wrap; align-items:center;">
+                    <label>L1:</label>
+                    <select id="sim-l1-sets">
+                        <option value="2">2组</option>
+                        <option value="4" selected>4组</option>
+                        <option value="8">8组</option>
+                    </select>
+                    <select id="sim-l1-ways">
+                        <option value="1">直接映射</option>
+                        <option value="2" selected>2路</option>
+                        <option value="4">4路</option>
+                    </select>
+                    <span style="margin-left:0.5rem;">|</span>
+                    <label>L2:</label>
+                    <select id="sim-l2-sets">
+                        <option value="4">4组</option>
+                        <option value="8" selected>8组</option>
+                        <option value="16">16组</option>
+                    </select>
+                    <select id="sim-l2-ways">
+                        <option value="2">2路</option>
+                        <option value="4" selected>4路</option>
+                        <option value="8">8路</option>
+                    </select>
+                    <span style="margin-left:0.5rem;">|</span>
+                    <label>L3:</label>
+                    <select id="sim-l3-sets">
+                        <option value="8">8组</option>
+                        <option value="16" selected>16组</option>
+                        <option value="32">32组</option>
+                    </select>
+                    <select id="sim-l3-ways">
+                        <option value="4">4路</option>
+                        <option value="8" selected>8路</option>
+                        <option value="16">16路</option>
+                    </select>
+                    <button class="btn btn-sm btn-primary" onclick="S6.rebuildCaches()" style="margin-left:auto;">应用配置</button>
+                </div>
+
+                <div class="addr-input-wrap" style="margin-top:0.5rem;">
+                    <select id="sim-preset" onchange="S6.loadPreset()">
+                        <option value="">选择预设序列...</option>
+                        <option value="sequential">顺序访问 (0,4,8,12,...)</option>
+                        <option value="strided">步长访问 (0,16,32,48,...)</option>
+                        <option value="repeated">重复访问 (0,4,8,0,4,8,...)</option>
+                        <option value="random">随机访问</option>
+                        <option value="thrash">颠簸模式 (冲突缺失)</option>
+                    </select>
+                    <input type="text" id="sim-addr-input" placeholder="输入地址序列 (逗号分隔, 如: 0,4,8,16,32,0,4)">
+                    <button class="btn btn-sm btn-primary" onclick="S6.runSequence()">运行</button>
+                    <button class="btn btn-sm" onclick="S6.stepNext()">单步</button>
+                    <button class="btn btn-sm" onclick="S6.resetSim()">重置</button>
+                </div>
+            </div>
+
+            <div class="canvas-wrap">
+                <canvas id="canvas-sim"></canvas>
+            </div>
+
+            <div class="stats-dashboard" id="sim-stats">
+                <div class="stat-card">
+                    <div class="stat-label">L1 命中率</div>
+                    <div class="stat-value" id="sim-l1-hitrate" style="color:#ff5252;">--%</div>
+                    <div class="stat-sub" id="sim-l1-detail">0 命中 / 0 访问</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">L2 命中率</div>
+                    <div class="stat-value" id="sim-l2-hitrate" style="color:#ffab40;">--%</div>
+                    <div class="stat-sub" id="sim-l2-detail">0 命中 / 0 访问</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">L3 命中率</div>
+                    <div class="stat-value" id="sim-l3-hitrate" style="color:#ffd740;">--%</div>
+                    <div class="stat-sub" id="sim-l3-detail">0 命中 / 0 访问</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">全局AMAT</div>
+                    <div class="stat-value" id="sim-amat" style="color:var(--accent-green);">-- ns</div>
+                    <div class="stat-sub" id="sim-amat-detail">--</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">总访问时间</div>
+                    <div class="stat-value" id="sim-total-time" style="color:var(--accent-blue);">-- ns</div>
+                    <div class="stat-sub" id="sim-total-detail">0 次访问</div>
+                </div>
+            </div>
+
+            <div class="event-log" id="sim-log"></div>
+        </div>
+
+    </div><!-- .page-container -->
+
+    <!-- Shared Scripts -->
+    <script src="../shared/scripts/mem-utils.js"></script>
+    <script src="../shared/scripts/nav.js"></script>
+
+    <script>
+    /* ================================================================
+       Section 1: 为什么需要多级Cache
+       ================================================================ */
+    const S1 = (() => {
+        let mode = 'single';
+        let canvas, ctx, w, h;
+        let animProgress = 0;
+        let animId = null;
+
+        function init() {
+            const c = document.getElementById('canvas-why');
+            ({ ctx, w, h } = MemUtils.initCanvas(c, 380));
+            canvas = c;
+            draw();
+            updateAMAT();
+        }
+
+        function setMode(m) {
+            mode = m;
+            document.getElementById('mode-single').classList.toggle('active', m === 'single');
+            document.getElementById('mode-multi').classList.toggle('active', m === 'multi');
+            animProgress = 0;
+            if (animId) cancelAnimationFrame(animId);
+            animate();
+            updateAMAT();
+        }
+
+        function updateAMAT() {
+            let amat;
+            if (mode === 'single') {
+                // Single level: large cache, moderate hit time, moderate miss rate
+                amat = MemUtils.calcAMAT(5, 0.10, 100); // 5 + 0.10*100 = 15ns
+            } else {
+                // Multi-level
+                amat = MemUtils.calcMultiLevelAMAT([
+                    { hitTime: 1, missRate: 0.08 },
+                    { hitTime: 5, missRate: 0.15 },
+                    { hitTime: 20, missRate: 0.30 },
+                    { hitTime: 100, missRate: 0 }
+                ]);
+            }
+            document.getElementById('s1-amat').textContent = amat.toFixed(2);
+        }
+
+        function animate() {
+            animProgress += 0.015;
+            if (animProgress > 1) animProgress = 1;
+            draw();
+            if (animProgress < 1) {
+                animId = requestAnimationFrame(animate);
+            }
+        }
+
+        function draw() {
+            ({ ctx, w, h } = MemUtils.initCanvas(canvas, 380));
+            ctx.clearRect(0, 0, w, h);
+
+            if (mode === 'single') {
+                drawSingleLevel();
+            } else {
+                drawMultiLevel();
+            }
+        }
+
+        function drawSingleLevel() {
+            const cx = w / 2;
+            const startY = 40;
+
+            // CPU
+            drawBox(ctx, cx - 50, startY, 100, 44, 'CPU', '#b388ff', true);
+
+            // Arrow
+            MemUtils.drawArrow(ctx, cx, startY + 44, cx, startY + 100, '#6c6c7c');
+            drawLatencyLabel(ctx, cx + 55, startY + 72, '5 ns', '#6c6c7c');
+
+            // Single large cache
+            drawBox(ctx, cx - 80, startY + 100, 160, 50, '单级Cache (大)', '#ffab40', animProgress > 0.3);
+            ctx.font = '11px "JetBrains Mono", monospace';
+            ctx.fillStyle = MemUtils.COLORS.textMut;
+            ctx.textAlign = 'center';
+            ctx.fillText('256 KB, 缺失率~10%', cx, startY + 168);
+
+            // Arrow to memory
+            MemUtils.drawArrow(ctx, cx, startY + 175, cx, startY + 230, '#6c6c7c');
+            drawLatencyLabel(ctx, cx + 60, startY + 202, '100 ns (缺失)', '#ff5252');
+
+            // Main Memory
+            drawBox(ctx, cx - 90, startY + 230, 180, 50, '主存 (Main Memory)', '#4fc3f7', false);
+
+            // AMAT box
+            ctx.font = 'bold 14px "JetBrains Mono", monospace';
+            ctx.fillStyle = '#ff5252';
+            ctx.textAlign = 'center';
+            ctx.fillText('AMAT = 5 + 0.10 × 100 = 15.00 ns', cx, startY + 320);
+        }
+
+        function drawMultiLevel() {
+            const cx = w / 2;
+            const startY = 20;
+            const levels = [
+                { label: 'CPU', color: '#b388ff', w: 90, h: 38 },
+                { label: 'L1 Cache', color: '#ff5252', w: 100, h: 38, info: '32KB, ~1ns', miss: '8%' },
+                { label: 'L2 Cache', color: '#ffab40', w: 130, h: 38, info: '256KB, ~5ns', miss: '15%' },
+                { label: 'L3 Cache', color: '#ffd740', w: 160, h: 38, info: '8MB, ~20ns', miss: '30%' },
+                { label: '主存', color: '#4fc3f7', w: 190, h: 38, info: 'GB级, ~100ns' },
+            ];
+
+            let y = startY;
+            for (let i = 0; i < levels.length; i++) {
+                const lv = levels[i];
+                const bx = cx - lv.w / 2;
+                const highlight = animProgress > (i * 0.2);
+                drawBox(ctx, bx, y, lv.w, lv.h, lv.label, lv.color, highlight);
+
+                if (lv.info) {
+                    ctx.font = '10px "JetBrains Mono", monospace';
+                    ctx.fillStyle = MemUtils.COLORS.textMut;
+                    ctx.textAlign = 'left';
+                    ctx.fillText(lv.info, cx + lv.w / 2 + 12, y + lv.h / 2 - 2);
+                    if (lv.miss) {
+                        ctx.fillStyle = lv.color;
+                        ctx.fillText('缺失率 ' + lv.miss, cx + lv.w / 2 + 12, y + lv.h / 2 + 12);
+                    }
+                }
+
+                if (i < levels.length - 1) {
+                    const ny = y + lv.h;
+                    const nny = ny + 28;
+                    MemUtils.drawArrow(ctx, cx, ny, cx, nny, MemUtils.hexToRgba(lv.color, 0.6));
+                    y = nny;
+                } else {
+                    y += lv.h;
+                }
+            }
+
+            // AMAT calculation
+            ctx.font = 'bold 13px "JetBrains Mono", monospace';
+            ctx.fillStyle = '#16c79a';
+            ctx.textAlign = 'center';
+            const amat = MemUtils.calcMultiLevelAMAT([
+                { hitTime: 1, missRate: 0.08 },
+                { hitTime: 5, missRate: 0.15 },
+                { hitTime: 20, missRate: 0.30 },
+                { hitTime: 100, missRate: 0 }
+            ]);
+            ctx.fillText('AMAT = 1 + 0.08×(5 + 0.15×(20 + 0.30×100))', cx, y + 20);
+            ctx.fillText('= ' + amat.toFixed(2) + ' ns', cx, y + 38);
+        }
+
+        function drawBox(ctx, x, y, w, h, label, color, highlight) {
+            MemUtils.drawMemoryBlock(ctx, x, y, w, h, label, color, {
+                highlight,
+                radius: 6,
+                font: `bold ${Math.min(13, h * 0.4)}px "JetBrains Mono", monospace`
+            });
+        }
+
+        function drawLatencyLabel(ctx, x, y, text, color) {
+            ctx.font = '11px "JetBrains Mono", monospace';
+            ctx.fillStyle = color;
+            ctx.textAlign = 'left';
+            ctx.fillText(text, x, y);
+        }
+
+        return { init, setMode };
+    })();
+
+
+    /* ================================================================
+       Section 2: Chip Floorplan Canvas
+       ================================================================ */
+    const S2 = (() => {
+        let canvas, ctx, w, h;
+
+        function init() {
+            const c = document.getElementById('canvas-floorplan');
+            ({ ctx, w, h } = MemUtils.initCanvas(c, 340));
+            canvas = c;
+            draw();
+        }
+
+        function draw() {
+            ({ ctx, w, h } = MemUtils.initCanvas(canvas, 340));
+            ctx.clearRect(0, 0, w, h);
+
+            const chipW = Math.min(w - 40, 600);
+            const chipH = 300;
+            const chipX = (w - chipW) / 2;
+            const chipY = 20;
+
+            // Chip outline
+            ctx.strokeStyle = MemUtils.COLORS.border;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.roundRect(chipX, chipY, chipW, chipH, 8);
+            ctx.stroke();
+
+            // L3 shared cache (background)
+            const l3x = chipX + 10;
+            const l3y = chipY + chipH - 90;
+            const l3w = chipW - 20;
+            const l3h = 80;
+            ctx.fillStyle = MemUtils.hexToRgba('#ffd740', 0.12);
+            ctx.strokeStyle = '#ffd740';
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.roundRect(l3x, l3y, l3w, l3h, 6);
+            ctx.fill();
+            ctx.stroke();
+            ctx.font = 'bold 12px "JetBrains Mono", monospace';
+            ctx.fillStyle = '#ffd740';
+            ctx.textAlign = 'center';
+            ctx.fillText('L3 共享Cache (8-64 MB)', l3x + l3w / 2, l3y + l3h / 2 + 4);
+
+            // Draw 4 cores
+            const numCores = 4;
+            const coreAreaW = chipW - 20;
+            const coreW = (coreAreaW - (numCores - 1) * 12) / numCores;
+            const coreAreaStartX = chipX + 10;
+            const coreY = chipY + 15;
+
+            for (let i = 0; i < numCores; i++) {
+                const cx = coreAreaStartX + i * (coreW + 12);
+                const cy = coreY;
+
+                // Core
+                const coreBoxH = 45;
+                ctx.fillStyle = MemUtils.hexToRgba('#b388ff', 0.15);
+                ctx.strokeStyle = '#b388ff';
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                ctx.roundRect(cx, cy, coreW, coreBoxH, 4);
+                ctx.fill();
+                ctx.stroke();
+                ctx.font = 'bold 11px "JetBrains Mono", monospace';
+                ctx.fillStyle = '#b388ff';
+                ctx.textAlign = 'center';
+                ctx.fillText('Core ' + i, cx + coreW / 2, cy + 18);
+                ctx.font = '9px "JetBrains Mono", monospace';
+                ctx.fillStyle = MemUtils.COLORS.textMut;
+                ctx.fillText('ALU/FPU', cx + coreW / 2, cy + 34);
+
+                // L1 caches (split)
+                const l1y = cy + coreBoxH + 8;
+                const l1w = (coreW - 6) / 2;
+                const l1h = 30;
+                // I-Cache
+                ctx.fillStyle = MemUtils.hexToRgba('#ff5252', 0.18);
+                ctx.strokeStyle = '#ff5252';
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.roundRect(cx, l1y, l1w, l1h, 3);
+                ctx.fill();
+                ctx.stroke();
+                ctx.font = '9px "JetBrains Mono", monospace';
+                ctx.fillStyle = '#ff5252';
+                ctx.textAlign = 'center';
+                ctx.fillText('L1-I', cx + l1w / 2, l1y + 12);
+                ctx.font = '8px "JetBrains Mono", monospace';
+                ctx.fillStyle = MemUtils.COLORS.textMut;
+                ctx.fillText('32KB', cx + l1w / 2, l1y + 24);
+
+                // D-Cache
+                ctx.fillStyle = MemUtils.hexToRgba('#ff5252', 0.18);
+                ctx.strokeStyle = '#ff5252';
+                ctx.beginPath();
+                ctx.roundRect(cx + l1w + 6, l1y, l1w, l1h, 3);
+                ctx.fill();
+                ctx.stroke();
+                ctx.font = '9px "JetBrains Mono", monospace';
+                ctx.fillStyle = '#ff5252';
+                ctx.textAlign = 'center';
+                ctx.fillText('L1-D', cx + l1w + 6 + l1w / 2, l1y + 12);
+                ctx.font = '8px "JetBrains Mono", monospace';
+                ctx.fillStyle = MemUtils.COLORS.textMut;
+                ctx.fillText('48KB', cx + l1w + 6 + l1w / 2, l1y + 24);
+
+                // L2 cache
+                const l2y = l1y + l1h + 8;
+                const l2h = 35;
+                ctx.fillStyle = MemUtils.hexToRgba('#ffab40', 0.15);
+                ctx.strokeStyle = '#ffab40';
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.roundRect(cx, l2y, coreW, l2h, 4);
+                ctx.fill();
+                ctx.stroke();
+                ctx.font = 'bold 10px "JetBrains Mono", monospace';
+                ctx.fillStyle = '#ffab40';
+                ctx.textAlign = 'center';
+                ctx.fillText('L2 Cache', cx + coreW / 2, l2y + 14);
+                ctx.font = '9px "JetBrains Mono", monospace';
+                ctx.fillStyle = MemUtils.COLORS.textMut;
+                ctx.fillText('256KB-1MB', cx + coreW / 2, l2y + 28);
+
+                // Connection lines to L3
+                ctx.strokeStyle = MemUtils.hexToRgba('#ffd740', 0.4);
+                ctx.lineWidth = 1;
+                ctx.setLineDash([3, 3]);
+                ctx.beginPath();
+                ctx.moveTo(cx + coreW / 2, l2y + l2h);
+                ctx.lineTo(cx + coreW / 2, l3y);
+                ctx.stroke();
+                ctx.setLineDash([]);
+            }
+        }
+
+        return { init, draw };
+    })();
+
+
+    /* ================================================================
+       Section 3: 本地缺失率 vs 全局缺失率
+       ================================================================ */
+    const S3 = (() => {
+        let canvas, ctx, w, h;
+
+        function init() {
+            const c = document.getElementById('canvas-funnel');
+            ({ ctx, w, h } = MemUtils.initCanvas(c, 450));
+            canvas = c;
+            update();
+        }
+
+        function update() {
+            const l1Miss = parseInt(document.getElementById('s3-l1-miss').value);
+            const l2Miss = parseInt(document.getElementById('s3-l2-miss').value);
+            const l3Miss = parseInt(document.getElementById('s3-l3-miss').value);
+
+            document.getElementById('s3-l1-miss-val').textContent = l1Miss + '%';
+            document.getElementById('s3-l2-miss-val').textContent = l2Miss + '%';
+            document.getElementById('s3-l3-miss-val').textContent = l3Miss + '%';
+
+            const g1 = l1Miss;
+            const g2 = (l1Miss * l2Miss) / 100;
+            const g3 = (l1Miss * l2Miss * l3Miss) / 10000;
+
+            document.getElementById('s3-g1').textContent = g1.toFixed(1) + '%';
+            document.getElementById('s3-g2').textContent = g2.toFixed(2) + '%';
+            document.getElementById('s3-g3').textContent = g3.toFixed(3) + '%';
+
+            drawFunnel(l1Miss / 100, l2Miss / 100, l3Miss / 100);
+        }
+
+        function drawFunnel(l1mr, l2mr, l3mr) {
+            ({ ctx, w, h } = MemUtils.initCanvas(canvas, 450));
+            ctx.clearRect(0, 0, w, h);
+
+            const cx = w / 2;
+            const totalAccesses = 1000;
+            const l1Hits = totalAccesses * (1 - l1mr);
+            const l2Accesses = totalAccesses * l1mr;
+            const l2Hits = l2Accesses * (1 - l2mr);
+            const l3Accesses = l2Accesses * l2mr;
+            const l3Hits = l3Accesses * (1 - l3mr);
+            const memAccesses = l3Accesses * l3mr;
+
+            const maxBarW = Math.min(w - 80, 400);
+            const barH = 50;
+            const gap = 16;
+            const startY = 30;
+
+            const stages = [
+                { label: 'CPU 总访问', count: totalAccesses, color: '#b388ff', barW: maxBarW },
+                { label: 'L1 命中', count: l1Hits, color: '#ff5252', barW: maxBarW * (l1Hits / totalAccesses), hit: true },
+                { label: 'L2 访问 (L1缺失)', count: l2Accesses, color: '#ff5252', barW: maxBarW * (l2Accesses / totalAccesses) },
+                { label: 'L2 命中', count: l2Hits, color: '#ffab40', barW: maxBarW * (l2Hits / totalAccesses), hit: true },
+                { label: 'L3 访问 (L2缺失)', count: l3Accesses, color: '#ffab40', barW: maxBarW * (l3Accesses / totalAccesses) },
+                { label: 'L3 命中', count: l3Hits, color: '#ffd740', barW: maxBarW * (l3Hits / totalAccesses), hit: true },
+                { label: '主存访问 (L3缺失)', count: memAccesses, color: '#4fc3f7', barW: Math.max(maxBarW * (memAccesses / totalAccesses), 4) },
+            ];
+
+            let y = startY;
+            for (const stage of stages) {
+                const bx = cx - stage.barW / 2;
+
+                ctx.fillStyle = MemUtils.hexToRgba(stage.color, stage.hit ? 0.25 : 0.15);
+                ctx.strokeStyle = stage.color;
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                ctx.roundRect(bx, y, stage.barW, barH, 4);
+                ctx.fill();
+                ctx.stroke();
+
+                // Label
+                ctx.font = 'bold 11px "JetBrains Mono", monospace';
+                ctx.fillStyle = stage.color;
+                ctx.textAlign = 'left';
+                ctx.fillText(stage.label, cx - maxBarW / 2 - 2, y - 4);
+
+                // Count
+                ctx.font = 'bold 13px "JetBrains Mono", monospace';
+                ctx.fillStyle = '#e8e8e8';
+                ctx.textAlign = 'center';
+                const countText = stage.count.toFixed(1) + (stage.hit ? ' 命中' : ' 次');
+                ctx.fillText(countText, cx, y + barH / 2 + 4);
+
+                // Percentage on right
+                ctx.font = '10px "JetBrains Mono", monospace';
+                ctx.fillStyle = MemUtils.COLORS.textMut;
+                ctx.textAlign = 'right';
+                const pct = ((stage.count / totalAccesses) * 100).toFixed(2);
+                ctx.fillText(pct + '% of total', cx + maxBarW / 2 + 2, y + barH / 2 + 4);
+
+                y += barH + gap;
+            }
+        }
+
+        return { init, update };
+    })();
+
+
+    /* ================================================================
+       Section 4: 包含与排他策略
+       ================================================================ */
+    const S4 = (() => {
+        let canvas, ctx, w, h;
+        let policy = 'inclusive';
+        let l1Data = [];
+        let l2Data = [];
+        let animQueue = [];
+        let animating = false;
+        const logEl = () => document.getElementById('policy-log');
+        const MAX_L1 = 4;
+        const MAX_L2 = 8;
+
+        function init() {
+            const c = document.getElementById('canvas-policy');
+            ({ ctx, w, h } = MemUtils.initCanvas(c, 360));
+            canvas = c;
+            resetState();
+            draw();
+        }
+
+        function setPolicy(p) {
+            policy = p;
+            document.querySelectorAll('.policy-tab').forEach((tab, i) => {
+                const pols = ['inclusive', 'exclusive', 'nine'];
+                tab.classList.toggle('active', pols[i] === p);
+            });
+            resetState();
+            draw();
+            logEvent('策略切换为: ' + getPolName(p), '');
+        }
+
+        function getPolName(p) {
+            return { inclusive: '包含(Inclusive)', exclusive: '排他(Exclusive)', nine: 'NINE' }[p];
+        }
+
+        function resetState() {
+            l1Data = [];
+            l2Data = [];
+            animQueue = [];
+            animating = false;
+            const el = logEl();
+            if (el) el.innerHTML = '';
+        }
+
+        function triggerOp(op) {
+            if (animating) return;
+
+            if (op === 'reset') {
+                resetState();
+                draw();
+                return;
+            }
+
+            const nextBlock = 'B' + (Math.max(
+                ...l1Data.map(b => parseInt(b.slice(1)) || 0),
+                ...l2Data.map(b => parseInt(b.slice(1)) || 0),
+                0
+            ) + 1);
+
+            if (op === 'read-hit') {
+                if (l1Data.length === 0) {
+                    // Add a block first
+                    handleMiss(nextBlock);
+                } else {
+                    logEvent('读命中 L1: ' + l1Data[0], 'log-hit');
+                    animateHighlight(0, 'l1');
+                }
+            } else if (op === 'read-miss-l1-hit-l2') {
+                if (l2Data.length === 0) {
+                    // Need data in L2 first - put something there
+                    if (policy === 'exclusive') {
+                        l2Data.push(nextBlock);
+                        logEvent('预填充 L2: ' + nextBlock, '');
+                    } else {
+                        l1Data.push(nextBlock);
+                        l2Data.push(nextBlock);
+                        logEvent('预填充: ' + nextBlock, '');
+                    }
+                    draw();
+                    return;
+                }
+                // Find a block in L2 not in L1 (for exclusive), or any block in L2
+                let target;
+                if (policy === 'exclusive') {
+                    target = l2Data[0];
+                } else {
+                    target = l2Data.find(b => !l1Data.includes(b)) || l2Data[0];
+                }
+                handleL1MissL2Hit(target);
+            } else if (op === 'read-miss-both') {
+                handleMiss(nextBlock);
+            } else if (op === 'evict-l1') {
+                if (l1Data.length === 0) {
+                    logEvent('L1为空，无法驱逐', '');
+                    return;
+                }
+                handleEvictL1();
+            }
+            draw();
+        }
+
+        function handleMiss(block) {
+            logEvent('L1缺失 + L2缺失: 从主存加载 ' + block, 'log-miss');
+
+            if (policy === 'inclusive') {
+                // Both L1 and L2 get the data
+                if (l1Data.length >= MAX_L1) {
+                    const evicted = l1Data.shift();
+                    logEvent('  L1驱逐: ' + evicted, 'log-evict');
+                }
+                l1Data.push(block);
+                if (l2Data.length >= MAX_L2) {
+                    const evicted = l2Data.shift();
+                    logEvent('  L2驱逐: ' + evicted, 'log-evict');
+                    // Inclusive: must also remove from L1 if present
+                    const idx = l1Data.indexOf(evicted);
+                    if (idx !== -1) {
+                        l1Data.splice(idx, 1);
+                        logEvent('  反向无效化L1: ' + evicted, 'log-evict');
+                    }
+                }
+                l2Data.push(block);
+            } else if (policy === 'exclusive') {
+                // Only goes to L1
+                if (l1Data.length >= MAX_L1) {
+                    const evicted = l1Data.shift();
+                    logEvent('  L1驱逐→写入L2: ' + evicted, 'log-evict');
+                    if (l2Data.length >= MAX_L2) {
+                        const e2 = l2Data.shift();
+                        logEvent('  L2驱逐: ' + e2, 'log-evict');
+                    }
+                    l2Data.push(evicted);
+                }
+                l1Data.push(block);
+            } else {
+                // NINE: put in L1, may or may not put in L2
+                if (l1Data.length >= MAX_L1) {
+                    const evicted = l1Data.shift();
+                    logEvent('  L1驱逐: ' + evicted + ' (不强制写入L2)', 'log-evict');
+                }
+                l1Data.push(block);
+            }
+        }
+
+        function handleL1MissL2Hit(block) {
+            logEvent('L1缺失, L2命中: ' + block, 'log-miss');
+
+            if (policy === 'inclusive') {
+                // Load to L1, keep in L2
+                if (l1Data.length >= MAX_L1) {
+                    const evicted = l1Data.shift();
+                    logEvent('  L1驱逐: ' + evicted, 'log-evict');
+                }
+                if (!l1Data.includes(block)) l1Data.push(block);
+                logEvent('  数据同时保留在L1和L2', 'log-hit');
+            } else if (policy === 'exclusive') {
+                // Move from L2 to L1 (swap)
+                const idx = l2Data.indexOf(block);
+                if (idx !== -1) l2Data.splice(idx, 1);
+                if (l1Data.length >= MAX_L1) {
+                    const evicted = l1Data.shift();
+                    l2Data.push(evicted);
+                    logEvent('  L1→L2交换: ' + evicted, 'log-evict');
+                }
+                l1Data.push(block);
+                logEvent('  数据从L2移至L1 (互斥)', 'log-hit');
+            } else {
+                // NINE
+                if (l1Data.length >= MAX_L1) {
+                    const evicted = l1Data.shift();
+                    logEvent('  L1驱逐: ' + evicted, 'log-evict');
+                }
+                l1Data.push(block);
+                logEvent('  加载到L1，L2副本可能保留', 'log-hit');
+            }
+        }
+
+        function handleEvictL1() {
+            const evicted = l1Data.shift();
+            logEvent('手动驱逐L1: ' + evicted, 'log-evict');
+
+            if (policy === 'inclusive') {
+                // L2 may still keep it
+                logEvent('  包含策略: L2仍保留副本', '');
+            } else if (policy === 'exclusive') {
+                // Must write to L2
+                if (l2Data.length >= MAX_L2) {
+                    const e2 = l2Data.shift();
+                    logEvent('  L2驱逐: ' + e2, 'log-evict');
+                }
+                l2Data.push(evicted);
+                logEvent('  排他策略: 驱逐数据写入L2', '');
+            } else {
+                logEvent('  NINE策略: 驱逐数据丢弃', '');
+            }
+        }
+
+        function animateHighlight(index, level) {
+            // Simple highlight flash using GSAP
+        }
+
+        function logEvent(msg, cls) {
+            const el = logEl();
+            if (!el) return;
+            const div = document.createElement('div');
+            div.className = 'log-entry ' + (cls || '');
+            div.textContent = '[' + new Date().toLocaleTimeString() + '] ' + msg;
+            el.prepend(div);
+            if (el.children.length > 50) el.removeChild(el.lastChild);
+        }
+
+        function draw() {
+            ({ ctx, w, h } = MemUtils.initCanvas(canvas, 360));
+            ctx.clearRect(0, 0, w, h);
+
+            const blockW = 55;
+            const blockH = 35;
+            const gap = 6;
+            const labelW = 80;
+
+            // L1 Cache
+            const l1y = 30;
+            ctx.font = 'bold 14px "JetBrains Mono", monospace';
+            ctx.fillStyle = '#ff5252';
+            ctx.textAlign = 'left';
+            ctx.fillText('L1 Cache', 20, l1y + blockH / 2 + 4);
+            ctx.font = '10px "JetBrains Mono", monospace';
+            ctx.fillStyle = MemUtils.COLORS.textMut;
+            ctx.fillText('(' + l1Data.length + '/' + MAX_L1 + ')', 20, l1y + blockH / 2 + 18);
+
+            for (let i = 0; i < MAX_L1; i++) {
+                const bx = labelW + 20 + i * (blockW + gap);
+                const data = l1Data[i];
+                if (data) {
+                    MemUtils.drawMemoryBlock(ctx, bx, l1y, blockW, blockH, data, '#ff5252', {
+                        highlight: true,
+                        radius: 4,
+                        font: 'bold 12px "JetBrains Mono", monospace'
+                    });
+                } else {
+                    ctx.strokeStyle = MemUtils.hexToRgba('#ff5252', 0.3);
+                    ctx.lineWidth = 1;
+                    ctx.setLineDash([3, 3]);
+                    ctx.beginPath();
+                    ctx.roundRect(bx, l1y, blockW, blockH, 4);
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+                    ctx.font = '10px "JetBrains Mono", monospace';
+                    ctx.fillStyle = MemUtils.COLORS.textMut;
+                    ctx.textAlign = 'center';
+                    ctx.fillText('空', bx + blockW / 2, l1y + blockH / 2 + 3);
+                }
+            }
+
+            // Arrow between L1 and L2
+            const arrowY1 = l1y + blockH + 15;
+            const arrowY2 = arrowY1 + 30;
+            MemUtils.drawArrow(ctx, w / 2, arrowY1, w / 2, arrowY2, MemUtils.COLORS.textMut);
+
+            // Policy indicator
+            ctx.font = 'bold 11px "JetBrains Mono", monospace';
+            const polColor = policy === 'inclusive' ? '#16c79a' : policy === 'exclusive' ? '#4fc3f7' : '#b388ff';
+            ctx.fillStyle = polColor;
+            ctx.textAlign = 'center';
+            ctx.fillText(getPolName(policy), w / 2, arrowY1 + 20);
+
+            // L2 Cache
+            const l2y = arrowY2 + 15;
+            ctx.font = 'bold 14px "JetBrains Mono", monospace';
+            ctx.fillStyle = '#ffab40';
+            ctx.textAlign = 'left';
+            ctx.fillText('L2 Cache', 20, l2y + blockH / 2 + 4);
+            ctx.font = '10px "JetBrains Mono", monospace';
+            ctx.fillStyle = MemUtils.COLORS.textMut;
+            ctx.fillText('(' + l2Data.length + '/' + MAX_L2 + ')', 20, l2y + blockH / 2 + 18);
+
+            for (let i = 0; i < MAX_L2; i++) {
+                const bx = labelW + 20 + i * (blockW + gap);
+                const data = l2Data[i];
+                if (data) {
+                    // Highlight if also in L1 (for inclusive visualization)
+                    const inL1 = l1Data.includes(data);
+                    const color = inL1 && policy === 'inclusive' ? '#ff5252' : '#ffab40';
+                    MemUtils.drawMemoryBlock(ctx, bx, l2y, blockW, blockH, data, '#ffab40', {
+                        highlight: true,
+                        radius: 4,
+                        font: 'bold 12px "JetBrains Mono", monospace',
+                        fill: inL1 && policy === 'inclusive' ? MemUtils.hexToRgba('#ff5252', 0.15) : undefined
+                    });
+                    if (inL1 && policy === 'inclusive') {
+                        // Draw small duplicate indicator
+                        ctx.font = '8px "JetBrains Mono", monospace';
+                        ctx.fillStyle = '#ff5252';
+                        ctx.textAlign = 'center';
+                        ctx.fillText('(副本)', bx + blockW / 2, l2y + blockH + 11);
+                    }
+                } else {
+                    ctx.strokeStyle = MemUtils.hexToRgba('#ffab40', 0.3);
+                    ctx.lineWidth = 1;
+                    ctx.setLineDash([3, 3]);
+                    ctx.beginPath();
+                    ctx.roundRect(bx, l2y, blockW, blockH, 4);
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+                    ctx.font = '10px "JetBrains Mono", monospace';
+                    ctx.fillStyle = MemUtils.COLORS.textMut;
+                    ctx.textAlign = 'center';
+                    ctx.fillText('空', bx + blockW / 2, l2y + blockH / 2 + 3);
+                }
+            }
+
+            // Arrow to memory
+            const memArrowY1 = l2y + blockH + 25;
+            const memArrowY2 = memArrowY1 + 30;
+            MemUtils.drawArrow(ctx, w / 2, memArrowY1, w / 2, memArrowY2, MemUtils.hexToRgba('#4fc3f7', 0.5));
+
+            // Main Memory
+            const memY = memArrowY2 + 5;
+            MemUtils.drawMemoryBlock(ctx, w / 2 - 80, memY, 160, 35, '主存 (Main Memory)', '#4fc3f7', {
+                radius: 6,
+                font: 'bold 11px "JetBrains Mono", monospace'
+            });
+
+            // Summary stats
+            const summY = memY + 55;
+            ctx.font = '11px "JetBrains Mono", monospace';
+            ctx.textAlign = 'center';
+
+            if (policy === 'inclusive') {
+                ctx.fillStyle = '#16c79a';
+                const effective = l2Data.length;
+                ctx.fillText('有效容量 = L2容量 = ' + effective + ' 块', w / 2, summY);
+            } else if (policy === 'exclusive') {
+                ctx.fillStyle = '#4fc3f7';
+                const effective = l1Data.length + l2Data.length;
+                ctx.fillText('有效容量 = L1 + L2 = ' + l1Data.length + ' + ' + l2Data.length + ' = ' + effective + ' 块', w / 2, summY);
+            } else {
+                ctx.fillStyle = '#b388ff';
+                const overlap = l1Data.filter(b => l2Data.includes(b)).length;
+                const effective = l1Data.length + l2Data.length - overlap;
+                ctx.fillText('有效容量 = ' + l1Data.length + ' + ' + l2Data.length + ' - ' + overlap + '(重叠) = ' + effective + ' 块', w / 2, summY);
+            }
+        }
+
+        return { init, setPolicy, triggerOp };
+    })();
+
+
+    /* ================================================================
+       Section 5: 多级AMAT计算
+       ================================================================ */
+    const S5 = (() => {
+        let amatCanvas, sensCanvas;
+
+        function init() {
+            amatCanvas = document.getElementById('canvas-amat');
+            sensCanvas = document.getElementById('canvas-sensitivity');
+            update();
+        }
+
+        function getParams() {
+            return {
+                l1Hit: parseFloat(document.getElementById('s5-l1-hit').value),
+                l1Miss: parseInt(document.getElementById('s5-l1-miss').value) / 100,
+                l2Hit: parseFloat(document.getElementById('s5-l2-hit').value),
+                l2Miss: parseInt(document.getElementById('s5-l2-miss').value) / 100,
+                l3Hit: parseFloat(document.getElementById('s5-l3-hit').value),
+                l3Miss: parseInt(document.getElementById('s5-l3-miss').value) / 100,
+                memLatency: parseInt(document.getElementById('s5-mem').value),
+            };
+        }
+
+        function calcAMAT(p) {
+            return MemUtils.calcMultiLevelAMAT([
+                { hitTime: p.l1Hit, missRate: p.l1Miss },
+                { hitTime: p.l2Hit, missRate: p.l2Miss },
+                { hitTime: p.l3Hit, missRate: p.l3Miss },
+                { hitTime: p.memLatency, missRate: 0 }
+            ]);
+        }
+
+        function update() {
+            const p = getParams();
+
+            document.getElementById('s5-l1-hit-val').textContent = p.l1Hit + ' ns';
+            document.getElementById('s5-l1-miss-val').textContent = (p.l1Miss * 100).toFixed(0) + '%';
+            document.getElementById('s5-l2-hit-val').textContent = p.l2Hit + ' ns';
+            document.getElementById('s5-l2-miss-val').textContent = (p.l2Miss * 100).toFixed(0) + '%';
+            document.getElementById('s5-l3-hit-val').textContent = p.l3Hit + ' ns';
+            document.getElementById('s5-l3-miss-val').textContent = (p.l3Miss * 100).toFixed(0) + '%';
+            document.getElementById('s5-mem-val').textContent = p.memLatency + ' ns';
+
+            const amat = calcAMAT(p);
+            document.getElementById('s5-amat-total').textContent = amat.toFixed(2) + ' ns';
+
+            // Breakdown
+            const l1Contrib = p.l1Hit;
+            const l2Contrib = p.l1Miss * p.l2Hit;
+            const l3Contrib = p.l1Miss * p.l2Miss * p.l3Hit;
+            const memContrib = p.l1Miss * p.l2Miss * p.l3Miss * p.memLatency;
+
+            document.getElementById('s5-amat-formula').textContent =
+                `L1: ${l1Contrib.toFixed(2)} + L2: ${l2Contrib.toFixed(2)} + L3: ${l3Contrib.toFixed(2)} + 主存: ${memContrib.toFixed(2)}`;
+
+            drawAMATChart(p, l1Contrib, l2Contrib, l3Contrib, memContrib, amat);
+            drawSensitivity(p);
+        }
+
+        function drawAMATChart(p, l1c, l2c, l3c, memc, total) {
+            const { ctx, w, h } = MemUtils.initCanvas(amatCanvas, 280);
+            ctx.clearRect(0, 0, w, h);
+
+            const barX = 60;
+            const barW = Math.min(w - 120, 500);
+            const barH = 50;
+            const barY = 40;
+
+            // Title
+            ctx.font = 'bold 12px "Noto Sans SC", sans-serif';
+            ctx.fillStyle = MemUtils.COLORS.textPri;
+            ctx.textAlign = 'left';
+            ctx.fillText('AMAT 各级贡献分解', barX, 25);
+
+            const parts = [
+                { label: 'L1命中', value: l1c, color: '#ff5252' },
+                { label: 'L2命中', value: l2c, color: '#ffab40' },
+                { label: 'L3命中', value: l3c, color: '#ffd740' },
+                { label: '主存访问', value: memc, color: '#4fc3f7' },
+            ];
+
+            let x = barX;
+            for (const part of parts) {
+                const partW = (part.value / total) * barW;
+                if (partW < 0.5) continue;
+
+                ctx.fillStyle = part.color;
+                ctx.beginPath();
+                ctx.roundRect(x, barY, partW, barH, 0);
+                ctx.fill();
+
+                if (partW > 30) {
+                    ctx.font = 'bold 10px "JetBrains Mono", monospace';
+                    ctx.fillStyle = '#1a1a2e';
+                    ctx.textAlign = 'center';
+                    ctx.fillText(part.value.toFixed(2) + 'ns', x + partW / 2, barY + barH / 2 + 4);
+                }
+                x += partW;
+            }
+
+            // Border
+            ctx.strokeStyle = MemUtils.COLORS.border;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.roundRect(barX, barY, barW, barH, 4);
+            ctx.stroke();
+
+            // Legend
+            let lx = barX;
+            const ly = barY + barH + 25;
+            for (const part of parts) {
+                ctx.fillStyle = part.color;
+                ctx.fillRect(lx, ly, 12, 12);
+                ctx.font = '11px "Noto Sans SC", sans-serif';
+                ctx.fillStyle = MemUtils.COLORS.textSec;
+                ctx.textAlign = 'left';
+                const pctText = part.label + ' ' + ((part.value / total) * 100).toFixed(1) + '%';
+                ctx.fillText(pctText, lx + 16, ly + 10);
+                lx += ctx.measureText(pctText).width + 32;
+            }
+
+            // Percentage bars
+            const pbY = ly + 30;
+            ctx.font = '10px "JetBrains Mono", monospace';
+            for (let i = 0; i < parts.length; i++) {
+                const py = pbY + i * 28;
+                const pct = (parts[i].value / total);
+                ctx.fillStyle = MemUtils.COLORS.textSec;
+                ctx.textAlign = 'right';
+                ctx.fillText(parts[i].label, barX + 50, py + 12);
+
+                const pbW = barW - 70;
+                ctx.fillStyle = MemUtils.hexToRgba(parts[i].color, 0.15);
+                ctx.fillRect(barX + 58, py, pbW, 16);
+                ctx.fillStyle = parts[i].color;
+                ctx.fillRect(barX + 58, py, pbW * pct, 16);
+
+                ctx.fillStyle = '#e8e8e8';
+                ctx.textAlign = 'left';
+                ctx.fillText(parts[i].value.toFixed(2) + ' ns (' + (pct * 100).toFixed(1) + '%)', barX + 62 + pbW * pct + 4, py + 12);
+            }
+        }
+
+        function drawSensitivity(p) {
+            const { ctx, w, h } = MemUtils.initCanvas(sensCanvas, 280);
+            ctx.clearRect(0, 0, w, h);
+
+            const chartX = 80;
+            const chartW = Math.min(w - 120, 500);
+            const chartH = 200;
+            const chartY = 50;
+
+            // Title
+            ctx.font = 'bold 12px "Noto Sans SC", sans-serif';
+            ctx.fillStyle = MemUtils.COLORS.textPri;
+            ctx.textAlign = 'left';
+            ctx.fillText('各级缺失率对AMAT的影响 (其他参数固定)', chartX, 25);
+
+            // Y-axis
+            const baseAMAT = calcAMAT(p);
+            const maxAMAT = baseAMAT * 3;
+
+            ctx.strokeStyle = MemUtils.COLORS.border;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(chartX, chartY);
+            ctx.lineTo(chartX, chartY + chartH);
+            ctx.lineTo(chartX + chartW, chartY + chartH);
+            ctx.stroke();
+
+            // Y labels
+            ctx.font = '9px "JetBrains Mono", monospace';
+            ctx.fillStyle = MemUtils.COLORS.textMut;
+            ctx.textAlign = 'right';
+            for (let i = 0; i <= 4; i++) {
+                const val = (maxAMAT * i / 4);
+                const yy = chartY + chartH - (chartH * i / 4);
+                ctx.fillText(val.toFixed(1), chartX - 8, yy + 3);
+                ctx.strokeStyle = MemUtils.hexToRgba(MemUtils.COLORS.border, 0.5);
+                ctx.beginPath();
+                ctx.moveTo(chartX, yy);
+                ctx.lineTo(chartX + chartW, yy);
+                ctx.stroke();
+            }
+
+            // X labels
+            ctx.textAlign = 'center';
+            for (let i = 0; i <= 10; i++) {
+                const pct = i * 10;
+                const xx = chartX + (chartW * i / 10);
+                ctx.fillText(pct + '%', xx, chartY + chartH + 16);
+            }
+            ctx.fillStyle = MemUtils.COLORS.textSec;
+            ctx.font = '10px "Noto Sans SC", sans-serif';
+            ctx.fillText('缺失率', chartX + chartW / 2, chartY + chartH + 32);
+
+            // Draw lines for each level
+            const levels = [
+                { key: 'l1Miss', label: 'L1缺失率', color: '#ff5252' },
+                { key: 'l2Miss', label: 'L2缺失率', color: '#ffab40' },
+                { key: 'l3Miss', label: 'L3缺失率', color: '#ffd740' },
+            ];
+
+            for (const lv of levels) {
+                ctx.strokeStyle = lv.color;
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+
+                for (let i = 0; i <= 50; i++) {
+                    const missRate = i / 50;
+                    const testP = { ...p };
+                    testP[lv.key] = missRate;
+                    const amat = calcAMAT(testP);
+                    const x = chartX + (chartW * missRate);
+                    const y = chartY + chartH - (chartH * Math.min(amat / maxAMAT, 1));
+                    if (i === 0) ctx.moveTo(x, y);
+                    else ctx.lineTo(x, y);
+                }
+                ctx.stroke();
+
+                // Current point
+                const curMR = p[lv.key];
+                const curAMAT = calcAMAT(p);
+                const cx = chartX + (chartW * curMR);
+                const cy = chartY + chartH - (chartH * Math.min(curAMAT / maxAMAT, 1));
+                ctx.fillStyle = lv.color;
+                ctx.beginPath();
+                ctx.arc(cx, cy, 5, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            // Legend
+            let lx = chartX;
+            const ly = chartY - 15;
+            for (const lv of levels) {
+                ctx.strokeStyle = lv.color;
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(lx, ly);
+                ctx.lineTo(lx + 20, ly);
+                ctx.stroke();
+                ctx.fillStyle = lv.color;
+                ctx.beginPath();
+                ctx.arc(lx + 10, ly, 3, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.font = '10px "Noto Sans SC", sans-serif';
+                ctx.fillStyle = MemUtils.COLORS.textSec;
+                ctx.textAlign = 'left';
+                ctx.fillText(lv.label, lx + 24, ly + 4);
+                lx += 100;
+            }
+        }
+
+        function loadPreset(name) {
+            const presets = {
+                server: { l1Hit: 1, l1Miss: 5, l2Hit: 5, l2Miss: 10, l3Hit: 20, l3Miss: 20, mem: 80 },
+                desktop: { l1Hit: 1, l1Miss: 8, l2Hit: 5, l2Miss: 15, l3Hit: 20, l3Miss: 30, mem: 100 },
+                embedded: { l1Hit: 2, l1Miss: 12, l2Hit: 8, l2Miss: 25, l3Hit: 20, l3Miss: 50, mem: 120 },
+            };
+            const pr = presets[name];
+            if (!pr) return;
+            document.getElementById('s5-l1-hit').value = pr.l1Hit;
+            document.getElementById('s5-l1-miss').value = pr.l1Miss;
+            document.getElementById('s5-l2-hit').value = pr.l2Hit;
+            document.getElementById('s5-l2-miss').value = pr.l2Miss;
+            document.getElementById('s5-l3-hit').value = pr.l3Hit;
+            document.getElementById('s5-l3-miss').value = pr.l3Miss;
+            document.getElementById('s5-mem').value = pr.mem;
+            update();
+        }
+
+        return { init, update, loadPreset };
+    })();
+
+
+    /* ================================================================
+       Section 6: 多级Cache模拟器
+       ================================================================ */
+    const S6 = (() => {
+        let canvas, ctx, w, h;
+        let l1Cache, l2Cache, l3Cache;
+        let l1Stats, l2Stats, l3Stats;
+        let addressQueue = [];
+        let currentAddrIdx = -1;
+        let accessLog = [];
+        let totalTime = 0;
+        let accessCount = 0;
+
+        // Timing constants (ns)
+        const L1_HIT_TIME = 1;
+        const L2_HIT_TIME = 5;
+        const L3_HIT_TIME = 20;
+        const MEM_TIME = 100;
+
+        function init() {
+            canvas = document.getElementById('canvas-sim');
+            rebuildCaches();
+        }
+
+        function rebuildCaches() {
+            const l1Sets = parseInt(document.getElementById('sim-l1-sets').value);
+            const l1Ways = parseInt(document.getElementById('sim-l1-ways').value);
+            const l2Sets = parseInt(document.getElementById('sim-l2-sets').value);
+            const l2Ways = parseInt(document.getElementById('sim-l2-ways').value);
+            const l3Sets = parseInt(document.getElementById('sim-l3-sets').value);
+            const l3Ways = parseInt(document.getElementById('sim-l3-ways').value);
+
+            l1Cache = MemUtils.createCache(l1Sets, l1Ways, 4);
+            l2Cache = MemUtils.createCache(l2Sets, l2Ways, 4);
+            l3Cache = MemUtils.createCache(l3Sets, l3Ways, 4);
+
+            resetSim();
+        }
+
+        function resetSim() {
+            if (l1Cache) l1Cache.reset();
+            if (l2Cache) l2Cache.reset();
+            if (l3Cache) l3Cache.reset();
+            accessLog = [];
+            totalTime = 0;
+            accessCount = 0;
+            currentAddrIdx = -1;
+            addressQueue = [];
+            updateStats();
+            drawCaches();
+            document.getElementById('sim-log').innerHTML = '';
+        }
+
+        function loadPreset() {
+            const sel = document.getElementById('sim-preset').value;
+            let addrs = [];
+            switch (sel) {
+                case 'sequential':
+                    addrs = Array.from({ length: 20 }, (_, i) => i * 4);
+                    break;
+                case 'strided':
+                    addrs = Array.from({ length: 16 }, (_, i) => i * 16);
+                    break;
+                case 'repeated':
+                    for (let r = 0; r < 5; r++) {
+                        addrs.push(0, 4, 8, 12);
+                    }
+                    break;
+                case 'random':
+                    const rng = MemUtils.seededRandom(42);
+                    addrs = Array.from({ length: 20 }, () => Math.floor(rng() * 256) & ~3);
+                    break;
+                case 'thrash':
+                    // Access addresses that map to same sets causing conflict misses
+                    const l1Sets = parseInt(document.getElementById('sim-l1-sets').value);
+                    const stride = l1Sets * 4;
+                    for (let r = 0; r < 4; r++) {
+                        for (let i = 0; i < 6; i++) {
+                            addrs.push(i * stride);
+                        }
+                    }
+                    break;
+            }
+            if (addrs.length > 0) {
+                document.getElementById('sim-addr-input').value = addrs.join(', ');
+            }
+        }
+
+        function parseAddresses() {
+            const input = document.getElementById('sim-addr-input').value.trim();
+            if (!input) return [];
+            return input.split(/[,\s]+/).map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+        }
+
+        function accessAddress(addr) {
+            accessCount++;
+            let time = L1_HIT_TIME;
+            let level = 'L1';
+
+            const r1 = l1Cache.access(addr, false, 'write-back');
+            if (r1.hit) {
+                totalTime += L1_HIT_TIME;
+                logAccess(addr, 'L1 命中', 'log-hit', L1_HIT_TIME);
+                return;
+            }
+
+            // L1 miss -> check L2
+            time += L2_HIT_TIME;
+            const r2 = l2Cache.access(addr, false, 'write-back');
+            if (r2.hit) {
+                totalTime += L1_HIT_TIME + L2_HIT_TIME;
+                logAccess(addr, 'L1缺失 → L2命中', 'log-miss', L1_HIT_TIME + L2_HIT_TIME);
+                return;
+            }
+
+            // L2 miss -> check L3
+            time += L3_HIT_TIME;
+            const r3 = l3Cache.access(addr, false, 'write-back');
+            if (r3.hit) {
+                totalTime += L1_HIT_TIME + L2_HIT_TIME + L3_HIT_TIME;
+                logAccess(addr, 'L1+L2缺失 → L3命中', 'log-miss', L1_HIT_TIME + L2_HIT_TIME + L3_HIT_TIME);
+                return;
+            }
+
+            // All miss -> memory
+            totalTime += L1_HIT_TIME + L2_HIT_TIME + L3_HIT_TIME + MEM_TIME;
+            logAccess(addr, 'L1+L2+L3缺失 → 访问主存', 'log-miss', L1_HIT_TIME + L2_HIT_TIME + L3_HIT_TIME + MEM_TIME);
+        }
+
+        function logAccess(addr, msg, cls, time) {
+            const entry = { addr, msg, cls, time };
+            accessLog.push(entry);
+            const el = document.getElementById('sim-log');
+            const div = document.createElement('div');
+            div.className = 'log-entry ' + cls;
+            div.textContent = `[#${accessCount}] 地址 0x${addr.toString(16).padStart(4, '0')} (${addr}) — ${msg} — ${time} ns`;
+            el.prepend(div);
+            if (el.children.length > 100) el.removeChild(el.lastChild);
+        }
+
+        function runSequence() {
+            resetSim();
+            const addrs = parseAddresses();
+            if (addrs.length === 0) return;
+            addressQueue = addrs;
+            currentAddrIdx = 0;
+
+            for (const addr of addrs) {
+                accessAddress(addr);
+            }
+            currentAddrIdx = addrs.length;
+            updateStats();
+            drawCaches();
+        }
+
+        function stepNext() {
+            if (addressQueue.length === 0) {
+                const addrs = parseAddresses();
+                if (addrs.length === 0) return;
+                resetSim();
+                addressQueue = addrs;
+                currentAddrIdx = 0;
+            }
+
+            if (currentAddrIdx >= addressQueue.length) {
+                currentAddrIdx = 0;
+                // Don't reset - allow re-running
+            }
+
+            accessAddress(addressQueue[currentAddrIdx]);
+            currentAddrIdx++;
+            updateStats();
+            drawCaches();
+        }
+
+        function updateStats() {
+            const s1 = l1Cache ? l1Cache.getStats() : { accesses: 0, hits: 0, misses: 0 };
+            const s2 = l2Cache ? l2Cache.getStats() : { accesses: 0, hits: 0, misses: 0 };
+            const s3 = l3Cache ? l3Cache.getStats() : { accesses: 0, hits: 0, misses: 0 };
+
+            const l1Rate = s1.accesses > 0 ? (s1.hits / s1.accesses * 100) : 0;
+            const l2Rate = s2.accesses > 0 ? (s2.hits / s2.accesses * 100) : 0;
+            const l3Rate = s3.accesses > 0 ? (s3.hits / s3.accesses * 100) : 0;
+
+            document.getElementById('sim-l1-hitrate').textContent = l1Rate.toFixed(1) + '%';
+            document.getElementById('sim-l1-detail').textContent = s1.hits + ' 命中 / ' + s1.accesses + ' 访问';
+            document.getElementById('sim-l2-hitrate').textContent = l2Rate.toFixed(1) + '%';
+            document.getElementById('sim-l2-detail').textContent = s2.hits + ' 命中 / ' + s2.accesses + ' 访问';
+            document.getElementById('sim-l3-hitrate').textContent = l3Rate.toFixed(1) + '%';
+            document.getElementById('sim-l3-detail').textContent = s3.hits + ' 命中 / ' + s3.accesses + ' 访问';
+
+            const amat = accessCount > 0 ? (totalTime / accessCount) : 0;
+            document.getElementById('sim-amat').textContent = amat.toFixed(2) + ' ns';
+            document.getElementById('sim-amat-detail').textContent = totalTime.toFixed(0) + ' ns / ' + accessCount + ' 次';
+            document.getElementById('sim-total-time').textContent = totalTime.toFixed(0) + ' ns';
+            document.getElementById('sim-total-detail').textContent = accessCount + ' 次访问';
+        }
+
+        function drawCaches() {
+            ({ ctx, w, h } = MemUtils.initCanvas(canvas, 500));
+            ctx.clearRect(0, 0, w, h);
+
+            if (!l1Cache) return;
+
+            const l1Sets = l1Cache.getSets();
+            const l2Sets = l2Cache.getSets();
+            const l3Sets = l3Cache.getSets();
+
+            const blockW = 48;
+            const blockH = 26;
+            const gap = 3;
+            const setGap = 2;
+            const labelW = 75;
+            const startX = labelW + 10;
+
+            drawCacheLevel('L1 Cache', l1Sets, '#ff5252', 20, startX, blockW, blockH, gap, setGap);
+
+            const l1EndY = 20 + l1Sets.length * (blockH + setGap) + 15;
+            drawCacheLevel('L2 Cache', l2Sets, '#ffab40', l1EndY + 10, startX, blockW, blockH, gap, setGap);
+
+            const l2EndY = l1EndY + 10 + l2Sets.length * (blockH + setGap) + 15;
+            drawCacheLevel('L3 Cache', l3Sets, '#ffd740', l2EndY + 10, startX, blockW, blockH, gap, setGap);
+
+            // Main Memory indicator
+            const l3EndY = l2EndY + 10 + l3Sets.length * (blockH + setGap) + 10;
+            MemUtils.drawMemoryBlock(ctx, startX, l3EndY, Math.min(w - startX - 20, 300), 30, '主存 (Main Memory)', '#4fc3f7', {
+                radius: 4,
+                font: 'bold 11px "JetBrains Mono", monospace'
+            });
+        }
+
+        function drawCacheLevel(name, sets, color, startY, startX, blockW, blockH, gap, setGap) {
+            // Level label
+            ctx.font = 'bold 13px "JetBrains Mono", monospace';
+            ctx.fillStyle = color;
+            ctx.textAlign = 'left';
+            ctx.fillText(name, 10, startY + 10);
+
+            for (let s = 0; s < sets.length; s++) {
+                const sy = startY + s * (blockH + setGap);
+
+                // Set index
+                ctx.font = '9px "JetBrains Mono", monospace';
+                ctx.fillStyle = MemUtils.COLORS.textMut;
+                ctx.textAlign = 'right';
+                ctx.fillText('Set ' + s, startX - 6, sy + blockH / 2 + 3);
+
+                for (let way = 0; way < sets[s].length; way++) {
+                    const block = sets[s][way];
+                    const bx = startX + way * (blockW + gap);
+
+                    if (block.valid) {
+                        const label = 'T:' + block.tag;
+                        MemUtils.drawMemoryBlock(ctx, bx, sy, blockW, blockH, label, color, {
+                            highlight: false,
+                            radius: 3,
+                            font: '10px "JetBrains Mono", monospace'
+                        });
+                    } else {
+                        ctx.strokeStyle = MemUtils.hexToRgba(color, 0.2);
+                        ctx.lineWidth = 1;
+                        ctx.setLineDash([2, 2]);
+                        ctx.beginPath();
+                        ctx.roundRect(bx, sy, blockW, blockH, 3);
+                        ctx.stroke();
+                        ctx.setLineDash([]);
+                    }
+                }
+            }
+        }
+
+        return { init, rebuildCaches, resetSim, loadPreset, runSequence, stepNext };
+    })();
+
+
+    /* ================================================================
+       Initialize all sections on DOM load
+       ================================================================ */
+    document.addEventListener('DOMContentLoaded', () => {
+        S1.init();
+        S2.init();
+        S3.init();
+        S4.init();
+        S5.init();
+        S6.init();
+
+        // Handle resize
+        let resizeTimer;
+        window.addEventListener('resize', () => {
+            clearTimeout(resizeTimer);
+            resizeTimer = setTimeout(() => {
+                S1.setMode(document.getElementById('mode-multi').classList.contains('active') ? 'multi' : 'single');
+                S2.draw();
+                S3.update();
+                S4.init();
+                S5.update();
+                S6.init();
+            }, 200);
+        });
+    });
+    </script>
+</body>
+</html>

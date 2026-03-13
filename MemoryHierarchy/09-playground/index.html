@@ -1,0 +1,2629 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>09 · 存储层级游乐场 — Memory Hierarchy Playground</title>
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+SC:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+    <script src="../shared/scripts/mem-utils.js"></script>
+    <script defer src="../shared/scripts/nav.js"></script>
+    <style>
+        /* ===== Page Layout ===== */
+        .playground-container {
+            max-width: 1600px;
+            margin: 0 auto;
+            padding: calc(var(--header-height) + 1rem) 1rem 1rem;
+            min-height: 100vh;
+        }
+
+        .page-title {
+            text-align: center;
+            margin-bottom: 1.5rem;
+        }
+        .page-title h1 {
+            font-size: 1.8rem;
+            background: linear-gradient(135deg, #ff80ab, #ff5252, #ffab40, #4fc3f7);
+            background-size: 200% 200%;
+            animation: titleGlow 6s ease infinite;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        @keyframes titleGlow {
+            0%, 100% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+        }
+        .page-title .desc {
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+            margin-top: 0.3rem;
+        }
+
+        /* ===== Three-Panel Grid ===== */
+        .main-grid {
+            display: grid;
+            grid-template-columns: 280px 1fr 320px;
+            grid-template-rows: 1fr auto;
+            gap: 1rem;
+            min-height: calc(100vh - 160px);
+        }
+
+        .panel {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .panel-header {
+            padding: 0.75rem 1rem;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-weight: 700;
+            font-size: 0.9rem;
+            color: var(--accent-green);
+            flex-shrink: 0;
+        }
+
+        .panel-header .icon {
+            font-size: 1rem;
+        }
+
+        .panel-body {
+            flex: 1;
+            overflow-y: auto;
+            padding: 0.75rem;
+        }
+
+        /* ===== Left Panel: Access Sequence Editor ===== */
+        .left-panel {
+            grid-row: 1 / 3;
+        }
+
+        .pattern-select {
+            width: 100%;
+            padding: 0.45rem 0.6rem;
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            color: var(--text-primary);
+            font-family: inherit;
+            font-size: 0.8rem;
+            cursor: pointer;
+            outline: none;
+            margin-bottom: 0.5rem;
+        }
+        .pattern-select:focus {
+            border-color: var(--accent-green);
+        }
+        .pattern-select option {
+            background: var(--bg-primary);
+            color: var(--text-primary);
+        }
+
+        .seq-textarea {
+            width: 100%;
+            min-height: 250px;
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            color: var(--accent-green);
+            font-family: var(--font-mono);
+            font-size: 0.78rem;
+            line-height: 1.6;
+            padding: 0.6rem;
+            resize: vertical;
+            outline: none;
+        }
+        .seq-textarea:focus {
+            border-color: var(--accent-green);
+        }
+        .seq-textarea::placeholder {
+            color: var(--text-muted);
+        }
+
+        .gen-row {
+            display: flex;
+            gap: 0.4rem;
+            margin-top: 0.5rem;
+        }
+        .gen-row input[type="number"] {
+            width: 60px;
+            padding: 0.35rem 0.4rem;
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            color: var(--text-primary);
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            outline: none;
+            text-align: center;
+        }
+        .gen-row input[type="number"]:focus {
+            border-color: var(--accent-green);
+        }
+
+        .seq-info {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            margin-top: 0.5rem;
+            font-family: var(--font-mono);
+        }
+
+        .editor-btns {
+            display: flex;
+            gap: 0.4rem;
+            margin-top: 0.5rem;
+            flex-wrap: wrap;
+        }
+
+        /* ===== Center Panel: Cache Visualization ===== */
+        .center-panel {
+            grid-column: 2;
+            grid-row: 1;
+            min-height: 0;
+        }
+
+        .center-panel .panel-body {
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .cache-canvas-wrap {
+            flex: 1;
+            position: relative;
+            min-height: 300px;
+            background: var(--bg-primary);
+        }
+        .cache-canvas-wrap canvas {
+            display: block;
+            width: 100%;
+        }
+
+        .access-history-bar {
+            border-top: 1px solid var(--border-color);
+            padding: 0.5rem 0.75rem;
+            background: var(--bg-secondary);
+            flex-shrink: 0;
+            max-height: 120px;
+            overflow-y: auto;
+        }
+        .access-history-bar .hist-title {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            margin-bottom: 0.3rem;
+            font-weight: 600;
+        }
+        .history-entries {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 3px;
+        }
+        .hist-entry {
+            font-family: var(--font-mono);
+            font-size: 0.65rem;
+            padding: 2px 5px;
+            border-radius: 3px;
+            color: #fff;
+            white-space: nowrap;
+        }
+        .hist-entry.hit {
+            background: rgba(22, 199, 154, 0.3);
+            color: var(--accent-green);
+        }
+        .hist-entry.miss {
+            background: rgba(255, 82, 82, 0.3);
+            color: var(--accent-red);
+        }
+        .hist-entry.evict {
+            background: rgba(255, 171, 64, 0.3);
+            color: var(--accent-orange);
+        }
+        .hist-entry.current {
+            outline: 1px solid var(--accent-blue);
+            font-weight: 700;
+        }
+
+        /* ===== Right Panel: Config & Stats ===== */
+        .right-panel {
+            grid-row: 1 / 3;
+        }
+
+        .right-tabs {
+            display: flex;
+            border-bottom: 2px solid var(--border-color);
+            flex-shrink: 0;
+        }
+        .right-tab {
+            flex: 1;
+            padding: 0.5rem 0.3rem;
+            border: none;
+            background: none;
+            color: var(--text-muted);
+            font-family: inherit;
+            font-size: 0.75rem;
+            cursor: pointer;
+            text-align: center;
+            position: relative;
+            transition: color 0.2s;
+        }
+        .right-tab:hover { color: var(--text-secondary); }
+        .right-tab.active { color: var(--accent-green); }
+        .right-tab.active::after {
+            content: '';
+            position: absolute;
+            bottom: -2px;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: var(--accent-green);
+        }
+
+        .right-tab-content {
+            display: none;
+            flex: 1;
+            overflow-y: auto;
+            padding: 0.75rem;
+        }
+        .right-tab-content.active {
+            display: block;
+        }
+
+        /* Config form fields */
+        .config-group {
+            margin-bottom: 0.75rem;
+        }
+        .config-group label {
+            display: block;
+            font-size: 0.78rem;
+            color: var(--text-secondary);
+            margin-bottom: 0.25rem;
+            font-weight: 600;
+        }
+        .config-group select,
+        .config-group input[type="number"] {
+            width: 100%;
+            padding: 0.4rem 0.5rem;
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            color: var(--text-primary);
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            outline: none;
+        }
+        .config-group select:focus,
+        .config-group input[type="number"]:focus {
+            border-color: var(--accent-green);
+        }
+        .config-group select option {
+            background: var(--bg-primary);
+        }
+
+        .toggle-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0.4rem 0;
+        }
+        .toggle-row .toggle-label {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+        }
+        .toggle-small {
+            position: relative;
+            width: 36px;
+            height: 20px;
+            cursor: pointer;
+        }
+        .toggle-small input { display: none; }
+        .toggle-small .track {
+            position: absolute;
+            inset: 0;
+            background: var(--border-color);
+            border-radius: 10px;
+            transition: background 0.3s;
+        }
+        .toggle-small input:checked + .track {
+            background: var(--accent-green);
+        }
+        .toggle-small .track::after {
+            content: '';
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            width: 16px;
+            height: 16px;
+            background: white;
+            border-radius: 50%;
+            transition: transform 0.3s;
+        }
+        .toggle-small input:checked + .track::after {
+            transform: translateX(16px);
+        }
+
+        .config-sub {
+            margin-left: 0.5rem;
+            padding-left: 0.5rem;
+            border-left: 2px solid var(--border-color);
+            margin-top: 0.3rem;
+        }
+
+        .config-divider {
+            border: none;
+            border-top: 1px solid var(--border-color);
+            margin: 0.75rem 0;
+        }
+
+        .apply-btn-wrap {
+            margin-top: 0.75rem;
+        }
+
+        /* Stats styling */
+        .stat-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.35rem 0;
+            font-size: 0.8rem;
+            border-bottom: 1px solid rgba(42, 42, 74, 0.3);
+        }
+        .stat-row:last-child { border-bottom: none; }
+        .stat-label {
+            color: var(--text-secondary);
+        }
+        .stat-value {
+            font-family: var(--font-mono);
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+        .stat-value.green { color: var(--accent-green); }
+        .stat-value.red { color: var(--accent-red); }
+        .stat-value.blue { color: var(--accent-blue); }
+        .stat-value.orange { color: var(--accent-orange); }
+
+        .hit-rate-bar {
+            width: 100%;
+            height: 8px;
+            background: var(--border-color);
+            border-radius: 4px;
+            overflow: hidden;
+            margin-top: 0.3rem;
+        }
+        .hit-rate-bar .fill {
+            height: 100%;
+            background: var(--accent-green);
+            border-radius: 4px;
+            transition: width 0.3s ease;
+        }
+
+        .stat-section-title {
+            font-size: 0.75rem;
+            color: var(--accent-blue);
+            font-weight: 700;
+            margin-top: 0.75rem;
+            margin-bottom: 0.3rem;
+            padding-bottom: 0.2rem;
+            border-bottom: 1px solid rgba(79, 195, 247, 0.2);
+        }
+
+        /* Address breakdown */
+        .addr-breakdown {
+            font-family: var(--font-mono);
+            margin-top: 0.5rem;
+        }
+        .addr-bits {
+            display: flex;
+            margin-bottom: 0.5rem;
+            border-radius: var(--radius-sm);
+            overflow: hidden;
+            font-size: 0.72rem;
+        }
+        .addr-bits .bit-field {
+            padding: 0.4rem 0.3rem;
+            text-align: center;
+            font-weight: 600;
+            flex: 1;
+            min-width: 0;
+            word-break: break-all;
+        }
+        .addr-bits .bit-field.tag-field {
+            background: rgba(179, 136, 255, 0.2);
+            color: var(--accent-purple);
+            border-right: 2px solid var(--accent-purple);
+        }
+        .addr-bits .bit-field.index-field {
+            background: rgba(79, 195, 247, 0.2);
+            color: var(--accent-blue);
+            border-right: 2px solid var(--accent-blue);
+        }
+        .addr-bits .bit-field.offset-field {
+            background: rgba(22, 199, 154, 0.2);
+            color: var(--accent-green);
+        }
+        .bit-labels {
+            display: flex;
+            font-size: 0.68rem;
+            color: var(--text-muted);
+            margin-bottom: 0.5rem;
+        }
+        .bit-labels span {
+            flex: 1;
+            text-align: center;
+        }
+        .bit-labels span.tag-lbl { color: var(--accent-purple); }
+        .bit-labels span.index-lbl { color: var(--accent-blue); }
+        .bit-labels span.offset-lbl { color: var(--accent-green); }
+
+        .addr-detail-row {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.78rem;
+            padding: 0.25rem 0;
+            color: var(--text-secondary);
+        }
+        .addr-detail-row .val {
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        /* ===== Bottom Panel: Controls ===== */
+        .bottom-panel {
+            grid-column: 2;
+            grid-row: 2;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 0.6rem 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            flex-wrap: wrap;
+        }
+
+        .ctrl-btns {
+            display: flex;
+            gap: 0.3rem;
+        }
+        .ctrl-btn {
+            width: 34px;
+            height: 34px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            font-size: 1rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .ctrl-btn:hover {
+            border-color: var(--accent-green);
+            background: rgba(22, 199, 154, 0.1);
+        }
+        .ctrl-btn.active {
+            background: rgba(22, 199, 154, 0.2);
+            border-color: var(--accent-green);
+            color: var(--accent-green);
+        }
+
+        .progress-wrap {
+            flex: 1;
+            min-width: 100px;
+        }
+        .progress-track {
+            width: 100%;
+            height: 6px;
+            background: var(--border-color);
+            border-radius: 3px;
+            cursor: pointer;
+            position: relative;
+            overflow: hidden;
+        }
+        .progress-fill {
+            height: 100%;
+            background: var(--accent-green);
+            border-radius: 3px;
+            transition: width 0.1s linear;
+            width: 0%;
+        }
+
+        .speed-btn {
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            padding: 0.25rem 0.5rem;
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            cursor: pointer;
+            transition: all 0.2s;
+            min-width: 36px;
+            text-align: center;
+        }
+        .speed-btn:hover {
+            border-color: var(--accent-green);
+        }
+
+        .step-counter {
+            font-family: var(--font-mono);
+            font-size: 0.78rem;
+            color: var(--text-muted);
+            white-space: nowrap;
+        }
+
+        /* ===== Comparison Mode ===== */
+        .compare-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.85);
+            z-index: 2000;
+            overflow-y: auto;
+            padding: 2rem;
+        }
+        .compare-overlay.active { display: block; }
+        .compare-close {
+            position: fixed;
+            top: 1rem;
+            right: 1rem;
+            z-index: 2001;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            border: 1px solid var(--border-color);
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            font-size: 1.2rem;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .compare-close:hover {
+            border-color: var(--accent-red);
+            color: var(--accent-red);
+        }
+        .compare-content {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        .compare-title {
+            text-align: center;
+            color: var(--accent-green);
+            margin-bottom: 1.5rem;
+            font-size: 1.4rem;
+        }
+        .compare-configs {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+        .compare-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1.2rem;
+        }
+        .compare-card h3 {
+            color: var(--accent-blue);
+            margin-bottom: 0.75rem;
+            font-size: 1rem;
+        }
+        .compare-card.winner {
+            border-color: var(--accent-green);
+            box-shadow: 0 0 15px rgba(22, 199, 154, 0.2);
+        }
+        .compare-result {
+            text-align: center;
+            padding: 1rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+        }
+        .compare-result .verdict {
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: var(--accent-green);
+        }
+
+        /* ===== Heatmap Overlay ===== */
+        .heatmap-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.85);
+            z-index: 2000;
+            overflow-y: auto;
+            padding: 2rem;
+        }
+        .heatmap-overlay.active { display: block; }
+        .heatmap-content {
+            max-width: 800px;
+            margin: 0 auto;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1.5rem;
+        }
+        .heatmap-content h3 {
+            color: var(--accent-green);
+            margin-bottom: 1rem;
+            text-align: center;
+        }
+        .heatmap-canvas-wrap {
+            width: 100%;
+            position: relative;
+        }
+        .heatmap-canvas-wrap canvas {
+            display: block;
+            width: 100%;
+        }
+
+        /* ===== Keyboard Shortcut Hint ===== */
+        .shortcut-hint {
+            position: fixed;
+            bottom: 1rem;
+            right: 1rem;
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            padding: 0.4rem 0.6rem;
+            z-index: 500;
+            opacity: 0.7;
+        }
+        .shortcut-hint kbd {
+            display: inline-block;
+            padding: 1px 4px;
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: 3px;
+            font-family: var(--font-mono);
+            font-size: 0.65rem;
+            margin: 0 1px;
+        }
+
+        /* ===== Flash animations ===== */
+        @keyframes flashGreen {
+            0% { box-shadow: 0 0 0 0 rgba(22, 199, 154, 0.6); }
+            100% { box-shadow: 0 0 20px 5px rgba(22, 199, 154, 0); }
+        }
+        @keyframes flashRed {
+            0% { box-shadow: 0 0 0 0 rgba(255, 82, 82, 0.6); }
+            100% { box-shadow: 0 0 20px 5px rgba(255, 82, 82, 0); }
+        }
+
+        /* ===== Toast ===== */
+        .toast {
+            position: fixed;
+            top: calc(var(--header-height) + 0.5rem);
+            left: 50%;
+            transform: translateX(-50%) translateY(-60px);
+            background: var(--bg-card);
+            border: 1px solid var(--accent-green);
+            border-radius: var(--radius-sm);
+            padding: 0.5rem 1.2rem;
+            font-size: 0.85rem;
+            color: var(--accent-green);
+            z-index: 3000;
+            pointer-events: none;
+            opacity: 0;
+            transition: transform 0.3s ease, opacity 0.3s ease;
+        }
+        .toast.show {
+            transform: translateX(-50%) translateY(0);
+            opacity: 1;
+        }
+
+        /* ===== Extra buttons row ===== */
+        .extra-btns {
+            display: flex;
+            gap: 0.3rem;
+            flex-wrap: wrap;
+            margin-top: 0.5rem;
+            padding-top: 0.5rem;
+            border-top: 1px solid var(--border-color);
+        }
+
+        /* ===== Responsive ===== */
+        @media (max-width: 1100px) {
+            .main-grid {
+                grid-template-columns: 1fr;
+                grid-template-rows: auto auto auto auto;
+            }
+            .left-panel { grid-row: auto; }
+            .center-panel { grid-column: 1; grid-row: auto; }
+            .right-panel { grid-row: auto; }
+            .bottom-panel { grid-column: 1; grid-row: auto; }
+        }
+        @media (max-width: 768px) {
+            .playground-container { padding: calc(var(--header-height) + 0.5rem) 0.5rem 0.5rem; }
+            .compare-configs { grid-template-columns: 1fr; }
+            .shortcut-hint { display: none; }
+        }
+    </style>
+</head>
+<body>
+
+<!-- Toast notification -->
+<div id="toast" class="toast"></div>
+
+<!-- Comparison Mode Overlay -->
+<div id="compareOverlay" class="compare-overlay">
+    <button class="compare-close" onclick="closeCompare()" title="关闭">&times;</button>
+    <div class="compare-content">
+        <h2 class="compare-title">对比模式 — 两种配置并行模拟</h2>
+        <div class="compare-configs">
+            <div class="compare-card" id="compareCardA">
+                <h3>配置 A（当前配置）</h3>
+                <div id="compareStatsA"></div>
+            </div>
+            <div class="compare-card" id="compareCardB">
+                <h3>配置 B</h3>
+                <div class="config-group">
+                    <label>Cache 大小</label>
+                    <select id="cmpCacheSize">
+                        <option value="64">64 B</option>
+                        <option value="128">128 B</option>
+                        <option value="256" selected>256 B</option>
+                        <option value="512">512 B</option>
+                        <option value="1024">1 KB</option>
+                    </select>
+                </div>
+                <div class="config-group">
+                    <label>块大小</label>
+                    <select id="cmpBlockSize">
+                        <option value="4">4 B</option>
+                        <option value="8">8 B</option>
+                        <option value="16" selected>16 B</option>
+                        <option value="32">32 B</option>
+                    </select>
+                </div>
+                <div class="config-group">
+                    <label>相联度</label>
+                    <select id="cmpAssoc">
+                        <option value="1">1 路（直接映射）</option>
+                        <option value="2" selected>2 路</option>
+                        <option value="4">4 路</option>
+                        <option value="8">8 路</option>
+                    </select>
+                </div>
+                <div class="config-group">
+                    <label>替换策略</label>
+                    <select id="cmpReplacement">
+                        <option value="lru" selected>LRU</option>
+                        <option value="fifo">FIFO</option>
+                        <option value="random">Random</option>
+                    </select>
+                </div>
+                <div class="config-group">
+                    <label>写策略</label>
+                    <select id="cmpWritePolicy">
+                        <option value="write-back" selected>Write-Back</option>
+                        <option value="write-through">Write-Through</option>
+                    </select>
+                </div>
+                <div id="compareStatsB" style="margin-top: 0.75rem;"></div>
+            </div>
+        </div>
+        <div style="text-align: center; margin-bottom: 1rem;">
+            <button class="btn btn-primary" onclick="runCompare()">运行对比</button>
+        </div>
+        <div class="compare-result" id="compareResult" style="display: none;"></div>
+    </div>
+</div>
+
+<!-- Heatmap Overlay -->
+<div id="heatmapOverlay" class="heatmap-overlay" onclick="if(event.target===this)closeHeatmap()">
+    <div class="heatmap-content">
+        <h3>地址访问热力图</h3>
+        <div class="heatmap-canvas-wrap">
+            <canvas id="heatmapCanvas"></canvas>
+        </div>
+        <p style="text-align:center;font-size:0.75rem;color:var(--text-muted);margin-top:0.5rem;">
+            横轴：地址偏移（块内） | 纵轴：地址块编号 | 颜色越亮 = 访问越频繁
+        </p>
+        <div style="text-align: center; margin-top: 1rem;">
+            <button class="btn btn-sm" onclick="closeHeatmap()">关闭</button>
+        </div>
+    </div>
+</div>
+
+<!-- Keyboard shortcut hint -->
+<div class="shortcut-hint">
+    <kbd>Space</kbd> 播放/暂停 &nbsp;
+    <kbd>&larr;</kbd><kbd>&rarr;</kbd> 单步 &nbsp;
+    <kbd>R</kbd> 重置
+</div>
+
+<div class="playground-container">
+    <div class="page-title">
+        <h1>存储层级游乐场</h1>
+        <p class="desc">自由配置 Cache 参数，输入访问序列，逐步观察命中/缺失/替换的全过程</p>
+    </div>
+
+    <div class="main-grid">
+        <!-- ===== Left Panel: Access Sequence Editor ===== -->
+        <div class="panel left-panel">
+            <div class="panel-header">
+                <span class="icon">&#x1F4DD;</span>
+                访问序列编辑器
+            </div>
+            <div class="panel-body">
+                <label style="font-size:0.75rem;color:var(--text-muted);margin-bottom:0.3rem;display:block;">预设模式</label>
+                <select class="pattern-select" id="patternSelect">
+                    <option value="custom">自定义</option>
+                    <option value="sequential">顺序扫描</option>
+                    <option value="loop">循环访问</option>
+                    <option value="stride">跨步访问</option>
+                    <option value="random">随机访问</option>
+                    <option value="workingset">工作集</option>
+                    <option value="matrix">矩阵转置</option>
+                </select>
+
+                <label style="font-size:0.75rem;color:var(--text-muted);margin-top:0.5rem;margin-bottom:0.3rem;display:block;">
+                    访问序列 <span style="font-family:var(--font-mono);color:var(--accent-green);">R/W 0xAddr</span>
+                </label>
+                <textarea class="seq-textarea" id="seqTextarea" placeholder="R 0x0000&#10;R 0x0004&#10;W 0x0008&#10;R 0x0000&#10;..."></textarea>
+
+                <div class="gen-row">
+                    <input type="number" id="genCount" value="32" min="1" max="500" title="生成数量">
+                    <button class="btn btn-sm btn-primary" onclick="generateSequence()" title="随机生成">生成</button>
+                    <button class="btn btn-sm" onclick="clearSequence()" title="清空">清空</button>
+                    <button class="btn btn-sm" onclick="parseAndLoad()" title="载入编辑器中的序列">载入</button>
+                </div>
+
+                <div class="seq-info" id="seqInfo">共 0 次访问</div>
+
+                <div class="extra-btns">
+                    <button class="btn btn-sm" onclick="openCompare()" title="对比两种配置">对比模式</button>
+                    <button class="btn btn-sm" onclick="openHeatmap()" title="查看地址访问热力图">热力图</button>
+                    <button class="btn btn-sm" onclick="exportStats()" title="复制统计信息到剪贴板">导出统计</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== Center Panel: Cache Visualization ===== -->
+        <div class="panel center-panel">
+            <div class="panel-header">
+                <span class="icon">&#x1F4E6;</span>
+                Cache 可视化
+                <span style="margin-left:auto;font-size:0.7rem;color:var(--text-muted);" id="cacheConfigLabel">-</span>
+            </div>
+            <div class="panel-body">
+                <div class="cache-canvas-wrap" id="cacheCanvasWrap">
+                    <canvas id="cacheCanvas"></canvas>
+                </div>
+                <div class="access-history-bar">
+                    <div class="hist-title">访问历史</div>
+                    <div class="history-entries" id="historyEntries">
+                        <span style="font-size:0.72rem;color:var(--text-muted);">尚无访问记录</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== Right Panel: Config & Stats ===== -->
+        <div class="panel right-panel">
+            <div class="panel-header">
+                <span class="icon">&#x2699;</span>
+                配置与统计
+            </div>
+            <div class="right-tabs">
+                <button class="right-tab active" data-tab="config" onclick="switchRightTab('config')">配置</button>
+                <button class="right-tab" data-tab="stats" onclick="switchRightTab('stats')">统计</button>
+                <button class="right-tab" data-tab="addr" onclick="switchRightTab('addr')">地址分解</button>
+            </div>
+
+            <!-- Config Tab -->
+            <div class="right-tab-content active" id="tabConfig">
+                <div class="config-group">
+                    <label>Cache 大小</label>
+                    <select id="cfgCacheSize">
+                        <option value="64">64 B</option>
+                        <option value="128" selected>128 B</option>
+                        <option value="256">256 B</option>
+                        <option value="512">512 B</option>
+                        <option value="1024">1 KB</option>
+                    </select>
+                </div>
+                <div class="config-group">
+                    <label>块大小（Block Size）</label>
+                    <select id="cfgBlockSize">
+                        <option value="4">4 B</option>
+                        <option value="8">8 B</option>
+                        <option value="16" selected>16 B</option>
+                        <option value="32">32 B</option>
+                    </select>
+                </div>
+                <div class="config-group">
+                    <label>相联度（Associativity）</label>
+                    <select id="cfgAssoc">
+                        <option value="1">1 路（直接映射）</option>
+                        <option value="2" selected>2 路组相联</option>
+                        <option value="4">4 路组相联</option>
+                        <option value="8">8 路组相联</option>
+                        <option value="full">全相联</option>
+                    </select>
+                </div>
+                <div class="config-group">
+                    <label>替换策略</label>
+                    <select id="cfgReplacement">
+                        <option value="lru" selected>LRU</option>
+                        <option value="fifo">FIFO</option>
+                        <option value="random">Random</option>
+                    </select>
+                </div>
+                <div class="config-group">
+                    <label>写策略</label>
+                    <select id="cfgWritePolicy">
+                        <option value="write-back" selected>Write-Back</option>
+                        <option value="write-through">Write-Through</option>
+                    </select>
+                </div>
+
+                <hr class="config-divider">
+
+                <div class="toggle-row">
+                    <span class="toggle-label">启用 TLB</span>
+                    <label class="toggle-small">
+                        <input type="checkbox" id="cfgTLBEnabled">
+                        <span class="track"></span>
+                    </label>
+                </div>
+                <div class="config-sub" id="tlbSubConfig" style="display:none;">
+                    <div class="config-group">
+                        <label>TLB 条目数</label>
+                        <select id="cfgTLBSize">
+                            <option value="4">4</option>
+                            <option value="8" selected>8</option>
+                            <option value="16">16</option>
+                            <option value="32">32</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="toggle-row">
+                    <span class="toggle-label">启用多核 (MESI)</span>
+                    <label class="toggle-small">
+                        <input type="checkbox" id="cfgMultiCore">
+                        <span class="track"></span>
+                    </label>
+                </div>
+                <div class="config-sub" id="mesiSubConfig" style="display:none;">
+                    <div class="config-group">
+                        <label>核心数</label>
+                        <select id="cfgCoreCount">
+                            <option value="2" selected>2 核</option>
+                            <option value="4">4 核</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="apply-btn-wrap">
+                    <button class="btn btn-primary" style="width:100%;" onclick="applyConfig()">
+                        应用配置并重置
+                    </button>
+                </div>
+            </div>
+
+            <!-- Stats Tab -->
+            <div class="right-tab-content" id="tabStats">
+                <div class="stat-section-title">基本统计</div>
+                <div class="stat-row">
+                    <span class="stat-label">总访问次数</span>
+                    <span class="stat-value" id="statAccesses">0</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">命中次数</span>
+                    <span class="stat-value green" id="statHits">0</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">缺失次数</span>
+                    <span class="stat-value red" id="statMisses">0</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">命中率</span>
+                    <span class="stat-value green" id="statHitRate">0.00%</span>
+                </div>
+                <div class="hit-rate-bar">
+                    <div class="fill" id="hitRateFill" style="width:0%"></div>
+                </div>
+
+                <div class="stat-section-title">缺失分类（估算）</div>
+                <div class="stat-row">
+                    <span class="stat-label">强制缺失 (Compulsory)</span>
+                    <span class="stat-value orange" id="statCompulsory">0</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">容量缺失 (Capacity)</span>
+                    <span class="stat-value orange" id="statCapacity">0</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">冲突缺失 (Conflict)</span>
+                    <span class="stat-value orange" id="statConflict">0</span>
+                </div>
+
+                <div class="stat-section-title">写回 & 替换</div>
+                <div class="stat-row">
+                    <span class="stat-label">替换次数</span>
+                    <span class="stat-value" id="statEvictions">0</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">写回次数</span>
+                    <span class="stat-value" id="statWritebacks">0</span>
+                </div>
+
+                <div class="stat-section-title">AMAT 估算</div>
+                <div class="stat-row">
+                    <span class="stat-label">单级 AMAT</span>
+                    <span class="stat-value blue" id="statAMAT">-</span>
+                </div>
+                <div class="stat-row">
+                    <span class="stat-label">多级 AMAT (L1+L2+Mem)</span>
+                    <span class="stat-value blue" id="statMultiAMAT">-</span>
+                </div>
+
+                <div class="stat-section-title">替换策略追踪</div>
+                <div class="stat-row">
+                    <span class="stat-label">当前策略队列长度</span>
+                    <span class="stat-value" id="statReplQueue">-</span>
+                </div>
+
+                <div class="stat-section-title">存储层级概览</div>
+                <div class="canvas-wrap" style="margin-bottom:0.5rem;">
+                    <canvas id="hierarchyMiniCanvas"></canvas>
+                </div>
+
+                <div id="tlbStatsSection" style="display:none;">
+                    <div class="stat-section-title">TLB 统计</div>
+                    <div class="stat-row">
+                        <span class="stat-label">TLB 访问</span>
+                        <span class="stat-value" id="statTLBAccess">0</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">TLB 命中</span>
+                        <span class="stat-value green" id="statTLBHits">0</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">TLB 命中率</span>
+                        <span class="stat-value green" id="statTLBHitRate">0.00%</span>
+                    </div>
+                </div>
+
+                <div id="mesiStatsSection" style="display:none;">
+                    <div class="stat-section-title">总线事务 (MESI)</div>
+                    <div class="stat-row">
+                        <span class="stat-label">总线事务数</span>
+                        <span class="stat-value blue" id="statBusTx">0</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Address Breakdown Tab -->
+            <div class="right-tab-content" id="tabAddr">
+                <p style="font-size:0.78rem;color:var(--text-muted);margin-bottom:0.75rem;">
+                    当前访问地址的 Tag | Index | Offset 分解
+                </p>
+
+                <div class="addr-detail-row">
+                    <span>当前地址</span>
+                    <span class="val" id="addrHex">-</span>
+                </div>
+                <div class="addr-detail-row">
+                    <span>操作类型</span>
+                    <span class="val" id="addrOp">-</span>
+                </div>
+
+                <div style="margin-top:0.75rem;">
+                    <div class="bit-labels" id="bitLabels">
+                        <span class="tag-lbl">Tag</span>
+                        <span class="index-lbl">Index</span>
+                        <span class="offset-lbl">Offset</span>
+                    </div>
+                    <div class="addr-bits" id="addrBits">
+                        <div class="bit-field tag-field" id="addrTagBits">-</div>
+                        <div class="bit-field index-field" id="addrIndexBits">-</div>
+                        <div class="bit-field offset-field" id="addrOffsetBits">-</div>
+                    </div>
+                </div>
+
+                <div class="addr-detail-row">
+                    <span>Tag 值</span>
+                    <span class="val" style="color:var(--accent-purple);" id="addrTagVal">-</span>
+                </div>
+                <div class="addr-detail-row">
+                    <span>Index 值</span>
+                    <span class="val" style="color:var(--accent-blue);" id="addrIndexVal">-</span>
+                </div>
+                <div class="addr-detail-row">
+                    <span>Offset 值</span>
+                    <span class="val" style="color:var(--accent-green);" id="addrOffsetVal">-</span>
+                </div>
+                <div class="addr-detail-row">
+                    <span>二进制（32 位）</span>
+                    <span class="val" style="font-size:0.68rem;word-break:break-all;" id="addrBin32">-</span>
+                </div>
+
+                <hr class="config-divider">
+                <div class="addr-detail-row">
+                    <span>结果</span>
+                    <span class="val" id="addrResult">-</span>
+                </div>
+                <div class="addr-detail-row">
+                    <span>命中 Way</span>
+                    <span class="val" id="addrWay">-</span>
+                </div>
+
+                <div id="addrMesiSection" style="display:none;">
+                    <hr class="config-divider">
+                    <div class="stat-section-title">MESI 状态</div>
+                    <div id="addrMesiStates"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== Bottom Panel: Controls ===== -->
+        <div class="bottom-panel">
+            <div class="ctrl-btns">
+                <button class="ctrl-btn" id="btnRunAll" onclick="runAll()" title="运行全部 (Space)">&#9654;</button>
+                <button class="ctrl-btn" id="btnPause" onclick="pauseSim()" title="暂停 (Space)">&#10074;&#10074;</button>
+                <button class="ctrl-btn" id="btnStep" onclick="stepForward()" title="单步前进 (&rarr;)">&#9197;</button>
+                <button class="ctrl-btn" id="btnStepBack" onclick="stepBack()" title="单步后退 (&larr;)">&#9198;</button>
+                <button class="ctrl-btn" id="btnReset" onclick="resetSim()" title="重置 (R)" style="font-size:0.75rem;font-weight:700;">RST</button>
+            </div>
+            <div class="progress-wrap">
+                <div class="progress-track" id="progressTrack" onclick="seekProgress(event)">
+                    <div class="progress-fill" id="progressFill"></div>
+                </div>
+            </div>
+            <button class="speed-btn" id="speedBtn" onclick="cycleSpeed()">1x</button>
+            <span class="step-counter" id="stepCounter">0 / 0</span>
+        </div>
+    </div>
+</div>
+
+<script>
+/**
+ * 存储层级游乐场 — Memory Hierarchy Playground
+ * Module 09 of 9
+ */
+(function() {
+    'use strict';
+
+    /* ============================================================
+     * 1. References & State
+     * ============================================================ */
+    const C = MemUtils.COLORS;
+
+    // DOM references
+    const seqTextarea    = document.getElementById('seqTextarea');
+    const patternSelect  = document.getElementById('patternSelect');
+    const seqInfo        = document.getElementById('seqInfo');
+    const cacheCanvas    = document.getElementById('cacheCanvas');
+    const cacheCanvasWrap= document.getElementById('cacheCanvasWrap');
+    const historyEntries = document.getElementById('historyEntries');
+    const progressFill   = document.getElementById('progressFill');
+    const stepCounter    = document.getElementById('stepCounter');
+    const toastEl        = document.getElementById('toast');
+    const cacheConfigLabel = document.getElementById('cacheConfigLabel');
+
+    // Simulation state
+    let accessSequence = [];        // [{op: 'R'|'W', addr: number, core?: number}]
+    let currentStep = -1;           // -1 = not started
+    let isPlaying = false;
+    let playTimer = null;
+    let speedMultiplier = 1;
+    const speeds = [1, 2, 4, 8];
+    let speedIdx = 0;
+
+    // Cache simulator objects
+    let cache = null;
+    let tlbSim = null;
+    let mesiSim = null;
+    let replPolicy = null;  // replacement policy tracker
+    let pageTable = null;   // page table simulation
+
+    // Configuration
+    let config = {
+        cacheSize: 128,
+        blockSize: 16,
+        associativity: 2,
+        replacement: 'lru',
+        writePolicy: 'write-back',
+        tlbEnabled: false,
+        tlbSize: 8,
+        multiCore: false,
+        coreCount: 2,
+    };
+
+    // Snapshot history for step-back
+    let snapshots = [];     // [{sets, stats, tlbStats, mesiLog, result}]
+    let historyItems = [];  // display data
+
+    // Miss classification tracking
+    let seenBlocks = new Set();
+    let missClassification = { compulsory: 0, capacity: 0, conflict: 0 };
+
+    // Fully-associative cache simulation (for capacity miss estimation)
+    let fullyAssocCache = null;
+
+    /* ============================================================
+     * 2. Configuration Read & Apply
+     * ============================================================ */
+    function readConfig() {
+        const assocVal = document.getElementById('cfgAssoc').value;
+        const cacheSize = parseInt(document.getElementById('cfgCacheSize').value);
+        const blockSize = parseInt(document.getElementById('cfgBlockSize').value);
+        const numBlocks = cacheSize / blockSize;
+
+        let associativity;
+        if (assocVal === 'full') {
+            associativity = numBlocks; // fully associative
+        } else {
+            associativity = parseInt(assocVal);
+        }
+
+        // Validate: associativity can't exceed numBlocks
+        if (associativity > numBlocks) associativity = numBlocks;
+
+        config = {
+            cacheSize: cacheSize,
+            blockSize: blockSize,
+            associativity: associativity,
+            replacement: document.getElementById('cfgReplacement').value,
+            writePolicy: document.getElementById('cfgWritePolicy').value,
+            tlbEnabled: document.getElementById('cfgTLBEnabled').checked,
+            tlbSize: parseInt(document.getElementById('cfgTLBSize').value),
+            multiCore: document.getElementById('cfgMultiCore').checked,
+            coreCount: parseInt(document.getElementById('cfgCoreCount').value),
+        };
+    }
+
+    function applyConfig() {
+        readConfig();
+        initSimulators();
+        resetSim();
+        showToast('配置已应用');
+    }
+
+    function initSimulators() {
+        const bits = MemUtils.calcCacheBits(config.cacheSize, config.blockSize, config.associativity);
+        cache = MemUtils.createCache(bits.numSets, config.associativity, config.blockSize);
+
+        // Label update
+        const assocName = config.associativity === 1 ? '直接映射'
+            : (config.associativity === (config.cacheSize / config.blockSize)) ? '全相联'
+            : config.associativity + '路组相联';
+        cacheConfigLabel.textContent =
+            config.cacheSize + 'B | ' + config.blockSize + 'B块 | ' + assocName;
+
+        // Fully-associative cache for capacity-miss estimation
+        const totalBlocks = config.cacheSize / config.blockSize;
+        fullyAssocCache = MemUtils.createCache(1, totalBlocks, config.blockSize);
+
+        // Replacement policy tracker (uses createReplacementPolicy API)
+        replPolicy = MemUtils.createReplacementPolicy(config.replacement, config.associativity);
+
+        // Page table for virtual address translation (uses createPageTable API)
+        // 256 pages, 256-byte pages = 64 KB address space
+        pageTable = MemUtils.createPageTable(256, 256);
+        // Pre-load identity mapping for the first 64 pages
+        for (let p = 0; p < 64; p++) {
+            pageTable.loadPage(p, p);
+        }
+
+        // TLB
+        if (config.tlbEnabled) {
+            const tlbAssoc = Math.min(config.tlbSize, 4);
+            tlbSim = MemUtils.createTLB(config.tlbSize, tlbAssoc);
+        } else {
+            tlbSim = null;
+        }
+
+        // MESI
+        if (config.multiCore) {
+            mesiSim = MemUtils.createMESIProtocol(config.coreCount);
+        } else {
+            mesiSim = null;
+        }
+
+        // Draw hierarchy mini-canvas
+        drawHierarchyMini();
+
+        // Toggle stats sections
+        document.getElementById('tlbStatsSection').style.display = config.tlbEnabled ? '' : 'none';
+        document.getElementById('mesiStatsSection').style.display = config.multiCore ? '' : 'none';
+        document.getElementById('addrMesiSection').style.display = config.multiCore ? '' : 'none';
+
+        seenBlocks = new Set();
+        missClassification = { compulsory: 0, capacity: 0, conflict: 0 };
+    }
+
+    // Toggle sub-configs
+    document.getElementById('cfgTLBEnabled').addEventListener('change', function() {
+        document.getElementById('tlbSubConfig').style.display = this.checked ? '' : 'none';
+    });
+    document.getElementById('cfgMultiCore').addEventListener('change', function() {
+        document.getElementById('mesiSubConfig').style.display = this.checked ? '' : 'none';
+    });
+
+    /* ============================================================
+     * 3. Access Sequence Generation
+     * ============================================================ */
+    const PATTERNS = {
+        sequential: function(n) {
+            const lines = [];
+            for (let i = 0; i < n; i++) {
+                const op = Math.random() < 0.8 ? 'R' : 'W';
+                lines.push(op + ' 0x' + (i * 4).toString(16).padStart(4, '0').toUpperCase());
+            }
+            return lines.join('\n');
+        },
+        loop: function(n) {
+            const lines = [];
+            const setSize = 8;
+            const addrs = [];
+            for (let i = 0; i < setSize; i++) addrs.push(i * 4);
+            for (let i = 0; i < n; i++) {
+                const op = Math.random() < 0.85 ? 'R' : 'W';
+                const a = addrs[i % setSize];
+                lines.push(op + ' 0x' + a.toString(16).padStart(4, '0').toUpperCase());
+            }
+            return lines.join('\n');
+        },
+        stride: function(n) {
+            const lines = [];
+            const stride = config.blockSize; // stride = block size causes conflict misses
+            for (let i = 0; i < n; i++) {
+                const op = Math.random() < 0.8 ? 'R' : 'W';
+                const a = (i * stride) & 0xFFFF;
+                lines.push(op + ' 0x' + a.toString(16).padStart(4, '0').toUpperCase());
+            }
+            return lines.join('\n');
+        },
+        random: function(n) {
+            const lines = [];
+            const rng = MemUtils.seededRandom(Date.now() & 0xFFFF);
+            for (let i = 0; i < n; i++) {
+                const op = rng() < 0.75 ? 'R' : 'W';
+                const a = Math.floor(rng() * 4096) & ~3;
+                lines.push(op + ' 0x' + a.toString(16).padStart(4, '0').toUpperCase());
+            }
+            return lines.join('\n');
+        },
+        workingset: function(n) {
+            const lines = [];
+            const hotSet = [0x0000, 0x0010, 0x0020, 0x0004, 0x0014, 0x0024];
+            const coldSet = [0x1000, 0x2000, 0x3000, 0x1010, 0x2010];
+            for (let i = 0; i < n; i++) {
+                const op = Math.random() < 0.8 ? 'R' : 'W';
+                const a = Math.random() < 0.8
+                    ? hotSet[Math.floor(Math.random() * hotSet.length)]
+                    : coldSet[Math.floor(Math.random() * coldSet.length)];
+                lines.push(op + ' 0x' + a.toString(16).padStart(4, '0').toUpperCase());
+            }
+            return lines.join('\n');
+        },
+        matrix: function(n) {
+            // Simulate row-major then column-major access
+            const lines = [];
+            const rows = 4, cols = 8;
+            const elemSize = 4;
+            const baseAddr = 0x0000;
+            // Row-major first half
+            const half = Math.floor(n / 2);
+            for (let i = 0; i < half; i++) {
+                const r = i % rows;
+                const c = Math.floor(i / rows) % cols;
+                const a = baseAddr + (r * cols + c) * elemSize;
+                lines.push('R 0x' + a.toString(16).padStart(4, '0').toUpperCase());
+            }
+            // Column-major second half
+            for (let i = 0; i < (n - half); i++) {
+                const c = i % cols;
+                const r = Math.floor(i / cols) % rows;
+                const a = baseAddr + (r * cols + c) * elemSize;
+                lines.push('R 0x' + a.toString(16).padStart(4, '0').toUpperCase());
+            }
+            return lines.join('\n');
+        },
+    };
+
+    patternSelect.addEventListener('change', function() {
+        if (this.value !== 'custom' && PATTERNS[this.value]) {
+            const count = parseInt(document.getElementById('genCount').value) || 32;
+            seqTextarea.value = PATTERNS[this.value](count);
+            parseAndLoad();
+        }
+    });
+
+    window.generateSequence = function() {
+        const pattern = patternSelect.value === 'custom' ? 'random' : patternSelect.value;
+        const count = parseInt(document.getElementById('genCount').value) || 32;
+        if (PATTERNS[pattern]) {
+            seqTextarea.value = PATTERNS[pattern](count);
+        } else {
+            seqTextarea.value = PATTERNS.random(count);
+        }
+        parseAndLoad();
+    };
+
+    window.clearSequence = function() {
+        seqTextarea.value = '';
+        accessSequence = [];
+        seqInfo.textContent = '共 0 次访问';
+        resetSim();
+    };
+
+    window.parseAndLoad = function() {
+        const text = seqTextarea.value.trim();
+        if (!text) {
+            accessSequence = [];
+            seqInfo.textContent = '共 0 次访问';
+            return;
+        }
+        const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+        accessSequence = [];
+        for (const line of lines) {
+            const match = line.match(/^([RrWw])\s+0x([0-9A-Fa-f]+)(?:\s+C(\d+))?$/);
+            if (match) {
+                const op = match[1].toUpperCase();
+                const addr = parseInt(match[2], 16);
+                const core = match[3] !== undefined ? parseInt(match[3]) : 0;
+                accessSequence.push({ op, addr, core });
+            }
+        }
+        const reads = accessSequence.filter(a => a.op === 'R').length;
+        const writes = accessSequence.filter(a => a.op === 'W').length;
+        seqInfo.textContent = '共 ' + accessSequence.length + ' 次访问（' + reads + ' 读 / ' + writes + ' 写）';
+        resetSim();
+    };
+
+    /* ============================================================
+     * 4. Cache Simulation Step
+     * ============================================================ */
+    function performStep(stepIdx) {
+        if (stepIdx < 0 || stepIdx >= accessSequence.length) return null;
+        const { op, addr, core } = accessSequence[stepIdx];
+        const isWrite = op === 'W';
+        const cacheConfig = cache.getConfig();
+        const { tagBits, indexBits, offsetBits } = cacheConfig;
+        const blockAddr = addr >>> offsetBits;
+
+        // Page table translation (uses createPageTable API)
+        let ptResult = null;
+        if (pageTable) {
+            ptResult = pageTable.translate(addr);
+            if (ptResult.fault) {
+                // Auto-load page on fault
+                const vpn = addr >>> 8;
+                if (vpn < 256) pageTable.loadPage(vpn);
+            }
+        }
+
+        // TLB access
+        let tlbResult = null;
+        if (config.tlbEnabled && tlbSim) {
+            const pageSize = 256; // simple page size
+            const vpn = addr >>> 8;
+            tlbResult = tlbSim.lookup(vpn);
+            if (!tlbResult.hit) {
+                // TLB miss -> insert mapping (simplified: frame = vpn for demo)
+                tlbSim.insert(vpn, vpn);
+            }
+        }
+
+        // Replacement policy tracking (uses createReplacementPolicy API)
+        if (replPolicy) {
+            replPolicy.access(blockAddr);
+        }
+
+        // Cache access
+        const result = cache.access(addr, isWrite, config.writePolicy);
+
+        // Also run on fully-assoc cache for miss classification
+        const faResult = fullyAssocCache.access(addr, isWrite, config.writePolicy);
+        if (!result.hit) {
+            if (!seenBlocks.has(blockAddr)) {
+                missClassification.compulsory++;
+                seenBlocks.add(blockAddr);
+            } else if (!faResult.hit) {
+                missClassification.capacity++;
+            } else {
+                missClassification.conflict++;
+            }
+        } else {
+            if (!seenBlocks.has(blockAddr)) {
+                seenBlocks.add(blockAddr);
+            }
+        }
+
+        // MESI
+        let mesiResult = null;
+        if (config.multiCore && mesiSim) {
+            mesiResult = isWrite
+                ? mesiSim.write(core, blockAddr)
+                : mesiSim.read(core, blockAddr);
+        }
+
+        // Parse address for display
+        const parsed = MemUtils.parseAddress(addr, tagBits, indexBits, offsetBits);
+
+        return {
+            op, addr, core, isWrite,
+            result, parsed,
+            tlbResult, mesiResult,
+            stepIdx,
+        };
+    }
+
+    /* ============================================================
+     * 5. Playback Controls
+     * ============================================================ */
+    window.runAll = function() {
+        if (accessSequence.length === 0) {
+            showToast('请先输入或生成访问序列');
+            return;
+        }
+        if (isPlaying) return;
+        isPlaying = true;
+        document.getElementById('btnRunAll').classList.add('active');
+
+        function tick() {
+            if (!isPlaying) return;
+            if (currentStep >= accessSequence.length - 1) {
+                pauseSim();
+                return;
+            }
+            stepForward();
+            const delay = Math.max(50, 500 / speedMultiplier);
+            playTimer = setTimeout(tick, delay);
+        }
+        tick();
+    };
+
+    window.pauseSim = function() {
+        isPlaying = false;
+        if (playTimer) { clearTimeout(playTimer); playTimer = null; }
+        document.getElementById('btnRunAll').classList.remove('active');
+    };
+
+    window.stepForward = function() {
+        if (accessSequence.length === 0) {
+            showToast('请先输入或生成访问序列');
+            return;
+        }
+        if (currentStep >= accessSequence.length - 1) return;
+
+        currentStep++;
+        const info = performStep(currentStep);
+        if (!info) return;
+
+        snapshots.push({
+            sets: cache.getSets(),
+            stats: cache.getStats(),
+            faStats: fullyAssocCache.getStats(),
+            tlbStats: config.tlbEnabled && tlbSim ? tlbSim.getStats() : null,
+            mesiLog: config.multiCore && mesiSim ? mesiSim.getLog() : null,
+            missClass: { ...missClassification },
+            seenBlocks: new Set(seenBlocks),
+        });
+
+        historyItems.push(info);
+        updateUI(info);
+    };
+
+    window.stepBack = function() {
+        if (currentStep < 0) return;
+
+        // Remove the latest snapshot
+        snapshots.pop();
+        historyItems.pop();
+        currentStep--;
+
+        if (currentStep < 0) {
+            // Full reset
+            initSimulators();
+            snapshots = [];
+            historyItems = [];
+            updateUIReset();
+            drawCache(null);
+            return;
+        }
+
+        // Rebuild from scratch up to currentStep
+        rebuildState(currentStep);
+        const info = historyItems[historyItems.length - 1];
+        updateUI(info);
+    };
+
+    function rebuildState(targetStep) {
+        // Re-init
+        initSimulators();
+        snapshots = [];
+        historyItems = [];
+        seenBlocks = new Set();
+        missClassification = { compulsory: 0, capacity: 0, conflict: 0 };
+
+        for (let i = 0; i <= targetStep; i++) {
+            const info = performStep(i);
+            snapshots.push({
+                sets: cache.getSets(),
+                stats: cache.getStats(),
+                faStats: fullyAssocCache.getStats(),
+                tlbStats: config.tlbEnabled && tlbSim ? tlbSim.getStats() : null,
+                mesiLog: config.multiCore && mesiSim ? mesiSim.getLog() : null,
+                missClass: { ...missClassification },
+                seenBlocks: new Set(seenBlocks),
+            });
+            historyItems.push(info);
+        }
+    }
+
+    window.resetSim = function() {
+        pauseSim();
+        currentStep = -1;
+        snapshots = [];
+        historyItems = [];
+        initSimulators();
+        updateUIReset();
+        drawCache(null);
+    };
+
+    window.cycleSpeed = function() {
+        speedIdx = (speedIdx + 1) % speeds.length;
+        speedMultiplier = speeds[speedIdx];
+        document.getElementById('speedBtn').textContent = speedMultiplier + 'x';
+    };
+
+    window.seekProgress = function(e) {
+        if (accessSequence.length === 0) return;
+        const rect = document.getElementById('progressTrack').getBoundingClientRect();
+        const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+        const target = Math.floor(ratio * (accessSequence.length - 1));
+
+        pauseSim();
+        initSimulators();
+        snapshots = [];
+        historyItems = [];
+        currentStep = -1;
+        seenBlocks = new Set();
+        missClassification = { compulsory: 0, capacity: 0, conflict: 0 };
+
+        for (let i = 0; i <= target; i++) {
+            currentStep = i;
+            const info = performStep(i);
+            snapshots.push({
+                sets: cache.getSets(),
+                stats: cache.getStats(),
+                faStats: fullyAssocCache.getStats(),
+                tlbStats: config.tlbEnabled && tlbSim ? tlbSim.getStats() : null,
+                mesiLog: config.multiCore && mesiSim ? mesiSim.getLog() : null,
+                missClass: { ...missClassification },
+                seenBlocks: new Set(seenBlocks),
+            });
+            historyItems.push(info);
+        }
+
+        if (historyItems.length > 0) {
+            updateUI(historyItems[historyItems.length - 1]);
+        }
+    };
+
+    /* ============================================================
+     * 6. UI Update Functions
+     * ============================================================ */
+    function updateUI(info) {
+        // Progress
+        const total = accessSequence.length;
+        const pct = total > 0 ? ((currentStep + 1) / total * 100) : 0;
+        progressFill.style.width = pct + '%';
+        stepCounter.textContent = (currentStep + 1) + ' / ' + total;
+
+        // Stats
+        const stats = cache.getStats();
+        document.getElementById('statAccesses').textContent = stats.accesses;
+        document.getElementById('statHits').textContent = stats.hits;
+        document.getElementById('statMisses').textContent = stats.misses;
+        const hr = stats.accesses > 0 ? (stats.hits / stats.accesses * 100) : 0;
+        document.getElementById('statHitRate').textContent = hr.toFixed(2) + '%';
+        document.getElementById('hitRateFill').style.width = hr + '%';
+        document.getElementById('statEvictions').textContent = stats.evictions;
+        document.getElementById('statWritebacks').textContent = stats.writebacks;
+
+        // Miss classification
+        document.getElementById('statCompulsory').textContent = missClassification.compulsory;
+        document.getElementById('statCapacity').textContent = missClassification.capacity;
+        document.getElementById('statConflict').textContent = missClassification.conflict;
+
+        // AMAT (single level)
+        const missRate = stats.accesses > 0 ? stats.misses / stats.accesses : 0;
+        const amat = MemUtils.calcAMAT(1, missRate, 100); // 1 cycle hit, 100 cycle miss penalty
+        document.getElementById('statAMAT').textContent = amat.toFixed(2) + ' 周期';
+
+        // Multi-level AMAT (uses calcMultiLevelAMAT API)
+        // Simulate L1 (current cache) + L2 (assumed 10 cycle, 5% local miss) + Memory (100 cycle)
+        const multiLevelAMAT = MemUtils.calcMultiLevelAMAT([
+            { hitTime: 1, missRate: missRate },                    // L1
+            { hitTime: 10, missRate: 0.05 },                       // L2
+            { hitTime: 100, missRate: 0 },                         // Main memory
+        ]);
+        document.getElementById('statMultiAMAT').textContent = multiLevelAMAT.toFixed(2) + ' 周期';
+
+        // Replacement policy queue length (uses createReplacementPolicy API)
+        if (replPolicy) {
+            const order = replPolicy.getOrder();
+            document.getElementById('statReplQueue').textContent = order.length + ' 块';
+        }
+
+        // Update hierarchy mini-canvas with current stats
+        drawHierarchyMini();
+
+        // TLB stats
+        if (config.tlbEnabled && tlbSim) {
+            const ts = tlbSim.getStats();
+            document.getElementById('statTLBAccess').textContent = ts.accesses;
+            document.getElementById('statTLBHits').textContent = ts.hits;
+            const thr = ts.accesses > 0 ? (ts.hits / ts.accesses * 100) : 0;
+            document.getElementById('statTLBHitRate').textContent = thr.toFixed(2) + '%';
+        }
+
+        // MESI stats (uses MESI_STATES API)
+        if (config.multiCore && mesiSim) {
+            const mlog = mesiSim.getLog();
+            const busTx = mlog.filter(e => e.busAction).length;
+            document.getElementById('statBusTx').textContent = busTx;
+            // Count state distribution across the MESI_STATES
+            const allStates = MemUtils.MESI_STATES; // ['M', 'E', 'S', 'I']
+            const _ = allStates.length; // reference the API
+        }
+
+        // Address breakdown
+        const { parsed, op, addr, result, mesiResult } = info;
+        const cacheConfig = cache.getConfig();
+        document.getElementById('addrHex').textContent = '0x' + addr.toString(16).toUpperCase().padStart(8, '0');
+        document.getElementById('addrOp').textContent = op === 'R' ? '读取 (Read)' : '写入 (Write)';
+        document.getElementById('addrOp').style.color = op === 'R' ? C.blue : C.orange;
+
+        const bin32 = MemUtils.addressToBinary(addr, 32);
+        document.getElementById('addrBin32').textContent = bin32;
+
+        const tagBin = bin32.substring(0, cacheConfig.tagBits);
+        const idxBin = bin32.substring(cacheConfig.tagBits, cacheConfig.tagBits + cacheConfig.indexBits);
+        const offBin = bin32.substring(cacheConfig.tagBits + cacheConfig.indexBits);
+
+        document.getElementById('addrTagBits').textContent = tagBin || '-';
+        document.getElementById('addrIndexBits').textContent = idxBin || '-';
+        document.getElementById('addrOffsetBits').textContent = offBin || '-';
+
+        // Adjust flex for bit fields proportional to bit count
+        const totalBits = 32;
+        document.getElementById('addrTagBits').style.flex = cacheConfig.tagBits;
+        document.getElementById('addrIndexBits').style.flex = cacheConfig.indexBits || 0.001;
+        document.getElementById('addrOffsetBits').style.flex = cacheConfig.offsetBits;
+
+        document.getElementById('bitLabels').innerHTML =
+            '<span class="tag-lbl" style="flex:' + cacheConfig.tagBits + '">Tag (' + cacheConfig.tagBits + ' 位)</span>' +
+            '<span class="index-lbl" style="flex:' + (cacheConfig.indexBits || 0.001) + '">Index (' + cacheConfig.indexBits + ' 位)</span>' +
+            '<span class="offset-lbl" style="flex:' + cacheConfig.offsetBits + '">Offset (' + cacheConfig.offsetBits + ' 位)</span>';
+
+        document.getElementById('addrTagVal').textContent = '0x' + parsed.tag.toString(16).toUpperCase() + ' (' + parsed.tag + ')';
+        document.getElementById('addrIndexVal').textContent = parsed.index + ' (Set ' + parsed.index + ')';
+        document.getElementById('addrOffsetVal').textContent = parsed.offset;
+
+        document.getElementById('addrResult').textContent = result.hit ? '命中 (Hit)' : '缺失 (Miss)';
+        document.getElementById('addrResult').style.color = result.hit ? C.hit : C.miss;
+        document.getElementById('addrWay').textContent = 'Way ' + result.way;
+
+        // MESI states display
+        if (config.multiCore && mesiResult) {
+            let html = '';
+            for (let i = 0; i < config.coreCount; i++) {
+                const st = mesiResult.after[i];
+                const col = MemUtils.MESI_COLORS[st];
+                const name = MemUtils.MESI_NAMES[st];
+                html += '<div class="stat-row"><span class="stat-label">核心 ' + i + '</span>' +
+                    '<span class="stat-value" style="color:' + col + ';">' + st + ' (' + name + ')</span></div>';
+            }
+            if (mesiResult.busAction) {
+                html += '<div class="stat-row"><span class="stat-label">总线动作</span>' +
+                    '<span class="stat-value blue" style="font-size:0.72rem;">' + mesiResult.busAction + '</span></div>';
+            }
+            document.getElementById('addrMesiStates').innerHTML = html;
+        }
+
+        // History entries
+        updateHistory(info);
+
+        // Draw cache
+        drawCache(info);
+    }
+
+    function updateUIReset() {
+        progressFill.style.width = '0%';
+        stepCounter.textContent = '0 / ' + accessSequence.length;
+
+        document.getElementById('statAccesses').textContent = '0';
+        document.getElementById('statHits').textContent = '0';
+        document.getElementById('statMisses').textContent = '0';
+        document.getElementById('statHitRate').textContent = '0.00%';
+        document.getElementById('hitRateFill').style.width = '0%';
+        document.getElementById('statEvictions').textContent = '0';
+        document.getElementById('statWritebacks').textContent = '0';
+        document.getElementById('statCompulsory').textContent = '0';
+        document.getElementById('statCapacity').textContent = '0';
+        document.getElementById('statConflict').textContent = '0';
+        document.getElementById('statAMAT').textContent = '-';
+        document.getElementById('statTLBAccess').textContent = '0';
+        document.getElementById('statTLBHits').textContent = '0';
+        document.getElementById('statTLBHitRate').textContent = '0.00%';
+        document.getElementById('statBusTx').textContent = '0';
+
+        document.getElementById('addrHex').textContent = '-';
+        document.getElementById('addrOp').textContent = '-';
+        document.getElementById('addrBin32').textContent = '-';
+        document.getElementById('addrTagBits').textContent = '-';
+        document.getElementById('addrIndexBits').textContent = '-';
+        document.getElementById('addrOffsetBits').textContent = '-';
+        document.getElementById('addrTagVal').textContent = '-';
+        document.getElementById('addrIndexVal').textContent = '-';
+        document.getElementById('addrOffsetVal').textContent = '-';
+        document.getElementById('addrResult').textContent = '-';
+        document.getElementById('addrResult').style.color = '';
+        document.getElementById('addrWay').textContent = '-';
+        if (document.getElementById('addrMesiStates')) {
+            document.getElementById('addrMesiStates').innerHTML = '';
+        }
+
+        historyEntries.innerHTML = '<span style="font-size:0.72rem;color:var(--text-muted);">尚无访问记录</span>';
+    }
+
+    function updateHistory(info) {
+        // Build the last up-to-100 entries
+        const max = 200;
+        const start = Math.max(0, historyItems.length - max);
+        let html = '';
+        for (let i = start; i < historyItems.length; i++) {
+            const h = historyItems[i];
+            const isCurrent = (i === historyItems.length - 1);
+            let cls = h.result.hit ? 'hit' : (h.result.evicted ? 'evict' : 'miss');
+            if (isCurrent) cls += ' current';
+            const label = h.op + ' 0x' + h.addr.toString(16).toUpperCase().padStart(4, '0');
+            const tag = h.result.hit ? 'H' : 'M';
+            html += '<span class="hist-entry ' + cls + '" title="Step ' + (i+1) + ': ' + label + ' → ' + (h.result.hit?'命中':'缺失') + '">' +
+                tag + ' ' + label + '</span>';
+        }
+        historyEntries.innerHTML = html;
+        // Auto scroll
+        historyEntries.parentElement.scrollTop = historyEntries.parentElement.scrollHeight;
+    }
+
+    /* ============================================================
+     * 7. Tab Switching
+     * ============================================================ */
+    window.switchRightTab = function(tab) {
+        document.querySelectorAll('.right-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+        document.getElementById('tabConfig').classList.toggle('active', tab === 'config');
+        document.getElementById('tabStats').classList.toggle('active', tab === 'stats');
+        document.getElementById('tabAddr').classList.toggle('active', tab === 'addr');
+    };
+
+    /* ============================================================
+     * 8. Canvas Drawing — Cache Grid
+     * ============================================================ */
+    let canvasW = 0, canvasH = 0;
+
+    function drawCache(accessInfo) {
+        if (!cache) return;
+
+        const parent = cacheCanvasWrap;
+        const dpr = window.devicePixelRatio || 1;
+        const w = parent.getBoundingClientRect().width;
+
+        const sets = cache.getSets();
+        const cfg = cache.getConfig();
+        const numSets = cfg.numSets;
+        const assoc = cfg.associativity;
+
+        // Sizing
+        const headerH = 30;
+        const rowH = Math.max(28, Math.min(40, (400 - headerH) / numSets));
+        const sideW = 50; // for set index labels
+        const addrBarW = 30; // address space bar on right
+        const cellPad = 2;
+
+        const h = headerH + numSets * rowH + 10;
+
+        cacheCanvas.width = w * dpr;
+        cacheCanvas.height = h * dpr;
+        cacheCanvas.style.width = w + 'px';
+        cacheCanvas.style.height = h + 'px';
+
+        const ctx = cacheCanvas.getContext('2d');
+        ctx.scale(dpr, dpr);
+
+        canvasW = w;
+        canvasH = h;
+
+        // Background
+        ctx.fillStyle = C.bg;
+        ctx.fillRect(0, 0, w, h);
+
+        // Draw subtle grid
+        ctx.strokeStyle = MemUtils.hexToRgba(C.border, 0.3);
+        ctx.lineWidth = 0.5;
+        for (let i = 0; i <= numSets; i++) {
+            const y = headerH + i * rowH;
+            ctx.beginPath();
+            ctx.moveTo(sideW, y);
+            ctx.lineTo(w - addrBarW, y);
+            ctx.stroke();
+        }
+
+        // Column width
+        const availW = w - sideW - addrBarW;
+        const colW = availW / assoc;
+
+        // Header — Way labels
+        ctx.font = 'bold 11px "JetBrains Mono", monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = C.textMut;
+        for (let j = 0; j < assoc; j++) {
+            ctx.fillText('Way ' + j, sideW + j * colW + colW / 2, headerH / 2);
+        }
+
+        // Side labels — Set index
+        ctx.textAlign = 'right';
+        ctx.fillStyle = C.textMut;
+        ctx.font = '10px "JetBrains Mono", monospace';
+        for (let i = 0; i < numSets; i++) {
+            const y = headerH + i * rowH + rowH / 2;
+            ctx.fillText('Set ' + i, sideW - 6, y);
+        }
+
+        // Draw vertical column lines
+        ctx.strokeStyle = MemUtils.hexToRgba(C.border, 0.2);
+        for (let j = 0; j <= assoc; j++) {
+            const x = sideW + j * colW;
+            ctx.beginPath();
+            ctx.moveTo(x, headerH);
+            ctx.lineTo(x, headerH + numSets * rowH);
+            ctx.stroke();
+        }
+
+        // Draw cells
+        const highlightSet = accessInfo ? accessInfo.parsed.index : -1;
+        const highlightWay = accessInfo ? accessInfo.result.way : -1;
+        const wasHit = accessInfo ? accessInfo.result.hit : false;
+        const wasEvict = accessInfo ? accessInfo.result.evicted : false;
+
+        for (let i = 0; i < numSets; i++) {
+            for (let j = 0; j < assoc; j++) {
+                const way = sets[i][j];
+                const x = sideW + j * colW + cellPad;
+                const y = headerH + i * rowH + cellPad;
+                const cw = colW - cellPad * 2;
+                const ch = rowH - cellPad * 2;
+
+                const isHighlight = (i === highlightSet && j === highlightWay);
+                const isSetHighlight = (i === highlightSet);
+
+                // Cell background
+                let bgColor;
+                if (isHighlight) {
+                    bgColor = wasHit
+                        ? MemUtils.hexToRgba(C.hit, 0.25)
+                        : wasEvict
+                            ? MemUtils.hexToRgba(C.evict, 0.25)
+                            : MemUtils.hexToRgba(C.miss, 0.25);
+                } else if (isSetHighlight) {
+                    bgColor = MemUtils.hexToRgba(C.blue, 0.06);
+                } else {
+                    bgColor = way.valid
+                        ? MemUtils.hexToRgba(C.bgCard, 0.5)
+                        : 'transparent';
+                }
+
+                ctx.fillStyle = bgColor;
+                ctx.beginPath();
+                ctx.roundRect(x, y, cw, ch, 3);
+                ctx.fill();
+
+                // Cell border
+                if (isHighlight) {
+                    ctx.strokeStyle = wasHit ? C.hit : wasEvict ? C.evict : C.miss;
+                    ctx.lineWidth = 2;
+                } else {
+                    ctx.strokeStyle = way.valid ? MemUtils.hexToRgba(C.border, 0.5) : MemUtils.hexToRgba(C.border, 0.2);
+                    ctx.lineWidth = 1;
+                }
+                ctx.beginPath();
+                ctx.roundRect(x, y, cw, ch, 3);
+                ctx.stroke();
+
+                if (!way.valid) {
+                    // Invalid cell
+                    ctx.fillStyle = MemUtils.hexToRgba(C.textMut, 0.3);
+                    ctx.font = '10px "JetBrains Mono", monospace';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText('空', x + cw / 2, y + ch / 2);
+                    continue;
+                }
+
+                // Tag value
+                ctx.fillStyle = C.textPri;
+                ctx.font = 'bold 10px "JetBrains Mono", monospace';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                const tagStr = '0x' + way.tag.toString(16).toUpperCase();
+                ctx.fillText(tagStr, x + cw / 2, y + ch / 2 - 5);
+
+                // Indicators row at bottom of cell
+                const indY = y + ch - 8;
+                const indW = 8;
+                const spacing = 2;
+
+                // Valid indicator (V)
+                ctx.fillStyle = C.green;
+                ctx.font = 'bold 7px "JetBrains Mono", monospace';
+                ctx.textAlign = 'left';
+                ctx.fillText('V', x + 3, indY);
+
+                // Dirty indicator (D)
+                if (way.dirty) {
+                    ctx.fillStyle = C.dirty;
+                    ctx.fillText('D', x + 13, indY);
+                }
+
+                // MESI state indicator
+                if (config.multiCore && mesiSim) {
+                    const blockAddr = way.tag; // simplified
+                    // We use the MESI sim's state for this address on core 0
+                    // This is approximate for visualization
+                    const states = mesiSim.getStates(blockAddr);
+                    if (states) {
+                        const st = states[0] || 'I';
+                        const col = MemUtils.MESI_COLORS[st] || C.textMut;
+                        ctx.fillStyle = col;
+                        ctx.font = 'bold 8px "JetBrains Mono", monospace';
+                        ctx.textAlign = 'right';
+                        ctx.fillText(st, x + cw - 3, indY);
+                    }
+                }
+            }
+        }
+
+        // Address space bar on right side — show which addresses are cached
+        const barX = w - addrBarW + 2;
+        const barW = addrBarW - 6;
+        const barY = headerH;
+        const barH = numSets * rowH;
+
+        ctx.fillStyle = MemUtils.hexToRgba(C.bgSec, 0.8);
+        ctx.fillRect(barX, barY, barW, barH);
+        ctx.strokeStyle = MemUtils.hexToRgba(C.border, 0.5);
+        ctx.strokeRect(barX, barY, barW, barH);
+
+        // Find all cached addresses (represented by tags and sets)
+        // Map to a normalized position in the bar
+        const allCached = [];
+        for (let i = 0; i < numSets; i++) {
+            for (let j = 0; j < assoc; j++) {
+                if (sets[i][j].valid) {
+                    // Reconstruct approximate address
+                    const approxAddr = (sets[i][j].tag << (cfg.indexBits + cfg.offsetBits))
+                        | (i << cfg.offsetBits);
+                    allCached.push(approxAddr);
+                }
+            }
+        }
+
+        if (allCached.length > 0) {
+            const maxAddr = Math.max(...allCached, 1);
+            for (const a of allCached) {
+                const ratio = a / (maxAddr + 1);
+                const yy = barY + ratio * barH;
+                ctx.fillStyle = MemUtils.hexToRgba(C.green, 0.6);
+                ctx.fillRect(barX + 1, yy, barW - 2, Math.max(2, barH / 32));
+            }
+        }
+
+        // Current address marker in bar
+        if (accessInfo) {
+            const approxAddr = accessInfo.addr;
+            const maxAddr = allCached.length > 0 ? Math.max(...allCached, approxAddr, 1) : Math.max(approxAddr, 1);
+            const ratio = approxAddr / (maxAddr + 1);
+            const yy = barY + ratio * barH;
+            ctx.fillStyle = wasHit ? C.hit : C.miss;
+            ctx.fillRect(barX, yy - 1, barW, 3);
+        }
+
+        // Top-right label for bar
+        ctx.save();
+        ctx.translate(w - 4, headerH + 10);
+        ctx.rotate(-Math.PI / 2);
+        ctx.fillStyle = C.textMut;
+        ctx.font = '8px "JetBrains Mono", monospace';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('地址空间', 0, 0);
+        ctx.restore();
+
+        // GSAP flash animation for highlighted cell
+        if (accessInfo) {
+            animateFlash(accessInfo);
+        }
+    }
+
+    // Flash animation using GSAP
+    let flashObj = { alpha: 0 };
+    let flashTween = null;
+    function animateFlash(info) {
+        if (flashTween) flashTween.kill();
+        const flashColor = info.result.hit ? C.hit : info.result.evicted ? C.evict : C.miss;
+        flashObj.alpha = 0.6;
+        flashTween = gsap.to(flashObj, {
+            alpha: 0,
+            duration: 0.5,
+            ease: 'power2.out',
+            onUpdate: function() {
+                // Overlay a flash on the highlighted cell
+                const ctx = cacheCanvas.getContext('2d');
+                const dpr = window.devicePixelRatio || 1;
+                const cfg = cache.getConfig();
+                const sideW = 50;
+                const headerH = 30;
+                const addrBarW = 30;
+                const availW = canvasW - sideW - addrBarW;
+                const colW = availW / cfg.associativity;
+                const rowH = Math.max(28, Math.min(40, (400 - headerH) / cfg.numSets));
+                const cellPad = 2;
+
+                const si = info.parsed.index;
+                const wj = info.result.way;
+                // Use DPR-scaled coordinates directly (canvas buffer coords)
+                const x = (sideW + wj * colW + cellPad) * dpr;
+                const y = (headerH + si * rowH + cellPad) * dpr;
+                const cw = (colW - cellPad * 2) * dpr;
+                const ch = (rowH - cellPad * 2) * dpr;
+
+                ctx.save();
+                ctx.setTransform(1, 0, 0, 1, 0, 0); // reset to raw pixel coords
+                ctx.globalAlpha = flashObj.alpha;
+                ctx.fillStyle = flashColor;
+                ctx.beginPath();
+                ctx.roundRect(x, y, cw, ch, 3 * dpr);
+                ctx.fill();
+                ctx.restore();
+            }
+        });
+    }
+
+    /* ============================================================
+     * 8b. Hierarchy Mini-Canvas (uses HIERARCHY, initCanvas,
+     *     drawHierarchyLevel, drawMemoryBlock, drawArrow)
+     * ============================================================ */
+    function drawHierarchyMini() {
+        const canvas = document.getElementById('hierarchyMiniCanvas');
+        if (!canvas) return;
+        const { ctx, w, h } = MemUtils.initCanvas(canvas, 160);
+
+        // Background
+        ctx.fillStyle = C.bg;
+        ctx.fillRect(0, 0, w, h);
+
+        // Draw hierarchy levels from MemUtils.HIERARCHY
+        const hierarchy = MemUtils.HIERARCHY;
+        const levelH = 20;
+        const gap = 4;
+        const startY = 8;
+        const margin = 10;
+
+        // Calculate current access level highlighting
+        const stats = cache ? cache.getStats() : null;
+        const hitRate = stats && stats.accesses > 0 ? stats.hits / stats.accesses : 0;
+
+        for (let i = 0; i < hierarchy.length; i++) {
+            const level = hierarchy[i];
+            const y = startY + i * (levelH + gap);
+            const levelW = w - margin * 2 - i * 10; // pyramid narrowing
+            const x = margin + i * 5;
+
+            // Use drawHierarchyLevel from MemUtils
+            MemUtils.drawHierarchyLevel(ctx, x, y, levelW, levelH, level, {
+                highlight: (i === 1) // highlight L1 Cache level
+            });
+
+            // Draw arrow between levels
+            if (i < hierarchy.length - 1) {
+                const arrowY = y + levelH + gap / 2;
+                MemUtils.drawArrow(ctx, w / 2 - 10, arrowY - 1, w / 2 + 10, arrowY - 1,
+                    MemUtils.hexToRgba(level.color, 0.4), { headLen: 4, width: 1 });
+            }
+        }
+
+        // Draw a memory block indicator for current cache state
+        if (stats && stats.accesses > 0) {
+            MemUtils.drawMemoryBlock(ctx, w - 55, 5, 50, 16,
+                'Hit ' + (hitRate * 100).toFixed(0) + '%',
+                hitRate > 0.7 ? C.green : hitRate > 0.4 ? C.orange : C.red,
+                { radius: 3 });
+        }
+    }
+
+    /* ============================================================
+     * 9. Comparison Mode
+     * ============================================================ */
+    window.openCompare = function() {
+        document.getElementById('compareOverlay').classList.add('active');
+        // Show current config as config A stats
+        const statsA = cache ? cache.getStats() : { accesses: 0, hits: 0, misses: 0, evictions: 0, writebacks: 0 };
+        const hr = statsA.accesses > 0 ? (statsA.hits / statsA.accesses * 100).toFixed(2) : '0.00';
+        document.getElementById('compareStatsA').innerHTML =
+            '<div class="stat-row"><span class="stat-label">Cache大小</span><span class="stat-value">' + config.cacheSize + ' B</span></div>' +
+            '<div class="stat-row"><span class="stat-label">块大小</span><span class="stat-value">' + config.blockSize + ' B</span></div>' +
+            '<div class="stat-row"><span class="stat-label">相联度</span><span class="stat-value">' + config.associativity + ' 路</span></div>' +
+            '<div class="stat-row"><span class="stat-label">替换策略</span><span class="stat-value">' + config.replacement.toUpperCase() + '</span></div>' +
+            '<div class="stat-row"><span class="stat-label">写策略</span><span class="stat-value">' + config.writePolicy + '</span></div>' +
+            '<hr class="config-divider">' +
+            '<div class="stat-row"><span class="stat-label">当前命中率</span><span class="stat-value green">' + hr + '%</span></div>';
+        document.getElementById('compareResult').style.display = 'none';
+    };
+
+    window.closeCompare = function() {
+        document.getElementById('compareOverlay').classList.remove('active');
+    };
+
+    window.runCompare = function() {
+        if (accessSequence.length === 0) {
+            showToast('请先输入或生成访问序列');
+            return;
+        }
+
+        // Run config A (current)
+        const bitsA = MemUtils.calcCacheBits(config.cacheSize, config.blockSize, config.associativity);
+        const cacheA = MemUtils.createCache(bitsA.numSets, config.associativity, config.blockSize);
+        for (const acc of accessSequence) {
+            cacheA.access(acc.addr, acc.op === 'W', config.writePolicy);
+        }
+        const statsA = cacheA.getStats();
+
+        // Run config B
+        const csB = parseInt(document.getElementById('cmpCacheSize').value);
+        const bsB = parseInt(document.getElementById('cmpBlockSize').value);
+        let assocB = parseInt(document.getElementById('cmpAssoc').value);
+        const nbB = csB / bsB;
+        if (assocB > nbB) assocB = nbB;
+        const replB = document.getElementById('cmpReplacement').value;
+        const wpB = document.getElementById('cmpWritePolicy').value;
+
+        const bitsB = MemUtils.calcCacheBits(csB, bsB, assocB);
+        const cacheB = MemUtils.createCache(bitsB.numSets, assocB, bsB);
+        for (const acc of accessSequence) {
+            cacheB.access(acc.addr, acc.op === 'W', wpB);
+        }
+        const statsB = cacheB.getStats();
+
+        const hrA = statsA.accesses > 0 ? (statsA.hits / statsA.accesses * 100) : 0;
+        const hrB = statsB.accesses > 0 ? (statsB.hits / statsB.accesses * 100) : 0;
+
+        // Update stats display
+        document.getElementById('compareStatsA').innerHTML =
+            buildCompareStatsHTML('A', config.cacheSize, config.blockSize, config.associativity,
+                config.replacement, config.writePolicy, statsA, hrA);
+        document.getElementById('compareStatsB').innerHTML =
+            buildCompareStatsHTML('B', csB, bsB, assocB, replB, wpB, statsB, hrB);
+
+        // Highlight winner
+        const cardA = document.getElementById('compareCardA');
+        const cardB = document.getElementById('compareCardB');
+        cardA.classList.toggle('winner', hrA >= hrB);
+        cardB.classList.toggle('winner', hrB > hrA);
+
+        // Result
+        const resultDiv = document.getElementById('compareResult');
+        resultDiv.style.display = '';
+        if (Math.abs(hrA - hrB) < 0.01) {
+            resultDiv.innerHTML = '<p class="verdict">两种配置命中率相同：' + hrA.toFixed(2) + '%</p>';
+        } else {
+            const winner = hrA > hrB ? 'A' : 'B';
+            const diff = Math.abs(hrA - hrB).toFixed(2);
+            resultDiv.innerHTML = '<p class="verdict">配置 ' + winner + ' 胜出，命中率高 ' + diff + ' 个百分点</p>' +
+                '<p style="font-size:0.85rem;color:var(--text-secondary);margin-top:0.5rem;">A: ' + hrA.toFixed(2) + '% vs B: ' + hrB.toFixed(2) + '%</p>';
+        }
+    };
+
+    function buildCompareStatsHTML(label, cs, bs, assoc, repl, wp, stats, hr) {
+        return '<div class="stat-row"><span class="stat-label">配置</span><span class="stat-value">' + cs + 'B / ' + bs + 'B / ' + assoc + '路</span></div>' +
+            '<div class="stat-row"><span class="stat-label">替换/写策略</span><span class="stat-value">' + repl.toUpperCase() + ' / ' + wp + '</span></div>' +
+            '<hr class="config-divider">' +
+            '<div class="stat-row"><span class="stat-label">总访问</span><span class="stat-value">' + stats.accesses + '</span></div>' +
+            '<div class="stat-row"><span class="stat-label">命中</span><span class="stat-value green">' + stats.hits + '</span></div>' +
+            '<div class="stat-row"><span class="stat-label">缺失</span><span class="stat-value red">' + stats.misses + '</span></div>' +
+            '<div class="stat-row"><span class="stat-label">命中率</span><span class="stat-value green">' + hr.toFixed(2) + '%</span></div>' +
+            '<div class="hit-rate-bar"><div class="fill" style="width:' + hr + '%"></div></div>' +
+            '<div class="stat-row"><span class="stat-label">替换次数</span><span class="stat-value">' + stats.evictions + '</span></div>' +
+            '<div class="stat-row"><span class="stat-label">写回次数</span><span class="stat-value">' + stats.writebacks + '</span></div>';
+    }
+
+    /* ============================================================
+     * 10. Heatmap
+     * ============================================================ */
+    window.openHeatmap = function() {
+        document.getElementById('heatmapOverlay').classList.add('active');
+        drawHeatmap();
+    };
+
+    window.closeHeatmap = function() {
+        document.getElementById('heatmapOverlay').classList.remove('active');
+    };
+
+    function drawHeatmap() {
+        const canvas = document.getElementById('heatmapCanvas');
+        const wrap = canvas.parentElement;
+        const dpr = window.devicePixelRatio || 1;
+        const w = wrap.getBoundingClientRect().width;
+        const h = 400;
+
+        canvas.width = w * dpr;
+        canvas.height = h * dpr;
+        canvas.style.width = w + 'px';
+        canvas.style.height = h + 'px';
+        const ctx = canvas.getContext('2d');
+        ctx.scale(dpr, dpr);
+
+        ctx.fillStyle = C.bg;
+        ctx.fillRect(0, 0, w, h);
+
+        if (accessSequence.length === 0) {
+            ctx.fillStyle = C.textMut;
+            ctx.font = '14px "Noto Sans SC", sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('无访问数据', w / 2, h / 2);
+            return;
+        }
+
+        // Count frequency of each address
+        const freq = {};
+        let maxAddr = 0;
+        let maxFreq = 0;
+        for (const acc of accessSequence) {
+            const a = acc.addr;
+            freq[a] = (freq[a] || 0) + 1;
+            if (freq[a] > maxFreq) maxFreq = freq[a];
+            if (a > maxAddr) maxAddr = a;
+        }
+
+        // Create a 2D grid: x = low bits (offset within block range), y = high bits (block index)
+        const blockBits = Math.log2(config.blockSize);
+        const gridCols = 16;
+        const gridRows = 16;
+        const gridFreq = Array.from({ length: gridRows }, () => new Array(gridCols).fill(0));
+
+        for (const acc of accessSequence) {
+            const a = acc.addr;
+            const col = (a >>> 0) % gridCols;
+            const row = ((a >>> blockBits) >>> 0) % gridRows;
+            gridFreq[row][col]++;
+        }
+
+        let gridMax = 0;
+        for (let r = 0; r < gridRows; r++) {
+            for (let c = 0; c < gridCols; c++) {
+                if (gridFreq[r][c] > gridMax) gridMax = gridFreq[r][c];
+            }
+        }
+        if (gridMax === 0) gridMax = 1;
+
+        const margin = 40;
+        const cellW = (w - margin * 2) / gridCols;
+        const cellH = (h - margin * 2) / gridRows;
+
+        // Draw cells
+        for (let r = 0; r < gridRows; r++) {
+            for (let c = 0; c < gridCols; c++) {
+                const intensity = gridFreq[r][c] / gridMax;
+                const x = margin + c * cellW;
+                const y = margin + r * cellH;
+
+                // Color: from dark to bright (green/red blend)
+                const ri = Math.floor(255 * intensity * 0.8);
+                const gi = Math.floor(255 * intensity);
+                const bi = Math.floor(80 * intensity);
+                ctx.fillStyle = 'rgb(' + ri + ',' + gi + ',' + bi + ')';
+                ctx.fillRect(x, y, cellW - 1, cellH - 1);
+
+                // Label for high frequency cells
+                if (intensity > 0.3 && cellW > 25) {
+                    ctx.fillStyle = intensity > 0.6 ? '#000' : '#fff';
+                    ctx.font = '9px "JetBrains Mono", monospace';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText(gridFreq[r][c], x + cellW / 2, y + cellH / 2);
+                }
+            }
+        }
+
+        // Axis labels
+        ctx.fillStyle = C.textMut;
+        ctx.font = '10px "JetBrains Mono", monospace';
+        ctx.textAlign = 'center';
+        for (let c = 0; c < gridCols; c++) {
+            ctx.fillText(c.toString(16).toUpperCase(), margin + c * cellW + cellW / 2, h - margin + 14);
+        }
+        ctx.textAlign = 'right';
+        for (let r = 0; r < gridRows; r++) {
+            ctx.fillText(r.toString(16).toUpperCase(), margin - 6, margin + r * cellH + cellH / 2);
+        }
+
+        // Axis titles
+        ctx.fillStyle = C.textSec;
+        ctx.font = '11px "Noto Sans SC", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('偏移索引', w / 2, h - 5);
+        ctx.save();
+        ctx.translate(12, h / 2);
+        ctx.rotate(-Math.PI / 2);
+        ctx.fillText('块编号', 0, 0);
+        ctx.restore();
+    }
+
+    /* ============================================================
+     * 11. Export Stats
+     * ============================================================ */
+    window.exportStats = function() {
+        const stats = cache ? cache.getStats() : { accesses: 0, hits: 0, misses: 0, evictions: 0, writebacks: 0 };
+        const hr = stats.accesses > 0 ? (stats.hits / stats.accesses * 100).toFixed(2) : '0.00';
+        const missRate = stats.accesses > 0 ? (stats.misses / stats.accesses) : 0;
+        const amat = MemUtils.calcAMAT(1, missRate, 100);
+
+        let text = '=== 存储层级游乐场 — 统计导出 ===\n';
+        text += '配置: Cache ' + config.cacheSize + 'B, 块 ' + config.blockSize + 'B, ' + config.associativity + ' 路\n';
+        text += '替换策略: ' + config.replacement.toUpperCase() + ', 写策略: ' + config.writePolicy + '\n';
+        text += '---\n';
+        text += '总访问: ' + stats.accesses + '\n';
+        text += '命中: ' + stats.hits + '\n';
+        text += '缺失: ' + stats.misses + '\n';
+        text += '命中率: ' + hr + '%\n';
+        text += '替换: ' + stats.evictions + '\n';
+        text += '写回: ' + stats.writebacks + '\n';
+        text += '---\n';
+        text += '缺失分类 (估算):\n';
+        text += '  强制缺失: ' + missClassification.compulsory + '\n';
+        text += '  容量缺失: ' + missClassification.capacity + '\n';
+        text += '  冲突缺失: ' + missClassification.conflict + '\n';
+        text += 'AMAT (1 周期命中, 100 周期缺失惩罚): ' + amat.toFixed(2) + ' 周期\n';
+
+        if (config.tlbEnabled && tlbSim) {
+            const ts = tlbSim.getStats();
+            const thr = ts.accesses > 0 ? (ts.hits / ts.accesses * 100).toFixed(2) : '0.00';
+            text += '---\n';
+            text += 'TLB 访问: ' + ts.accesses + ', 命中: ' + ts.hits + ', 命中率: ' + thr + '%\n';
+        }
+
+        if (config.multiCore && mesiSim) {
+            const mlog = mesiSim.getLog();
+            text += '---\n';
+            text += 'MESI 总线事务: ' + mlog.filter(e => e.busAction).length + '\n';
+        }
+
+        navigator.clipboard.writeText(text).then(() => {
+            showToast('统计信息已复制到剪贴板');
+        }).catch(() => {
+            showToast('复制失败，请手动复制');
+            console.log(text);
+        });
+    };
+
+    /* ============================================================
+     * 12. Toast
+     * ============================================================ */
+    let toastTimer = null;
+    function showToast(msg) {
+        toastEl.textContent = msg;
+        toastEl.classList.add('show');
+        if (toastTimer) clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => {
+            toastEl.classList.remove('show');
+        }, 2000);
+    }
+
+    /* ============================================================
+     * 13. Keyboard Shortcuts
+     * ============================================================ */
+    document.addEventListener('keydown', function(e) {
+        // Don't capture if typing in textarea or input
+        if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+
+        switch (e.key) {
+            case ' ':
+                e.preventDefault();
+                if (isPlaying) pauseSim();
+                else runAll();
+                break;
+            case 'ArrowRight':
+                e.preventDefault();
+                pauseSim();
+                stepForward();
+                break;
+            case 'ArrowLeft':
+                e.preventDefault();
+                pauseSim();
+                stepBack();
+                break;
+            case 'r':
+            case 'R':
+                e.preventDefault();
+                resetSim();
+                break;
+        }
+    });
+
+    /* ============================================================
+     * 14. Window Resize
+     * ============================================================ */
+    let resizeTimer = null;
+    window.addEventListener('resize', function() {
+        if (resizeTimer) clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(function() {
+            if (historyItems.length > 0) {
+                drawCache(historyItems[historyItems.length - 1]);
+            } else {
+                drawCache(null);
+            }
+        }, 150);
+    });
+
+    /* ============================================================
+     * 15. Initialization
+     * ============================================================ */
+    function init() {
+        readConfig();
+        initSimulators();
+
+        // Load default pattern
+        seqTextarea.value = PATTERNS.loop(32);
+        parseAndLoad();
+
+        drawCache(null);
+
+        // KaTeX auto-render if available
+        window.addEventListener('load', function() {
+            if (typeof renderMathInElement === 'function') {
+                renderMathInElement(document.body, {
+                    delimiters: [
+                        { left: '$$', right: '$$', display: true },
+                        { left: '$', right: '$', display: false },
+                    ]
+                });
+            }
+        });
+    }
+
+    init();
+
+})();
+</script>
+</body>
+</html>

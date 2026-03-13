@@ -1,0 +1,2260 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>虚拟内存 — 存储层级</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+    <!-- KaTeX -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+    <!-- GSAP -->
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+    <!-- Shared Styles -->
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+    <style>
+        /* ========== Page Hero ========== */
+        .hero {
+            text-align: center;
+            padding: 3rem 0 2rem;
+        }
+        .hero h1 {
+            font-size: 2.4rem;
+            background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 0.5rem;
+        }
+        .hero .subtitle {
+            font-size: 1.05rem;
+            color: var(--text-secondary);
+            max-width: 700px;
+            margin: 0 auto;
+        }
+
+        /* ========== Section Alternating BG ========== */
+        .section-alt {
+            background: var(--bg-secondary);
+            margin-left: -2rem;
+            margin-right: -2rem;
+            padding: 2.5rem 2rem;
+            border-top: 1px solid var(--border-color);
+            border-bottom: 1px solid var(--border-color);
+        }
+        @media (max-width: 768px) {
+            .section-alt {
+                margin-left: -1rem;
+                margin-right: -1rem;
+                padding: 2rem 1rem;
+            }
+        }
+
+        /* ========== Canvas Containers ========== */
+        .canvas-container {
+            position: relative;
+            width: 100%;
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+            margin: 1rem 0;
+        }
+        .canvas-container canvas {
+            display: block;
+            width: 100%;
+        }
+
+        /* ========== Controls Row ========== */
+        .controls-row {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 0.75rem;
+            margin: 1rem 0;
+        }
+        .controls-row label {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+        }
+        .controls-row input[type="text"],
+        .controls-row input[type="number"],
+        .controls-row select {
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            color: var(--text-primary);
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            padding: 0.4rem 0.6rem;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        .controls-row input:focus,
+        .controls-row select:focus {
+            border-color: var(--accent-green);
+        }
+
+        /* ========== Page Table Visual ========== */
+        .pt-entry {
+            display: grid;
+            grid-template-columns: 40px 40px 40px 50px 80px;
+            gap: 2px;
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            text-align: center;
+        }
+        .pt-entry > span {
+            padding: 4px 2px;
+            border-radius: 3px;
+        }
+        .pt-header > span {
+            color: var(--accent-blue);
+            font-weight: 600;
+        }
+
+        /* ========== Result Box ========== */
+        .result-box {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1rem 1.2rem;
+            margin: 1rem 0;
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            line-height: 1.8;
+        }
+        .result-box .label {
+            color: var(--text-muted);
+            margin-right: 0.5rem;
+        }
+        .result-box .val-green { color: var(--accent-green); font-weight: 600; }
+        .result-box .val-blue { color: var(--accent-blue); font-weight: 600; }
+        .result-box .val-orange { color: var(--accent-orange); font-weight: 600; }
+        .result-box .val-red { color: var(--accent-red); font-weight: 600; }
+        .result-box .val-purple { color: var(--accent-purple); font-weight: 600; }
+
+        /* ========== Bit Breakdown ========== */
+        .bit-breakdown {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1px;
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            margin: 0.75rem 0;
+        }
+        .bit-breakdown .bit {
+            width: 24px;
+            height: 28px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 3px;
+        }
+        .bit-group-label {
+            text-align: center;
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            margin-top: 2px;
+        }
+
+        /* ========== Algorithm Comparison ========== */
+        .algo-panel {
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1rem;
+            min-height: 200px;
+        }
+        .algo-panel h4 {
+            color: var(--accent-blue);
+            font-size: 0.95rem;
+            margin-bottom: 0.75rem;
+        }
+        .frame-row {
+            display: flex;
+            gap: 4px;
+            margin-bottom: 4px;
+        }
+        .frame-cell {
+            width: 36px;
+            height: 28px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 3px;
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            font-weight: 600;
+            border: 1px solid var(--border-color);
+            background: var(--bg-secondary);
+            color: var(--text-secondary);
+            transition: all 0.3s;
+        }
+        .frame-cell.loaded {
+            border-color: var(--accent-green);
+            background: rgba(22, 199, 154, 0.15);
+            color: var(--accent-green);
+        }
+        .frame-cell.evicted {
+            border-color: var(--accent-red);
+            background: rgba(255, 82, 82, 0.15);
+            color: var(--accent-red);
+        }
+        .frame-cell.hit {
+            border-color: var(--accent-blue);
+            background: rgba(79, 195, 247, 0.2);
+            color: var(--accent-blue);
+        }
+
+        /* ========== Stats Bar ========== */
+        .stat-bar {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin: 0.5rem 0;
+        }
+        .stat-bar .bar-track {
+            flex: 1;
+            height: 8px;
+            background: var(--border-color);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .stat-bar .bar-fill {
+            height: 100%;
+            border-radius: 4px;
+            transition: width 0.5s ease;
+        }
+        .stat-bar .stat-label {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            min-width: 80px;
+        }
+        .stat-bar .stat-value {
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            color: var(--accent-green);
+            min-width: 50px;
+            text-align: right;
+        }
+
+        /* ========== Clock Algo Visual ========== */
+        .clock-canvas-wrap {
+            display: flex;
+            justify-content: center;
+            margin: 1rem 0;
+        }
+
+        /* ========== Tree Visual for Multi-Level ========== */
+        .tree-container {
+            overflow-x: auto;
+            padding: 1rem 0;
+        }
+
+        /* ========== Inline KaTeX ========== */
+        .formula-block {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1rem;
+            margin: 1rem 0;
+            text-align: center;
+            overflow-x: auto;
+        }
+
+        /* ========== Timing diagram ========== */
+        .timing-bar {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin: 0.5rem 0;
+            font-size: 0.8rem;
+        }
+        .timing-bar .t-label {
+            min-width: 120px;
+            color: var(--text-secondary);
+        }
+        .timing-bar .t-bar {
+            height: 20px;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: var(--font-mono);
+            font-size: 0.7rem;
+            color: var(--bg-primary);
+            font-weight: 600;
+            min-width: 30px;
+        }
+        .timing-bar .t-val {
+            font-family: var(--font-mono);
+            color: var(--text-muted);
+            min-width: 80px;
+        }
+
+        /* ========== Process cards ========== */
+        .process-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1rem;
+            text-align: center;
+        }
+        .process-card h4 {
+            margin-bottom: 0.5rem;
+        }
+
+        /* ========== Comparison table ========== */
+        .cmp-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.85rem;
+            margin: 1rem 0;
+        }
+        .cmp-table th, .cmp-table td {
+            padding: 0.5rem 0.8rem;
+            border: 1px solid var(--border-color);
+            text-align: center;
+        }
+        .cmp-table th {
+            background: var(--bg-card);
+            color: var(--accent-blue);
+            font-weight: 600;
+        }
+        .cmp-table td {
+            color: var(--text-secondary);
+        }
+        .cmp-table tr:hover td {
+            background: rgba(79, 195, 247, 0.05);
+        }
+
+        /* ========== Step Timeline ========== */
+        .step-timeline {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+            margin: 1rem 0;
+        }
+        .step-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 0.75rem;
+            padding: 0.5rem;
+            border-radius: var(--radius-sm);
+            transition: background 0.3s;
+        }
+        .step-item.active {
+            background: rgba(22, 199, 154, 0.08);
+        }
+        .step-item .step-num {
+            min-width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: var(--border-color);
+            color: var(--text-muted);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.8rem;
+            font-weight: 700;
+            transition: all 0.3s;
+        }
+        .step-item.active .step-num {
+            background: var(--accent-green);
+            color: var(--bg-primary);
+        }
+        .step-item.done .step-num {
+            background: rgba(22, 199, 154, 0.3);
+            color: var(--accent-green);
+        }
+        .step-item .step-text {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            line-height: 1.6;
+        }
+        .step-item.active .step-text {
+            color: var(--text-primary);
+        }
+
+        /* ========== Ref string display ========== */
+        .ref-string-display {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+            margin: 0.75rem 0;
+        }
+        .ref-item {
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 4px;
+            border: 1px solid var(--border-color);
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            transition: all 0.3s;
+        }
+        .ref-item.current {
+            border-color: var(--accent-green);
+            background: rgba(22, 199, 154, 0.2);
+            color: var(--accent-green);
+            transform: scale(1.15);
+        }
+        .ref-item.processed {
+            opacity: 0.5;
+        }
+        .ref-item.fault {
+            border-color: var(--accent-red);
+            background: rgba(255, 82, 82, 0.15);
+            color: var(--accent-red);
+        }
+        .ref-item.hit-ref {
+            border-color: var(--accent-blue);
+            background: rgba(79, 195, 247, 0.15);
+            color: var(--accent-blue);
+        }
+    </style>
+</head>
+<body>
+    <!-- nav.js auto-injects navigation -->
+    <div class="page-container">
+        <!-- Hero -->
+        <header class="hero">
+            <h1>虚拟内存</h1>
+            <p class="subtitle">Virtual Memory -- 让每个进程拥有独立地址空间的核心抽象机制，实现内存隔离、地址空间扩展与按需加载</p>
+        </header>
+
+        <!-- ============================================================ -->
+        <!-- Section 1: 为什么需要虚拟内存 -->
+        <!-- ============================================================ -->
+        <section id="sec-why" class="section">
+            <div class="section-title">
+                <span class="icon">1</span>
+                <h2>为什么需要虚拟内存</h2>
+            </div>
+            <p>在没有虚拟内存的系统中，多个程序直接使用物理地址。如果进程 A 使用地址 <code>0x1000</code>，进程 B 也想用 <code>0x1000</code>，就会发生地址冲突。虚拟内存通过为每个进程提供独立的虚拟地址空间，完美解决了这个问题。</p>
+
+            <div class="compare-grid cols-3" style="margin:1.5rem 0">
+                <div class="card">
+                    <div class="card-header"><h3 style="color:var(--accent-green)">隔离保护</h3></div>
+                    <p>每个进程有独立的地址空间，无法访问其他进程的内存。操作系统通过页表的保护位实现安全隔离。</p>
+                </div>
+                <div class="card">
+                    <div class="card-header"><h3 style="color:var(--accent-blue)">地址抽象</h3></div>
+                    <p>程序员无需关心物理内存布局。编译器始终假设从地址 0 开始，操作系统负责映射到真实物理地址。</p>
+                </div>
+                <div class="card">
+                    <div class="card-header"><h3 style="color:var(--accent-purple)">超越物理限制</h3></div>
+                    <p>虚拟地址空间可以远大于物理内存。操作系统将暂不使用的页换出到磁盘，按需加载。</p>
+                </div>
+            </div>
+
+            <h3>交互演示：两个进程的虚拟地址映射</h3>
+            <p>下方画布展示两个进程各自的虚拟地址空间如何映射到物理内存。点击虚拟页可手动分配/取消物理帧。</p>
+            <div class="canvas-container" id="why-canvas-wrap">
+                <canvas id="whyCanvas"></canvas>
+            </div>
+            <div class="controls-row">
+                <button class="btn btn-primary" id="whyResetBtn">重置映射</button>
+                <button class="btn" id="whyAutoBtn">自动演示</button>
+                <span class="text-sm text-muted" id="whyStatus">点击虚拟页块分配物理帧</span>
+            </div>
+        </section>
+
+        <!-- ============================================================ -->
+        <!-- Section 2: 页表 -->
+        <!-- ============================================================ -->
+        <section id="sec-pagetable" class="section section-alt">
+            <div class="section-title">
+                <span class="icon">2</span>
+                <h2>页表 (Page Table)</h2>
+            </div>
+            <p>页表是虚拟内存系统的核心数据结构。它将虚拟页号 (VPN) 映射到物理帧号 (PPN/PFN)。每个页表项 (PTE) 包含若干控制位。</p>
+
+            <div class="info-box" style="margin:1rem 0">
+                <p><strong>页表项字段：</strong>有效位 (Valid) 表示页是否在物理内存中；脏位 (Dirty) 表示页是否被修改过；保护位 (Prot) 控制读/写/执行权限；帧号 (Frame) 是物理帧地址。</p>
+            </div>
+
+            <h3>地址翻译流程</h3>
+            <p>输入一个虚拟地址，观察页表查找的完整过程。</p>
+
+            <div class="controls-row">
+                <label>虚拟地址 (hex):</label>
+                <input type="text" id="ptAddrInput" value="0x3A7F" style="width:100px" placeholder="0x....">
+                <label>页大小:</label>
+                <select id="ptPageSizeSelect">
+                    <option value="256">256B (8位偏移)</option>
+                    <option value="4096" selected>4KB (12位偏移)</option>
+                    <option value="16384">16KB (14位偏移)</option>
+                </select>
+                <button class="btn btn-primary" id="ptLookupBtn">查找</button>
+                <button class="btn" id="ptStepBtn">逐步演示</button>
+            </div>
+
+            <div class="canvas-container" id="pt-canvas-wrap">
+                <canvas id="ptCanvas"></canvas>
+            </div>
+
+            <div class="result-box" id="ptResult">
+                <div><span class="label">虚拟地址:</span> <span class="val-blue" id="ptResVA">--</span></div>
+                <div><span class="label">VPN:</span> <span class="val-green" id="ptResVPN">--</span> &nbsp; <span class="label">偏移:</span> <span class="val-orange" id="ptResOffset">--</span></div>
+                <div><span class="label">页表项:</span> <span id="ptResPTE">--</span></div>
+                <div><span class="label">物理地址:</span> <span class="val-purple" id="ptResPA">--</span></div>
+            </div>
+
+            <h3 style="margin-top:1.5rem">页表内容</h3>
+            <p>当前页表的所有表项。绿色=有效，红色=无效，橙色=脏页。</p>
+            <div id="ptTableDisplay" style="overflow-x:auto;margin:1rem 0"></div>
+        </section>
+
+        <!-- ============================================================ -->
+        <!-- Section 3: 地址翻译 -->
+        <!-- ============================================================ -->
+        <section id="sec-translation" class="section">
+            <div class="section-title">
+                <span class="icon">3</span>
+                <h2>地址翻译 (Address Translation)</h2>
+            </div>
+            <p>虚拟地址 (VA) 由虚拟页号 (VPN) 和页内偏移 (Offset) 两部分组成。翻译时，VPN 通过页表查找得到物理页号 (PPN)，再与偏移拼接得到物理地址 (PA)。</p>
+
+            <div class="formula-block">
+                <span id="translationFormula"></span>
+            </div>
+
+            <div class="controls-row">
+                <label>虚拟地址位数:</label>
+                <select id="transVABits">
+                    <option value="16">16 位</option>
+                    <option value="20" selected>20 位</option>
+                    <option value="32">32 位</option>
+                </select>
+                <label>物理地址位数:</label>
+                <select id="transPABits">
+                    <option value="14">14 位</option>
+                    <option value="16" selected>16 位</option>
+                    <option value="24">24 位</option>
+                </select>
+                <label>页大小:</label>
+                <select id="transPageSize">
+                    <option value="4096" selected>4KB</option>
+                    <option value="8192">8KB</option>
+                    <option value="16384">16KB</option>
+                </select>
+            </div>
+            <div class="controls-row">
+                <label>虚拟地址 (hex):</label>
+                <input type="text" id="transVAInput" value="0x7A4B0" style="width:120px">
+                <button class="btn btn-primary" id="transGoBtn">翻译</button>
+                <button class="btn" id="transAnimBtn">动画演示</button>
+            </div>
+
+            <div class="canvas-container" id="trans-canvas-wrap">
+                <canvas id="transCanvas"></canvas>
+            </div>
+
+            <div class="result-box" id="transResult">
+                <div><span class="label">VA 位分解:</span> <span id="transResVABits">--</span></div>
+                <div><span class="label">VPN:</span> <span class="val-green" id="transResVPN">--</span> (<span id="transResVPNDec">--</span>) &nbsp; <span class="label">偏移:</span> <span class="val-orange" id="transResOff">--</span> (<span id="transResOffDec">--</span>)</div>
+                <div><span class="label">PPN:</span> <span class="val-purple" id="transResPPN">--</span> (<span id="transResPPNDec">--</span>)</div>
+                <div><span class="label">PA:</span> <span class="val-blue" id="transResPA">--</span></div>
+            </div>
+
+            <div class="info-box success" style="margin-top:1rem">
+                <p id="transInfoText">调整参数后点击"翻译"，观察不同页大小和地址位数下的地址分解方式。</p>
+            </div>
+        </section>
+
+        <!-- ============================================================ -->
+        <!-- Section 4: 页面错误 -->
+        <!-- ============================================================ -->
+        <section id="sec-pagefault" class="section section-alt">
+            <div class="section-title">
+                <span class="icon">4</span>
+                <h2>页面错误 (Page Fault)</h2>
+            </div>
+            <p>当访问的虚拟页不在物理内存中时（页表项 valid=0），CPU 触发<strong>页面错误异常</strong>。操作系统接管控制，从磁盘加载所需页面，更新页表后重新执行该指令。</p>
+
+            <h3>页面错误处理流程</h3>
+            <div class="step-timeline" id="pfSteps">
+                <div class="step-item" data-step="0">
+                    <span class="step-num">1</span>
+                    <div class="step-text"><strong>CPU 发出虚拟地址</strong> -- 尝试访问一个虚拟页</div>
+                </div>
+                <div class="step-item" data-step="1">
+                    <span class="step-num">2</span>
+                    <div class="step-text"><strong>查询页表</strong> -- 发现 Valid=0，触发页面错误异常</div>
+                </div>
+                <div class="step-item" data-step="2">
+                    <span class="step-num">3</span>
+                    <div class="step-text"><strong>OS 页面错误处理程序</strong> -- 确定页面在磁盘上的位置</div>
+                </div>
+                <div class="step-item" data-step="3">
+                    <span class="step-num">4</span>
+                    <div class="step-text"><strong>磁盘 I/O</strong> -- 读取页面到空闲物理帧 (~10ms)</div>
+                </div>
+                <div class="step-item" data-step="4">
+                    <span class="step-num">5</span>
+                    <div class="step-text"><strong>更新页表</strong> -- 设置 Valid=1，填入物理帧号</div>
+                </div>
+                <div class="step-item" data-step="5">
+                    <span class="step-num">6</span>
+                    <div class="step-text"><strong>重新执行指令</strong> -- 这次页表命中，正常翻译</div>
+                </div>
+            </div>
+
+            <div class="canvas-container" id="pf-canvas-wrap">
+                <canvas id="pfCanvas"></canvas>
+            </div>
+
+            <div class="controls-row">
+                <button class="btn btn-primary" id="pfPlayBtn">播放动画</button>
+                <button class="btn" id="pfResetBtn">重置</button>
+                <button class="btn" id="pfTriggerBtn">触发页面错误</button>
+                <span class="text-sm text-muted" id="pfStatus">点击"播放动画"观察完整流程</span>
+            </div>
+
+            <h3 style="margin-top:1.5rem">时间对比：内存访问 vs 磁盘访问</h3>
+            <div class="timing-bar">
+                <span class="t-label">内存访问</span>
+                <div class="t-bar" style="width:2px;background:var(--accent-green)"></div>
+                <span class="t-val">~100 ns</span>
+            </div>
+            <div class="timing-bar">
+                <span class="t-label">磁盘访问 (页面错误)</span>
+                <div class="t-bar" style="width:min(100%,500px);background:var(--accent-red)">~10,000,000 ns</div>
+                <span class="t-val">~10 ms</span>
+            </div>
+            <div class="info-box warning" style="margin-top:1rem">
+                <p>页面错误代价极高：磁盘访问约 10ms，而内存访问约 100ns，相差约 <strong>100,000 倍</strong>！因此，减少页面错误（高命中率）是虚拟内存性能的关键。</p>
+            </div>
+        </section>
+
+        <!-- ============================================================ -->
+        <!-- Section 5: 页面置换算法 -->
+        <!-- ============================================================ -->
+        <section id="sec-replacement" class="section">
+            <div class="section-title">
+                <span class="icon">5</span>
+                <h2>页面置换算法 (Page Replacement)</h2>
+            </div>
+            <p>当物理内存已满需要加载新页时，操作系统必须选择一个页面换出。不同的置换算法对页面错误率影响巨大。</p>
+
+            <div class="controls-row">
+                <label>页面引用串:</label>
+                <input type="text" id="replRefInput" value="7,0,1,2,0,3,0,4,2,3,0,3,2,1,2,0,1,7,0,1" style="width:340px;max-width:100%">
+                <label>物理帧数:</label>
+                <select id="replFrameCount">
+                    <option value="2">2</option>
+                    <option value="3" selected>3</option>
+                    <option value="4">4</option>
+                    <option value="5">5</option>
+                </select>
+                <button class="btn btn-primary" id="replRunBtn">运行</button>
+                <button class="btn" id="replStepBtn">逐步</button>
+                <button class="btn" id="replResetBtn">重置</button>
+            </div>
+
+            <div id="replRefDisplay" class="ref-string-display"></div>
+
+            <div class="compare-grid cols-4" style="margin:1.5rem 0" id="replGrid">
+                <div class="algo-panel">
+                    <h4>Optimal (最优)</h4>
+                    <div id="optFrames"></div>
+                    <div class="stat-bar"><span class="stat-label">命中率</span><div class="bar-track"><div class="bar-fill" id="optHitBar" style="width:0%;background:var(--accent-green)"></div></div><span class="stat-value" id="optHitVal">--</span></div>
+                    <div class="stat-bar"><span class="stat-label">缺页次数</span><span class="stat-value" id="optFaults" style="color:var(--accent-red)">--</span></div>
+                </div>
+                <div class="algo-panel">
+                    <h4>LRU (最近最少使用)</h4>
+                    <div id="lruFrames"></div>
+                    <div class="stat-bar"><span class="stat-label">命中率</span><div class="bar-track"><div class="bar-fill" id="lruHitBar" style="width:0%;background:var(--accent-blue)"></div></div><span class="stat-value" id="lruHitVal">--</span></div>
+                    <div class="stat-bar"><span class="stat-label">缺页次数</span><span class="stat-value" id="lruFaults" style="color:var(--accent-red)">--</span></div>
+                </div>
+                <div class="algo-panel">
+                    <h4>FIFO (先进先出)</h4>
+                    <div id="fifoFrames"></div>
+                    <div class="stat-bar"><span class="stat-label">命中率</span><div class="bar-track"><div class="bar-fill" id="fifoHitBar" style="width:0%;background:var(--accent-orange)"></div></div><span class="stat-value" id="fifoHitVal">--</span></div>
+                    <div class="stat-bar"><span class="stat-label">缺页次数</span><span class="stat-value" id="fifoFaults" style="color:var(--accent-red)">--</span></div>
+                </div>
+                <div class="algo-panel">
+                    <h4>Clock (时钟)</h4>
+                    <div id="clockFrames"></div>
+                    <div class="stat-bar"><span class="stat-label">命中率</span><div class="bar-track"><div class="bar-fill" id="clockHitBar" style="width:0%;background:var(--accent-purple)"></div></div><span class="stat-value" id="clockHitVal">--</span></div>
+                    <div class="stat-bar"><span class="stat-label">缺页次数</span><span class="stat-value" id="clockFaults" style="color:var(--accent-red)">--</span></div>
+                </div>
+            </div>
+
+            <h3>Clock 算法可视化</h3>
+            <p>时钟算法用环形缓冲区和引用位近似 LRU。时钟指针扫描时，将引用位为 1 的清零，选择第一个引用位为 0 的页换出。</p>
+            <div class="clock-canvas-wrap">
+                <div class="canvas-container" style="max-width:420px" id="clock-canvas-wrap">
+                    <canvas id="clockCanvas"></canvas>
+                </div>
+            </div>
+        </section>
+
+        <!-- ============================================================ -->
+        <!-- Section 6: 多级页表 -->
+        <!-- ============================================================ -->
+        <section id="sec-multilevel" class="section section-alt">
+            <div class="section-title">
+                <span class="icon">6</span>
+                <h2>多级页表 (Multi-Level Page Tables)</h2>
+            </div>
+            <p>单级页表的问题：假设 32 位虚拟地址、4KB 页面，则需要 <code>2^20 = 1,048,576</code> 个页表项。若每项 4B，单个页表就要 4MB -- 每个进程都需要一个！</p>
+
+            <div class="formula-block">
+                <span id="mlFormula"></span>
+            </div>
+
+            <p>解决方案：<strong>多级页表</strong>。将一级页表拆成页目录 + 二级页表，只为实际使用的地址区域分配二级页表。对于稀疏地址空间，可节省大量内存。</p>
+
+            <h3>交互：单级 vs 多级页表内存占用对比</h3>
+            <div class="controls-row">
+                <label>虚拟地址位数:</label>
+                <select id="mlVABits">
+                    <option value="20">20 位 (1MB)</option>
+                    <option value="24">24 位 (16MB)</option>
+                    <option value="32" selected>32 位 (4GB)</option>
+                    <option value="40">40 位 (1TB)</option>
+                    <option value="48">48 位 (256TB)</option>
+                </select>
+                <label>页大小:</label>
+                <select id="mlPageSize">
+                    <option value="4096" selected>4KB</option>
+                    <option value="8192">8KB</option>
+                    <option value="16384">16KB</option>
+                </select>
+                <label>实际使用页面比例:</label>
+                <input type="range" id="mlUsageSlider" min="1" max="100" value="5" style="width:150px">
+                <span class="slider-value" id="mlUsageVal">5%</span>
+            </div>
+
+            <div class="canvas-container" id="ml-canvas-wrap">
+                <canvas id="mlCanvas"></canvas>
+            </div>
+
+            <div id="mlResult" class="result-box">
+                <div><span class="label">总页数:</span> <span class="val-blue" id="mlTotalPages">--</span></div>
+                <div><span class="label">单级页表大小:</span> <span class="val-red" id="mlSingleSize">--</span></div>
+                <div><span class="label">二级页表大小:</span> <span class="val-green" id="ml2LevelSize">--</span></div>
+                <div><span class="label">三级页表大小:</span> <span class="val-purple" id="ml3LevelSize">--</span></div>
+                <div><span class="label">节省:</span> <span class="val-orange" id="mlSaving">--</span></div>
+            </div>
+
+            <h3 style="margin-top:1.5rem">多级页表树形结构</h3>
+            <p>下方画布展示二级页表的树形查找过程。虚拟地址分为三段：页目录索引、页表索引、页内偏移。</p>
+            <div class="canvas-container" id="mltree-canvas-wrap">
+                <canvas id="mlTreeCanvas"></canvas>
+            </div>
+
+            <div class="info-box" style="margin-top:1rem">
+                <p><strong>反向页表 (Inverted Page Table):</strong> 另一种方案是按物理帧建立索引，每个帧一个表项记录哪个进程的哪个虚拟页在此帧。优点是页表大小与物理内存成正比（而非虚拟地址空间），缺点是查找需要哈希搜索。PowerPC 和 IA-64 曾使用此方案。</p>
+            </div>
+        </section>
+
+    </div><!-- /.page-container -->
+
+    <!-- Shared Scripts -->
+    <script src="../shared/scripts/mem-utils.js"></script>
+    <script src="../shared/scripts/nav.js"></script>
+
+    <script>
+    'use strict';
+    /* ================================================================
+       虚拟内存 — 全局状态与工具
+       ================================================================ */
+    const C = MemUtils.COLORS;
+    const DPR = window.devicePixelRatio || 1;
+
+    /* Helper: parse hex string to int */
+    function parseHex(s) {
+        s = s.trim().replace(/^0x/i, '');
+        return parseInt(s, 16) || 0;
+    }
+    function toHex(n, digits) {
+        return '0x' + (n >>> 0).toString(16).toUpperCase().padStart(digits || 4, '0');
+    }
+    function formatBytes(bytes) {
+        if (bytes >= 1024 * 1024 * 1024 * 1024) return (bytes / (1024 * 1024 * 1024 * 1024)).toFixed(1) + ' TB';
+        if (bytes >= 1024 * 1024 * 1024) return (bytes / (1024 * 1024 * 1024)).toFixed(1) + ' GB';
+        if (bytes >= 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+        if (bytes >= 1024) return (bytes / 1024).toFixed(1) + ' KB';
+        return bytes + ' B';
+    }
+
+    /* ================================================================
+       Section 1: 为什么需要虚拟内存
+       ================================================================ */
+    (() => {
+        const canvas = document.getElementById('whyCanvas');
+        const wrap = document.getElementById('why-canvas-wrap');
+        let ctx, W, H;
+        const NUM_VPAGES = 8;
+        const NUM_FRAMES = 8;
+        // Process A and B virtual pages
+        const procA = { name: '进程 A', color: C.blue, vpages: new Array(NUM_VPAGES).fill(-1) };
+        const procB = { name: '进程 B', color: C.purple, vpages: new Array(NUM_VPAGES).fill(-1) };
+        let physFrames = new Array(NUM_FRAMES).fill(null); // { proc, vpage }
+        let animating = false;
+
+        function resize() {
+            ({ ctx, w: W, h: H } = MemUtils.initCanvas(canvas, 400));
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, W, H);
+            const pad = 20;
+            const colW = (W - pad * 4) / 3;
+            const blockH = 32;
+            const gap = 4;
+            const startY = 50;
+
+            // Column headers
+            ctx.font = 'bold 13px "Noto Sans SC", sans-serif';
+            ctx.textAlign = 'center';
+
+            // Process A virtual space
+            const axCenter = pad + colW / 2;
+            ctx.fillStyle = procA.color;
+            ctx.fillText(procA.name + ' 虚拟空间', axCenter, 30);
+            for (let i = 0; i < NUM_VPAGES; i++) {
+                const y = startY + i * (blockH + gap);
+                const mapped = procA.vpages[i] >= 0;
+                MemUtils.drawMemoryBlock(ctx, pad, y, colW, blockH,
+                    'VP ' + i, procA.color,
+                    { highlight: mapped, fill: mapped ? MemUtils.hexToRgba(procA.color, 0.25) : MemUtils.hexToRgba(procA.color, 0.06) });
+            }
+
+            // Physical memory (center)
+            const pxStart = pad * 2 + colW;
+            const pxCenter = pxStart + colW / 2;
+            ctx.fillStyle = C.green;
+            ctx.textAlign = 'center';
+            ctx.fillText('物理内存', pxCenter, 30);
+            for (let i = 0; i < NUM_FRAMES; i++) {
+                const y = startY + i * (blockH + gap);
+                const occ = physFrames[i];
+                let col = C.textMut;
+                let label = 'Frame ' + i;
+                let hl = false;
+                if (occ) {
+                    col = occ.proc === 'A' ? procA.color : procB.color;
+                    label = occ.proc + ':VP' + occ.vpage;
+                    hl = true;
+                }
+                MemUtils.drawMemoryBlock(ctx, pxStart, y, colW, blockH, label, col,
+                    { highlight: hl, fill: hl ? MemUtils.hexToRgba(col, 0.2) : MemUtils.hexToRgba(col, 0.05) });
+            }
+
+            // Process B virtual space
+            const bxStart = pad * 3 + colW * 2;
+            const bxCenter = bxStart + colW / 2;
+            ctx.fillStyle = procB.color;
+            ctx.textAlign = 'center';
+            ctx.fillText(procB.name + ' 虚拟空间', bxCenter, 30);
+            for (let i = 0; i < NUM_VPAGES; i++) {
+                const y = startY + i * (blockH + gap);
+                const mapped = procB.vpages[i] >= 0;
+                MemUtils.drawMemoryBlock(ctx, bxStart, y, colW, blockH,
+                    'VP ' + i, procB.color,
+                    { highlight: mapped, fill: mapped ? MemUtils.hexToRgba(procB.color, 0.25) : MemUtils.hexToRgba(procB.color, 0.06) });
+            }
+
+            // Draw arrows for mappings
+            for (let i = 0; i < NUM_VPAGES; i++) {
+                if (procA.vpages[i] >= 0) {
+                    const fromX = pad + colW;
+                    const fromY = startY + i * (blockH + gap) + blockH / 2;
+                    const toX = pxStart;
+                    const toY = startY + procA.vpages[i] * (blockH + gap) + blockH / 2;
+                    MemUtils.drawArrow(ctx, fromX, fromY, toX, toY, procA.color, { width: 1.5 });
+                }
+                if (procB.vpages[i] >= 0) {
+                    const fromX = bxStart;
+                    const fromY = startY + i * (blockH + gap) + blockH / 2;
+                    const toX = pxStart + colW;
+                    const toY = startY + procB.vpages[i] * (blockH + gap) + blockH / 2;
+                    MemUtils.drawArrow(ctx, fromX, fromY, toX, toY, procB.color, { width: 1.5 });
+                }
+            }
+        }
+
+        function findFreeFrame() {
+            for (let i = 0; i < NUM_FRAMES; i++) {
+                if (!physFrames[i]) return i;
+            }
+            return -1;
+        }
+
+        function handleClick(e) {
+            if (animating) return;
+            const rect = canvas.getBoundingClientRect();
+            const x = (e.clientX - rect.left);
+            const y = (e.clientY - rect.top);
+            const pad = 20;
+            const colW = (W - pad * 4) / 3;
+            const blockH = 32;
+            const gap = 4;
+            const startY = 50;
+
+            // Check Process A clicks
+            for (let i = 0; i < NUM_VPAGES; i++) {
+                const bx = pad;
+                const by = startY + i * (blockH + gap);
+                if (x >= bx && x <= bx + colW && y >= by && y <= by + blockH) {
+                    if (procA.vpages[i] >= 0) {
+                        const frame = procA.vpages[i];
+                        physFrames[frame] = null;
+                        procA.vpages[i] = -1;
+                    } else {
+                        const frame = findFreeFrame();
+                        if (frame >= 0) {
+                            procA.vpages[i] = frame;
+                            physFrames[frame] = { proc: 'A', vpage: i };
+                        }
+                    }
+                    draw();
+                    return;
+                }
+            }
+            // Check Process B clicks
+            const bxStart = pad * 3 + colW * 2;
+            for (let i = 0; i < NUM_VPAGES; i++) {
+                const bx = bxStart;
+                const by = startY + i * (blockH + gap);
+                if (x >= bx && x <= bx + colW && y >= by && y <= by + blockH) {
+                    if (procB.vpages[i] >= 0) {
+                        const frame = procB.vpages[i];
+                        physFrames[frame] = null;
+                        procB.vpages[i] = -1;
+                    } else {
+                        const frame = findFreeFrame();
+                        if (frame >= 0) {
+                            procB.vpages[i] = frame;
+                            physFrames[frame] = { proc: 'B', vpage: i };
+                        }
+                    }
+                    draw();
+                    return;
+                }
+            }
+        }
+
+        function reset() {
+            procA.vpages.fill(-1);
+            procB.vpages.fill(-1);
+            physFrames.fill(null);
+            draw();
+        }
+
+        async function autoDemo() {
+            if (animating) return;
+            animating = true;
+            reset();
+            const sequence = [
+                { proc: procA, vp: 0, pn: 'A' },
+                { proc: procA, vp: 1, pn: 'A' },
+                { proc: procA, vp: 3, pn: 'A' },
+                { proc: procB, vp: 0, pn: 'B' },
+                { proc: procB, vp: 2, pn: 'B' },
+                { proc: procB, vp: 5, pn: 'B' },
+                { proc: procA, vp: 6, pn: 'A' },
+                { proc: procB, vp: 7, pn: 'B' },
+            ];
+            for (const s of sequence) {
+                const frame = findFreeFrame();
+                if (frame >= 0) {
+                    s.proc.vpages[s.vp] = frame;
+                    physFrames[frame] = { proc: s.pn, vpage: s.vp };
+                    draw();
+                    await new Promise(r => setTimeout(r, 400));
+                }
+            }
+            document.getElementById('whyStatus').textContent = '演示完成！点击虚拟页块可修改映射';
+            animating = false;
+        }
+
+        canvas.addEventListener('click', handleClick);
+        document.getElementById('whyResetBtn').addEventListener('click', reset);
+        document.getElementById('whyAutoBtn').addEventListener('click', autoDemo);
+
+        window.addEventListener('resize', () => { resize(); draw(); });
+        resize();
+        draw();
+    })();
+
+    /* ================================================================
+       Section 2: 页表
+       ================================================================ */
+    (() => {
+        const canvas = document.getElementById('ptCanvas');
+        let ctx, W, H;
+        const NUM_PAGES = 16;
+        let pageSize = 4096;
+        let pt = MemUtils.createPageTable(NUM_PAGES, pageSize);
+        let lastLookup = null;
+        let animStep = -1;
+
+        // Pre-load some pages
+        function setupPT() {
+            pt = MemUtils.createPageTable(NUM_PAGES, pageSize);
+            const mappings = [
+                [0, 5], [1, 2], [3, 7], [4, 0], [7, 3], [9, 6], [11, 1], [14, 4]
+            ];
+            mappings.forEach(([vp, fr]) => pt.loadPage(vp, fr));
+            // Mark some dirty
+            const entries = pt.getEntries();
+            // We'll simulate dirty by modifying internal state via loadPage
+            // Re-implement: mark entries 3, 7 dirty
+        }
+
+        function resize() {
+            ({ ctx, w: W, h: H } = MemUtils.initCanvas(canvas, 380));
+        }
+
+        function drawPT() {
+            ctx.clearRect(0, 0, W, H);
+            const entries = pt.getEntries();
+            const pageBits = pt.getPageBits();
+            const pad = 20;
+
+            // Left: Virtual address breakdown
+            if (lastLookup) {
+                const va = lastLookup.va;
+                const vpn = va >>> pageBits;
+                const offset = va & (pageSize - 1);
+                const binaryVA = MemUtils.addressToBinary(va, 16);
+                const vpnBits = 16 - pageBits;
+
+                ctx.font = 'bold 12px "JetBrains Mono", monospace';
+                ctx.textAlign = 'left';
+                ctx.fillStyle = C.textPri;
+                ctx.fillText('虚拟地址: ' + toHex(va), pad, 25);
+
+                // Bit breakdown
+                let bx = pad;
+                const by = 38;
+                const bitW = Math.min(18, (W - pad * 2) / 16);
+                for (let i = 0; i < 16; i++) {
+                    const isVPN = i < vpnBits;
+                    ctx.fillStyle = isVPN ? MemUtils.hexToRgba(C.green, 0.2) : MemUtils.hexToRgba(C.orange, 0.2);
+                    ctx.strokeStyle = isVPN ? C.green : C.orange;
+                    ctx.lineWidth = 1;
+                    ctx.beginPath();
+                    ctx.roundRect(bx, by, bitW - 2, 22, 2);
+                    ctx.fill();
+                    ctx.stroke();
+                    ctx.fillStyle = isVPN ? C.green : C.orange;
+                    ctx.font = '10px "JetBrains Mono", monospace';
+                    ctx.textAlign = 'center';
+                    ctx.fillText(binaryVA[i], bx + (bitW - 2) / 2, by + 15);
+                    bx += bitW;
+                }
+                // Labels
+                ctx.font = '10px "Noto Sans SC", sans-serif';
+                ctx.fillStyle = C.green;
+                ctx.textAlign = 'center';
+                ctx.fillText('VPN=' + vpn, pad + vpnBits * bitW / 2, by + 38);
+                ctx.fillStyle = C.orange;
+                ctx.fillText('Offset=' + offset, pad + vpnBits * bitW + (16 - vpnBits) * bitW / 2, by + 38);
+            }
+
+            // Page table in the middle
+            const tableX = pad;
+            const tableY = 95;
+            const entryH = 16;
+            const entryGap = 2;
+            const colWidths = [32, 32, 32, 40, 60]; // VPN, V, D, Prot, Frame
+            const totalW = colWidths.reduce((a, b) => a + b, 0) + 20;
+
+            // Header
+            ctx.font = 'bold 10px "JetBrains Mono", monospace';
+            ctx.textAlign = 'center';
+            const headers = ['VPN', 'V', 'D', 'Prot', 'Frame'];
+            const headerColors = [C.textSec, C.green, C.orange, C.blue, C.purple];
+            let hx = tableX;
+            headers.forEach((h, i) => {
+                ctx.fillStyle = headerColors[i];
+                ctx.fillText(h, hx + colWidths[i] / 2, tableY);
+                hx += colWidths[i] + 4;
+            });
+
+            // Entries
+            ctx.font = '10px "JetBrains Mono", monospace';
+            for (let i = 0; i < NUM_PAGES; i++) {
+                const ey = tableY + 12 + i * (entryH + entryGap);
+                const e = entries[i];
+                const isHighlight = lastLookup && (lastLookup.va >>> pageBits) === i;
+
+                if (isHighlight) {
+                    ctx.fillStyle = MemUtils.hexToRgba(C.green, 0.1);
+                    ctx.fillRect(tableX - 4, ey - 2, totalW + 8, entryH + 2);
+                }
+
+                let ex = tableX;
+                // VPN
+                ctx.fillStyle = C.textSec;
+                ctx.textAlign = 'center';
+                ctx.fillText(i.toString(), ex + colWidths[0] / 2, ey + entryH - 4);
+                ex += colWidths[0] + 4;
+                // Valid
+                ctx.fillStyle = e.valid ? C.green : C.red;
+                ctx.fillText(e.valid ? '1' : '0', ex + colWidths[1] / 2, ey + entryH - 4);
+                ex += colWidths[1] + 4;
+                // Dirty
+                ctx.fillStyle = e.dirty ? C.orange : C.textMut;
+                ctx.fillText(e.dirty ? '1' : '0', ex + colWidths[2] / 2, ey + entryH - 4);
+                ex += colWidths[2] + 4;
+                // Protection
+                ctx.fillStyle = C.blue;
+                ctx.fillText(e.protection, ex + colWidths[3] / 2, ey + entryH - 4);
+                ex += colWidths[3] + 4;
+                // Frame
+                ctx.fillStyle = e.valid ? C.purple : C.textMut;
+                ctx.fillText(e.valid ? e.frame.toString() : '--', ex + colWidths[4] / 2, ey + entryH - 4);
+            }
+
+            // Right side: Physical memory representation
+            const pmX = W * 0.55;
+            const pmW = W * 0.4;
+            const pmBlockH = 28;
+            const pmGap = 3;
+            const pmY = 30;
+
+            ctx.font = 'bold 12px "Noto Sans SC", sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillStyle = C.purple;
+            ctx.fillText('物理内存帧', pmX + pmW / 2, pmY);
+
+            // Find used frames
+            const usedFrames = {};
+            entries.forEach((e, vpn) => {
+                if (e.valid) usedFrames[e.frame] = vpn;
+            });
+
+            const maxFrame = 8;
+            for (let i = 0; i < maxFrame; i++) {
+                const fy = pmY + 15 + i * (pmBlockH + pmGap);
+                const used = usedFrames[i] !== undefined;
+                const isTarget = lastLookup && !lastLookup.result.fault && lastLookup.result.frame === i;
+                const col = isTarget ? C.green : (used ? C.purple : C.textMut);
+                MemUtils.drawMemoryBlock(ctx, pmX, fy, pmW, pmBlockH,
+                    'Frame ' + i + (used ? ' (VP' + usedFrames[i] + ')' : ''),
+                    col, { highlight: isTarget });
+            }
+
+            // Draw arrow from page table to physical frame if lookup succeeded
+            if (lastLookup && !lastLookup.result.fault) {
+                const vpn = lastLookup.va >>> pageBits;
+                const srcX = tableX + totalW + 8;
+                const srcY = tableY + 12 + vpn * (entryH + entryGap) + entryH / 2;
+                const dstX = pmX;
+                const dstY = pmY + 15 + lastLookup.result.frame * (pmBlockH + pmGap) + pmBlockH / 2;
+                MemUtils.drawArrow(ctx, srcX, srcY, dstX, dstY, C.green, { width: 2 });
+            }
+        }
+
+        function doLookup() {
+            const addrStr = document.getElementById('ptAddrInput').value;
+            pageSize = parseInt(document.getElementById('ptPageSizeSelect').value);
+            setupPT();
+            const va = parseHex(addrStr);
+            const result = pt.translate(va);
+            lastLookup = { va, result };
+
+            const pageBits = pt.getPageBits();
+            const vpn = va >>> pageBits;
+            const offset = va & (pageSize - 1);
+
+            document.getElementById('ptResVA').textContent = toHex(va);
+            document.getElementById('ptResVPN').textContent = vpn;
+            document.getElementById('ptResOffset').textContent = toHex(offset, Math.ceil(pageBits / 4));
+
+            if (result.fault) {
+                document.getElementById('ptResPTE').innerHTML = '<span class="val-red">页面错误! (Valid=0)</span>';
+                document.getElementById('ptResPA').innerHTML = '<span class="val-red">无法翻译</span>';
+            } else {
+                document.getElementById('ptResPTE').innerHTML =
+                    'Valid=<span class="val-green">1</span> Frame=<span class="val-purple">' + result.frame + '</span>';
+                document.getElementById('ptResPA').textContent = toHex(result.physAddr);
+            }
+
+            drawPT();
+            renderPTTable();
+        }
+
+        function renderPTTable() {
+            const entries = pt.getEntries();
+            const pageBits = pt.getPageBits();
+            const container = document.getElementById('ptTableDisplay');
+            let html = '<table class="truth-table"><thead><tr>';
+            html += '<th>VPN</th><th>Valid</th><th>Dirty</th><th>Prot</th><th>Frame</th></tr></thead><tbody>';
+            entries.forEach((e, i) => {
+                const hl = lastLookup && (lastLookup.va >>> pageBits) === i ? ' class="highlight"' : '';
+                html += `<tr${hl}>`;
+                html += `<td>${i}</td>`;
+                html += `<td class="${e.valid ? 'val-1' : 'val-0'}">${e.valid ? 1 : 0}</td>`;
+                html += `<td style="color:${e.dirty ? C.orange : C.textMut}">${e.dirty ? 1 : 0}</td>`;
+                html += `<td style="color:${C.blue}">${e.protection}</td>`;
+                html += `<td style="color:${e.valid ? C.purple : C.textMut}">${e.valid ? e.frame : '--'}</td>`;
+                html += '</tr>';
+            });
+            html += '</tbody></table>';
+            container.innerHTML = html;
+        }
+
+        document.getElementById('ptLookupBtn').addEventListener('click', doLookup);
+        document.getElementById('ptStepBtn').addEventListener('click', doLookup); // simplified
+        document.getElementById('ptPageSizeSelect').addEventListener('change', doLookup);
+
+        window.addEventListener('resize', () => { resize(); if (lastLookup) drawPT(); else { setupPT(); drawPT(); } });
+        resize();
+        setupPT();
+        drawPT();
+        renderPTTable();
+    })();
+
+    /* ================================================================
+       Section 3: 地址翻译
+       ================================================================ */
+    (() => {
+        const canvas = document.getElementById('transCanvas');
+        let ctx, W, H;
+        let currentResult = null;
+
+        // Random PPN mapping
+        const ppnMap = {};
+        for (let i = 0; i < 256; i++) {
+            ppnMap[i] = Math.floor(Math.random() * 64);
+        }
+
+        function resize() {
+            ({ ctx, w: W, h: H } = MemUtils.initCanvas(canvas, 300));
+        }
+
+        function doTranslation() {
+            const vaBits = parseInt(document.getElementById('transVABits').value);
+            const paBits = parseInt(document.getElementById('transPABits').value);
+            const pageSize = parseInt(document.getElementById('transPageSize').value);
+            const vaStr = document.getElementById('transVAInput').value;
+            const va = parseHex(vaStr);
+
+            const offsetBits = Math.log2(pageSize);
+            const vpnBits = vaBits - offsetBits;
+            const ppnBits = paBits - offsetBits;
+
+            const vpn = (va >>> offsetBits) & ((1 << vpnBits) - 1);
+            const offset = va & (pageSize - 1);
+            const ppn = ppnMap[vpn % 256] !== undefined ? ppnMap[vpn % 256] & ((1 << ppnBits) - 1) : (vpn * 7 + 3) & ((1 << ppnBits) - 1);
+            const pa = (ppn << offsetBits) | offset;
+
+            currentResult = { va, vaBits, paBits, offsetBits, vpnBits, ppnBits, vpn, offset, ppn, pa, pageSize };
+
+            // Update DOM
+            const vaBin = MemUtils.addressToBinary(va, vaBits);
+            document.getElementById('transResVABits').innerHTML =
+                '<span style="color:' + C.green + '">' + vaBin.slice(0, vpnBits) + '</span>' +
+                '<span style="color:' + C.orange + '">' + vaBin.slice(vpnBits) + '</span>';
+            document.getElementById('transResVPN').textContent = MemUtils.addressToBinary(vpn, vpnBits);
+            document.getElementById('transResVPNDec').textContent = vpn;
+            document.getElementById('transResOff').textContent = MemUtils.addressToBinary(offset, offsetBits);
+            document.getElementById('transResOffDec').textContent = offset;
+            document.getElementById('transResPPN').textContent = MemUtils.addressToBinary(ppn, ppnBits);
+            document.getElementById('transResPPNDec').textContent = ppn;
+            const paBin = MemUtils.addressToBinary(pa, paBits);
+            document.getElementById('transResPA').textContent = toHex(pa, Math.ceil(paBits / 4)) + ' (' + paBin + ')';
+
+            document.getElementById('transInfoText').textContent =
+                `页大小 ${formatBytes(pageSize)}, 偏移 ${offsetBits} 位, VPN ${vpnBits} 位 (${Math.pow(2, vpnBits)} 页), PPN ${ppnBits} 位 (${Math.pow(2, ppnBits)} 帧)`;
+
+            drawTranslation();
+        }
+
+        function drawTranslation() {
+            if (!currentResult) return;
+            ctx.clearRect(0, 0, W, H);
+            const r = currentResult;
+            const pad = 30;
+            const rowH = 40;
+
+            // Row 1: VA bit breakdown
+            ctx.font = 'bold 12px "Noto Sans SC", sans-serif';
+            ctx.textAlign = 'left';
+            ctx.fillStyle = C.textPri;
+            ctx.fillText('虚拟地址 (VA)', pad, 25);
+
+            const bitW = Math.min(20, (W - pad * 2) / r.vaBits);
+            const vaBin = MemUtils.addressToBinary(r.va, r.vaBits);
+            let bx = pad;
+            const row1Y = 35;
+            for (let i = 0; i < r.vaBits; i++) {
+                const isVPN = i < r.vpnBits;
+                ctx.fillStyle = isVPN ? MemUtils.hexToRgba(C.green, 0.2) : MemUtils.hexToRgba(C.orange, 0.2);
+                ctx.strokeStyle = isVPN ? C.green : C.orange;
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                ctx.roundRect(bx, row1Y, bitW - 1, 24, 2);
+                ctx.fill();
+                ctx.stroke();
+                ctx.fillStyle = isVPN ? C.green : C.orange;
+                ctx.font = '9px "JetBrains Mono", monospace';
+                ctx.textAlign = 'center';
+                ctx.fillText(vaBin[i], bx + (bitW - 1) / 2, row1Y + 16);
+                bx += bitW;
+            }
+
+            // Labels under VA
+            ctx.font = 'bold 11px "JetBrains Mono", monospace';
+            ctx.fillStyle = C.green;
+            ctx.textAlign = 'center';
+            ctx.fillText('VPN (' + r.vpnBits + '位)', pad + r.vpnBits * bitW / 2, row1Y + 42);
+            ctx.fillStyle = C.orange;
+            ctx.fillText('Offset (' + r.offsetBits + '位)', pad + r.vpnBits * bitW + (r.vaBits - r.vpnBits) * bitW / 2, row1Y + 42);
+
+            // Arrow down to page table
+            const midX = W / 2;
+            const arrowY1 = row1Y + 50;
+            const arrowY2 = arrowY1 + 30;
+            MemUtils.drawArrow(ctx, midX, arrowY1, midX, arrowY2, C.green, { width: 2 });
+
+            // Page table box
+            const ptBoxW = 160;
+            const ptBoxH = 36;
+            const ptBoxX = midX - ptBoxW / 2;
+            const ptBoxY = arrowY2 + 5;
+            MemUtils.drawMemoryBlock(ctx, ptBoxX, ptBoxY, ptBoxW, ptBoxH,
+                '页表查找: VPN ' + r.vpn + ' → PPN ' + r.ppn, C.blue, { highlight: true });
+
+            // Arrow down to PA
+            const arrowY3 = ptBoxY + ptBoxH + 5;
+            const arrowY4 = arrowY3 + 30;
+            MemUtils.drawArrow(ctx, midX, arrowY3, midX, arrowY4, C.purple, { width: 2 });
+
+            // Row 3: PA bit breakdown
+            ctx.font = 'bold 12px "Noto Sans SC", sans-serif';
+            ctx.textAlign = 'left';
+            ctx.fillStyle = C.textPri;
+            ctx.fillText('物理地址 (PA)', pad, arrowY4 + 15);
+
+            const paBin = MemUtils.addressToBinary(r.pa, r.paBits);
+            const paBitW = Math.min(20, (W - pad * 2) / r.paBits);
+            bx = pad;
+            const row3Y = arrowY4 + 25;
+            for (let i = 0; i < r.paBits; i++) {
+                const isPPN = i < r.ppnBits;
+                ctx.fillStyle = isPPN ? MemUtils.hexToRgba(C.purple, 0.2) : MemUtils.hexToRgba(C.orange, 0.2);
+                ctx.strokeStyle = isPPN ? C.purple : C.orange;
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                ctx.roundRect(bx, row3Y, paBitW - 1, 24, 2);
+                ctx.fill();
+                ctx.stroke();
+                ctx.fillStyle = isPPN ? C.purple : C.orange;
+                ctx.font = '9px "JetBrains Mono", monospace';
+                ctx.textAlign = 'center';
+                ctx.fillText(paBin[i], bx + (paBitW - 1) / 2, row3Y + 16);
+                bx += paBitW;
+            }
+
+            // Labels under PA
+            ctx.font = 'bold 11px "JetBrains Mono", monospace';
+            ctx.fillStyle = C.purple;
+            ctx.textAlign = 'center';
+            ctx.fillText('PPN (' + r.ppnBits + '位)', pad + r.ppnBits * paBitW / 2, row3Y + 42);
+            ctx.fillStyle = C.orange;
+            ctx.fillText('Offset (' + r.offsetBits + '位)', pad + r.ppnBits * paBitW + (r.paBits - r.ppnBits) * paBitW / 2, row3Y + 42);
+        }
+
+        document.getElementById('transGoBtn').addEventListener('click', doTranslation);
+        document.getElementById('transAnimBtn').addEventListener('click', doTranslation);
+        document.getElementById('transVABits').addEventListener('change', doTranslation);
+        document.getElementById('transPABits').addEventListener('change', doTranslation);
+        document.getElementById('transPageSize').addEventListener('change', doTranslation);
+
+        window.addEventListener('resize', () => { resize(); drawTranslation(); });
+        resize();
+
+        // Render KaTeX formula
+        setTimeout(() => {
+            if (typeof katex !== 'undefined') {
+                katex.render(
+                    'VA = \\underbrace{VPN}_{\\text{虚拟页号}} \\;|\\; \\underbrace{Offset}_{\\text{页内偏移}} \\;\\;\\Rightarrow\\;\\; PA = \\underbrace{PPN}_{\\text{物理页号}} \\;|\\; \\underbrace{Offset}_{\\text{页内偏移}}',
+                    document.getElementById('translationFormula'),
+                    { displayMode: true, throwOnError: false }
+                );
+            }
+        }, 500);
+
+        doTranslation();
+    })();
+
+    /* ================================================================
+       Section 4: 页面错误
+       ================================================================ */
+    (() => {
+        const canvas = document.getElementById('pfCanvas');
+        let ctx, W, H;
+        let currentStep = -1;
+        let animTimer = null;
+        const TOTAL_STEPS = 6;
+
+        function resize() {
+            ({ ctx, w: W, h: H } = MemUtils.initCanvas(canvas, 320));
+        }
+
+        function drawPageFault() {
+            ctx.clearRect(0, 0, W, H);
+            const pad = 25;
+            const compW = 110;
+            const compH = 55;
+            const gap = 40;
+
+            // Components
+            const cpuX = pad;
+            const cpuY = 60;
+            const ptX = pad + compW + gap;
+            const ptY = 60;
+            const memX = pad + (compW + gap) * 2;
+            const memY = 60;
+            const diskX = W - pad - compW;
+            const diskY = 60;
+            const osX = W / 2 - compW / 2;
+            const osY = 200;
+
+            // Draw components
+            const drawComp = (x, y, label, color, hl) => {
+                MemUtils.drawMemoryBlock(ctx, x, y, compW, compH, label, color, { highlight: hl, radius: 8 });
+            };
+
+            drawComp(cpuX, cpuY, 'CPU', C.blue, currentStep === 0 || currentStep === 5);
+            drawComp(ptX, ptY, '页表', C.green, currentStep === 1 || currentStep === 4);
+            drawComp(memX, memY, '物理内存', C.purple, currentStep === 4);
+            drawComp(diskX, diskY, '磁盘', C.orange, currentStep === 3);
+            drawComp(osX, osY, 'OS 处理程序', C.red, currentStep === 2 || currentStep === 3);
+
+            // Labels
+            ctx.font = '10px "Noto Sans SC", sans-serif';
+            ctx.textAlign = 'center';
+
+            // Step arrows
+            const arrowColor = (step) => currentStep >= step ? C.green : MemUtils.hexToRgba(C.textMut, 0.3);
+            const arrowW = (step) => currentStep === step ? 3 : 1.5;
+
+            // Step 0: CPU → Page Table
+            if (currentStep >= 0) {
+                MemUtils.drawArrow(ctx, cpuX + compW, cpuY + compH / 2, ptX, ptY + compH / 2,
+                    arrowColor(0), { width: arrowW(0) });
+                if (currentStep === 0) {
+                    ctx.fillStyle = C.blue;
+                    ctx.fillText('① 发出 VA', (cpuX + compW + ptX) / 2, cpuY - 5);
+                }
+            }
+
+            // Step 1: Page Table fault → OS
+            if (currentStep >= 1) {
+                MemUtils.drawArrow(ctx, ptX + compW / 2, ptY + compH, osX + compW / 2, osY,
+                    arrowColor(1), { width: arrowW(1), dashed: true });
+                if (currentStep === 1) {
+                    ctx.fillStyle = C.red;
+                    ctx.fillText('② 缺页异常!', ptX + compW / 2 + 40, (ptY + compH + osY) / 2);
+                }
+            }
+
+            // Step 2-3: OS → Disk
+            if (currentStep >= 2) {
+                MemUtils.drawArrow(ctx, osX + compW, osY + compH / 2, diskX, diskY + compH,
+                    arrowColor(3), { width: arrowW(3) });
+                if (currentStep === 3) {
+                    ctx.fillStyle = C.orange;
+                    ctx.fillText('④ 磁盘读取 (~10ms)', (osX + compW + diskX) / 2, osY + compH + 20);
+                }
+            }
+
+            // Step 3-4: Disk → Memory
+            if (currentStep >= 3) {
+                MemUtils.drawArrow(ctx, diskX, diskY + compH / 2, memX + compW, memY + compH / 2,
+                    arrowColor(3), { width: arrowW(3) });
+            }
+
+            // Step 4: Update page table
+            if (currentStep >= 4) {
+                MemUtils.drawArrow(ctx, memX + compW / 2, memY + compH, ptX + compW, ptY + compH / 2 + 10,
+                    arrowColor(4), { width: arrowW(4) });
+                if (currentStep === 4) {
+                    ctx.fillStyle = C.green;
+                    ctx.fillText('⑤ 更新页表', (memX + ptX + compW) / 2, memY + compH + 20);
+                }
+            }
+
+            // Step 5: Restart instruction
+            if (currentStep >= 5) {
+                MemUtils.drawArrow(ctx, ptX, ptY + compH / 2 - 10, cpuX + compW, cpuY + compH / 2 - 10,
+                    C.green, { width: 3 });
+                ctx.fillStyle = C.green;
+                ctx.fillText('⑥ 命中! 返回 PA', (cpuX + compW + ptX) / 2, cpuY + compH + 15);
+            }
+
+            // Step indicator text
+            ctx.font = 'bold 14px "Noto Sans SC", sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillStyle = C.textPri;
+            const stepLabels = [
+                'CPU 发出虚拟地址访问请求',
+                '页表查询 Valid=0，触发缺页异常',
+                'OS 缺页处理程序介入',
+                '从磁盘读取页面到物理内存',
+                '更新页表，设置 Valid=1',
+                '重新执行指令，这次命中!'
+            ];
+            if (currentStep >= 0 && currentStep < TOTAL_STEPS) {
+                ctx.fillText('步骤 ' + (currentStep + 1) + ': ' + stepLabels[currentStep], W / 2, H - 15);
+            }
+        }
+
+        function updateStepHighlights() {
+            const items = document.querySelectorAll('#pfSteps .step-item');
+            items.forEach((item, i) => {
+                item.classList.remove('active', 'done');
+                if (i === currentStep) item.classList.add('active');
+                else if (i < currentStep) item.classList.add('done');
+            });
+        }
+
+        function playAnimation() {
+            if (animTimer) { clearInterval(animTimer); animTimer = null; }
+            currentStep = -1;
+            animTimer = setInterval(() => {
+                currentStep++;
+                if (currentStep >= TOTAL_STEPS) {
+                    clearInterval(animTimer);
+                    animTimer = null;
+                    document.getElementById('pfStatus').textContent = '动画完成!';
+                    return;
+                }
+                updateStepHighlights();
+                drawPageFault();
+                document.getElementById('pfStatus').textContent = '步骤 ' + (currentStep + 1) + '/' + TOTAL_STEPS;
+            }, 1200);
+        }
+
+        function resetPF() {
+            if (animTimer) { clearInterval(animTimer); animTimer = null; }
+            currentStep = -1;
+            updateStepHighlights();
+            drawPageFault();
+            document.getElementById('pfStatus').textContent = '点击"播放动画"观察完整流程';
+        }
+
+        function triggerFault() {
+            currentStep = 1; // Jump to fault state
+            updateStepHighlights();
+            drawPageFault();
+            document.getElementById('pfStatus').textContent = '页面错误已触发! 点击播放继续';
+        }
+
+        document.getElementById('pfPlayBtn').addEventListener('click', playAnimation);
+        document.getElementById('pfResetBtn').addEventListener('click', resetPF);
+        document.getElementById('pfTriggerBtn').addEventListener('click', triggerFault);
+
+        window.addEventListener('resize', () => { resize(); drawPageFault(); });
+        resize();
+        drawPageFault();
+    })();
+
+    /* ================================================================
+       Section 5: 页面置换算法
+       ================================================================ */
+    (() => {
+        let refString = [];
+        let numFrames = 3;
+        let stepIndex = 0;
+        let autoTimer = null;
+
+        // Algorithm results storage
+        let results = { opt: null, lru: null, fifo: null, clock: null };
+
+        // ---- Algorithm implementations ----
+        function runOptimal(refs, nf) {
+            const frames = [];
+            const history = [];
+            let faults = 0;
+            let hits = 0;
+
+            for (let i = 0; i < refs.length; i++) {
+                const p = refs[i];
+                const inFrames = frames.indexOf(p) !== -1;
+                let evicted = -1;
+
+                if (inFrames) {
+                    hits++;
+                    history.push({ frames: [...frames], hit: true, page: p, evicted: -1 });
+                } else {
+                    faults++;
+                    if (frames.length < nf) {
+                        frames.push(p);
+                    } else {
+                        // Find page used farthest in future
+                        let farthest = -1, victimIdx = 0;
+                        for (let f = 0; f < frames.length; f++) {
+                            let nextUse = refs.indexOf(frames[f], i + 1);
+                            if (nextUse === -1) { victimIdx = f; break; }
+                            if (nextUse > farthest) { farthest = nextUse; victimIdx = f; }
+                        }
+                        evicted = frames[victimIdx];
+                        frames[victimIdx] = p;
+                    }
+                    history.push({ frames: [...frames], hit: false, page: p, evicted });
+                }
+            }
+            return { history, faults, hits, total: refs.length };
+        }
+
+        function runLRU(refs, nf) {
+            const frames = [];
+            const history = [];
+            let faults = 0, hits = 0;
+            const lruOrder = []; // most recent at end
+
+            for (let i = 0; i < refs.length; i++) {
+                const p = refs[i];
+                const idx = frames.indexOf(p);
+                let evicted = -1;
+
+                if (idx !== -1) {
+                    hits++;
+                    // Move to most recent
+                    const li = lruOrder.indexOf(p);
+                    if (li !== -1) lruOrder.splice(li, 1);
+                    lruOrder.push(p);
+                    history.push({ frames: [...frames], hit: true, page: p, evicted: -1 });
+                } else {
+                    faults++;
+                    if (frames.length < nf) {
+                        frames.push(p);
+                    } else {
+                        const victim = lruOrder.shift();
+                        evicted = victim;
+                        frames[frames.indexOf(victim)] = p;
+                    }
+                    const li = lruOrder.indexOf(p);
+                    if (li !== -1) lruOrder.splice(li, 1);
+                    lruOrder.push(p);
+                    history.push({ frames: [...frames], hit: false, page: p, evicted });
+                }
+            }
+            return { history, faults, hits, total: refs.length };
+        }
+
+        function runFIFO(refs, nf) {
+            const frames = [];
+            const history = [];
+            let faults = 0, hits = 0;
+            const queue = []; // FIFO order
+
+            for (let i = 0; i < refs.length; i++) {
+                const p = refs[i];
+                let evicted = -1;
+
+                if (frames.indexOf(p) !== -1) {
+                    hits++;
+                    history.push({ frames: [...frames], hit: true, page: p, evicted: -1 });
+                } else {
+                    faults++;
+                    if (frames.length < nf) {
+                        frames.push(p);
+                        queue.push(p);
+                    } else {
+                        const victim = queue.shift();
+                        evicted = victim;
+                        frames[frames.indexOf(victim)] = p;
+                        queue.push(p);
+                    }
+                    history.push({ frames: [...frames], hit: false, page: p, evicted });
+                }
+            }
+            return { history, faults, hits, total: refs.length };
+        }
+
+        function runClock(refs, nf) {
+            const frames = new Array(nf).fill(-1);
+            const refBits = new Array(nf).fill(0);
+            let hand = 0;
+            const history = [];
+            let faults = 0, hits = 0;
+            const clockHistory = []; // for clock visualization
+
+            for (let i = 0; i < refs.length; i++) {
+                const p = refs[i];
+                let evicted = -1;
+                const fIdx = frames.indexOf(p);
+
+                if (fIdx !== -1) {
+                    hits++;
+                    refBits[fIdx] = 1;
+                    history.push({ frames: frames.filter(f => f !== -1), hit: true, page: p, evicted: -1 });
+                    clockHistory.push({ frames: [...frames], refBits: [...refBits], hand, action: 'hit' });
+                } else {
+                    faults++;
+                    // Find empty slot first
+                    const emptyIdx = frames.indexOf(-1);
+                    if (emptyIdx !== -1) {
+                        frames[emptyIdx] = p;
+                        refBits[emptyIdx] = 1;
+                    } else {
+                        // Clock algorithm: sweep
+                        while (refBits[hand] === 1) {
+                            refBits[hand] = 0;
+                            hand = (hand + 1) % nf;
+                        }
+                        evicted = frames[hand];
+                        frames[hand] = p;
+                        refBits[hand] = 1;
+                        hand = (hand + 1) % nf;
+                    }
+                    history.push({ frames: frames.filter(f => f !== -1), hit: false, page: p, evicted });
+                    clockHistory.push({ frames: [...frames], refBits: [...refBits], hand, action: 'fault' });
+                }
+            }
+            return { history, faults, hits, total: refs.length, clockHistory };
+        }
+
+        function parseRefString() {
+            const raw = document.getElementById('replRefInput').value;
+            refString = raw.split(/[,\s]+/).map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+            numFrames = parseInt(document.getElementById('replFrameCount').value);
+        }
+
+        function renderRefDisplay(highlightIdx) {
+            const container = document.getElementById('replRefDisplay');
+            container.innerHTML = refString.map((p, i) => {
+                let cls = 'ref-item';
+                if (i === highlightIdx) cls += ' current';
+                else if (i < highlightIdx) {
+                    // Check if it was a fault
+                    const algo = results.opt;
+                    if (algo && algo.history[i]) {
+                        cls += algo.history[i].hit ? ' hit-ref' : ' fault';
+                    } else {
+                        cls += ' processed';
+                    }
+                }
+                return `<div class="${cls}">${p}</div>`;
+            }).join('');
+        }
+
+        function renderAlgoFrames(containerId, history, step) {
+            const container = document.getElementById(containerId);
+            if (!history || step < 0) {
+                container.innerHTML = '<div style="color:var(--text-muted);font-size:0.8rem">等待运行...</div>';
+                return;
+            }
+            const s = Math.min(step, history.length - 1);
+            const h = history[s];
+            let html = '<div class="frame-row">';
+            for (let f = 0; f < numFrames; f++) {
+                const page = h.frames[f] !== undefined ? h.frames[f] : '--';
+                let cls = 'frame-cell';
+                if (page !== '--') {
+                    if (h.hit && h.page === page) cls += ' hit';
+                    else if (!h.hit && h.page === page) cls += ' loaded';
+                    else cls += ' loaded';
+                }
+                html += `<div class="${cls}">${page}</div>`;
+            }
+            html += '</div>';
+            if (h.hit) {
+                html += `<div style="font-size:0.75rem;color:${C.blue};margin-top:4px">命中: 页 ${h.page}</div>`;
+            } else {
+                html += `<div style="font-size:0.75rem;color:${C.red};margin-top:4px">缺页: 加载 ${h.page}${h.evicted >= 0 ? ', 换出 ' + h.evicted : ''}</div>`;
+            }
+            container.innerHTML = html;
+        }
+
+        function updateStats(prefix, result) {
+            if (!result) return;
+            const hitRate = result.total > 0 ? (result.hits / result.total * 100) : 0;
+            document.getElementById(prefix + 'HitVal').textContent = hitRate.toFixed(1) + '%';
+            document.getElementById(prefix + 'HitBar').style.width = hitRate + '%';
+            document.getElementById(prefix + 'Faults').textContent = result.faults;
+        }
+
+        function runAll() {
+            parseRefString();
+            if (refString.length === 0) return;
+
+            results.opt = runOptimal(refString, numFrames);
+            results.lru = runLRU(refString, numFrames);
+            results.fifo = runFIFO(refString, numFrames);
+            results.clock = runClock(refString, numFrames);
+
+            stepIndex = refString.length - 1;
+            renderRefDisplay(stepIndex);
+            renderAlgoFrames('optFrames', results.opt.history, stepIndex);
+            renderAlgoFrames('lruFrames', results.lru.history, stepIndex);
+            renderAlgoFrames('fifoFrames', results.fifo.history, stepIndex);
+            renderAlgoFrames('clockFrames', results.clock.history, stepIndex);
+            updateStats('opt', results.opt);
+            updateStats('lru', results.lru);
+            updateStats('fifo', results.fifo);
+            updateStats('clock', results.clock);
+            drawClockViz();
+        }
+
+        function resetAlgos() {
+            if (autoTimer) { clearInterval(autoTimer); autoTimer = null; }
+            stepIndex = 0;
+            results = { opt: null, lru: null, fifo: null, clock: null };
+            renderRefDisplay(-1);
+            ['optFrames', 'lruFrames', 'fifoFrames', 'clockFrames'].forEach(id => {
+                document.getElementById(id).innerHTML = '<div style="color:var(--text-muted);font-size:0.8rem">等待运行...</div>';
+            });
+            ['opt', 'lru', 'fifo', 'clock'].forEach(p => {
+                document.getElementById(p + 'HitVal').textContent = '--';
+                document.getElementById(p + 'HitBar').style.width = '0%';
+                document.getElementById(p + 'Faults').textContent = '--';
+            });
+            drawClockViz();
+        }
+
+        function stepForward() {
+            parseRefString();
+            if (refString.length === 0) return;
+
+            // Run all algorithms if not already done
+            if (!results.opt) {
+                results.opt = runOptimal(refString, numFrames);
+                results.lru = runLRU(refString, numFrames);
+                results.fifo = runFIFO(refString, numFrames);
+                results.clock = runClock(refString, numFrames);
+            }
+
+            if (stepIndex >= refString.length) {
+                stepIndex = 0;
+            }
+
+            renderRefDisplay(stepIndex);
+            renderAlgoFrames('optFrames', results.opt.history, stepIndex);
+            renderAlgoFrames('lruFrames', results.lru.history, stepIndex);
+            renderAlgoFrames('fifoFrames', results.fifo.history, stepIndex);
+            renderAlgoFrames('clockFrames', results.clock.history, stepIndex);
+
+            // Update partial stats
+            const updatePartialStats = (prefix, result) => {
+                const partHits = result.history.slice(0, stepIndex + 1).filter(h => h.hit).length;
+                const partFaults = result.history.slice(0, stepIndex + 1).filter(h => !h.hit).length;
+                const total = stepIndex + 1;
+                const hitRate = total > 0 ? (partHits / total * 100) : 0;
+                document.getElementById(prefix + 'HitVal').textContent = hitRate.toFixed(1) + '%';
+                document.getElementById(prefix + 'HitBar').style.width = hitRate + '%';
+                document.getElementById(prefix + 'Faults').textContent = partFaults;
+            };
+            updatePartialStats('opt', results.opt);
+            updatePartialStats('lru', results.lru);
+            updatePartialStats('fifo', results.fifo);
+            updatePartialStats('clock', results.clock);
+
+            drawClockViz();
+            stepIndex++;
+        }
+
+        document.getElementById('replRunBtn').addEventListener('click', runAll);
+        document.getElementById('replStepBtn').addEventListener('click', stepForward);
+        document.getElementById('replResetBtn').addEventListener('click', resetAlgos);
+
+        // ---- Clock Algorithm Visualization ----
+        const clockCanvas = document.getElementById('clockCanvas');
+        let cCtx, cW, cH;
+
+        function resizeClock() {
+            ({ ctx: cCtx, w: cW, h: cH } = MemUtils.initCanvas(clockCanvas, 350));
+        }
+
+        function drawClockViz() {
+            if (!cCtx) return;
+            cCtx.clearRect(0, 0, cW, cH);
+
+            const cx = cW / 2;
+            const cy = cH / 2;
+            const radius = Math.min(cW, cH) / 2 - 50;
+
+            // If we have clock results
+            const clockData = results.clock;
+            let frames, refBits, hand;
+
+            if (clockData && clockData.clockHistory && clockData.clockHistory.length > 0) {
+                const idx = Math.min(stepIndex, clockData.clockHistory.length - 1);
+                const snap = clockData.clockHistory[Math.max(0, idx)];
+                frames = snap.frames;
+                refBits = snap.refBits;
+                hand = snap.hand;
+            } else {
+                frames = new Array(numFrames).fill(-1);
+                refBits = new Array(numFrames).fill(0);
+                hand = 0;
+            }
+
+            // Draw circle
+            cCtx.beginPath();
+            cCtx.arc(cx, cy, radius, 0, Math.PI * 2);
+            cCtx.strokeStyle = MemUtils.hexToRgba(C.textMut, 0.3);
+            cCtx.lineWidth = 2;
+            cCtx.stroke();
+
+            // Draw slots
+            const n = frames.length;
+            for (let i = 0; i < n; i++) {
+                const angle = (i / n) * Math.PI * 2 - Math.PI / 2;
+                const sx = cx + radius * Math.cos(angle);
+                const sy = cy + radius * Math.sin(angle);
+                const slotR = 22;
+
+                // Slot circle
+                const isHand = i === hand;
+                const isEmpty = frames[i] === -1;
+                const col = isEmpty ? C.textMut : (refBits[i] ? C.green : C.orange);
+
+                cCtx.beginPath();
+                cCtx.arc(sx, sy, slotR, 0, Math.PI * 2);
+                cCtx.fillStyle = isEmpty ? MemUtils.hexToRgba(C.textMut, 0.1) : MemUtils.hexToRgba(col, 0.2);
+                cCtx.fill();
+                cCtx.strokeStyle = isHand ? C.yellow : col;
+                cCtx.lineWidth = isHand ? 3 : 1.5;
+                cCtx.stroke();
+
+                // Page number
+                cCtx.font = 'bold 12px "JetBrains Mono", monospace';
+                cCtx.textAlign = 'center';
+                cCtx.textBaseline = 'middle';
+                cCtx.fillStyle = isEmpty ? C.textMut : col;
+                cCtx.fillText(isEmpty ? '--' : frames[i].toString(), sx, sy);
+
+                // Ref bit label
+                if (!isEmpty) {
+                    cCtx.font = '9px "JetBrains Mono", monospace';
+                    cCtx.fillStyle = refBits[i] ? C.green : C.red;
+                    cCtx.fillText('R=' + refBits[i], sx, sy + slotR + 12);
+                }
+            }
+
+            // Draw clock hand
+            const handAngle = (hand / n) * Math.PI * 2 - Math.PI / 2;
+            const hx = cx + (radius - 35) * Math.cos(handAngle);
+            const hy = cy + (radius - 35) * Math.sin(handAngle);
+            MemUtils.drawArrow(cCtx, cx, cy, hx, hy, C.yellow, { width: 2.5, headLen: 10 });
+
+            // Center label
+            cCtx.font = 'bold 11px "Noto Sans SC", sans-serif';
+            cCtx.fillStyle = C.textSec;
+            cCtx.textAlign = 'center';
+            cCtx.textBaseline = 'middle';
+            cCtx.fillText('时钟指针', cx, cy + 2);
+
+            // Legend
+            cCtx.font = '10px "Noto Sans SC", sans-serif';
+            cCtx.textAlign = 'left';
+            cCtx.fillStyle = C.green;
+            cCtx.fillText('R=1 已引用', 10, cH - 30);
+            cCtx.fillStyle = C.orange;
+            cCtx.fillText('R=0 可替换', 10, cH - 14);
+            cCtx.fillStyle = C.yellow;
+            cCtx.fillText('▶ 时钟指针', cW - 100, cH - 14);
+        }
+
+        window.addEventListener('resize', () => {
+            resizeClock();
+            drawClockViz();
+        });
+        resizeClock();
+        parseRefString();
+        renderRefDisplay(-1);
+        drawClockViz();
+    })();
+
+    /* ================================================================
+       Section 6: 多级页表
+       ================================================================ */
+    (() => {
+        const canvas = document.getElementById('mlCanvas');
+        const treeCanvas = document.getElementById('mlTreeCanvas');
+        let ctx, W, H;
+        let tCtx, tW, tH;
+
+        function resizeML() {
+            ({ ctx, w: W, h: H } = MemUtils.initCanvas(canvas, 300));
+        }
+        function resizeTree() {
+            ({ ctx: tCtx, w: tW, h: tH } = MemUtils.initCanvas(treeCanvas, 380));
+        }
+
+        function calculate() {
+            const vaBits = parseInt(document.getElementById('mlVABits').value);
+            const pageSize = parseInt(document.getElementById('mlPageSize').value);
+            const usagePct = parseInt(document.getElementById('mlUsageSlider').value) / 100;
+            document.getElementById('mlUsageVal').textContent = (usagePct * 100).toFixed(0) + '%';
+
+            const offsetBits = Math.log2(pageSize);
+            const vpnBits = vaBits - offsetBits;
+            const totalPages = Math.pow(2, vpnBits);
+            const pteSize = 4; // bytes per page table entry
+
+            // Single level
+            const singleSize = totalPages * pteSize;
+
+            // Two-level: page directory + page tables
+            // Entries per page table = pageSize / pteSize
+            const entriesPerPT = pageSize / pteSize;
+            const numPTNeeded = Math.ceil(totalPages * usagePct / entriesPerPT);
+            const pdSize = Math.ceil(totalPages / entriesPerPT) * pteSize;
+            const twoLevelSize = pdSize + numPTNeeded * pageSize;
+
+            // Three-level
+            const entriesPerL2 = entriesPerPT;
+            const numL2Needed = Math.ceil(numPTNeeded / entriesPerL2) || 1;
+            const l1Size = Math.ceil(Math.ceil(totalPages / entriesPerPT) / entriesPerPT) * pteSize;
+            const threeLevelSize = l1Size + numL2Needed * pageSize + numPTNeeded * pageSize;
+
+            // Ensure two/three level don't exceed single for display
+            const effectiveTwo = Math.min(twoLevelSize, singleSize);
+            const effectiveThree = Math.min(threeLevelSize, singleSize);
+
+            const saving = ((1 - effectiveTwo / singleSize) * 100);
+
+            document.getElementById('mlTotalPages').textContent = totalPages.toLocaleString() + ' (' + formatBytes(totalPages * pageSize) + '虚拟空间)';
+            document.getElementById('mlSingleSize').textContent = formatBytes(singleSize);
+            document.getElementById('ml2LevelSize').textContent = formatBytes(effectiveTwo);
+            document.getElementById('ml3LevelSize').textContent = formatBytes(effectiveThree);
+            document.getElementById('mlSaving').textContent = saving.toFixed(1) + '% (二级 vs 单级)';
+
+            drawMLComparison(singleSize, effectiveTwo, effectiveThree);
+            drawMLTree(vaBits, offsetBits, entriesPerPT);
+        }
+
+        function drawMLComparison(single, two, three) {
+            if (!ctx) return;
+            ctx.clearRect(0, 0, W, H);
+            const pad = 30;
+            const barH = 40;
+            const gap = 25;
+            const maxBarW = W - pad * 2 - 150;
+            const maxVal = single;
+            const startY = 40;
+
+            ctx.font = 'bold 13px "Noto Sans SC", sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillStyle = C.textPri;
+            ctx.fillText('页表内存占用对比', W / 2, 25);
+
+            const items = [
+                { label: '单级页表', val: single, color: C.red },
+                { label: '二级页表', val: two, color: C.green },
+                { label: '三级页表', val: three, color: C.purple },
+            ];
+
+            items.forEach((item, i) => {
+                const y = startY + i * (barH + gap);
+                const barW = Math.max(2, (item.val / maxVal) * maxBarW);
+
+                // Label
+                ctx.font = '12px "Noto Sans SC", sans-serif';
+                ctx.textAlign = 'right';
+                ctx.fillStyle = C.textSec;
+                ctx.fillText(item.label, pad + 70, y + barH / 2 + 4);
+
+                // Bar
+                ctx.fillStyle = MemUtils.hexToRgba(item.color, 0.2);
+                ctx.strokeStyle = item.color;
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                ctx.roundRect(pad + 80, y, barW, barH, 4);
+                ctx.fill();
+                ctx.stroke();
+
+                // Gradient fill
+                const grad = ctx.createLinearGradient(pad + 80, y, pad + 80 + barW, y);
+                grad.addColorStop(0, MemUtils.hexToRgba(item.color, 0.4));
+                grad.addColorStop(1, MemUtils.hexToRgba(item.color, 0.1));
+                ctx.fillStyle = grad;
+                ctx.beginPath();
+                ctx.roundRect(pad + 80, y, barW, barH, 4);
+                ctx.fill();
+
+                // Value text
+                ctx.font = 'bold 11px "JetBrains Mono", monospace';
+                ctx.textAlign = 'left';
+                ctx.fillStyle = item.color;
+                ctx.fillText(formatBytes(item.val), pad + 80 + barW + 8, y + barH / 2 + 4);
+            });
+        }
+
+        function drawMLTree(vaBits, offsetBits, entriesPerPT) {
+            if (!tCtx) return;
+            tCtx.clearRect(0, 0, tW, tH);
+            const pad = 30;
+
+            // Calculate index bits at each level
+            const vpnBits = vaBits - offsetBits;
+            const l1Bits = Math.min(10, Math.ceil(vpnBits / 2));
+            const l2Bits = vpnBits - l1Bits;
+
+            // Title
+            tCtx.font = 'bold 13px "Noto Sans SC", sans-serif';
+            tCtx.textAlign = 'center';
+            tCtx.fillStyle = C.textPri;
+            tCtx.fillText('二级页表查找过程', tW / 2, 25);
+
+            // VA breakdown at top
+            const bitsY = 45;
+            const totalDisplayBits = Math.min(vaBits, 32);
+            const bitW = Math.min(20, (tW - pad * 2) / totalDisplayBits);
+            const startX = (tW - totalDisplayBits * bitW) / 2;
+
+            let bx = startX;
+            const segments = [
+                { bits: l1Bits, label: 'L1 索引 (' + l1Bits + '位)', color: C.blue },
+                { bits: l2Bits, label: 'L2 索引 (' + l2Bits + '位)', color: C.green },
+                { bits: offsetBits, label: '偏移 (' + offsetBits + '位)', color: C.orange },
+            ];
+
+            segments.forEach(seg => {
+                const segW = seg.bits * bitW;
+                tCtx.fillStyle = MemUtils.hexToRgba(seg.color, 0.15);
+                tCtx.strokeStyle = seg.color;
+                tCtx.lineWidth = 1.5;
+                tCtx.beginPath();
+                tCtx.roundRect(bx, bitsY, segW - 2, 28, 4);
+                tCtx.fill();
+                tCtx.stroke();
+
+                tCtx.font = '10px "JetBrains Mono", monospace';
+                tCtx.textAlign = 'center';
+                tCtx.fillStyle = seg.color;
+                tCtx.fillText(seg.label, bx + segW / 2, bitsY + 18);
+                bx += segW;
+            });
+
+            // Tree structure
+            const treeY = 110;
+            const nodeW = 100;
+            const nodeH = 40;
+            const levelGap = 70;
+
+            // Level 1: Page Directory
+            const l1X = tW / 2 - nodeW / 2;
+            MemUtils.drawMemoryBlock(tCtx, l1X, treeY, nodeW, nodeH, '页目录', C.blue, { highlight: true, radius: 6 });
+
+            // Arrow from L1 index bits to page directory
+            const l1SegEnd = startX + l1Bits * bitW;
+            MemUtils.drawArrow(tCtx, startX + l1Bits * bitW / 2, bitsY + 28, tW / 2, treeY, C.blue, { width: 1.5, dashed: true });
+
+            // Level 2: Page Tables (show 3 branches)
+            const l2Y = treeY + levelGap;
+            const l2Positions = [-1, 0, 1];
+            const l2XOffset = 140;
+            l2Positions.forEach((pos, idx) => {
+                const x = tW / 2 + pos * l2XOffset - nodeW / 2;
+                const isDim = idx !== 1;
+                MemUtils.drawMemoryBlock(tCtx, x, l2Y, nodeW, nodeH,
+                    '页表 ' + idx, C.green,
+                    { highlight: idx === 1, fill: isDim ? MemUtils.hexToRgba(C.green, 0.05) : undefined, radius: 6 });
+
+                // Arrow from page directory
+                MemUtils.drawArrow(tCtx, tW / 2, treeY + nodeH, x + nodeW / 2, l2Y,
+                    isDim ? MemUtils.hexToRgba(C.green, 0.3) : C.green, { width: isDim ? 1 : 2 });
+            });
+
+            // Arrow from L2 index bits
+            MemUtils.drawArrow(tCtx, startX + l1Bits * bitW + l2Bits * bitW / 2, bitsY + 28,
+                tW / 2, l2Y, C.green, { width: 1.5, dashed: true });
+
+            // Level 3: Physical Frame
+            const l3Y = l2Y + levelGap;
+            const frameW = 120;
+            MemUtils.drawMemoryBlock(tCtx, tW / 2 - frameW / 2, l3Y, frameW, nodeH,
+                '物理帧 (PPN)', C.purple, { highlight: true, radius: 6 });
+            MemUtils.drawArrow(tCtx, tW / 2, l2Y + nodeH, tW / 2, l3Y, C.purple, { width: 2 });
+
+            // Final: combine with offset
+            const l4Y = l3Y + levelGap;
+            const paW = 140;
+            MemUtils.drawMemoryBlock(tCtx, tW / 2 - paW / 2, l4Y, paW, nodeH,
+                '物理地址 (PA)', C.yellow, { highlight: true, radius: 6 });
+
+            // Arrow from PPN
+            MemUtils.drawArrow(tCtx, tW / 2, l3Y + nodeH, tW / 2 - 20, l4Y, C.purple, { width: 1.5 });
+            // Arrow from offset
+            const offsetCenter = startX + (l1Bits + l2Bits) * bitW + offsetBits * bitW / 2;
+            MemUtils.drawArrow(tCtx, offsetCenter, bitsY + 28, tW / 2 + 20, l4Y, C.orange, { width: 1.5, dashed: true });
+
+            // Ellipsis to show more page tables
+            tCtx.font = '14px "Noto Sans SC", sans-serif';
+            tCtx.fillStyle = C.textMut;
+            tCtx.textAlign = 'center';
+            tCtx.fillText('...', tW / 2 + l2XOffset * 1.6, l2Y + nodeH / 2);
+            tCtx.fillText('...', tW / 2 - l2XOffset * 1.6, l2Y + nodeH / 2);
+        }
+
+        document.getElementById('mlVABits').addEventListener('change', calculate);
+        document.getElementById('mlPageSize').addEventListener('change', calculate);
+        document.getElementById('mlUsageSlider').addEventListener('input', calculate);
+
+        // KaTeX formula
+        setTimeout(() => {
+            if (typeof katex !== 'undefined') {
+                katex.render(
+                    '\\text{单级页表大小} = \\frac{2^{\\text{VA位数}}}{\\text{页大小}} \\times \\text{PTE大小}',
+                    document.getElementById('mlFormula'),
+                    { displayMode: true, throwOnError: false }
+                );
+            }
+        }, 600);
+
+        window.addEventListener('resize', () => {
+            resizeML();
+            resizeTree();
+            calculate();
+        });
+        resizeML();
+        resizeTree();
+        calculate();
+    })();
+
+    /* ================================================================
+       KaTeX auto-render on load
+       ================================================================ */
+    document.addEventListener('DOMContentLoaded', () => {
+        if (typeof renderMathInElement !== 'undefined') {
+            renderMathInElement(document.body, {
+                delimiters: [
+                    { left: '$$', right: '$$', display: true },
+                    { left: '$', right: '$', display: false },
+                ],
+                throwOnError: false,
+            });
+        }
+    });
+
+    /* ================================================================
+       Smooth scroll for section anchors
+       ================================================================ */
+    document.querySelectorAll('a[href^="#"]').forEach(a => {
+        a.addEventListener('click', e => {
+            const target = document.querySelector(a.getAttribute('href'));
+            if (target) {
+                e.preventDefault();
+                target.scrollIntoView({ behavior: 'smooth' });
+            }
+        });
+    });
+
+    </script>
+</body>
+</html>

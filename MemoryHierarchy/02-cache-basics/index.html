@@ -1,0 +1,2121 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cache基础 — 存储层级</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+    <!-- KaTeX -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+    <!-- GSAP -->
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+    <!-- Shared styles -->
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+    <style>
+        /* ========== Page-specific styles ========== */
+        .hero {
+            text-align: center;
+            padding: 3rem 0 2rem;
+        }
+        .hero h1 {
+            font-size: 2.4rem;
+            background: linear-gradient(135deg, var(--accent-green), var(--accent-blue));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 0.5rem;
+        }
+        .hero .subtitle {
+            color: var(--text-secondary);
+            font-size: 1.05rem;
+        }
+
+        /* Section alternating backgrounds */
+        .module-section {
+            padding: 3rem 0;
+        }
+        .module-section:nth-child(even) {
+            background: var(--bg-secondary);
+            margin: 0 -2rem;
+            padding-left: 2rem;
+            padding-right: 2rem;
+        }
+        .module-section .section-inner {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        /* Canvas containers */
+        .canvas-container {
+            position: relative;
+            width: 100%;
+            background: rgba(15, 52, 96, 0.3);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+            margin: 1rem 0;
+        }
+        .canvas-container canvas {
+            display: block;
+            width: 100%;
+        }
+
+        /* Controls bar */
+        .controls-bar {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 0.75rem 1rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            margin: 1rem 0;
+        }
+
+        /* Address display */
+        .addr-display {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 2px;
+            font-family: var(--font-mono);
+            font-size: 1.1rem;
+            padding: 0.75rem 1rem;
+            background: rgba(15, 52, 96, 0.4);
+            border-radius: var(--radius-sm);
+            margin: 0.5rem 0;
+            line-height: 1.8;
+        }
+        .addr-bit {
+            display: inline-block;
+            width: 1.4em;
+            text-align: center;
+            border-radius: 3px;
+            transition: all 0.2s;
+            padding: 2px 0;
+        }
+        .addr-bit.tag { background: rgba(79, 195, 247, 0.2); color: var(--accent-blue); }
+        .addr-bit.index { background: rgba(22, 199, 154, 0.2); color: var(--accent-green); }
+        .addr-bit.offset { background: rgba(255, 171, 64, 0.2); color: var(--accent-orange); }
+
+        /* Legend for address parts */
+        .addr-legend {
+            display: flex;
+            gap: 1.5rem;
+            font-size: 0.85rem;
+            margin: 0.5rem 0;
+        }
+        .addr-legend span {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+        }
+        .legend-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 3px;
+        }
+
+        /* Input fields */
+        .hex-input {
+            font-family: var(--font-mono);
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 0.4rem 0.8rem;
+            border-radius: var(--radius-sm);
+            font-size: 0.9rem;
+            outline: none;
+            transition: border-color 0.2s;
+            width: 140px;
+        }
+        .hex-input:focus {
+            border-color: var(--accent-green);
+        }
+
+        /* Access log */
+        .access-log {
+            max-height: 280px;
+            overflow-y: auto;
+            padding: 0.5rem;
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            background: rgba(15, 52, 96, 0.25);
+            border-radius: var(--radius-sm);
+        }
+        .log-entry {
+            display: flex;
+            gap: 0.5rem;
+            padding: 0.3rem 0.5rem;
+            border-radius: 4px;
+            margin-bottom: 2px;
+            transition: background 0.2s;
+        }
+        .log-entry:hover {
+            background: rgba(255,255,255,0.03);
+        }
+        .log-hit { border-left: 3px solid var(--accent-green); }
+        .log-miss { border-left: 3px solid var(--accent-red); }
+        .log-evict { border-left: 3px solid var(--accent-orange); }
+
+        /* Stats bar */
+        .stats-bar {
+            display: flex;
+            gap: 1.5rem;
+            padding: 0.75rem 1rem;
+            background: rgba(15, 52, 96, 0.3);
+            border-radius: var(--radius-sm);
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            flex-wrap: wrap;
+        }
+        .stat-item {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+        }
+        .stat-item .stat-label { color: var(--text-muted); }
+        .stat-item .stat-val { font-weight: 600; }
+        .stat-val.hit-color { color: var(--accent-green); }
+        .stat-val.miss-color { color: var(--accent-red); }
+        .stat-val.evict-color { color: var(--accent-orange); }
+
+        /* Comparison table */
+        .compare-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.85rem;
+            margin: 1rem 0;
+        }
+        .compare-table th, .compare-table td {
+            padding: 0.6rem 1rem;
+            text-align: center;
+            border: 1px solid rgba(42,42,74,0.5);
+        }
+        .compare-table th {
+            background: var(--bg-card);
+            color: var(--accent-green);
+            font-weight: 600;
+        }
+        .compare-table td {
+            color: var(--text-secondary);
+        }
+        .compare-table tr:hover td {
+            background: rgba(22, 199, 154, 0.05);
+        }
+
+        /* Quiz styles */
+        .quiz-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1.5rem;
+            margin: 1rem 0;
+        }
+        .quiz-question {
+            font-size: 0.95rem;
+            margin-bottom: 0.75rem;
+            color: var(--text-primary);
+        }
+        .quiz-option {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 0.75rem;
+            margin: 0.3rem 0;
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            transition: all 0.2s;
+        }
+        .quiz-option:hover {
+            border-color: var(--accent-blue);
+            background: rgba(79, 195, 247, 0.05);
+        }
+        .quiz-option.correct {
+            border-color: var(--accent-green);
+            background: rgba(22, 199, 154, 0.1);
+            color: var(--accent-green);
+        }
+        .quiz-option.wrong {
+            border-color: var(--accent-red);
+            background: rgba(255, 82, 82, 0.1);
+            color: var(--accent-red);
+        }
+
+        /* Analogy cards */
+        .analogy-grid {
+            display: grid;
+            grid-template-columns: 1fr 80px 1fr;
+            gap: 1rem;
+            align-items: center;
+            margin: 1.5rem 0;
+        }
+        .analogy-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1.5rem;
+            text-align: center;
+        }
+        .analogy-card h4 {
+            margin-bottom: 0.5rem;
+        }
+        .analogy-arrow {
+            text-align: center;
+            color: var(--text-muted);
+            font-size: 2rem;
+        }
+
+        /* Timing bar */
+        .timing-bar {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin: 0.3rem 0;
+        }
+        .timing-bar .bar-label {
+            min-width: 80px;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            text-align: right;
+        }
+        .timing-bar .bar-fill {
+            height: 24px;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            padding: 0 8px;
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: var(--bg-primary);
+            transition: width 0.8s var(--anim-ease);
+        }
+
+        /* Sequence input */
+        .seq-input {
+            font-family: var(--font-mono);
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 0.5rem 0.8rem;
+            border-radius: var(--radius-sm);
+            font-size: 0.85rem;
+            outline: none;
+            width: 100%;
+            transition: border-color 0.2s;
+        }
+        .seq-input:focus {
+            border-color: var(--accent-green);
+        }
+
+        /* Challenge section */
+        .challenge-row {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.4rem 0;
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+        }
+        .challenge-cell {
+            min-width: 80px;
+            padding: 0.3rem 0.6rem;
+            border-radius: 4px;
+            text-align: center;
+        }
+        .predict-btn {
+            padding: 0.2rem 0.6rem;
+            font-size: 0.75rem;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            background: var(--bg-secondary);
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .predict-btn:hover {
+            border-color: var(--accent-green);
+        }
+        .predict-btn.selected-hit {
+            background: rgba(22, 199, 154, 0.2);
+            border-color: var(--accent-green);
+            color: var(--accent-green);
+        }
+        .predict-btn.selected-miss {
+            background: rgba(255, 82, 82, 0.2);
+            border-color: var(--accent-red);
+            color: var(--accent-red);
+        }
+
+        /* Hit rate bars for comparison */
+        .hitrate-bar-wrap {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin: 0.4rem 0;
+        }
+        .hitrate-label {
+            min-width: 100px;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            text-align: right;
+        }
+        .hitrate-track {
+            flex: 1;
+            height: 22px;
+            background: rgba(42, 42, 74, 0.5);
+            border-radius: 4px;
+            overflow: hidden;
+            position: relative;
+        }
+        .hitrate-fill {
+            height: 100%;
+            border-radius: 4px;
+            transition: width 1s var(--anim-ease);
+            display: flex;
+            align-items: center;
+            padding-left: 8px;
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: var(--bg-primary);
+        }
+
+        /* Separator */
+        .sep {
+            width: 1px;
+            height: 20px;
+            background: var(--border-color);
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .analogy-grid {
+                grid-template-columns: 1fr;
+            }
+            .analogy-arrow {
+                transform: rotate(90deg);
+            }
+            .controls-bar {
+                flex-direction: column;
+                align-items: stretch;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- nav.js auto-injects navigation -->
+    <div class="page-container">
+
+        <!-- Hero -->
+        <div class="hero">
+            <h1>Cache基础</h1>
+            <p class="subtitle">理解高速缓存的工作原理、地址分解与三种映射方式</p>
+        </div>
+
+        <!-- ============================================ -->
+        <!-- Section 1: 什么是Cache -->
+        <!-- ============================================ -->
+        <div class="module-section" id="sec-what-is-cache">
+            <div class="section-inner">
+                <div class="section-title">
+                    <div class="icon">1</div>
+                    <h2>什么是Cache</h2>
+                </div>
+
+                <p>Cache（高速缓存）是位于CPU与主存之间的小容量、高速度存储器。它利用程序的<strong>局部性原理</strong>，将最近访问的数据保留在离CPU最近的地方，从而大幅降低平均访问延迟。</p>
+
+                <!-- Analogy -->
+                <div class="analogy-grid">
+                    <div class="analogy-card" style="border-color: var(--accent-green);">
+                        <h4 style="color: var(--accent-green);">书架（Cache）</h4>
+                        <p class="text-sm" style="color: var(--text-secondary);">就在你书桌旁边<br>容量小、取用极快<br>放常翻阅的书</p>
+                    </div>
+                    <div class="analogy-arrow">&#8596;</div>
+                    <div class="analogy-card" style="border-color: var(--accent-blue);">
+                        <h4 style="color: var(--accent-blue);">图书馆（主存）</h4>
+                        <p class="text-sm" style="color: var(--text-secondary);">在校园另一端<br>容量大、取用较慢<br>藏书极为丰富</p>
+                    </div>
+                </div>
+
+                <div class="info-box">
+                    <p><strong>局部性原理：</strong>时间局部性 — 刚访问的数据很快会再次访问；空间局部性 — 访问某地址后，附近地址也很可能被访问。</p>
+                </div>
+
+                <!-- Latency comparison -->
+                <h3 class="mt-2">延迟对比</h3>
+                <p>点击下方地址按钮，观察Cache命中与未命中时的延迟差异。</p>
+
+                <div class="canvas-container">
+                    <canvas id="canvas-whatcache"></canvas>
+                </div>
+
+                <div class="controls-bar">
+                    <span class="text-sm" style="color:var(--text-muted);">点击地址访问：</span>
+                    <button class="btn btn-sm" onclick="S1.accessAddr(0x0010)">0x0010</button>
+                    <button class="btn btn-sm" onclick="S1.accessAddr(0x0020)">0x0020</button>
+                    <button class="btn btn-sm" onclick="S1.accessAddr(0x0030)">0x0030</button>
+                    <button class="btn btn-sm" onclick="S1.accessAddr(0x0010)">0x0010 (再次)</button>
+                    <button class="btn btn-sm" onclick="S1.accessAddr(0x0040)">0x0040</button>
+                    <div class="sep"></div>
+                    <button class="btn btn-sm" onclick="S1.reset()">重置</button>
+                </div>
+
+                <div class="stats-bar mt-1">
+                    <div class="stat-item"><span class="stat-label">访问次数：</span><span class="stat-val" id="s1-accesses">0</span></div>
+                    <div class="stat-item"><span class="stat-label">命中：</span><span class="stat-val hit-color" id="s1-hits">0</span></div>
+                    <div class="stat-item"><span class="stat-label">未命中：</span><span class="stat-val miss-color" id="s1-misses">0</span></div>
+                    <div class="stat-item"><span class="stat-label">命中率：</span><span class="stat-val hit-color" id="s1-rate">0%</span></div>
+                </div>
+
+                <!-- Timing bars -->
+                <h4 class="mt-2">最近一次访问延迟</h4>
+                <div id="s1-timing">
+                    <div class="timing-bar">
+                        <span class="bar-label">Cache命中</span>
+                        <div class="bar-fill" id="s1-hit-bar" style="width:0; background:var(--accent-green);">1 周期</div>
+                    </div>
+                    <div class="timing-bar">
+                        <span class="bar-label">Cache未命中</span>
+                        <div class="bar-fill" id="s1-miss-bar" style="width:0; background:var(--accent-red);">100 周期</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ============================================ -->
+        <!-- Section 2: 地址分解 -->
+        <!-- ============================================ -->
+        <div class="module-section" id="sec-address">
+            <div class="section-inner">
+                <div class="section-title">
+                    <div class="icon">2</div>
+                    <h2>地址分解</h2>
+                </div>
+
+                <p>CPU发出的内存地址需要拆分成三部分才能查找Cache：<strong>标记(Tag)</strong>用于唯一标识数据块，<strong>索引(Index)</strong>确定数据在Cache中的位置，<strong>偏移(Offset)</strong>定位块内的具体字节。</p>
+
+                <div class="info-box">
+                    <p>$$\text{地址} = [\underbrace{\text{Tag}}_{\text{标识块}}\ |\ \underbrace{\text{Index}}_{\text{定位组}}\ |\ \underbrace{\text{Offset}}_{\text{块内偏移}}]$$</p>
+                </div>
+
+                <!-- Cache parameter sliders -->
+                <div class="card mt-2">
+                    <h4>Cache参数配置</h4>
+                    <div class="slider-group mt-1">
+                        <label>Cache大小：</label>
+                        <input type="range" id="s2-cachesize" min="6" max="16" value="10" step="1">
+                        <span class="slider-value" id="s2-cachesize-val">1 KB</span>
+                    </div>
+                    <div class="slider-group mt-1">
+                        <label>块大小：</label>
+                        <input type="range" id="s2-blocksize" min="2" max="8" value="5" step="1">
+                        <span class="slider-value" id="s2-blocksize-val">32 B</span>
+                    </div>
+                    <div class="slider-group mt-1">
+                        <label>相联度：</label>
+                        <input type="range" id="s2-assoc" min="0" max="4" value="0" step="1">
+                        <span class="slider-value" id="s2-assoc-val">1路</span>
+                    </div>
+
+                    <div class="stats-bar mt-1" id="s2-bit-info">
+                        <div class="stat-item"><span class="stat-label">Tag位数：</span><span class="stat-val" style="color:var(--accent-blue);" id="s2-tag-bits">22</span></div>
+                        <div class="stat-item"><span class="stat-label">Index位数：</span><span class="stat-val" style="color:var(--accent-green);" id="s2-index-bits">5</span></div>
+                        <div class="stat-item"><span class="stat-label">Offset位数：</span><span class="stat-val" style="color:var(--accent-orange);" id="s2-offset-bits">5</span></div>
+                        <div class="stat-item"><span class="stat-label">组数：</span><span class="stat-val" id="s2-num-sets">32</span></div>
+                        <div class="stat-item"><span class="stat-label">总块数：</span><span class="stat-val" id="s2-num-blocks">32</span></div>
+                    </div>
+                </div>
+
+                <!-- Address input -->
+                <div class="card mt-2">
+                    <h4>输入地址进行分解</h4>
+                    <div class="controls-bar" style="background:transparent; border:none; padding:0.5rem 0;">
+                        <span class="text-sm" style="color:var(--text-muted);">十六进制地址：</span>
+                        <input type="text" class="hex-input" id="s2-addr-input" value="0x00001A3C" placeholder="0x...">
+                        <button class="btn btn-primary btn-sm" onclick="S2.parseAddr()">分解</button>
+                    </div>
+
+                    <!-- Address breakdown display -->
+                    <div class="addr-legend">
+                        <span><span class="legend-dot" style="background:var(--accent-blue);"></span>Tag</span>
+                        <span><span class="legend-dot" style="background:var(--accent-green);"></span>Index</span>
+                        <span><span class="legend-dot" style="background:var(--accent-orange);"></span>Offset</span>
+                    </div>
+                    <div class="addr-display" id="s2-addr-display"></div>
+
+                    <div class="stats-bar mt-1">
+                        <div class="stat-item"><span class="stat-label">Tag值：</span><span class="stat-val" style="color:var(--accent-blue);" id="s2-tag-val">-</span></div>
+                        <div class="stat-item"><span class="stat-label">Index值：</span><span class="stat-val" style="color:var(--accent-green);" id="s2-index-val">-</span></div>
+                        <div class="stat-item"><span class="stat-label">Offset值：</span><span class="stat-val" style="color:var(--accent-orange);" id="s2-offset-val">-</span></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ============================================ -->
+        <!-- Section 3: 直接映射 -->
+        <!-- ============================================ -->
+        <div class="module-section" id="sec-direct-mapped">
+            <div class="section-inner">
+                <div class="section-title">
+                    <div class="icon">3</div>
+                    <h2>直接映射Cache</h2>
+                </div>
+
+                <p>直接映射是最简单的Cache映射方式：每个内存块只能映射到Cache中<strong>唯一确定的一行</strong>。映射规则为：</p>
+                <div class="info-box">
+                    <p>$$\text{Cache行号} = \text{内存块号} \mod \text{Cache总行数}$$</p>
+                </div>
+                <p>优点是硬件实现简单、查找速度快；缺点是容易产生<strong>冲突未命中</strong> — 两个不同地址映射到同一行时互相驱逐。</p>
+
+                <div class="canvas-container">
+                    <canvas id="canvas-direct"></canvas>
+                </div>
+
+                <div class="controls-bar">
+                    <span class="text-sm" style="color:var(--text-muted);">地址序列（逗号分隔的十六进制）：</span>
+                    <input type="text" class="seq-input" id="s3-seq" value="0x00,0x20,0x40,0x60,0x00,0x80,0x20,0x00" style="flex:1;min-width:200px;">
+                </div>
+                <div class="controls-bar">
+                    <button class="btn btn-primary btn-sm" onclick="S3.run()">运行序列</button>
+                    <button class="btn btn-sm" onclick="S3.step()">单步</button>
+                    <button class="btn btn-sm" onclick="S3.reset()">重置</button>
+                    <div class="sep"></div>
+                    <span class="text-sm" style="color:var(--text-muted);">Cache行数：<strong>4</strong></span>
+                    <span class="text-sm" style="color:var(--text-muted);">块大小：<strong>32B</strong></span>
+                </div>
+
+                <div class="stats-bar mt-1">
+                    <div class="stat-item"><span class="stat-label">当前步骤：</span><span class="stat-val" id="s3-step">0/0</span></div>
+                    <div class="stat-item"><span class="stat-label">命中：</span><span class="stat-val hit-color" id="s3-hits">0</span></div>
+                    <div class="stat-item"><span class="stat-label">未命中：</span><span class="stat-val miss-color" id="s3-misses">0</span></div>
+                    <div class="stat-item"><span class="stat-label">命中率：</span><span class="stat-val hit-color" id="s3-rate">0%</span></div>
+                </div>
+
+                <div class="access-log mt-1" id="s3-log"></div>
+            </div>
+        </div>
+
+        <!-- ============================================ -->
+        <!-- Section 4: 全相联 -->
+        <!-- ============================================ -->
+        <div class="module-section" id="sec-fully-assoc">
+            <div class="section-inner">
+                <div class="section-title">
+                    <div class="icon">4</div>
+                    <h2>全相联Cache</h2>
+                </div>
+
+                <p>全相联映射允许内存块放入Cache的<strong>任意位置</strong>。查找时需要将请求的Tag与Cache中所有行的Tag<strong>并行比较</strong>，因此不会有冲突未命中。</p>
+                <div class="info-box">
+                    <p>优点：无冲突未命中，利用率最高。<br>缺点：需要大量比较器，硬件成本高，仅适用于小容量Cache（如TLB）。</p>
+                </div>
+
+                <div class="canvas-container">
+                    <canvas id="canvas-fully"></canvas>
+                </div>
+
+                <div class="controls-bar">
+                    <span class="text-sm" style="color:var(--text-muted);">地址序列（与直接映射相同以便对比）：</span>
+                    <input type="text" class="seq-input" id="s4-seq" value="0x00,0x20,0x40,0x60,0x00,0x80,0x20,0x00" style="flex:1;min-width:200px;">
+                </div>
+                <div class="controls-bar">
+                    <button class="btn btn-primary btn-sm" onclick="S4.run()">运行序列</button>
+                    <button class="btn btn-sm" onclick="S4.step()">单步</button>
+                    <button class="btn btn-sm" onclick="S4.reset()">重置</button>
+                    <div class="sep"></div>
+                    <span class="text-sm" style="color:var(--text-muted);">Cache行数：<strong>4</strong></span>
+                    <span class="text-sm" style="color:var(--text-muted);">块大小：<strong>32B</strong></span>
+                </div>
+
+                <div class="stats-bar mt-1">
+                    <div class="stat-item"><span class="stat-label">当前步骤：</span><span class="stat-val" id="s4-step">0/0</span></div>
+                    <div class="stat-item"><span class="stat-label">命中：</span><span class="stat-val hit-color" id="s4-hits">0</span></div>
+                    <div class="stat-item"><span class="stat-label">未命中：</span><span class="stat-val miss-color" id="s4-misses">0</span></div>
+                    <div class="stat-item"><span class="stat-label">命中率：</span><span class="stat-val hit-color" id="s4-rate">0%</span></div>
+                </div>
+
+                <div class="access-log mt-1" id="s4-log"></div>
+            </div>
+        </div>
+
+        <!-- ============================================ -->
+        <!-- Section 5: 组相联 -->
+        <!-- ============================================ -->
+        <div class="module-section" id="sec-set-assoc">
+            <div class="section-inner">
+                <div class="section-title">
+                    <div class="icon">5</div>
+                    <h2>组相联Cache</h2>
+                </div>
+
+                <p>组相联是直接映射与全相联的折中方案：将Cache分成若干<strong>组(Set)</strong>，每组包含多个<strong>路(Way)</strong>。地址先根据Index定位到某组，再在该组内的多路中任意存放。</p>
+                <div class="info-box">
+                    <p>$$N\text{路组相联：每组} N \text{行，共} \frac{\text{Cache行数}}{N} \text{个组}$$</p>
+                    <p>1路组相联 = 直接映射；Cache行数路组相联 = 全相联</p>
+                </div>
+
+                <div class="canvas-container">
+                    <canvas id="canvas-setassoc"></canvas>
+                </div>
+
+                <div class="controls-bar">
+                    <span class="text-sm" style="color:var(--text-muted);">地址序列：</span>
+                    <input type="text" class="seq-input" id="s5-seq" value="0x00,0x20,0x40,0x60,0x00,0x80,0x20,0x00" style="flex:1;min-width:200px;">
+                </div>
+                <div class="controls-bar">
+                    <span class="text-sm" style="color:var(--text-muted);">相联度：</span>
+                    <div class="btn-group">
+                        <button class="btn btn-sm active" data-assoc="1" onclick="S5.setAssoc(1,this)">1路</button>
+                        <button class="btn btn-sm" data-assoc="2" onclick="S5.setAssoc(2,this)">2路</button>
+                        <button class="btn btn-sm" data-assoc="4" onclick="S5.setAssoc(4,this)">4路</button>
+                    </div>
+                    <div class="sep"></div>
+                    <button class="btn btn-primary btn-sm" onclick="S5.run()">运行序列</button>
+                    <button class="btn btn-sm" onclick="S5.step()">单步</button>
+                    <button class="btn btn-sm" onclick="S5.reset()">重置</button>
+                </div>
+
+                <div class="stats-bar mt-1">
+                    <div class="stat-item"><span class="stat-label">当前步骤：</span><span class="stat-val" id="s5-step">0/0</span></div>
+                    <div class="stat-item"><span class="stat-label">命中：</span><span class="stat-val hit-color" id="s5-hits">0</span></div>
+                    <div class="stat-item"><span class="stat-label">未命中：</span><span class="stat-val miss-color" id="s5-misses">0</span></div>
+                    <div class="stat-item"><span class="stat-label">命中率：</span><span class="stat-val hit-color" id="s5-rate">0%</span></div>
+                </div>
+
+                <div class="access-log mt-1" id="s5-log"></div>
+
+                <!-- Hit rate comparison -->
+                <h3 class="mt-2">命中率对比</h3>
+                <p class="text-sm" style="color:var(--text-muted);">使用相同地址序列，比较不同相联度下的命中率</p>
+                <div class="card mt-1" id="s5-compare">
+                    <div class="hitrate-bar-wrap">
+                        <span class="hitrate-label">直接映射</span>
+                        <div class="hitrate-track"><div class="hitrate-fill" id="s5-hr-1" style="width:0; background:var(--accent-red);"></div></div>
+                        <span class="stat-val" style="min-width:50px;text-align:right;" id="s5-hr-1-val">-</span>
+                    </div>
+                    <div class="hitrate-bar-wrap">
+                        <span class="hitrate-label">2路组相联</span>
+                        <div class="hitrate-track"><div class="hitrate-fill" id="s5-hr-2" style="width:0; background:var(--accent-orange);"></div></div>
+                        <span class="stat-val" style="min-width:50px;text-align:right;" id="s5-hr-2-val">-</span>
+                    </div>
+                    <div class="hitrate-bar-wrap">
+                        <span class="hitrate-label">4路组相联</span>
+                        <div class="hitrate-track"><div class="hitrate-fill" id="s5-hr-4" style="width:0; background:var(--accent-blue);"></div></div>
+                        <span class="stat-val" style="min-width:50px;text-align:right;" id="s5-hr-4-val">-</span>
+                    </div>
+                    <div class="hitrate-bar-wrap">
+                        <span class="hitrate-label">全相联</span>
+                        <div class="hitrate-track"><div class="hitrate-fill" id="s5-hr-full" style="width:0; background:var(--accent-green);"></div></div>
+                        <span class="stat-val" style="min-width:50px;text-align:right;" id="s5-hr-full-val">-</span>
+                    </div>
+                    <button class="btn btn-sm mt-1" onclick="S5.compareAll()">运行对比</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ============================================ -->
+        <!-- Section 6: 映射方式对比 -->
+        <!-- ============================================ -->
+        <div class="module-section" id="sec-comparison">
+            <div class="section-inner">
+                <div class="section-title">
+                    <div class="icon">6</div>
+                    <h2>映射方式对比与练习</h2>
+                </div>
+
+                <h3>总结对比</h3>
+                <table class="compare-table">
+                    <thead>
+                        <tr>
+                            <th>特性</th>
+                            <th>直接映射</th>
+                            <th>N路组相联</th>
+                            <th>全相联</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>映射规则</td>
+                            <td>固定一行</td>
+                            <td>固定一组，组内任选</td>
+                            <td>任意行</td>
+                        </tr>
+                        <tr>
+                            <td>比较器数量</td>
+                            <td>1个</td>
+                            <td>N个</td>
+                            <td>全部行数</td>
+                        </tr>
+                        <tr>
+                            <td>硬件成本</td>
+                            <td style="color:var(--accent-green);">低</td>
+                            <td style="color:var(--accent-orange);">中</td>
+                            <td style="color:var(--accent-red);">高</td>
+                        </tr>
+                        <tr>
+                            <td>命中率</td>
+                            <td style="color:var(--accent-red);">较低</td>
+                            <td style="color:var(--accent-orange);">较高</td>
+                            <td style="color:var(--accent-green);">最高</td>
+                        </tr>
+                        <tr>
+                            <td>冲突未命中</td>
+                            <td style="color:var(--accent-red);">多</td>
+                            <td style="color:var(--accent-orange);">少</td>
+                            <td style="color:var(--accent-green);">无</td>
+                        </tr>
+                        <tr>
+                            <td>查找速度</td>
+                            <td style="color:var(--accent-green);">最快</td>
+                            <td style="color:var(--accent-orange);">较快</td>
+                            <td style="color:var(--accent-red);">最慢</td>
+                        </tr>
+                        <tr>
+                            <td>典型应用</td>
+                            <td>L1 Cache</td>
+                            <td>L1/L2/L3 Cache</td>
+                            <td>TLB</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <!-- Performance trade-off graph -->
+                <h3 class="mt-2">性能权衡图</h3>
+                <p class="text-sm" style="color:var(--text-muted);">观察相联度增加时命中率与硬件成本的变化趋势</p>
+                <div class="canvas-container">
+                    <canvas id="canvas-tradeoff"></canvas>
+                </div>
+
+                <!-- Interactive challenge -->
+                <h3 class="mt-2">挑战练习</h3>
+                <p>给定以下Cache配置和地址序列，预测每次访问是命中还是未命中，然后检查答案。</p>
+
+                <div class="card mt-1">
+                    <div class="stats-bar" style="background:transparent;">
+                        <div class="stat-item"><span class="stat-label">映射方式：</span><span class="stat-val">直接映射</span></div>
+                        <div class="stat-item"><span class="stat-label">Cache行数：</span><span class="stat-val">4</span></div>
+                        <div class="stat-item"><span class="stat-label">块大小：</span><span class="stat-val">16B</span></div>
+                    </div>
+
+                    <div id="s6-challenge" class="mt-1"></div>
+
+                    <div class="controls-bar mt-1" style="background:transparent; border:none; padding:0;">
+                        <button class="btn btn-primary btn-sm" onclick="S6.check()">检查答案</button>
+                        <button class="btn btn-sm" onclick="S6.reveal()">显示解析</button>
+                        <button class="btn btn-sm" onclick="S6.newChallenge()">换一题</button>
+                    </div>
+
+                    <div id="s6-result" class="mt-1" style="display:none;"></div>
+                    <div id="s6-solution" class="mt-1" style="display:none;"></div>
+                </div>
+            </div>
+        </div>
+
+    </div><!-- /page-container -->
+
+    <!-- Shared scripts -->
+    <script src="../shared/scripts/mem-utils.js"></script>
+    <script src="../shared/scripts/nav.js"></script>
+
+    <script>
+    /* ================================================================
+       Section 1: 什么是Cache — CPU请求动画 + 命中/未命中延迟可视化
+       ================================================================ */
+    const S1 = (() => {
+        const cacheData = new Map();
+        let accesses = 0, hits = 0, misses = 0;
+        let animating = false;
+        let canvas, ctx, W, H;
+
+        // Cache visual state: 4 slots
+        const SLOTS = 4;
+        const slotContents = new Array(SLOTS).fill(null);
+        const slotHighlight = new Array(SLOTS).fill(null); // 'hit'|'miss'|null
+
+        function init() {
+            canvas = document.getElementById('canvas-whatcache');
+            const res = MemUtils.initCanvas(canvas, 320);
+            ctx = res.ctx; W = res.w; H = res.h;
+            draw();
+        }
+
+        function draw(activeAddr, result) {
+            ctx.clearRect(0, 0, W, H);
+
+            const C = MemUtils.COLORS;
+
+            // Draw CPU
+            const cpuX = 60, cpuY = H / 2 - 30, cpuW = 80, cpuH = 60;
+            MemUtils.drawMemoryBlock(ctx, cpuX, cpuY, cpuW, cpuH, 'CPU', C.purple, { radius: 8 });
+
+            // Draw Cache
+            const cacheX = W * 0.35, cacheY = 40, cacheW = 120, cacheH = H - 80;
+            ctx.save();
+            ctx.fillStyle = MemUtils.hexToRgba(C.green, 0.05);
+            ctx.strokeStyle = C.green;
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.roundRect(cacheX, cacheY, cacheW, cacheH, 8);
+            ctx.fill();
+            ctx.stroke();
+            ctx.fillStyle = C.green;
+            ctx.font = 'bold 12px "JetBrains Mono", monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText('Cache', cacheX + cacheW / 2, cacheY + 18);
+            ctx.restore();
+
+            // Draw Cache slots
+            const slotH = (cacheH - 50) / SLOTS;
+            for (let i = 0; i < SLOTS; i++) {
+                const sy = cacheY + 30 + i * slotH;
+                const label = slotContents[i] !== null ? '0x' + slotContents[i].toString(16).toUpperCase().padStart(4, '0') : '空';
+                const color = slotHighlight[i] === 'hit' ? C.hit : slotHighlight[i] === 'miss' ? C.miss : C.border;
+                const hl = slotHighlight[i] !== null;
+                MemUtils.drawMemoryBlock(ctx, cacheX + 10, sy, cacheW - 20, slotH - 6, label, color, {
+                    highlight: hl,
+                    font: 'bold 11px "JetBrains Mono", monospace'
+                });
+            }
+
+            // Draw Main Memory
+            const memX = W * 0.7, memY = 40, memW = 120, memH = H - 80;
+            ctx.save();
+            ctx.fillStyle = MemUtils.hexToRgba(C.blue, 0.05);
+            ctx.strokeStyle = C.blue;
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.roundRect(memX, memY, memW, memH, 8);
+            ctx.fill();
+            ctx.stroke();
+            ctx.fillStyle = C.blue;
+            ctx.font = 'bold 12px "JetBrains Mono", monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText('主存', memX + memW / 2, memY + 18);
+            ctx.restore();
+
+            // Draw some memory blocks representation
+            const memSlots = 8;
+            const msH = (memH - 50) / memSlots;
+            for (let i = 0; i < memSlots; i++) {
+                const my = memY + 30 + i * msH;
+                const addr = i * 0x10;
+                const label = '0x' + addr.toString(16).toUpperCase().padStart(4, '0');
+                MemUtils.drawMemoryBlock(ctx, memX + 10, my, memW - 20, msH - 4, label, C.blue, {
+                    font: '10px "JetBrains Mono", monospace'
+                });
+            }
+
+            // Arrow CPU -> Cache
+            MemUtils.drawArrow(ctx, cpuX + cpuW, cpuY + cpuH / 2, cacheX, cpuY + cpuH / 2, C.textMut, { dashed: true });
+
+            // Arrow Cache -> Memory
+            MemUtils.drawArrow(ctx, cacheX + cacheW, H / 2, memX, H / 2, C.textMut, { dashed: true });
+
+            // Labels
+            ctx.save();
+            ctx.font = '10px "Noto Sans SC", sans-serif';
+            ctx.fillStyle = C.textMut;
+            ctx.textAlign = 'center';
+            ctx.fillText('~1 周期', (cpuX + cpuW + cacheX) / 2, cpuY + cpuH / 2 - 10);
+            ctx.fillText('~100 周期', (cacheX + cacheW + memX) / 2, H / 2 - 10);
+            ctx.restore();
+
+            // Status text
+            if (activeAddr !== undefined && result !== undefined) {
+                ctx.save();
+                ctx.font = 'bold 13px "Noto Sans SC", sans-serif';
+                ctx.textAlign = 'center';
+                const addrStr = '0x' + activeAddr.toString(16).toUpperCase().padStart(4, '0');
+                if (result === 'hit') {
+                    ctx.fillStyle = C.hit;
+                    ctx.fillText('访问 ' + addrStr + ' → 命中!', W / 2, H - 10);
+                } else {
+                    ctx.fillStyle = C.miss;
+                    ctx.fillText('访问 ' + addrStr + ' → 未命中，从主存加载', W / 2, H - 10);
+                }
+                ctx.restore();
+            }
+        }
+
+        function accessAddr(addr) {
+            if (animating) return;
+            animating = true;
+            accesses++;
+
+            // Clear highlights
+            slotHighlight.fill(null);
+
+            // Check if in cache
+            const isHit = cacheData.has(addr);
+            if (isHit) {
+                hits++;
+                const slotIdx = cacheData.get(addr);
+                slotHighlight[slotIdx] = 'hit';
+                draw(addr, 'hit');
+                showTiming(true);
+            } else {
+                misses++;
+                // Find empty slot or evict oldest
+                let slotIdx = slotContents.indexOf(null);
+                if (slotIdx === -1) {
+                    // Evict LRU-ish: evict slot 0 and shift
+                    const evictedAddr = slotContents[0];
+                    cacheData.delete(evictedAddr);
+                    slotContents.shift();
+                    slotContents.push(null);
+                    // Re-map indices
+                    cacheData.forEach((val, key) => {
+                        cacheData.set(key, val - 1);
+                    });
+                    slotIdx = SLOTS - 1;
+                }
+                slotContents[slotIdx] = addr;
+                cacheData.set(addr, slotIdx);
+                slotHighlight[slotIdx] = 'miss';
+                draw(addr, 'miss');
+                showTiming(false);
+            }
+
+            updateStats();
+            setTimeout(() => { animating = false; }, 400);
+        }
+
+        function showTiming(isHit) {
+            const hitBar = document.getElementById('s1-hit-bar');
+            const missBar = document.getElementById('s1-miss-bar');
+            if (isHit) {
+                hitBar.style.width = '60px';
+                hitBar.style.background = 'var(--accent-green)';
+                missBar.style.width = '0';
+            } else {
+                hitBar.style.width = '0';
+                missBar.style.width = '100%';
+                missBar.style.background = 'var(--accent-red)';
+            }
+        }
+
+        function updateStats() {
+            document.getElementById('s1-accesses').textContent = accesses;
+            document.getElementById('s1-hits').textContent = hits;
+            document.getElementById('s1-misses').textContent = misses;
+            document.getElementById('s1-rate').textContent = accesses > 0 ? (hits / accesses * 100).toFixed(1) + '%' : '0%';
+        }
+
+        function reset() {
+            cacheData.clear();
+            slotContents.fill(null);
+            slotHighlight.fill(null);
+            accesses = 0; hits = 0; misses = 0;
+            updateStats();
+            document.getElementById('s1-hit-bar').style.width = '0';
+            document.getElementById('s1-miss-bar').style.width = '0';
+            draw();
+        }
+
+        return { init, accessAddr, reset };
+    })();
+
+    /* ================================================================
+       Section 2: 地址分解
+       ================================================================ */
+    const S2 = (() => {
+        function init() {
+            const els = ['s2-cachesize', 's2-blocksize', 's2-assoc'];
+            els.forEach(id => {
+                document.getElementById(id).addEventListener('input', updateConfig);
+            });
+            updateConfig();
+            parseAddr();
+        }
+
+        function updateConfig() {
+            const csExp = parseInt(document.getElementById('s2-cachesize').value);
+            const bsExp = parseInt(document.getElementById('s2-blocksize').value);
+            const assocExp = parseInt(document.getElementById('s2-assoc').value);
+
+            const cacheSize = 1 << csExp;
+            const blockSize = 1 << bsExp;
+            const assoc = 1 << assocExp;
+
+            // Validate: assoc cannot exceed numBlocks
+            const numBlocks = cacheSize / blockSize;
+            const actualAssoc = Math.min(assoc, numBlocks);
+
+            document.getElementById('s2-cachesize-val').textContent = formatSize(cacheSize);
+            document.getElementById('s2-blocksize-val').textContent = formatSize(blockSize);
+            document.getElementById('s2-assoc-val').textContent = actualAssoc + '路';
+
+            const bits = MemUtils.calcCacheBits(cacheSize, blockSize, actualAssoc);
+            document.getElementById('s2-tag-bits').textContent = bits.tagBits;
+            document.getElementById('s2-index-bits').textContent = bits.indexBits;
+            document.getElementById('s2-offset-bits').textContent = bits.offsetBits;
+            document.getElementById('s2-num-sets').textContent = bits.numSets;
+            document.getElementById('s2-num-blocks').textContent = bits.numBlocks;
+        }
+
+        function formatSize(bytes) {
+            if (bytes >= 1024 * 1024) return (bytes / (1024 * 1024)) + ' MB';
+            if (bytes >= 1024) return (bytes / 1024) + ' KB';
+            return bytes + ' B';
+        }
+
+        function parseAddr() {
+            let addrStr = document.getElementById('s2-addr-input').value.trim();
+            let addr = parseInt(addrStr, 16);
+            if (isNaN(addr)) addr = 0;
+            addr = addr >>> 0; // ensure unsigned 32-bit
+
+            const csExp = parseInt(document.getElementById('s2-cachesize').value);
+            const bsExp = parseInt(document.getElementById('s2-blocksize').value);
+            const assocExp = parseInt(document.getElementById('s2-assoc').value);
+
+            const cacheSize = 1 << csExp;
+            const blockSize = 1 << bsExp;
+            const assoc = Math.min(1 << assocExp, cacheSize / blockSize);
+
+            const bits = MemUtils.calcCacheBits(cacheSize, blockSize, assoc);
+            const parsed = MemUtils.parseAddress(addr, bits.tagBits, bits.indexBits, bits.offsetBits);
+            const binStr = MemUtils.addressToBinary(addr, 32);
+
+            // Build colored display
+            const display = document.getElementById('s2-addr-display');
+            display.innerHTML = '';
+
+            for (let i = 0; i < 32; i++) {
+                const span = document.createElement('span');
+                span.className = 'addr-bit';
+                span.textContent = binStr[i];
+                if (i < bits.tagBits) {
+                    span.classList.add('tag');
+                } else if (i < bits.tagBits + bits.indexBits) {
+                    span.classList.add('index');
+                } else {
+                    span.classList.add('offset');
+                }
+                display.appendChild(span);
+
+                // Add separator every 8 bits
+                if ((i + 1) % 8 === 0 && i < 31) {
+                    const sep = document.createElement('span');
+                    sep.style.width = '8px';
+                    sep.style.display = 'inline-block';
+                    display.appendChild(sep);
+                }
+            }
+
+            document.getElementById('s2-tag-val').textContent = '0x' + parsed.tag.toString(16).toUpperCase() + ' (' + parsed.tag + ')';
+            document.getElementById('s2-index-val').textContent = parsed.index + ' (第' + parsed.index + '组)';
+            document.getElementById('s2-offset-val').textContent = parsed.offset + ' (第' + parsed.offset + '字节)';
+        }
+
+        return { init, parseAddr };
+    })();
+
+    /* ================================================================
+       Section 3: 直接映射Cache模拟
+       ================================================================ */
+    const S3 = (() => {
+        const NUM_LINES = 4;
+        const BLOCK_SIZE = 32;
+        let cache = null;
+        let addrSeq = [];
+        let stepIdx = 0;
+        let results = [];
+        let canvas, ctx, W, H;
+
+        function init() {
+            canvas = document.getElementById('canvas-direct');
+            const res = MemUtils.initCanvas(canvas, 380);
+            ctx = res.ctx; W = res.w; H = res.h;
+            resetInternal();
+            draw();
+        }
+
+        function parseSeq() {
+            const raw = document.getElementById('s3-seq').value;
+            return raw.split(',').map(s => parseInt(s.trim(), 16)).filter(n => !isNaN(n));
+        }
+
+        function resetInternal() {
+            cache = MemUtils.createCache(NUM_LINES, 1, BLOCK_SIZE);
+            addrSeq = parseSeq();
+            stepIdx = 0;
+            results = [];
+        }
+
+        function reset() {
+            resetInternal();
+            document.getElementById('s3-log').innerHTML = '';
+            updateStats();
+            draw();
+        }
+
+        function step() {
+            addrSeq = parseSeq();
+            if (stepIdx >= addrSeq.length) return;
+            const addr = addrSeq[stepIdx];
+            const res = cache.access(addr, false);
+            results.push({ addr, ...res });
+            stepIdx++;
+            updateStats();
+            draw(results.length - 1);
+            addLog(addr, res);
+        }
+
+        function run() {
+            reset();
+            addrSeq = parseSeq();
+            let delay = 0;
+            for (let i = 0; i < addrSeq.length; i++) {
+                setTimeout(() => { step(); }, delay);
+                delay += 500;
+            }
+        }
+
+        function addLog(addr, res) {
+            const log = document.getElementById('s3-log');
+            const cls = res.hit ? 'log-hit' : (res.evicted ? 'log-evict' : 'log-miss');
+            const addrStr = '0x' + addr.toString(16).toUpperCase().padStart(4, '0');
+            const tagStr = '0x' + res.tag.toString(16).toUpperCase();
+            let text = `[${stepIdx}] ${addrStr} → 组${res.index} `;
+            if (res.hit) {
+                text += `<span style="color:var(--accent-green);">命中</span> (Tag=${tagStr})`;
+            } else {
+                text += `<span style="color:var(--accent-red);">未命中</span> (Tag=${tagStr})`;
+                if (res.evicted) {
+                    text += ` <span style="color:var(--accent-orange);">驱逐 Tag=0x${res.evictedTag.toString(16).toUpperCase()}</span>`;
+                }
+            }
+            log.innerHTML += `<div class="log-entry ${cls}">${text}</div>`;
+            log.scrollTop = log.scrollHeight;
+        }
+
+        function updateStats() {
+            const s = cache.getStats();
+            document.getElementById('s3-step').textContent = `${stepIdx}/${addrSeq.length}`;
+            document.getElementById('s3-hits').textContent = s.hits;
+            document.getElementById('s3-misses').textContent = s.misses;
+            document.getElementById('s3-rate').textContent = s.accesses > 0 ? (s.hits / s.accesses * 100).toFixed(1) + '%' : '0%';
+        }
+
+        function draw(highlightStep) {
+            ctx.clearRect(0, 0, W, H);
+            const C = MemUtils.COLORS;
+            const sets = cache.getSets();
+            const cfg = cache.getConfig();
+
+            // Title
+            ctx.save();
+            ctx.font = 'bold 14px "Noto Sans SC", sans-serif';
+            ctx.fillStyle = C.textPri;
+            ctx.textAlign = 'center';
+            ctx.fillText('直接映射 Cache（' + NUM_LINES + '行，块大小=' + BLOCK_SIZE + 'B）', W / 2, 22);
+            ctx.restore();
+
+            // Memory blocks on left
+            const memX = 30, memY = 45;
+            const memW = 100, memH = 36;
+            const memGap = 4;
+            const memBlocks = 8;
+            ctx.save();
+            ctx.font = '11px "Noto Sans SC", sans-serif';
+            ctx.fillStyle = C.textMut;
+            ctx.textAlign = 'center';
+            ctx.fillText('内存块', memX + memW / 2, memY - 8);
+            ctx.restore();
+
+            for (let i = 0; i < memBlocks; i++) {
+                const y = memY + i * (memH + memGap);
+                const blockAddr = i * BLOCK_SIZE;
+                const label = '块' + i + ' (0x' + blockAddr.toString(16).toUpperCase().padStart(2, '0') + ')';
+                const cacheLineIdx = i % NUM_LINES;
+                const lineColor = getLineColor(cacheLineIdx);
+                MemUtils.drawMemoryBlock(ctx, memX, y, memW, memH, label, lineColor, {
+                    font: '10px "JetBrains Mono", monospace'
+                });
+            }
+
+            // Cache on right
+            const cacheX = W - 240, cacheYStart = 45;
+            const lineW = 200, lineH = 60;
+            const lineGap = 10;
+
+            ctx.save();
+            ctx.font = '11px "Noto Sans SC", sans-serif';
+            ctx.fillStyle = C.textMut;
+            ctx.textAlign = 'center';
+            ctx.fillText('Cache', cacheX + lineW / 2, cacheYStart - 8);
+            ctx.restore();
+
+            for (let i = 0; i < NUM_LINES; i++) {
+                const y = cacheYStart + i * (lineH + lineGap);
+                const way = sets[i][0];
+                const lineColor = getLineColor(i);
+
+                // Determine highlight
+                let hl = false;
+                let hlColor = lineColor;
+                if (highlightStep !== undefined && results[highlightStep]) {
+                    const r = results[highlightStep];
+                    if (r.index === i) {
+                        hl = true;
+                        hlColor = r.hit ? C.hit : C.miss;
+                    }
+                }
+
+                // Background
+                ctx.save();
+                ctx.fillStyle = hl ? MemUtils.hexToRgba(hlColor, 0.12) : MemUtils.hexToRgba(lineColor, 0.05);
+                ctx.strokeStyle = hl ? hlColor : lineColor;
+                ctx.lineWidth = hl ? 2.5 : 1;
+                ctx.beginPath();
+                ctx.roundRect(cacheX, y, lineW, lineH, 6);
+                ctx.fill();
+                ctx.stroke();
+                if (hl) {
+                    ctx.shadowColor = hlColor;
+                    ctx.shadowBlur = 12;
+                    ctx.stroke();
+                    ctx.shadowBlur = 0;
+                }
+                ctx.restore();
+
+                // Line label
+                ctx.save();
+                ctx.font = 'bold 11px "JetBrains Mono", monospace';
+                ctx.fillStyle = lineColor;
+                ctx.textAlign = 'left';
+                ctx.fillText('行' + i, cacheX + 8, y + 18);
+
+                // Valid + Tag
+                ctx.font = '10px "JetBrains Mono", monospace';
+                ctx.fillStyle = C.textSec;
+                const vStr = 'V=' + (way.valid ? '1' : '0');
+                const tStr = way.valid ? 'Tag=0x' + way.tag.toString(16).toUpperCase() : 'Tag=-';
+                ctx.fillText(vStr + '  ' + tStr, cacheX + 8, y + 38);
+
+                // Data representation
+                if (way.valid) {
+                    ctx.fillStyle = C.textMut;
+                    ctx.fillText('数据块', cacheX + 8, y + 54);
+                    // Small data bar
+                    ctx.fillStyle = MemUtils.hexToRgba(lineColor, 0.3);
+                    ctx.fillRect(cacheX + 60, y + 44, lineW - 75, 12);
+                    ctx.strokeStyle = lineColor;
+                    ctx.lineWidth = 0.5;
+                    ctx.strokeRect(cacheX + 60, y + 44, lineW - 75, 12);
+                }
+                ctx.restore();
+            }
+
+            // Draw mapping arrows
+            const arrowStartX = memX + memW;
+            const arrowEndX = cacheX;
+            for (let i = 0; i < memBlocks; i++) {
+                const srcY = memY + i * (memH + memGap) + memH / 2;
+                const cacheLineIdx = i % NUM_LINES;
+                const dstY = cacheYStart + cacheLineIdx * (lineH + lineGap) + lineH / 2;
+                const lineColor = getLineColor(cacheLineIdx);
+
+                ctx.save();
+                ctx.strokeStyle = MemUtils.hexToRgba(lineColor, 0.25);
+                ctx.lineWidth = 1;
+                ctx.setLineDash([3, 3]);
+                ctx.beginPath();
+                ctx.moveTo(arrowStartX + 5, srcY);
+                ctx.lineTo(arrowEndX - 5, dstY);
+                ctx.stroke();
+                ctx.restore();
+            }
+        }
+
+        function getLineColor(idx) {
+            const colors = [MemUtils.COLORS.green, MemUtils.COLORS.blue, MemUtils.COLORS.purple, MemUtils.COLORS.orange];
+            return colors[idx % colors.length];
+        }
+
+        return { init, run, step, reset };
+    })();
+
+    /* ================================================================
+       Section 4: 全相联Cache模拟
+       ================================================================ */
+    const S4 = (() => {
+        const NUM_LINES = 4;
+        const BLOCK_SIZE = 32;
+        let cache = null;
+        let addrSeq = [];
+        let stepIdx = 0;
+        let results = [];
+        let canvas, ctx, W, H;
+
+        function init() {
+            canvas = document.getElementById('canvas-fully');
+            const res = MemUtils.initCanvas(canvas, 380);
+            ctx = res.ctx; W = res.w; H = res.h;
+            resetInternal();
+            draw();
+        }
+
+        function parseSeq() {
+            const raw = document.getElementById('s4-seq').value;
+            return raw.split(',').map(s => parseInt(s.trim(), 16)).filter(n => !isNaN(n));
+        }
+
+        function resetInternal() {
+            // Fully associative: 1 set, NUM_LINES ways
+            cache = MemUtils.createCache(1, NUM_LINES, BLOCK_SIZE);
+            addrSeq = parseSeq();
+            stepIdx = 0;
+            results = [];
+        }
+
+        function reset() {
+            resetInternal();
+            document.getElementById('s4-log').innerHTML = '';
+            updateStats();
+            draw();
+        }
+
+        function step() {
+            addrSeq = parseSeq();
+            if (stepIdx >= addrSeq.length) return;
+            const addr = addrSeq[stepIdx];
+            const res = cache.access(addr, false);
+            results.push({ addr, ...res });
+            stepIdx++;
+            updateStats();
+            draw(results.length - 1);
+            addLog(addr, res);
+        }
+
+        function run() {
+            reset();
+            addrSeq = parseSeq();
+            let delay = 0;
+            for (let i = 0; i < addrSeq.length; i++) {
+                setTimeout(() => { step(); }, delay);
+                delay += 500;
+            }
+        }
+
+        function addLog(addr, res) {
+            const log = document.getElementById('s4-log');
+            const cls = res.hit ? 'log-hit' : (res.evicted ? 'log-evict' : 'log-miss');
+            const addrStr = '0x' + addr.toString(16).toUpperCase().padStart(4, '0');
+            const tagStr = '0x' + res.tag.toString(16).toUpperCase();
+            let text = `[${stepIdx}] ${addrStr} → 路${res.way} `;
+            if (res.hit) {
+                text += `<span style="color:var(--accent-green);">命中</span> (Tag=${tagStr}, 并行比较所有路)`;
+            } else {
+                text += `<span style="color:var(--accent-red);">未命中</span> (Tag=${tagStr})`;
+                if (res.evicted) {
+                    text += ` <span style="color:var(--accent-orange);">LRU驱逐 Tag=0x${res.evictedTag.toString(16).toUpperCase()}</span>`;
+                }
+            }
+            log.innerHTML += `<div class="log-entry ${cls}">${text}</div>`;
+            log.scrollTop = log.scrollHeight;
+        }
+
+        function updateStats() {
+            const s = cache.getStats();
+            document.getElementById('s4-step').textContent = `${stepIdx}/${addrSeq.length}`;
+            document.getElementById('s4-hits').textContent = s.hits;
+            document.getElementById('s4-misses').textContent = s.misses;
+            document.getElementById('s4-rate').textContent = s.accesses > 0 ? (s.hits / s.accesses * 100).toFixed(1) + '%' : '0%';
+        }
+
+        function draw(highlightStep) {
+            ctx.clearRect(0, 0, W, H);
+            const C = MemUtils.COLORS;
+            const sets = cache.getSets();
+
+            // Title
+            ctx.save();
+            ctx.font = 'bold 14px "Noto Sans SC", sans-serif';
+            ctx.fillStyle = C.textPri;
+            ctx.textAlign = 'center';
+            ctx.fillText('全相联 Cache（' + NUM_LINES + '行，块大小=' + BLOCK_SIZE + 'B）', W / 2, 22);
+            ctx.restore();
+
+            // Memory blocks on left
+            const memX = 30, memY = 45;
+            const memW = 100, memH = 36;
+            const memGap = 4;
+            const memBlocks = 8;
+            ctx.save();
+            ctx.font = '11px "Noto Sans SC", sans-serif';
+            ctx.fillStyle = C.textMut;
+            ctx.textAlign = 'center';
+            ctx.fillText('内存块', memX + memW / 2, memY - 8);
+            ctx.restore();
+
+            for (let i = 0; i < memBlocks; i++) {
+                const y = memY + i * (memH + memGap);
+                const blockAddr = i * BLOCK_SIZE;
+                const label = '块' + i + ' (0x' + blockAddr.toString(16).toUpperCase().padStart(2, '0') + ')';
+                MemUtils.drawMemoryBlock(ctx, memX, y, memW, memH, label, C.blue, {
+                    font: '10px "JetBrains Mono", monospace'
+                });
+            }
+
+            // Cache on right — single set with N ways
+            const cacheX = W - 240, cacheYStart = 45;
+            const lineW = 200, lineH = 60;
+            const lineGap = 10;
+
+            // Draw "any block → any way" label
+            ctx.save();
+            ctx.font = '11px "Noto Sans SC", sans-serif';
+            ctx.fillStyle = C.textMut;
+            ctx.textAlign = 'center';
+            ctx.fillText('Cache（任意块 → 任意行）', cacheX + lineW / 2, cacheYStart - 8);
+            ctx.restore();
+
+            const ways = sets[0]; // Only 1 set
+            const wayColors = [C.green, C.orange, C.purple, C.cyan];
+
+            for (let j = 0; j < NUM_LINES; j++) {
+                const y = cacheYStart + j * (lineH + lineGap);
+                const way = ways[j];
+                const wColor = wayColors[j % wayColors.length];
+
+                let hl = false;
+                let hlColor = wColor;
+                if (highlightStep !== undefined && results[highlightStep]) {
+                    const r = results[highlightStep];
+                    if (r.way === j) {
+                        hl = true;
+                        hlColor = r.hit ? C.hit : C.miss;
+                    }
+                }
+
+                ctx.save();
+                ctx.fillStyle = hl ? MemUtils.hexToRgba(hlColor, 0.12) : MemUtils.hexToRgba(wColor, 0.05);
+                ctx.strokeStyle = hl ? hlColor : wColor;
+                ctx.lineWidth = hl ? 2.5 : 1;
+                ctx.beginPath();
+                ctx.roundRect(cacheX, y, lineW, lineH, 6);
+                ctx.fill();
+                ctx.stroke();
+                if (hl) {
+                    ctx.shadowColor = hlColor;
+                    ctx.shadowBlur = 12;
+                    ctx.stroke();
+                    ctx.shadowBlur = 0;
+                }
+                ctx.restore();
+
+                ctx.save();
+                ctx.font = 'bold 11px "JetBrains Mono", monospace';
+                ctx.fillStyle = wColor;
+                ctx.textAlign = 'left';
+                ctx.fillText('路' + j, cacheX + 8, y + 18);
+
+                ctx.font = '10px "JetBrains Mono", monospace';
+                ctx.fillStyle = C.textSec;
+                const vStr = 'V=' + (way.valid ? '1' : '0');
+                const tStr = way.valid ? 'Tag=0x' + way.tag.toString(16).toUpperCase() : 'Tag=-';
+                ctx.fillText(vStr + '  ' + tStr, cacheX + 8, y + 38);
+
+                if (way.valid) {
+                    ctx.fillStyle = C.textMut;
+                    ctx.fillText('数据块', cacheX + 8, y + 54);
+                    ctx.fillStyle = MemUtils.hexToRgba(wColor, 0.3);
+                    ctx.fillRect(cacheX + 60, y + 44, lineW - 75, 12);
+                    ctx.strokeStyle = wColor;
+                    ctx.lineWidth = 0.5;
+                    ctx.strokeRect(cacheX + 60, y + 44, lineW - 75, 12);
+                }
+                ctx.restore();
+            }
+
+            // Draw crisscross mapping arrows (any → any)
+            const arrowStartX = memX + memW;
+            const arrowEndX = cacheX;
+            for (let i = 0; i < memBlocks; i++) {
+                const srcY = memY + i * (memH + memGap) + memH / 2;
+                // Arrow to center of cache block
+                const dstY = cacheYStart + (NUM_LINES - 1) * (lineH + lineGap) / 2 + lineH / 2;
+                ctx.save();
+                ctx.strokeStyle = MemUtils.hexToRgba(C.blue, 0.12);
+                ctx.lineWidth = 0.8;
+                ctx.setLineDash([2, 4]);
+                ctx.beginPath();
+                ctx.moveTo(arrowStartX + 5, srcY);
+                ctx.lineTo(arrowEndX - 5, dstY);
+                ctx.stroke();
+                ctx.restore();
+            }
+
+            // Comparators label
+            ctx.save();
+            ctx.font = '10px "Noto Sans SC", sans-serif';
+            ctx.fillStyle = C.orange;
+            ctx.textAlign = 'center';
+            const compX = (arrowStartX + arrowEndX) / 2;
+            ctx.fillText('并行比较 ' + NUM_LINES + ' 个标记', compX + 20, cacheYStart + 25);
+            ctx.restore();
+        }
+
+        return { init, run, step, reset };
+    })();
+
+    /* ================================================================
+       Section 5: 组相联Cache模拟
+       ================================================================ */
+    const S5 = (() => {
+        const TOTAL_LINES = 4;
+        const BLOCK_SIZE = 32;
+        let assoc = 1;
+        let cache = null;
+        let addrSeq = [];
+        let stepIdx = 0;
+        let results = [];
+        let canvas, ctx, W, H;
+
+        function init() {
+            canvas = document.getElementById('canvas-setassoc');
+            const res = MemUtils.initCanvas(canvas, 400);
+            ctx = res.ctx; W = res.w; H = res.h;
+            resetInternal();
+            draw();
+        }
+
+        function parseSeq() {
+            const raw = document.getElementById('s5-seq').value;
+            return raw.split(',').map(s => parseInt(s.trim(), 16)).filter(n => !isNaN(n));
+        }
+
+        function setAssoc(a, btn) {
+            assoc = a;
+            // Update button styles
+            const group = btn.parentElement;
+            group.querySelectorAll('.btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            reset();
+        }
+
+        function resetInternal() {
+            const numSets = TOTAL_LINES / assoc;
+            cache = MemUtils.createCache(numSets, assoc, BLOCK_SIZE);
+            addrSeq = parseSeq();
+            stepIdx = 0;
+            results = [];
+        }
+
+        function reset() {
+            resetInternal();
+            document.getElementById('s5-log').innerHTML = '';
+            updateStats();
+            draw();
+        }
+
+        function step() {
+            addrSeq = parseSeq();
+            if (stepIdx >= addrSeq.length) return;
+            const addr = addrSeq[stepIdx];
+            const res = cache.access(addr, false);
+            results.push({ addr, ...res });
+            stepIdx++;
+            updateStats();
+            draw(results.length - 1);
+            addLog(addr, res);
+        }
+
+        function run() {
+            reset();
+            addrSeq = parseSeq();
+            let delay = 0;
+            for (let i = 0; i < addrSeq.length; i++) {
+                setTimeout(() => { step(); }, delay);
+                delay += 500;
+            }
+        }
+
+        function addLog(addr, res) {
+            const log = document.getElementById('s5-log');
+            const cls = res.hit ? 'log-hit' : (res.evicted ? 'log-evict' : 'log-miss');
+            const addrStr = '0x' + addr.toString(16).toUpperCase().padStart(4, '0');
+            const tagStr = '0x' + res.tag.toString(16).toUpperCase();
+            let text = `[${stepIdx}] ${addrStr} → 组${res.index} 路${res.way} `;
+            if (res.hit) {
+                text += `<span style="color:var(--accent-green);">命中</span> (Tag=${tagStr})`;
+            } else {
+                text += `<span style="color:var(--accent-red);">未命中</span> (Tag=${tagStr})`;
+                if (res.evicted) {
+                    text += ` <span style="color:var(--accent-orange);">驱逐 Tag=0x${res.evictedTag.toString(16).toUpperCase()}</span>`;
+                }
+            }
+            log.innerHTML += `<div class="log-entry ${cls}">${text}</div>`;
+            log.scrollTop = log.scrollHeight;
+        }
+
+        function updateStats() {
+            const s = cache.getStats();
+            document.getElementById('s5-step').textContent = `${stepIdx}/${addrSeq.length}`;
+            document.getElementById('s5-hits').textContent = s.hits;
+            document.getElementById('s5-misses').textContent = s.misses;
+            document.getElementById('s5-rate').textContent = s.accesses > 0 ? (s.hits / s.accesses * 100).toFixed(1) + '%' : '0%';
+        }
+
+        function draw(highlightStep) {
+            ctx.clearRect(0, 0, W, H);
+            const C = MemUtils.COLORS;
+            const sets = cache.getSets();
+            const cfg = cache.getConfig();
+            const numSets = cfg.numSets;
+
+            // Title
+            ctx.save();
+            ctx.font = 'bold 14px "Noto Sans SC", sans-serif';
+            ctx.fillStyle = C.textPri;
+            ctx.textAlign = 'center';
+            const assocLabel = assoc === TOTAL_LINES ? '全相联' : (assoc === 1 ? '直接映射' : assoc + '路组相联');
+            ctx.fillText(assocLabel + '（' + numSets + '组 x ' + assoc + '路，块大小=' + BLOCK_SIZE + 'B）', W / 2, 22);
+            ctx.restore();
+
+            // Draw sets and ways
+            const startX = 40;
+            const startY = 50;
+            const setW = Math.min((W - 80) / numSets, 280);
+            const setGap = 12;
+            const wayH = 50;
+            const wayGap = 6;
+
+            const setColors = [C.green, C.blue, C.purple, C.orange];
+
+            for (let s = 0; s < numSets; s++) {
+                const sx = startX + s * (setW + setGap);
+                const setColor = setColors[s % setColors.length];
+
+                // Set border
+                const totalSetH = assoc * (wayH + wayGap) + 30;
+                ctx.save();
+                ctx.fillStyle = MemUtils.hexToRgba(setColor, 0.03);
+                ctx.strokeStyle = MemUtils.hexToRgba(setColor, 0.3);
+                ctx.lineWidth = 1;
+                ctx.setLineDash([4, 4]);
+                ctx.beginPath();
+                ctx.roundRect(sx, startY, setW, totalSetH, 8);
+                ctx.fill();
+                ctx.stroke();
+                ctx.restore();
+
+                // Set label
+                ctx.save();
+                ctx.font = 'bold 11px "JetBrains Mono", monospace';
+                ctx.fillStyle = setColor;
+                ctx.textAlign = 'center';
+                ctx.fillText('组' + s, sx + setW / 2, startY + 16);
+                ctx.restore();
+
+                // Ways
+                for (let w = 0; w < assoc; w++) {
+                    const wy = startY + 24 + w * (wayH + wayGap);
+                    const way = sets[s][w];
+                    const wColor = setColor;
+
+                    let hl = false;
+                    let hlColor = wColor;
+                    if (highlightStep !== undefined && results[highlightStep]) {
+                        const r = results[highlightStep];
+                        if (r.index === s && r.way === w) {
+                            hl = true;
+                            hlColor = r.hit ? C.hit : C.miss;
+                        }
+                    }
+
+                    ctx.save();
+                    ctx.fillStyle = hl ? MemUtils.hexToRgba(hlColor, 0.15) : MemUtils.hexToRgba(wColor, 0.06);
+                    ctx.strokeStyle = hl ? hlColor : MemUtils.hexToRgba(wColor, 0.5);
+                    ctx.lineWidth = hl ? 2 : 1;
+                    ctx.beginPath();
+                    ctx.roundRect(sx + 6, wy, setW - 12, wayH, 4);
+                    ctx.fill();
+                    ctx.stroke();
+                    if (hl) {
+                        ctx.shadowColor = hlColor;
+                        ctx.shadowBlur = 10;
+                        ctx.stroke();
+                        ctx.shadowBlur = 0;
+                    }
+                    ctx.restore();
+
+                    ctx.save();
+                    ctx.font = '10px "JetBrains Mono", monospace';
+                    ctx.textAlign = 'left';
+                    ctx.fillStyle = C.textSec;
+                    const vStr = 'V=' + (way.valid ? '1' : '0');
+                    const tStr = way.valid ? ' Tag=0x' + way.tag.toString(16).toUpperCase() : ' Tag=-';
+                    ctx.fillText('路' + w + ' ' + vStr + tStr, sx + 12, wy + 20);
+
+                    if (way.valid) {
+                        ctx.fillStyle = MemUtils.hexToRgba(wColor, 0.3);
+                        ctx.fillRect(sx + 12, wy + 30, setW - 30, 10);
+                        ctx.strokeStyle = wColor;
+                        ctx.lineWidth = 0.5;
+                        ctx.strokeRect(sx + 12, wy + 30, setW - 30, 10);
+                    }
+                    ctx.restore();
+                }
+            }
+        }
+
+        function compareAll() {
+            const seq = parseSeq();
+            const configs = [
+                { label: '直接映射', sets: TOTAL_LINES, assoc: 1 },
+                { label: '2路组相联', sets: TOTAL_LINES / 2, assoc: 2 },
+                { label: '4路组相联', sets: 1, assoc: 4 },
+                { label: '全相联', sets: 1, assoc: TOTAL_LINES },
+            ];
+
+            const hitRates = [];
+            for (const cfg of configs) {
+                const c = MemUtils.createCache(cfg.sets, cfg.assoc, BLOCK_SIZE);
+                for (const addr of seq) {
+                    c.access(addr, false);
+                }
+                const s = c.getStats();
+                hitRates.push(s.accesses > 0 ? s.hits / s.accesses : 0);
+            }
+
+            const ids = ['s5-hr-1', 's5-hr-2', 's5-hr-4', 's5-hr-full'];
+            const valIds = ['s5-hr-1-val', 's5-hr-2-val', 's5-hr-4-val', 's5-hr-full-val'];
+            for (let i = 0; i < 4; i++) {
+                const pct = (hitRates[i] * 100).toFixed(1);
+                document.getElementById(ids[i]).style.width = pct + '%';
+                document.getElementById(ids[i]).textContent = pct + '%';
+                document.getElementById(valIds[i]).textContent = pct + '%';
+            }
+        }
+
+        return { init, run, step, reset, setAssoc, compareAll };
+    })();
+
+    /* ================================================================
+       Section 6: 对比与练习
+       ================================================================ */
+    const S6 = (() => {
+        const CACHE_LINES = 4;
+        const BLOCK_SIZE = 16; // 16B block for challenge
+        let challengeSeq = [];
+        let correctAnswers = [];
+        let userAnswers = [];
+
+        function init() {
+            drawTradeoff();
+            newChallenge();
+        }
+
+        /* Trade-off chart */
+        function drawTradeoff() {
+            const canvas = document.getElementById('canvas-tradeoff');
+            const { ctx, w, h } = MemUtils.initCanvas(canvas, 300);
+            const C = MemUtils.COLORS;
+
+            const padL = 60, padR = 40, padT = 40, padB = 50;
+            const plotW = w - padL - padR;
+            const plotH = h - padT - padB;
+
+            // Background
+            ctx.fillStyle = MemUtils.hexToRgba(C.border, 0.2);
+            ctx.fillRect(padL, padT, plotW, plotH);
+
+            // Axes
+            ctx.save();
+            ctx.strokeStyle = C.textMut;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(padL, padT);
+            ctx.lineTo(padL, padT + plotH);
+            ctx.lineTo(padL + plotW, padT + plotH);
+            ctx.stroke();
+            ctx.restore();
+
+            // X labels (associativity)
+            const xLabels = ['1路', '2路', '4路', '8路', '全相联'];
+            const xPositions = xLabels.map((_, i) => padL + (i / (xLabels.length - 1)) * plotW);
+
+            ctx.save();
+            ctx.font = '11px "Noto Sans SC", sans-serif';
+            ctx.fillStyle = C.textSec;
+            ctx.textAlign = 'center';
+            for (let i = 0; i < xLabels.length; i++) {
+                ctx.fillText(xLabels[i], xPositions[i], padT + plotH + 20);
+            }
+            ctx.fillText('相联度 →', padL + plotW / 2, padT + plotH + 40);
+            ctx.restore();
+
+            // Y axis label
+            ctx.save();
+            ctx.font = '11px "Noto Sans SC", sans-serif';
+            ctx.fillStyle = C.textSec;
+            ctx.textAlign = 'center';
+            ctx.translate(18, padT + plotH / 2);
+            ctx.rotate(-Math.PI / 2);
+            ctx.fillText('相对值 →', 0, 0);
+            ctx.restore();
+
+            // Data: hit rate curve (increasing, diminishing returns)
+            const hitRateData = [0.6, 0.78, 0.88, 0.93, 0.96];
+            // Hardware cost curve (increasing)
+            const hwCostData = [0.2, 0.35, 0.55, 0.75, 1.0];
+            // Access time (slight increase)
+            const accessTimeData = [0.15, 0.22, 0.32, 0.45, 0.65];
+
+            function drawCurve(data, color, label) {
+                ctx.save();
+                ctx.strokeStyle = color;
+                ctx.lineWidth = 2.5;
+                ctx.beginPath();
+                for (let i = 0; i < data.length; i++) {
+                    const x = xPositions[i];
+                    const y = padT + plotH - data[i] * plotH;
+                    if (i === 0) ctx.moveTo(x, y);
+                    else ctx.lineTo(x, y);
+                }
+                ctx.stroke();
+
+                // Points
+                for (let i = 0; i < data.length; i++) {
+                    const x = xPositions[i];
+                    const y = padT + plotH - data[i] * plotH;
+                    ctx.fillStyle = color;
+                    ctx.beginPath();
+                    ctx.arc(x, y, 4, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+
+                // Label at end
+                const lastX = xPositions[data.length - 1];
+                const lastY = padT + plotH - data[data.length - 1] * plotH;
+                ctx.font = 'bold 11px "Noto Sans SC", sans-serif';
+                ctx.fillStyle = color;
+                ctx.textAlign = 'left';
+                ctx.fillText(label, lastX + 8, lastY + 4);
+                ctx.restore();
+            }
+
+            drawCurve(hitRateData, C.green, '命中率');
+            drawCurve(hwCostData, C.red, '硬件成本');
+            drawCurve(accessTimeData, C.orange, '查找时间');
+        }
+
+        /* Challenge */
+        function newChallenge() {
+            // Generate a random address sequence
+            const blockSize = BLOCK_SIZE;
+            const numSets = CACHE_LINES;
+            const possibleBlocks = [0, 1, 2, 3, 4, 5, 6, 7];
+            const seqLen = 8;
+            challengeSeq = [];
+            for (let i = 0; i < seqLen; i++) {
+                const blk = possibleBlocks[Math.floor(Math.random() * possibleBlocks.length)];
+                challengeSeq.push(blk * blockSize);
+            }
+
+            // Compute correct answers
+            const cache = MemUtils.createCache(CACHE_LINES, 1, BLOCK_SIZE);
+            correctAnswers = [];
+            for (const addr of challengeSeq) {
+                const res = cache.access(addr, false);
+                correctAnswers.push(res.hit);
+            }
+
+            userAnswers = new Array(seqLen).fill(null);
+            renderChallenge();
+
+            document.getElementById('s6-result').style.display = 'none';
+            document.getElementById('s6-solution').style.display = 'none';
+        }
+
+        function renderChallenge() {
+            const container = document.getElementById('s6-challenge');
+            let html = '<div style="overflow-x:auto;"><table class="compare-table" style="font-family:var(--font-mono);font-size:0.82rem;">';
+            html += '<tr><th>步骤</th>';
+            for (let i = 0; i < challengeSeq.length; i++) {
+                html += `<th>${i + 1}</th>`;
+            }
+            html += '</tr>';
+
+            // Address row
+            html += '<tr><td>地址</td>';
+            for (let i = 0; i < challengeSeq.length; i++) {
+                html += `<td>0x${challengeSeq[i].toString(16).toUpperCase().padStart(2, '0')}</td>`;
+            }
+            html += '</tr>';
+
+            // Block number
+            html += '<tr><td>块号</td>';
+            for (let i = 0; i < challengeSeq.length; i++) {
+                html += `<td>${Math.floor(challengeSeq[i] / BLOCK_SIZE)}</td>`;
+            }
+            html += '</tr>';
+
+            // Cache line
+            html += '<tr><td>映射行</td>';
+            for (let i = 0; i < challengeSeq.length; i++) {
+                const blockNum = Math.floor(challengeSeq[i] / BLOCK_SIZE);
+                html += `<td>${blockNum % CACHE_LINES}</td>`;
+            }
+            html += '</tr>';
+
+            // User prediction
+            html += '<tr><td>预测</td>';
+            for (let i = 0; i < challengeSeq.length; i++) {
+                const hCls = userAnswers[i] === true ? 'selected-hit' : '';
+                const mCls = userAnswers[i] === false ? 'selected-miss' : '';
+                html += `<td>
+                    <button class="predict-btn ${hCls}" onclick="S6.predict(${i}, true)">命中</button>
+                    <button class="predict-btn ${mCls}" onclick="S6.predict(${i}, false)">未命中</button>
+                </td>`;
+            }
+            html += '</tr></table></div>';
+            container.innerHTML = html;
+        }
+
+        function predict(idx, isHit) {
+            userAnswers[idx] = isHit;
+            renderChallenge();
+        }
+
+        function check() {
+            let correct = 0;
+            for (let i = 0; i < challengeSeq.length; i++) {
+                if (userAnswers[i] === correctAnswers[i]) correct++;
+            }
+            const resultDiv = document.getElementById('s6-result');
+            resultDiv.style.display = 'block';
+            const pct = (correct / challengeSeq.length * 100).toFixed(0);
+            const color = correct === challengeSeq.length ? 'var(--accent-green)' : (correct >= challengeSeq.length / 2 ? 'var(--accent-orange)' : 'var(--accent-red)');
+            resultDiv.innerHTML = `<div class="info-box" style="border-left-color:${color};">
+                <p>正确 <strong style="color:${color};">${correct}/${challengeSeq.length}</strong> (${pct}%)</p>
+            </div>`;
+        }
+
+        function reveal() {
+            const solDiv = document.getElementById('s6-solution');
+            solDiv.style.display = 'block';
+
+            // Step-by-step simulation
+            const cache = MemUtils.createCache(CACHE_LINES, 1, BLOCK_SIZE);
+            let html = '<h4>逐步解析</h4>';
+            html += '<div class="access-log">';
+
+            for (let i = 0; i < challengeSeq.length; i++) {
+                const addr = challengeSeq[i];
+                const res = cache.access(addr, false);
+                const blockNum = Math.floor(addr / BLOCK_SIZE);
+                const lineIdx = blockNum % CACHE_LINES;
+                const addrStr = '0x' + addr.toString(16).toUpperCase().padStart(2, '0');
+
+                let text = `<strong>[${i + 1}]</strong> ${addrStr}（块${blockNum}）→ 行${lineIdx}：`;
+                if (res.hit) {
+                    text += `<span style="color:var(--accent-green);">命中</span> — Tag匹配`;
+                } else {
+                    text += `<span style="color:var(--accent-red);">未命中</span>`;
+                    if (res.evicted) {
+                        text += ` — 驱逐原有块（Tag=0x${res.evictedTag.toString(16).toUpperCase()}），冲突未命中`;
+                    } else {
+                        text += ` — 空行，冷启动未命中`;
+                    }
+                }
+
+                // Show user's answer correctness
+                if (userAnswers[i] !== null) {
+                    const isCorrect = userAnswers[i] === correctAnswers[i];
+                    text += isCorrect ? ' ✓' : ' ✗';
+                }
+
+                const cls = res.hit ? 'log-hit' : (res.evicted ? 'log-evict' : 'log-miss');
+                html += `<div class="log-entry ${cls}">${text}</div>`;
+            }
+
+            html += '</div>';
+
+            // Show final cache state
+            const sets = cache.getSets();
+            html += '<h4 class="mt-1">最终Cache状态</h4>';
+            html += '<table class="compare-table" style="font-family:var(--font-mono);font-size:0.82rem;">';
+            html += '<tr><th>行号</th><th>有效</th><th>Tag</th></tr>';
+            for (let i = 0; i < CACHE_LINES; i++) {
+                const w = sets[i][0];
+                html += `<tr><td>${i}</td><td>${w.valid ? '1' : '0'}</td><td>${w.valid ? '0x' + w.tag.toString(16).toUpperCase() : '-'}</td></tr>`;
+            }
+            html += '</table>';
+
+            solDiv.innerHTML = html;
+        }
+
+        return { init, newChallenge, predict, check, reveal };
+    })();
+
+    /* ================================================================
+       Initialization
+       ================================================================ */
+    document.addEventListener('DOMContentLoaded', () => {
+        // Render KaTeX
+        if (typeof renderMathInElement === 'function') {
+            renderMathInElement(document.body, {
+                delimiters: [
+                    { left: '$$', right: '$$', display: true },
+                    { left: '$', right: '$', display: false },
+                ],
+                throwOnError: false,
+            });
+        }
+
+        S1.init();
+        S2.init();
+        S3.init();
+        S4.init();
+        S5.init();
+        S6.init();
+
+        // Redraw canvases on resize
+        let resizeTimer;
+        window.addEventListener('resize', () => {
+            clearTimeout(resizeTimer);
+            resizeTimer = setTimeout(() => {
+                S1.init();
+                S3.init();
+                S4.init();
+                S5.init();
+                S6.init();
+            }, 200);
+        });
+    });
+
+    // Ensure KaTeX auto-render fires after script loads
+    document.addEventListener('DOMContentLoaded', () => {
+        const checkKatex = setInterval(() => {
+            if (typeof renderMathInElement === 'function') {
+                clearInterval(checkKatex);
+                renderMathInElement(document.body, {
+                    delimiters: [
+                        { left: '$$', right: '$$', display: true },
+                        { left: '$', right: '$', display: false },
+                    ],
+                    throwOnError: false,
+                });
+            }
+        }, 100);
+        setTimeout(() => clearInterval(checkKatex), 5000);
+    });
+    </script>
+</body>
+</html>
