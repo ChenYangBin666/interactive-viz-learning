@@ -1,0 +1,1380 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>游乐场 — AI 量化</title>
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script defer src="../shared/scripts/nav.js"></script>
+    <script defer src="../shared/scripts/aiquant-utils.js"></script>
+    <style>
+        .module-intro { margin-bottom: 1.5rem; }
+        .module-intro h1 span { color: #69f0ae; }
+        .playground-layout {
+            display: grid;
+            grid-template-columns: 280px 1fr 300px;
+            gap: 1rem;
+            min-height: calc(100vh - var(--header-height) - 6rem);
+        }
+        .panel {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1rem;
+            overflow-y: auto;
+            max-height: calc(100vh - var(--header-height) - 8rem);
+        }
+        .panel::-webkit-scrollbar { width: 5px; }
+        .panel-title {
+            font-size: 0.9rem; font-weight: 700;
+            color: #69f0ae; margin-bottom: 0.75rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 1px solid var(--border-color);
+            display: flex; align-items: center; gap: 0.5rem;
+        }
+        .param-group { margin-bottom: 1rem; }
+        .param-group-label {
+            font-size: 0.78rem; font-weight: 600;
+            color: var(--text-secondary); margin-bottom: 0.5rem;
+            text-transform: uppercase; letter-spacing: 0.5px;
+        }
+        .param-row {
+            display: flex; align-items: center; justify-content: space-between;
+            margin-bottom: 0.4rem; gap: 0.5rem;
+        }
+        .param-row label {
+            font-size: 0.8rem; color: var(--text-secondary);
+            white-space: nowrap; min-width: 0;
+        }
+        .param-row input[type="range"] { flex: 1; max-width: 100px; }
+        .param-row .val {
+            font-family: var(--font-mono); font-size: 0.78rem;
+            color: #69f0ae; min-width: 36px; text-align: right;
+        }
+        .param-row select {
+            flex: 1; max-width: 130px; padding: 0.25rem 0.4rem;
+            background: var(--bg-card); border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm); color: var(--text-primary);
+            font-family: inherit; font-size: 0.8rem; cursor: pointer;
+        }
+        .param-row select:focus { border-color: #69f0ae; outline: none; }
+        .checkbox-grid {
+            display: grid; grid-template-columns: 1fr 1fr;
+            gap: 0.3rem 0.5rem;
+        }
+        .checkbox-item {
+            display: flex; align-items: center; gap: 0.35rem;
+            font-size: 0.78rem; color: var(--text-secondary); cursor: pointer;
+        }
+        .checkbox-item input[type="checkbox"] {
+            accent-color: #69f0ae; width: 14px; height: 14px; cursor: pointer;
+        }
+        .checkbox-item:hover { color: var(--text-primary); }
+        /* Center panel */
+        .center-panel { padding: 0.75rem; display: flex; flex-direction: column; gap: 0.75rem; }
+        .chart-tabs {
+            display: flex; gap: 0.25rem; flex-wrap: wrap;
+        }
+        .chart-tab {
+            padding: 0.3rem 0.7rem; border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm); background: transparent;
+            color: var(--text-muted); font-size: 0.78rem; cursor: pointer;
+            font-family: inherit; transition: all 0.2s;
+        }
+        .chart-tab.active {
+            border-color: #69f0ae; color: #69f0ae;
+            background: rgba(105,240,174,0.1);
+        }
+        .chart-tab:hover { border-color: #69f0ae; }
+        .chart-container {
+            flex: 1; position: relative; min-height: 320px;
+            background: rgba(10,14,23,0.6);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+        }
+        .chart-container canvas { display: block; width: 100%; height: 100%; }
+        .action-bar {
+            display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;
+        }
+        .action-bar .btn { font-size: 0.82rem; }
+        .btn-accent {
+            background: #69f0ae; border-color: #69f0ae;
+            color: #1a1a2e; font-weight: 700;
+        }
+        .btn-accent:hover { background: #4cdf91; border-color: #4cdf91; }
+        .speed-ctrl {
+            display: flex; align-items: center; gap: 0.4rem;
+            font-size: 0.78rem; color: var(--text-muted);
+        }
+        .speed-ctrl input[type="range"] { width: 70px; }
+        /* Right panel */
+        .metric-card {
+            background: var(--bg-card); border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm); padding: 0.6rem 0.75rem;
+            margin-bottom: 0.5rem; transition: border-color 0.3s;
+        }
+        .metric-card:hover { border-color: #69f0ae; }
+        .metric-label {
+            font-size: 0.72rem; color: var(--text-muted);
+            text-transform: uppercase; letter-spacing: 0.3px;
+        }
+        .metric-value {
+            font-family: var(--font-mono); font-size: 1.3rem;
+            font-weight: 700; color: var(--text-primary);
+            margin-top: 0.15rem;
+        }
+        .metric-value.positive { color: #69f0ae; }
+        .metric-value.negative { color: var(--accent-red); }
+        .mini-chart {
+            height: 130px; background: rgba(10,14,23,0.4);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm); position: relative;
+            margin-bottom: 0.75rem;
+        }
+        .mini-chart canvas { display: block; width: 100%; height: 100%; }
+        .mini-chart-title {
+            font-size: 0.75rem; font-weight: 600;
+            color: var(--text-secondary); margin-bottom: 0.35rem;
+        }
+        .metrics-grid {
+            display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;
+            margin-bottom: 0.75rem;
+        }
+        .confusion-matrix {
+            width: 100%; border-collapse: collapse;
+            font-family: var(--font-mono); font-size: 0.75rem;
+        }
+        .confusion-matrix th, .confusion-matrix td {
+            padding: 0.4rem; text-align: center;
+            border: 1px solid var(--border-color);
+        }
+        .confusion-matrix th {
+            background: var(--bg-card); color: #69f0ae; font-weight: 600;
+        }
+        .confusion-matrix td { color: var(--text-primary); }
+        .cm-tp { background: rgba(105,240,174,0.2); }
+        .cm-tn { background: rgba(79,195,247,0.15); }
+        .cm-fp { background: rgba(255,82,82,0.15); }
+        .cm-fn { background: rgba(255,171,64,0.15); }
+        .legend-bar {
+            display: flex; flex-wrap: wrap; gap: 0.6rem;
+            font-size: 0.72rem; color: var(--text-muted);
+            padding: 0.4rem 0;
+        }
+        .legend-bar span {
+            display: flex; align-items: center; gap: 0.25rem;
+        }
+        .legend-dot {
+            width: 8px; height: 8px; border-radius: 50%; display: inline-block;
+        }
+        .training-overlay {
+            position: absolute; inset: 0;
+            background: rgba(10,14,23,0.85);
+            display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+            border-radius: var(--radius-sm);
+            z-index: 10; opacity: 0; pointer-events: none;
+            transition: opacity 0.3s;
+        }
+        .training-overlay.show { opacity: 1; pointer-events: auto; }
+        .training-text {
+            color: #69f0ae; font-size: 0.9rem;
+            font-weight: 600; margin-top: 0.75rem;
+        }
+        .training-progress {
+            width: 180px; height: 4px;
+            background: var(--border-color);
+            border-radius: 2px; margin-top: 0.5rem; overflow: hidden;
+        }
+        .training-progress .fill {
+            height: 100%; background: #69f0ae;
+            border-radius: 2px; transition: width 0.1s linear; width: 0%;
+        }
+        .compare-badge {
+            display: inline-flex; align-items: center; gap: 0.3rem;
+            padding: 0.15rem 0.5rem; border-radius: 9999px;
+            font-size: 0.7rem; font-weight: 600;
+            background: rgba(179,136,255,0.15); color: var(--accent-purple);
+        }
+        @media (max-width: 1200px) {
+            .playground-layout {
+                grid-template-columns: 1fr;
+            }
+            .panel { max-height: none; }
+        }
+    </style>
+</head>
+<body>
+<div class="page-container">
+    <div class="module-intro">
+        <h1><span>09</span> 游乐场 — AI 量化实验平台</h1>
+        <p>自由组合数据类型、技术特征、模型算法和策略参数，观察完整的 AI 量化交易流程。
+        调整参数后点击"训练"即可实时查看预测、信号和绩效表现。</p>
+    </div>
+
+    <div class="playground-layout">
+        <!-- ===== LEFT PANEL: Configuration ===== -->
+        <div class="panel" id="leftPanel">
+            <div class="panel-title">⚙ 参数配置</div>
+
+            <div class="param-group">
+                <div class="param-group-label">数据设置</div>
+                <div class="param-row">
+                    <label>市场环境</label>
+                    <select id="regime">
+                        <option value="trend">趋势行情</option>
+                        <option value="mean-revert">均值回归</option>
+                        <option value="volatile">高波动</option>
+                    </select>
+                </div>
+                <div class="param-row">
+                    <label>噪声</label>
+                    <input type="range" id="noise" min="0" max="100" value="30">
+                    <span class="val" id="noiseVal">30%</span>
+                </div>
+                <div class="param-row">
+                    <label>周期数</label>
+                    <input type="range" id="periods" min="120" max="500" step="10" value="250">
+                    <span class="val" id="periodsVal">250</span>
+                </div>
+            </div>
+
+            <div class="param-group">
+                <div class="param-group-label">技术特征</div>
+                <div class="checkbox-grid">
+                    <label class="checkbox-item"><input type="checkbox" id="feat_ma" checked> MA 均线</label>
+                    <label class="checkbox-item"><input type="checkbox" id="feat_rsi" checked> RSI</label>
+                    <label class="checkbox-item"><input type="checkbox" id="feat_macd"> MACD</label>
+                    <label class="checkbox-item"><input type="checkbox" id="feat_boll"> 布林带</label>
+                    <label class="checkbox-item"><input type="checkbox" id="feat_mom"> 动量</label>
+                    <label class="checkbox-item"><input type="checkbox" id="feat_vol"> 波动率</label>
+                    <label class="checkbox-item"><input type="checkbox" id="feat_volume"> 成交量</label>
+                </div>
+            </div>
+
+            <div class="param-group">
+                <div class="param-group-label">模型选择</div>
+                <div class="param-row">
+                    <label>模型</label>
+                    <select id="model">
+                        <option value="linear">线性回归</option>
+                        <option value="ridge">岭回归</option>
+                        <option value="rf">随机森林</option>
+                        <option value="xgb" selected>XGBoost</option>
+                        <option value="lstm">LSTM</option>
+                        <option value="rl">RL Agent</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="param-group">
+                <div class="param-group-label">模型参数</div>
+                <div class="param-row">
+                    <label>学习率</label>
+                    <input type="range" id="lr" min="1" max="100" value="10">
+                    <span class="val" id="lrVal">0.010</span>
+                </div>
+                <div class="param-row">
+                    <label>正则化</label>
+                    <input type="range" id="reg" min="0" max="100" value="20">
+                    <span class="val" id="regVal">0.20</span>
+                </div>
+                <div class="param-row">
+                    <label>深度/层数</label>
+                    <input type="range" id="depth" min="1" max="10" value="3">
+                    <span class="val" id="depthVal">3</span>
+                </div>
+                <div class="param-row">
+                    <label>回望窗口</label>
+                    <input type="range" id="lookback" min="5" max="60" value="20">
+                    <span class="val" id="lookbackVal">20</span>
+                </div>
+            </div>
+
+            <div class="param-group">
+                <div class="param-group-label">策略参数</div>
+                <div class="param-row">
+                    <label>信号阈值</label>
+                    <input type="range" id="threshold" min="1" max="100" value="50">
+                    <span class="val" id="thresholdVal">0.50%</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- ===== CENTER PANEL: Charts ===== -->
+        <div class="panel center-panel" id="centerPanel">
+            <div class="action-bar">
+                <button class="btn btn-accent" id="btnTrain">▶ 训练</button>
+                <button class="btn" id="btnReset">↺ 重置</button>
+                <button class="btn" id="btnAuto">⟳ 自动</button>
+                <div class="speed-ctrl">
+                    <label>速度</label>
+                    <input type="range" id="speed" min="1" max="10" value="5">
+                    <span class="val" id="speedVal">5x</span>
+                </div>
+                <button class="btn" id="btnCompare">
+                    <span class="compare-badge">VS</span> 对比
+                </button>
+            </div>
+
+            <div class="chart-tabs">
+                <button class="chart-tab active" data-view="predictions">预测曲线</button>
+                <button class="chart-tab" data-view="signals">买卖信号</button>
+                <button class="chart-tab" data-view="equity">权益曲线</button>
+                <button class="chart-tab" data-view="features">特征可视化</button>
+            </div>
+
+            <div class="chart-container" id="mainChartContainer">
+                <canvas id="mainChart"></canvas>
+                <div class="training-overlay" id="trainingOverlay">
+                    <div class="loading-spinner"></div>
+                    <div class="training-text" id="trainingText">训练中...</div>
+                    <div class="training-progress"><div class="fill" id="trainingFill"></div></div>
+                </div>
+            </div>
+
+            <div class="legend-bar" id="chartLegend">
+                <span><i class="legend-dot" style="background:#69f0ae"></i> 实际价格</span>
+                <span><i class="legend-dot" style="background:#ff6d00"></i> 预测</span>
+            </div>
+        </div>
+
+        <!-- ===== RIGHT PANEL: Analytics ===== -->
+        <div class="panel" id="rightPanel">
+            <div class="panel-title">📊 绩效分析</div>
+
+            <div class="metrics-grid" id="metricsGrid">
+                <div class="metric-card">
+                    <div class="metric-label">总收益</div>
+                    <div class="metric-value" id="metReturn">—</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">夏普比率</div>
+                    <div class="metric-value" id="metSharpe">—</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">最大回撤</div>
+                    <div class="metric-value" id="metDrawdown">—</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">胜率</div>
+                    <div class="metric-value" id="metWinRate">—</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">方向准确率</div>
+                    <div class="metric-value" id="metAccuracy">—</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-label">交易次数</div>
+                    <div class="metric-value" id="metTrades">—</div>
+                </div>
+            </div>
+
+            <div class="mini-chart-title">特征重要性</div>
+            <div class="mini-chart" id="importanceChart">
+                <canvas id="importanceCanvas"></canvas>
+            </div>
+
+            <div class="mini-chart-title">预测误差分布</div>
+            <div class="mini-chart" id="errorChart">
+                <canvas id="errorCanvas"></canvas>
+            </div>
+
+            <div class="mini-chart-title">方向预测混淆矩阵</div>
+            <table class="confusion-matrix" id="confMatrix">
+                <tr><th></th><th>预测涨</th><th>预测跌</th></tr>
+                <tr><th>实际涨</th><td class="cm-tp" id="cmTP">—</td><td class="cm-fn" id="cmFN">—</td></tr>
+                <tr><th>实际跌</th><td class="cm-fp" id="cmFP">—</td><td class="cm-tn" id="cmTN">—</td></tr>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    /* ====== State ====== */
+    const S = {
+        prices: [], predictions: [], signals: [], equity: [], buyHold: [],
+        features: {}, featureImportance: {}, errors: [],
+        confusion: { tp: 0, fn: 0, fp: 0, tn: 0 },
+        trained: false, autoPlay: false, autoTimer: null,
+        compareMode: false, compareData: null,
+        currentView: 'predictions',
+        seed: 42
+    };
+
+    /* ====== DOM refs ====== */
+    const $ = id => document.getElementById(id);
+    const mainCanvas = $('mainChart');
+    const mainCtx = mainCanvas.getContext('2d');
+    const impCanvas = $('importanceCanvas');
+    const impCtx = impCanvas.getContext('2d');
+    const errCanvas = $('errorCanvas');
+    const errCtx = errCanvas.getContext('2d');
+
+    /* ====== Slider wiring ====== */
+    function wireSlider(id, valId, fmt) {
+        const el = $(id), valEl = $(valId);
+        const update = () => { valEl.textContent = fmt(el.value); };
+        el.addEventListener('input', update);
+        update();
+    }
+    wireSlider('noise', 'noiseVal', v => v + '%');
+    wireSlider('periods', 'periodsVal', v => v);
+    wireSlider('lr', 'lrVal', v => (v / 1000).toFixed(3));
+    wireSlider('reg', 'regVal', v => (v / 100).toFixed(2));
+    wireSlider('depth', 'depthVal', v => v);
+    wireSlider('lookback', 'lookbackVal', v => v);
+    wireSlider('threshold', 'thresholdVal', v => (v / 100).toFixed(2) + '%');
+    wireSlider('speed', 'speedVal', v => v + 'x');
+
+    /* ====== localStorage ====== */
+    const STORAGE_KEY = 'aiquant-playground-settings';
+    function saveSettings() {
+        const settings = {
+            regime: $('regime').value, noise: $('noise').value,
+            periods: $('periods').value, model: $('model').value,
+            lr: $('lr').value, reg: $('reg').value,
+            depth: $('depth').value, lookback: $('lookback').value,
+            threshold: $('threshold').value, speed: $('speed').value,
+            features: getSelectedFeatures()
+        };
+        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(settings)); } catch(e) {}
+    }
+    function loadSettings() {
+        try {
+            const s = JSON.parse(localStorage.getItem(STORAGE_KEY));
+            if (!s) return;
+            if (s.regime) $('regime').value = s.regime;
+            if (s.noise) $('noise').value = s.noise;
+            if (s.periods) $('periods').value = s.periods;
+            if (s.model) $('model').value = s.model;
+            if (s.lr) $('lr').value = s.lr;
+            if (s.reg) $('reg').value = s.reg;
+            if (s.depth) $('depth').value = s.depth;
+            if (s.lookback) $('lookback').value = s.lookback;
+            if (s.threshold) $('threshold').value = s.threshold;
+            if (s.speed) $('speed').value = s.speed;
+            if (s.features) {
+                const feats = ['ma','rsi','macd','boll','mom','vol','volume'];
+                feats.forEach(f => { $('feat_' + f).checked = s.features.includes(f); });
+            }
+            // re-fire slider display updates
+            ['noise','periods','lr','reg','depth','lookback','threshold','speed'].forEach(id => {
+                $(id).dispatchEvent(new Event('input'));
+            });
+        } catch(e) {}
+    }
+    loadSettings();
+
+    /* ====== Data Generation ====== */
+    function getSelectedFeatures() {
+        const feats = [];
+        if ($('feat_ma').checked) feats.push('ma');
+        if ($('feat_rsi').checked) feats.push('rsi');
+        if ($('feat_macd').checked) feats.push('macd');
+        if ($('feat_boll').checked) feats.push('boll');
+        if ($('feat_mom').checked) feats.push('mom');
+        if ($('feat_vol').checked) feats.push('vol');
+        if ($('feat_volume').checked) feats.push('volume');
+        return feats;
+    }
+
+    function generatePrices() {
+        const regime = $('regime').value;
+        const noise = +$('noise').value / 100;
+        const n = +$('periods').value;
+        const rng = AIQuantUtils.seededRandom(S.seed);
+
+        const prices = [100];
+        for (let i = 1; i < n; i++) {
+            let drift = 0, vol = 0.015;
+            if (regime === 'trend') {
+                drift = 0.0005 + 0.0003 * Math.sin(i * 0.02);
+                vol = 0.012;
+            } else if (regime === 'mean-revert') {
+                const deviation = (prices[i-1] - 100) / 100;
+                drift = -0.05 * deviation;
+                vol = 0.01;
+            } else { // volatile
+                drift = 0.0001;
+                vol = 0.025 + 0.01 * Math.sin(i * 0.05);
+            }
+            vol *= (0.5 + noise * 1.5);
+            const eps = AIQuantUtils.normalRandom(0, 1, rng);
+            prices.push(prices[i-1] * Math.exp(drift + vol * eps));
+        }
+        return prices;
+    }
+
+    function computeFeatures(prices) {
+        const n = prices.length;
+        const ind = AIQuantUtils.technicalIndicators(prices);
+        const features = {};
+        const feats = getSelectedFeatures();
+
+        if (feats.includes('ma')) features['MA'] = ind.ma;
+        if (feats.includes('rsi')) features['RSI'] = ind.rsi.map(v => isNaN(v) ? 50 : v);
+        if (feats.includes('macd')) features['MACD'] = ind.macd.line;
+        if (feats.includes('boll')) {
+            features['BB_Upper'] = ind.bollinger.upper;
+            features['BB_Lower'] = ind.bollinger.lower;
+        }
+        if (feats.includes('mom')) {
+            const mom = new Array(n).fill(0);
+            for (let i = 10; i < n; i++) mom[i] = (prices[i] / prices[i-10] - 1) * 100;
+            features['Momentum'] = mom;
+        }
+        if (feats.includes('vol')) {
+            const vol = new Array(n).fill(0);
+            for (let i = 20; i < n; i++) {
+                const sl = prices.slice(i-20, i);
+                vol[i] = AIQuantUtils.std(sl.map((p,j) => j > 0 ? Math.log(p / sl[j-1]) : 0)) * Math.sqrt(252) * 100;
+            }
+            features['Volatility'] = vol;
+        }
+        if (feats.includes('volume')) {
+            const rng = AIQuantUtils.seededRandom(S.seed + 99);
+            const volume = [];
+            for (let i = 0; i < n; i++) {
+                volume.push(1e6 + rng() * 4e6 + Math.abs(AIQuantUtils.normalRandom(0,1,rng)) * 2e6);
+            }
+            features['Volume'] = volume;
+        }
+        return features;
+    }
+
+    /* ====== Model Training (Simulated) ====== */
+    function buildFeatureMatrix(prices, features) {
+        const keys = Object.keys(features);
+        if (keys.length === 0) return { X: [], y: [], startIdx: 0, featureNames: [] };
+        const lb = +$('lookback').value;
+        const startIdx = Math.max(lb, 30);
+        const X = [], y = [];
+        for (let i = startIdx; i < prices.length - 1; i++) {
+            const row = [];
+            keys.forEach(k => {
+                const v = features[k][i];
+                row.push(isNaN(v) ? 0 : v);
+            });
+            // Add lagged returns
+            for (let lag = 1; lag <= Math.min(5, lb); lag++) {
+                row.push(i >= lag ? (prices[i] / prices[i-lag] - 1) * 100 : 0);
+            }
+            X.push(row);
+            y.push((prices[i+1] / prices[i] - 1) * 100); // next-day return %
+        }
+        const featureNames = [...keys];
+        for (let lag = 1; lag <= Math.min(5, lb); lag++) featureNames.push('Lag' + lag);
+        return { X, y, startIdx, featureNames };
+    }
+
+    function trainModel(X, y, featureNames) {
+        const modelType = $('model').value;
+        const lr = +$('lr').value / 1000;
+        const reg = +$('reg').value / 100;
+        const depth = +$('depth').value;
+        const rng = AIQuantUtils.seededRandom(S.seed + 7);
+
+        if (X.length === 0 || X[0].length === 0) {
+            return { predictions: y.map(() => 0), importance: {} };
+        }
+
+        // Normalize features
+        const p = X[0].length;
+        const means = new Array(p).fill(0), stds = new Array(p).fill(1);
+        for (let j = 0; j < p; j++) {
+            const col = X.map(r => r[j]);
+            means[j] = AIQuantUtils.mean(col);
+            stds[j] = AIQuantUtils.std(col) || 1;
+        }
+        const Xn = X.map(row => row.map((v, j) => (v - means[j]) / stds[j]));
+
+        let predictions = [];
+        let importance = {};
+
+        if (modelType === 'linear' || modelType === 'ridge') {
+            const model = modelType === 'ridge'
+                ? AIQuantUtils.ridgeRegression(Xn, y, reg)
+                : AIQuantUtils.linearRegression(Xn, y);
+            predictions = Xn.map(x => model.predict(x));
+            const wAbs = model.weights.map(Math.abs);
+            const wSum = wAbs.reduce((a,b) => a+b, 1e-10);
+            featureNames.forEach((n, i) => { if (i < wAbs.length) importance[n] = wAbs[i] / wSum; });
+        } else if (modelType === 'rf' || modelType === 'xgb') {
+            // Simulated ensemble: weighted average with noise-reduced correlation
+            const nTrees = modelType === 'rf' ? depth * 5 : depth * 3;
+            const treePreds = [];
+            for (let t = 0; t < nTrees; t++) {
+                const subFeats = [];
+                for (let j = 0; j < p; j++) if (rng() > 0.3) subFeats.push(j);
+                if (subFeats.length === 0) subFeats.push(0);
+
+                const subX = Xn.map(row => subFeats.map(j => row[j]));
+                const subY = y.slice();
+                // Simple stump predictions
+                const bestFeat = Math.floor(rng() * subFeats.length);
+                const threshold = AIQuantUtils.normalRandom(0, 1, rng);
+                const leftVal = AIQuantUtils.mean(subY.filter((_, i) => subX[i][bestFeat] <= threshold));
+                const rightVal = AIQuantUtils.mean(subY.filter((_, i) => subX[i][bestFeat] > threshold));
+
+                const preds = subX.map(x => x[bestFeat] <= threshold ? leftVal : rightVal);
+                treePreds.push(preds);
+            }
+            predictions = Xn.map((_, i) => {
+                let sum = 0;
+                treePreds.forEach(tp => { sum += tp[i] || 0; });
+                const base = sum / nTrees;
+                // Enhance with actual signal
+                const signal = y[i] * (0.3 + rng() * 0.3);
+                return base * 0.5 + signal * 0.5 + AIQuantUtils.normalRandom(0, 0.2, rng);
+            });
+            // Feature importance via permutation-like simulation
+            featureNames.forEach((n, j) => {
+                importance[n] = Math.abs(AIQuantUtils.normalRandom(0.5, 0.3, rng)) *
+                    (j < Object.keys(S.features).length ? 1.5 : 0.8);
+            });
+            const impSum = Object.values(importance).reduce((a,b) => a+b, 1e-10);
+            Object.keys(importance).forEach(k => { importance[k] /= impSum; });
+        } else if (modelType === 'lstm') {
+            // Simulated LSTM: smoothed correlation with actual
+            const alpha = 0.7 + lr * 5;
+            let prev = 0;
+            predictions = y.map((actual, i) => {
+                const signal = actual * (0.4 + depth * 0.06);
+                prev = prev * 0.3 + signal * 0.7 + AIQuantUtils.normalRandom(0, 0.15, rng);
+                return prev;
+            });
+            featureNames.forEach((n, j) => {
+                importance[n] = 0.5 + rng() * 0.5;
+            });
+            const impSum = Object.values(importance).reduce((a,b) => a+b, 1e-10);
+            Object.keys(importance).forEach(k => { importance[k] /= impSum; });
+        } else if (modelType === 'rl') {
+            // Simulated RL agent decisions
+            let qTable = {};
+            const actions = [];
+            for (let i = 0; i < y.length; i++) {
+                const stateKey = Math.round(Xn[i][0] * 2).toString();
+                if (!qTable[stateKey]) qTable[stateKey] = [0, 0, 0];
+                // Epsilon-greedy
+                let action;
+                if (rng() < 0.1) {
+                    action = Math.floor(rng() * 3);
+                } else {
+                    action = qTable[stateKey].indexOf(Math.max(...qTable[stateKey]));
+                }
+                const reward = action === 0 ? y[i] : action === 1 ? -y[i] : 0;
+                const nextKey = (i < y.length - 1) ? Math.round(Xn[Math.min(i+1, Xn.length-1)][0] * 2).toString() : stateKey;
+                AIQuantUtils.qLearningStep(qTable, stateKey, action, reward, nextKey, lr, 0.95);
+                // Translate to prediction signal
+                predictions.push(action === 0 ? Math.abs(y[i]) * 0.6 : action === 1 ? -Math.abs(y[i]) * 0.6 : 0);
+                actions.push(action);
+            }
+            featureNames.forEach((n, j) => {
+                importance[n] = 0.3 + rng() * 0.7;
+            });
+            const impSum = Object.values(importance).reduce((a,b) => a+b, 1e-10);
+            Object.keys(importance).forEach(k => { importance[k] /= impSum; });
+        }
+
+        // Add some realistic noise scaling with model complexity
+        const noiseScale = Math.max(0.05, 0.5 - depth * 0.04 - lr * 20);
+        predictions = predictions.map((p, i) => {
+            return p + AIQuantUtils.normalRandom(0, noiseScale * AIQuantUtils.std(y), rng);
+        });
+
+        return { predictions, importance };
+    }
+
+    function generateSignals(prices, predictions, startIdx) {
+        const threshold = +$('threshold').value / 10000;
+        const signals = new Array(prices.length).fill(0); // 0=hold, 1=buy, -1=sell
+        for (let i = 0; i < predictions.length; i++) {
+            const idx = startIdx + i;
+            if (idx >= prices.length) break;
+            const predReturn = predictions[i] / 100;
+            if (predReturn > threshold) signals[idx] = 1;
+            else if (predReturn < -threshold) signals[idx] = -1;
+        }
+        return signals;
+    }
+
+    function computeEquity(prices, signals) {
+        const equity = [10000];
+        const buyHold = [10000];
+        let position = 0; // 0 = flat, 1 = long
+        let cash = 10000, shares = 0;
+
+        for (let i = 1; i < prices.length; i++) {
+            // Strategy equity
+            if (signals[i-1] === 1 && position === 0) {
+                shares = cash / prices[i-1];
+                cash = 0;
+                position = 1;
+            } else if (signals[i-1] === -1 && position === 1) {
+                cash = shares * prices[i-1];
+                shares = 0;
+                position = 0;
+            }
+            const value = position === 1 ? shares * prices[i] : cash;
+            equity.push(value);
+
+            // Buy and hold
+            buyHold.push(10000 * prices[i] / prices[0]);
+        }
+        return { equity, buyHold };
+    }
+
+    function computeMetrics(prices, predictions, equity, buyHold, signals, startIdx) {
+        // Returns
+        const totalReturn = (equity[equity.length-1] / equity[0] - 1);
+        const bhReturn = (buyHold[buyHold.length-1] / buyHold[0] - 1);
+
+        // Sharpe
+        const dailyReturns = [];
+        for (let i = 1; i < equity.length; i++) {
+            dailyReturns.push(equity[i] / equity[i-1] - 1);
+        }
+        const avgRet = AIQuantUtils.mean(dailyReturns);
+        const stdRet = AIQuantUtils.std(dailyReturns) || 1e-10;
+        const sharpe = (avgRet / stdRet) * Math.sqrt(252);
+
+        // Max drawdown
+        let maxDD = 0, peak = equity[0];
+        for (let i = 1; i < equity.length; i++) {
+            if (equity[i] > peak) peak = equity[i];
+            const dd = (peak - equity[i]) / peak;
+            if (dd > maxDD) maxDD = dd;
+        }
+
+        // Win rate
+        let wins = 0, trades = 0;
+        let entryPrice = 0;
+        for (let i = 0; i < signals.length; i++) {
+            if (signals[i] === 1) entryPrice = prices[i];
+            else if (signals[i] === -1 && entryPrice > 0) {
+                trades++;
+                if (prices[i] > entryPrice) wins++;
+                entryPrice = 0;
+            }
+        }
+        const winRate = trades > 0 ? wins / trades : 0;
+
+        // Direction accuracy & confusion matrix
+        let tp = 0, tn = 0, fp = 0, fn = 0;
+        const errors = [];
+        for (let i = 0; i < predictions.length; i++) {
+            const idx = startIdx + i;
+            if (idx >= prices.length - 1) break;
+            const actualDir = prices[idx+1] > prices[idx] ? 1 : -1;
+            const predDir = predictions[i] > 0 ? 1 : -1;
+            if (actualDir === 1 && predDir === 1) tp++;
+            else if (actualDir === -1 && predDir === -1) tn++;
+            else if (actualDir === -1 && predDir === 1) fp++;
+            else fn++;
+            errors.push(predictions[i] - (prices[idx+1] / prices[idx] - 1) * 100);
+        }
+        const accuracy = (tp + tn) / Math.max(1, tp + tn + fp + fn);
+
+        return {
+            totalReturn, sharpe, maxDD, winRate, accuracy,
+            trades, confusion: { tp, tn, fp, fn }, errors
+        };
+    }
+
+    /* ====== Full Pipeline ====== */
+    async function runPipeline() {
+        saveSettings();
+        S.trained = false;
+
+        // Show training overlay
+        const overlay = $('trainingOverlay');
+        const fillBar = $('trainingFill');
+        const trainText = $('trainingText');
+        overlay.classList.add('show');
+
+        // Animated training progress
+        const speed = +$('speed').value;
+        const totalSteps = 20;
+        const delay = Math.max(30, 150 / speed);
+
+        for (let step = 0; step <= totalSteps; step++) {
+            fillBar.style.width = (step / totalSteps * 100) + '%';
+            const msgs = ['生成数据...', '计算特征...', '构建训练集...', '训练模型...', '生成预测...', '计算信号...', '回测中...', '分析绩效...'];
+            trainText.textContent = msgs[Math.min(Math.floor(step / totalSteps * msgs.length), msgs.length - 1)];
+            await new Promise(r => setTimeout(r, delay));
+        }
+
+        // Generate data
+        S.prices = generatePrices();
+        S.features = computeFeatures(S.prices);
+
+        // Build feature matrix and train
+        const { X, y, startIdx, featureNames } = buildFeatureMatrix(S.prices, S.features);
+        const { predictions, importance } = trainModel(X, y, featureNames);
+
+        S.predictions = predictions;
+        S.featureImportance = importance;
+
+        // Generate signals
+        S.signals = generateSignals(S.prices, predictions, startIdx);
+
+        // Compute equity
+        const { equity, buyHold } = computeEquity(S.prices, S.signals);
+        S.equity = equity;
+        S.buyHold = buyHold;
+
+        // Compute metrics
+        const metrics = computeMetrics(S.prices, predictions, equity, buyHold, S.signals, startIdx);
+        S.errors = metrics.errors;
+        S.confusion = metrics.confusion;
+        S.startIdx = startIdx;
+
+        // Update display
+        updateMetrics(metrics);
+        S.trained = true;
+        overlay.classList.remove('show');
+        drawAll();
+    }
+
+    /* ====== Display Updates ====== */
+    function updateMetrics(m) {
+        const retEl = $('metReturn');
+        retEl.textContent = (m.totalReturn * 100).toFixed(2) + '%';
+        retEl.className = 'metric-value ' + (m.totalReturn >= 0 ? 'positive' : 'negative');
+
+        const sharpeEl = $('metSharpe');
+        sharpeEl.textContent = m.sharpe.toFixed(2);
+        sharpeEl.className = 'metric-value ' + (m.sharpe >= 0 ? 'positive' : 'negative');
+
+        const ddEl = $('metDrawdown');
+        ddEl.textContent = '-' + (m.maxDD * 100).toFixed(2) + '%';
+        ddEl.className = 'metric-value negative';
+
+        $('metWinRate').textContent = (m.winRate * 100).toFixed(1) + '%';
+        $('metAccuracy').textContent = (m.accuracy * 100).toFixed(1) + '%';
+        $('metTrades').textContent = m.trades;
+
+        // Confusion matrix
+        $('cmTP').textContent = m.confusion.tp;
+        $('cmFN').textContent = m.confusion.fn;
+        $('cmFP').textContent = m.confusion.fp;
+        $('cmTN').textContent = m.confusion.tn;
+    }
+
+    /* ====== Canvas Drawing ====== */
+    function resizeCanvas(canvas, container) {
+        const rect = container.getBoundingClientRect();
+        const dpr = window.devicePixelRatio || 1;
+        canvas.width = rect.width * dpr;
+        canvas.height = rect.height * dpr;
+        canvas.style.width = rect.width + 'px';
+        canvas.style.height = rect.height + 'px';
+        const ctx = canvas.getContext('2d');
+        ctx.scale(dpr, dpr);
+        return { w: rect.width, h: rect.height };
+    }
+
+    function drawLine(ctx, data, x, y, w, h, color, minV, maxV, dashed) {
+        ctx.save();
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.5;
+        if (dashed) ctx.setLineDash([4, 3]);
+        ctx.beginPath();
+        let started = false;
+        for (let i = 0; i < data.length; i++) {
+            if (isNaN(data[i])) continue;
+            const px = x + (i / (data.length - 1)) * w;
+            const py = y + h - ((data[i] - minV) / (maxV - minV || 1)) * h;
+            if (!started) { ctx.moveTo(px, py); started = true; }
+            else ctx.lineTo(px, py);
+        }
+        ctx.stroke();
+        ctx.restore();
+    }
+
+    function drawGrid(ctx, x, y, w, h, xTicks, yTicks, yMin, yMax) {
+        ctx.save();
+        ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+        ctx.lineWidth = 1;
+        ctx.fillStyle = '#78909c';
+        ctx.font = '10px monospace';
+
+        for (let i = 0; i <= yTicks; i++) {
+            const py = y + (i / yTicks) * h;
+            ctx.beginPath(); ctx.moveTo(x, py); ctx.lineTo(x + w, py); ctx.stroke();
+            const val = yMax - (i / yTicks) * (yMax - yMin);
+            ctx.textAlign = 'right';
+            ctx.fillText(val.toFixed(1), x - 4, py + 3);
+        }
+        for (let i = 0; i <= xTicks; i++) {
+            const px = x + (i / xTicks) * w;
+            ctx.beginPath(); ctx.moveTo(px, y); ctx.lineTo(px, y + h); ctx.stroke();
+        }
+        ctx.restore();
+    }
+
+    function drawPredictionsView(ctx, w, h) {
+        const pad = { l: 50, r: 15, t: 15, b: 25 };
+        const cw = w - pad.l - pad.r, ch = h - pad.t - pad.b;
+
+        const allVals = [...S.prices];
+        const minP = Math.min(...allVals) * 0.998;
+        const maxP = Math.max(...allVals) * 1.002;
+
+        drawGrid(ctx, pad.l, pad.t, cw, ch, 8, 5, minP, maxP);
+        drawLine(ctx, S.prices, pad.l, pad.t, cw, ch, '#69f0ae', minP, maxP);
+
+        // Draw predicted prices (overlay)
+        if (S.predictions.length > 0) {
+            const predPrices = [];
+            for (let i = 0; i < S.prices.length; i++) {
+                if (i >= S.startIdx && i - S.startIdx < S.predictions.length) {
+                    const predRet = S.predictions[i - S.startIdx] / 100;
+                    predPrices.push(S.prices[i] * (1 + predRet));
+                } else {
+                    predPrices.push(NaN);
+                }
+            }
+            drawLine(ctx, predPrices, pad.l, pad.t, cw, ch, '#ff6d00', minP, maxP, true);
+        }
+
+        // Compare mode
+        if (S.compareMode && S.compareData) {
+            drawLine(ctx, S.compareData.prices, pad.l, pad.t, cw, ch, 'rgba(179,136,255,0.5)', minP, maxP);
+        }
+    }
+
+    function drawSignalsView(ctx, w, h) {
+        const pad = { l: 50, r: 15, t: 15, b: 25 };
+        const cw = w - pad.l - pad.r, ch = h - pad.t - pad.b;
+
+        const minP = Math.min(...S.prices) * 0.998;
+        const maxP = Math.max(...S.prices) * 1.002;
+
+        drawGrid(ctx, pad.l, pad.t, cw, ch, 8, 5, minP, maxP);
+        drawLine(ctx, S.prices, pad.l, pad.t, cw, ch, 'rgba(105,240,174,0.5)', minP, maxP);
+
+        // Draw buy/sell markers
+        for (let i = 0; i < S.signals.length; i++) {
+            if (S.signals[i] === 0) continue;
+            const px = pad.l + (i / (S.prices.length - 1)) * cw;
+            const py = pad.t + ch - ((S.prices[i] - minP) / (maxP - minP)) * ch;
+
+            ctx.beginPath();
+            if (S.signals[i] === 1) {
+                // Buy - green triangle up
+                ctx.fillStyle = '#69f0ae';
+                ctx.moveTo(px, py - 8);
+                ctx.lineTo(px - 5, py + 2);
+                ctx.lineTo(px + 5, py + 2);
+            } else {
+                // Sell - red triangle down
+                ctx.fillStyle = '#ff5252';
+                ctx.moveTo(px, py + 8);
+                ctx.lineTo(px - 5, py - 2);
+                ctx.lineTo(px + 5, py - 2);
+            }
+            ctx.closePath();
+            ctx.fill();
+        }
+    }
+
+    function drawEquityView(ctx, w, h) {
+        const pad = { l: 55, r: 15, t: 15, b: 25 };
+        const cw = w - pad.l - pad.r, ch = h - pad.t - pad.b;
+
+        const allVals = [...S.equity, ...S.buyHold];
+        const minE = Math.min(...allVals) * 0.99;
+        const maxE = Math.max(...allVals) * 1.01;
+
+        drawGrid(ctx, pad.l, pad.t, cw, ch, 8, 5, minE, maxE);
+        drawLine(ctx, S.equity, pad.l, pad.t, cw, ch, '#69f0ae', minE, maxE);
+        drawLine(ctx, S.buyHold, pad.l, pad.t, cw, ch, 'rgba(79,195,247,0.6)', minE, maxE, true);
+
+        // Legend
+        ctx.save();
+        ctx.font = '11px sans-serif';
+        ctx.fillStyle = '#69f0ae';
+        ctx.fillText('● 策略', pad.l + 10, pad.t + 18);
+        ctx.fillStyle = 'rgba(79,195,247,0.8)';
+        ctx.fillText('● 买入持有', pad.l + 70, pad.t + 18);
+        ctx.restore();
+    }
+
+    function drawFeaturesView(ctx, w, h) {
+        const pad = { l: 50, r: 15, t: 15, b: 25 };
+        const cw = w - pad.l - pad.r, ch = h - pad.t - pad.b;
+        const keys = Object.keys(S.features);
+        if (keys.length === 0) {
+            ctx.fillStyle = '#78909c';
+            ctx.font = '14px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('请先选择特征并训练', w / 2, h / 2);
+            return;
+        }
+
+        const colors = ['#69f0ae', '#ff6d00', '#4fc3f7', '#b388ff', '#ff80ab', '#ffd740', '#18ffff'];
+        // Normalize each feature to [0,1] for overlay
+        keys.forEach((key, ki) => {
+            const data = S.features[key];
+            const valid = data.filter(v => !isNaN(v));
+            if (valid.length === 0) return;
+            const mn = Math.min(...valid), mx = Math.max(...valid);
+            const norm = data.map(v => isNaN(v) ? NaN : (v - mn) / (mx - mn || 1));
+            drawLine(ctx, norm, pad.l, pad.t, cw, ch, colors[ki % colors.length], 0, 1);
+        });
+
+        // Legend
+        ctx.save();
+        ctx.font = '10px sans-serif';
+        keys.forEach((key, ki) => {
+            ctx.fillStyle = colors[ki % colors.length];
+            ctx.fillText('● ' + key, pad.l + 10 + ki * 80, pad.t + 14);
+        });
+        ctx.restore();
+
+        drawGrid(ctx, pad.l, pad.t, cw, ch, 8, 4, 0, 1);
+    }
+
+    function drawImportanceChart() {
+        const container = $('importanceChart');
+        const { w, h } = resizeCanvas(impCanvas, container);
+        impCtx.clearRect(0, 0, w, h);
+
+        const keys = Object.keys(S.featureImportance);
+        if (keys.length === 0) return;
+
+        const pad = { l: 70, r: 10, t: 8, b: 8 };
+        const cw = w - pad.l - pad.r;
+        const barH = Math.min(16, (h - pad.t - pad.b) / keys.length - 2);
+        const maxVal = Math.max(...Object.values(S.featureImportance), 0.01);
+
+        keys.sort((a, b) => S.featureImportance[b] - S.featureImportance[a]);
+
+        keys.forEach((key, i) => {
+            const val = S.featureImportance[key];
+            const barW = (val / maxVal) * cw;
+            const y = pad.t + i * (barH + 3);
+
+            // Bar
+            const gradient = impCtx.createLinearGradient(pad.l, 0, pad.l + barW, 0);
+            gradient.addColorStop(0, 'rgba(105,240,174,0.3)');
+            gradient.addColorStop(1, 'rgba(105,240,174,0.8)');
+            impCtx.fillStyle = gradient;
+            impCtx.beginPath();
+            impCtx.roundRect(pad.l, y, barW, barH, 2);
+            impCtx.fill();
+
+            // Label
+            impCtx.fillStyle = '#a8a8b8';
+            impCtx.font = '9px sans-serif';
+            impCtx.textAlign = 'right';
+            impCtx.fillText(key.substring(0, 10), pad.l - 4, y + barH - 3);
+
+            // Value
+            impCtx.fillStyle = '#69f0ae';
+            impCtx.font = '9px monospace';
+            impCtx.textAlign = 'left';
+            impCtx.fillText((val * 100).toFixed(1) + '%', pad.l + barW + 4, y + barH - 3);
+        });
+    }
+
+    function drawErrorHistogram() {
+        const container = $('errorChart');
+        const { w, h } = resizeCanvas(errCanvas, container);
+        errCtx.clearRect(0, 0, w, h);
+
+        if (S.errors.length === 0) return;
+
+        const pad = { l: 35, r: 10, t: 8, b: 20 };
+        const cw = w - pad.l - pad.r, ch = h - pad.t - pad.b;
+
+        // Bin the errors
+        const nBins = 20;
+        const mn = Math.min(...S.errors), mx = Math.max(...S.errors);
+        const range = mx - mn || 1;
+        const binW = range / nBins;
+        const bins = new Array(nBins).fill(0);
+        S.errors.forEach(e => {
+            const idx = Math.min(Math.floor((e - mn) / binW), nBins - 1);
+            bins[idx]++;
+        });
+        const maxBin = Math.max(...bins, 1);
+
+        // Draw bars
+        const barW = cw / nBins - 1;
+        bins.forEach((count, i) => {
+            const x = pad.l + i * (cw / nBins);
+            const barH = (count / maxBin) * ch;
+            const y = pad.t + ch - barH;
+
+            const binCenter = mn + (i + 0.5) * binW;
+            errCtx.fillStyle = binCenter > 0 ? 'rgba(255,82,82,0.6)' : 'rgba(105,240,174,0.6)';
+            errCtx.beginPath();
+            errCtx.roundRect(x, y, barW, barH, 1);
+            errCtx.fill();
+        });
+
+        // Zero line
+        const zeroX = pad.l + ((0 - mn) / range) * cw;
+        if (zeroX >= pad.l && zeroX <= pad.l + cw) {
+            errCtx.strokeStyle = 'rgba(255,255,255,0.3)';
+            errCtx.lineWidth = 1;
+            errCtx.setLineDash([3, 3]);
+            errCtx.beginPath();
+            errCtx.moveTo(zeroX, pad.t);
+            errCtx.lineTo(zeroX, pad.t + ch);
+            errCtx.stroke();
+            errCtx.setLineDash([]);
+        }
+
+        // X labels
+        errCtx.fillStyle = '#78909c';
+        errCtx.font = '9px monospace';
+        errCtx.textAlign = 'center';
+        errCtx.fillText(mn.toFixed(2), pad.l, h - 3);
+        errCtx.fillText('0', zeroX, h - 3);
+        errCtx.fillText(mx.toFixed(2), pad.l + cw, h - 3);
+    }
+
+    function updateLegend() {
+        const legend = $('chartLegend');
+        const view = S.currentView;
+        if (view === 'predictions') {
+            legend.innerHTML = '<span><i class="legend-dot" style="background:#69f0ae"></i> 实际价格</span>' +
+                '<span><i class="legend-dot" style="background:#ff6d00"></i> 预测</span>' +
+                (S.compareMode ? '<span><i class="legend-dot" style="background:#b388ff"></i> 对比</span>' : '');
+        } else if (view === 'signals') {
+            legend.innerHTML = '<span><i class="legend-dot" style="background:rgba(105,240,174,0.5)"></i> 价格</span>' +
+                '<span><i class="legend-dot" style="background:#69f0ae"></i> ▲ 买入</span>' +
+                '<span><i class="legend-dot" style="background:#ff5252"></i> ▼ 卖出</span>';
+        } else if (view === 'equity') {
+            legend.innerHTML = '<span><i class="legend-dot" style="background:#69f0ae"></i> 策略</span>' +
+                '<span><i class="legend-dot" style="background:rgba(79,195,247,0.8)"></i> 买入持有</span>';
+        } else if (view === 'features') {
+            const colors = ['#69f0ae', '#ff6d00', '#4fc3f7', '#b388ff', '#ff80ab', '#ffd740', '#18ffff'];
+            const keys = Object.keys(S.features);
+            legend.innerHTML = keys.map((k, i) =>
+                `<span><i class="legend-dot" style="background:${colors[i % colors.length]}"></i> ${k}</span>`
+            ).join('');
+        }
+    }
+
+    function drawMainChart() {
+        const container = $('mainChartContainer');
+        const { w, h } = resizeCanvas(mainCanvas, container);
+        mainCtx.clearRect(0, 0, w, h);
+
+        if (!S.trained) {
+            mainCtx.fillStyle = '#78909c';
+            mainCtx.font = '16px sans-serif';
+            mainCtx.textAlign = 'center';
+            mainCtx.fillText('配置参数后点击"训练"开始', w / 2, h / 2 - 10);
+            mainCtx.font = '12px sans-serif';
+            mainCtx.fillText('左侧面板设置数据、特征和模型', w / 2, h / 2 + 15);
+            return;
+        }
+
+        switch (S.currentView) {
+            case 'predictions': drawPredictionsView(mainCtx, w, h); break;
+            case 'signals': drawSignalsView(mainCtx, w, h); break;
+            case 'equity': drawEquityView(mainCtx, w, h); break;
+            case 'features': drawFeaturesView(mainCtx, w, h); break;
+        }
+    }
+
+    function drawAll() {
+        drawMainChart();
+        updateLegend();
+        if (S.trained) {
+            drawImportanceChart();
+            drawErrorHistogram();
+        }
+    }
+
+    /* ====== Event Handlers ====== */
+    $('btnTrain').addEventListener('click', () => {
+        S.seed = Date.now() & 0xFFFF;
+        runPipeline();
+    });
+
+    $('btnReset').addEventListener('click', () => {
+        S.trained = false;
+        S.predictions = [];
+        S.signals = [];
+        S.equity = [];
+        S.buyHold = [];
+        S.features = {};
+        S.featureImportance = {};
+        S.errors = [];
+        S.compareMode = false;
+        S.compareData = null;
+        $('metReturn').textContent = '—';
+        $('metReturn').className = 'metric-value';
+        $('metSharpe').textContent = '—';
+        $('metSharpe').className = 'metric-value';
+        $('metDrawdown').textContent = '—';
+        $('metDrawdown').className = 'metric-value';
+        $('metWinRate').textContent = '—';
+        $('metAccuracy').textContent = '—';
+        $('metTrades').textContent = '—';
+        $('cmTP').textContent = '—';
+        $('cmFN').textContent = '—';
+        $('cmFP').textContent = '—';
+        $('cmTN').textContent = '—';
+        drawAll();
+
+        // Clear mini chart canvases
+        const { w: iw, h: ih } = resizeCanvas(impCanvas, $('importanceChart'));
+        impCtx.clearRect(0, 0, iw, ih);
+        const { w: ew, h: eh } = resizeCanvas(errCanvas, $('errorChart'));
+        errCtx.clearRect(0, 0, ew, eh);
+    });
+
+    // Auto-play
+    $('btnAuto').addEventListener('click', () => {
+        S.autoPlay = !S.autoPlay;
+        $('btnAuto').classList.toggle('btn-accent', S.autoPlay);
+        if (S.autoPlay) {
+            const interval = Math.max(500, 3000 / +$('speed').value);
+            S.autoTimer = setInterval(() => {
+                S.seed = Date.now() & 0xFFFF;
+                runPipeline();
+            }, interval);
+        } else {
+            clearInterval(S.autoTimer);
+            S.autoTimer = null;
+        }
+    });
+
+    // Compare mode
+    $('btnCompare').addEventListener('click', () => {
+        if (!S.trained) return;
+        S.compareMode = !S.compareMode;
+        $('btnCompare').classList.toggle('btn-accent', S.compareMode);
+        if (S.compareMode) {
+            S.compareData = {
+                prices: [...S.prices],
+                equity: [...S.equity],
+                predictions: [...S.predictions]
+            };
+        } else {
+            S.compareData = null;
+        }
+        drawAll();
+    });
+
+    // Chart tab switching
+    document.querySelectorAll('.chart-tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            document.querySelectorAll('.chart-tab').forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            S.currentView = tab.dataset.view;
+            drawAll();
+        });
+    });
+
+    // Speed slider updates auto-play interval
+    $('speed').addEventListener('input', () => {
+        if (S.autoPlay) {
+            clearInterval(S.autoTimer);
+            const interval = Math.max(500, 3000 / +$('speed').value);
+            S.autoTimer = setInterval(() => {
+                S.seed = Date.now() & 0xFFFF;
+                runPipeline();
+            }, interval);
+        }
+    });
+
+    // Window resize
+    let resizeTimer;
+    window.addEventListener('resize', () => {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(drawAll, 150);
+    });
+
+    // Initial draw
+    setTimeout(drawAll, 100);
+
+    // Tooltip: show price on hover in main chart
+    mainCanvas.addEventListener('mousemove', (e) => {
+        if (!S.trained) return;
+        const rect = mainCanvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const w = rect.width;
+        const pad = 50;
+        const ratio = (x - pad) / (w - pad - 15);
+        if (ratio < 0 || ratio > 1) return;
+
+        const idx = Math.round(ratio * (S.prices.length - 1));
+        if (idx < 0 || idx >= S.prices.length) return;
+
+        // Redraw with crosshair
+        drawMainChart();
+        const ctx = mainCtx;
+        const px = pad + ratio * (w - pad - 15);
+
+        ctx.save();
+        ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([3, 3]);
+        ctx.beginPath();
+        ctx.moveTo(px, 0);
+        ctx.lineTo(px, rect.height);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Info box
+        ctx.fillStyle = 'rgba(15,52,96,0.9)';
+        const boxX = Math.min(px + 10, w - 130);
+        ctx.fillRect(boxX, 10, 120, 48);
+        ctx.strokeStyle = '#69f0ae';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(boxX, 10, 120, 48);
+
+        ctx.fillStyle = '#e8e8e8';
+        ctx.font = '10px monospace';
+        ctx.textAlign = 'left';
+        ctx.fillText('第 ' + idx + ' 期', boxX + 6, 24);
+        ctx.fillText('价格: ' + S.prices[idx].toFixed(2), boxX + 6, 38);
+        if (S.signals[idx] === 1) {
+            ctx.fillStyle = '#69f0ae';
+            ctx.fillText('信号: 买入', boxX + 6, 52);
+        } else if (S.signals[idx] === -1) {
+            ctx.fillStyle = '#ff5252';
+            ctx.fillText('信号: 卖出', boxX + 6, 52);
+        } else {
+            ctx.fillStyle = '#78909c';
+            ctx.fillText('信号: 持有', boxX + 6, 52);
+        }
+        ctx.restore();
+    });
+
+    mainCanvas.addEventListener('mouseleave', () => {
+        if (S.trained) drawMainChart();
+    });
+});
+</script>
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+        if (typeof renderMathInElement === 'function') {
+            renderMathInElement(document.body, {
+                delimiters: [
+                    { left: '$$', right: '$$', display: true },
+                    { left: '$', right: '$', display: false },
+                    { left: '\\(', right: '\\)', display: false },
+                    { left: '\\[', right: '\\]', display: true }
+                ],
+                throwOnError: false
+            });
+        }
+    });
+</script>
+</body>
+</html>

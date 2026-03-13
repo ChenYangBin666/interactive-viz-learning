@@ -1,0 +1,1253 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CNN 完整架构 — CNN Architecture</title>
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+    <style>
+        /* ===== Section 1: Architecture diagram ===== */
+        .arch-diagram { display:flex; align-items:center; gap:4px; padding:1.5rem; overflow-x:auto; min-height:280px; flex-wrap:nowrap; }
+        .arch-block { display:flex; flex-direction:column; align-items:center; gap:4px; cursor:pointer; transition:all 0.3s; flex-shrink:0; }
+        .arch-block:hover { transform:translateY(-4px); }
+        .arch-block .block-box { padding:0.6rem 0.9rem; border-radius:var(--radius-sm); font-size:0.78rem; font-weight:600; text-align:center; border:2px solid transparent; transition:all 0.3s; min-width:60px; }
+        .arch-block:hover .block-box { border-color:rgba(255,255,255,0.3); box-shadow:0 0 12px rgba(255,255,255,0.1); }
+        .arch-block .block-box.active { border-color:var(--accent-green); box-shadow:0 0 16px rgba(22,199,154,0.3); }
+        .arch-block .block-dim { font-family:var(--font-mono); font-size:0.68rem; color:var(--text-muted); white-space:nowrap; }
+        .arch-arrow { color:var(--text-muted); font-size:1.2rem; flex-shrink:0; }
+        .arch-group { display:flex; align-items:center; gap:4px; border:1px dashed var(--border-color); border-radius:var(--radius-md); padding:0.5rem 0.6rem; position:relative; }
+        .arch-group-label { position:absolute; top:-10px; left:12px; background:var(--bg-secondary); padding:0 6px; font-size:0.65rem; color:var(--text-muted); }
+        .detail-panel { background:var(--bg-card); border:1px solid var(--border-color); border-radius:var(--radius-md); padding:1.2rem; margin-top:1rem; display:none; }
+        .detail-panel.visible { display:block; animation:fadeSlideIn 0.3s ease; }
+        .detail-panel h4 { color:var(--accent-green); margin-bottom:0.5rem; }
+        .detail-panel .detail-grid { display:grid; grid-template-columns:auto 1fr; gap:0.3rem 1rem; font-size:0.85rem; }
+        .detail-panel .detail-grid .label { color:var(--text-muted); }
+        .detail-panel .detail-grid .value { color:var(--text-primary); font-family:var(--font-mono); }
+        .detail-panel .internal-ops { margin-top:0.75rem; padding:0.75rem; background:rgba(22,199,154,0.05); border-radius:var(--radius-sm); border-left:3px solid var(--accent-green); }
+        .detail-panel .internal-ops h5 { color:var(--accent-blue); font-size:0.85rem; margin-bottom:0.4rem; }
+        .detail-panel .internal-ops .op-step { display:flex; align-items:center; gap:0.5rem; font-size:0.8rem; color:var(--text-secondary); padding:0.2rem 0; }
+        .detail-panel .internal-ops .op-step .op-num { width:20px; height:20px; border-radius:50%; background:var(--border-color); color:var(--text-primary); display:flex; align-items:center; justify-content:center; font-size:0.65rem; font-weight:700; flex-shrink:0; }
+        @keyframes fadeSlideIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+
+        /* ===== Section 2: Dimension tracker ===== */
+        .dim-controls { display:flex; flex-wrap:wrap; gap:0.75rem; align-items:flex-end; margin-bottom:1rem; }
+        .dim-controls .field { display:flex; flex-direction:column; gap:0.25rem; }
+        .dim-controls .field label { font-size:0.78rem; color:var(--text-secondary); }
+        .dim-controls input[type="number"], .dim-controls select { background:var(--bg-card); border:1px solid var(--border-color); border-radius:var(--radius-sm); color:var(--text-primary); padding:0.4rem 0.6rem; font-family:var(--font-mono); font-size:0.85rem; width:80px; }
+        .dim-controls select { width:120px; }
+        .layer-row { display:flex; align-items:center; gap:0.75rem; padding:0.75rem 1rem; background:var(--bg-card); border:1px solid var(--border-color); border-radius:var(--radius-sm); margin-bottom:0.5rem; transition:all 0.3s; }
+        .layer-row:hover { border-color:var(--accent-blue); }
+        .layer-row .layer-idx { width:28px; height:28px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:0.75rem; font-weight:700; flex-shrink:0; }
+        .layer-row .layer-info { flex:1; font-size:0.85rem; }
+        .layer-row .layer-dims { font-family:var(--font-mono); font-size:0.8rem; color:var(--accent-green); min-width:100px; text-align:right; }
+        .layer-row .layer-params { font-family:var(--font-mono); font-size:0.75rem; color:var(--text-muted); min-width:80px; text-align:right; }
+        .dim-bar-container { display:flex; align-items:center; gap:0.5rem; margin-top:0.25rem; }
+        .dim-bar { height:6px; border-radius:3px; transition:width 0.5s ease; }
+        .dim-bar-label { font-size:0.7rem; color:var(--text-muted); font-family:var(--font-mono); white-space:nowrap; }
+        .stats-row { display:flex; gap:1.5rem; padding:1rem; background:var(--bg-card); border:1px solid var(--border-color); border-radius:var(--radius-md); margin-top:1rem; flex-wrap:wrap; }
+        .stat-item { text-align:center; min-width:90px; }
+        .stat-item .stat-value { font-family:var(--font-mono); font-size:1.1rem; color:var(--accent-green); font-weight:700; }
+        .stat-item .stat-label { font-size:0.75rem; color:var(--text-muted); }
+        .layer-remove { background:none; border:none; color:var(--accent-red); cursor:pointer; font-size:1rem; padding:0.2rem; opacity:0.6; transition:opacity 0.2s; }
+        .layer-remove:hover { opacity:1; }
+        .dim-separator { border-left:1px solid var(--border-color); height:48px; margin:0 0.5rem; }
+
+        /* ===== Section 3: Forward pass ===== */
+        .fwd-canvas-wrap { position:relative; width:100%; min-height:420px; }
+        .fwd-canvas-wrap canvas { width:100%; height:100%; }
+        .fwd-step-info { padding:1rem; background:var(--bg-card); border:1px solid var(--border-color); border-radius:var(--radius-md); margin-top:0.75rem; font-size:0.85rem; }
+        .fwd-step-info .step-title { color:var(--accent-blue); font-weight:600; margin-bottom:0.3rem; }
+        .fwd-step-info .step-formula { font-family:var(--font-mono); font-size:0.8rem; color:var(--accent-purple); margin-top:0.4rem; padding:0.4rem 0.6rem; background:rgba(179,136,255,0.08); border-radius:var(--radius-sm); }
+        .speed-control { display:flex; align-items:center; gap:0.5rem; margin-left:auto; }
+        .speed-control label { font-size:0.78rem; color:var(--text-muted); }
+
+        /* ===== Section 4: 1x1 Conv ===== */
+        .channel-stack { display:flex; gap:2px; align-items:flex-end; }
+        .channel-slice { border-radius:3px; display:flex; align-items:center; justify-content:center; font-size:0.65rem; color:rgba(255,255,255,0.8); font-family:var(--font-mono); }
+        .conv1x1-arrow { display:flex; align-items:center; justify-content:center; font-size:1.5rem; color:var(--text-muted); padding:0 0.5rem; }
+        .savings-bar { display:flex; align-items:center; gap:0.5rem; font-size:0.8rem; }
+        .savings-bar .bar-track { flex:1; height:22px; background:var(--border-color); border-radius:4px; overflow:hidden; }
+        .savings-bar .bar-fill { height:100%; border-radius:4px; display:flex; align-items:center; padding:0 8px; font-size:0.7rem; font-weight:600; transition:width 0.6s ease; }
+        .compare-table { width:100%; border-collapse:collapse; font-size:0.85rem; }
+        .compare-table th, .compare-table td { padding:0.5rem 0.75rem; text-align:left; border-bottom:1px solid var(--border-color); }
+        .compare-table th { color:var(--text-muted); font-weight:600; font-size:0.78rem; }
+        .compare-table td { font-family:var(--font-mono); }
+        .compare-table .highlight-cell { color:var(--accent-green); font-weight:600; }
+        .use-case-cards { display:grid; grid-template-columns:repeat(auto-fit, minmax(250px, 1fr)); gap:1rem; margin-top:1rem; }
+        .use-case-card { background:var(--bg-card); border:1px solid var(--border-color); border-radius:var(--radius-sm); padding:1rem; transition:border-color 0.3s; }
+        .use-case-card:hover { border-color:var(--accent-purple); }
+        .use-case-card h5 { color:var(--accent-purple); font-size:0.9rem; margin-bottom:0.4rem; }
+        .use-case-card p { font-size:0.82rem; margin-bottom:0; }
+    </style>
+</head>
+<body>
+<div class="page-container">
+
+    <!-- ====== Section 1: CNN Overall Structure ====== -->
+    <div class="section" id="sec-architecture">
+        <div class="section-title">
+            <div class="icon">1</div>
+            <h2>CNN 整体结构</h2>
+        </div>
+        <p>典型的 CNN 由 <strong>特征提取</strong>（卷积 + 激活 + 池化 重复堆叠）和 <strong>分类器</strong>（全连接层 + Softmax）两大部分组成。悬停查看维度与参数，点击模块展开内部操作详情。</p>
+
+        <div class="card">
+            <div class="legend">
+                <div class="legend-item"><div class="swatch" style="background:#4fc3f7;"></div>卷积层</div>
+                <div class="legend-item"><div class="swatch" style="background:#16c79a;"></div>ReLU激活</div>
+                <div class="legend-item"><div class="swatch" style="background:#ffab40;"></div>池化层</div>
+                <div class="legend-item"><div class="swatch" style="background:#ab47bc;"></div>全连接层</div>
+                <div class="legend-item"><div class="swatch" style="background:#ff5252;"></div>Softmax</div>
+            </div>
+            <div class="arch-diagram" id="archDiagram"></div>
+            <div class="detail-panel" id="archDetail"></div>
+        </div>
+
+        <div class="info-box mt-2">
+            <p><strong>卷积输出尺寸公式：</strong></p>
+            <p>$$\text{Output}_{H} = \left\lfloor \frac{H_{in} + 2P - K}{S} \right\rfloor + 1$$</p>
+            <p class="text-sm text-muted mt-1">其中 $H_{in}$ 为输入空间尺寸，$P$ 为零填充大小，$K$ 为卷积核尺寸，$S$ 为步长。</p>
+        </div>
+        <div class="info-box success mt-1">
+            <p><strong>参数量公式：</strong></p>
+            <p>$$\text{Params}_{conv} = (K \times K \times C_{in} + 1) \times C_{out}$$</p>
+            <p class="text-sm text-muted mt-1">每个卷积核大小为 $K \times K \times C_{in}$，加上 1 个偏置项，共 $C_{out}$ 个卷积核。</p>
+        </div>
+    </div>
+
+    <!-- ====== Section 2: Dimension Tracker ====== -->
+    <div class="section" id="sec-dimensions">
+        <div class="section-title">
+            <div class="icon">2</div>
+            <h2>维度变化追踪</h2>
+        </div>
+        <p>输入图像尺寸后，逐层添加网络层，实时追踪每一层的输出维度变化、参数量和计算量（FLOPs）。可以使用"载入示例"快速查看一个典型的 CNN 架构。</p>
+
+        <div class="card">
+            <div class="dim-controls">
+                <div class="field">
+                    <label>输入高度 H</label>
+                    <input type="number" id="inputH" value="32" min="1" max="512">
+                </div>
+                <div class="field">
+                    <label>输入宽度 W</label>
+                    <input type="number" id="inputW" value="32" min="1" max="512">
+                </div>
+                <div class="field">
+                    <label>输入通道 C</label>
+                    <input type="number" id="inputC" value="3" min="1" max="512">
+                </div>
+                <div class="dim-separator"></div>
+                <div class="field">
+                    <label>添加层类型</label>
+                    <select id="layerType">
+                        <option value="conv">Conv2D 卷积</option>
+                        <option value="pool">MaxPool2D 最大池化</option>
+                        <option value="avgpool">AvgPool2D 平均池化</option>
+                        <option value="flatten">Flatten 展平</option>
+                        <option value="fc">全连接 FC</option>
+                    </select>
+                </div>
+                <div class="field" id="kernelField">
+                    <label>核大小 K</label>
+                    <input type="number" id="kernelSize" value="3" min="1" max="11">
+                </div>
+                <div class="field" id="strideField">
+                    <label>步长 S</label>
+                    <input type="number" id="strideSize" value="1" min="1" max="5">
+                </div>
+                <div class="field" id="padField">
+                    <label>填充 P</label>
+                    <input type="number" id="padSize" value="1" min="0" max="5">
+                </div>
+                <div class="field" id="filtersField">
+                    <label>输出通道/神经元</label>
+                    <input type="number" id="filtersNum" value="16" min="1" max="4096">
+                </div>
+            </div>
+            <div style="display:flex; gap:0.5rem; margin-bottom:1rem; flex-wrap:wrap;">
+                <button class="btn btn-primary" onclick="DimTracker.addLayer()">+ 添加层</button>
+                <button class="btn" onclick="DimTracker.reset()">清空全部</button>
+                <button class="btn" onclick="DimTracker.loadPreset()">载入示例 (VGG-like)</button>
+                <button class="btn" onclick="DimTracker.loadPreset2()">载入示例 (简单CNN)</button>
+            </div>
+            <div id="layerList"></div>
+            <div class="stats-row" id="dimStats">
+                <div class="stat-item">
+                    <div class="stat-value" id="statLayers">0</div>
+                    <div class="stat-label">层数</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value" id="statParams">0</div>
+                    <div class="stat-label">总参数量</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value" id="statFlops">0</div>
+                    <div class="stat-label">总 FLOPs</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value" id="statMemory">0</div>
+                    <div class="stat-label">激活值内存 (float32)</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value" id="statReduction">-</div>
+                    <div class="stat-label">空间缩减</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ====== Section 3: Forward Pass Animation ====== -->
+    <div class="section" id="sec-forward">
+        <div class="section-title">
+            <div class="icon">3</div>
+            <h2>前向传播动画</h2>
+        </div>
+        <p>观察数据在小型 CNN（8x8 输入 &rarr; Conv3x3(4) &rarr; ReLU &rarr; Pool &rarr; Conv3x3(8) &rarr; ReLU &rarr; Flatten &rarr; FC(4) &rarr; Softmax）中逐步传播的过程。热力图颜色表示数值大小。</p>
+
+        <div class="card">
+            <div class="anim-controls">
+                <button class="btn btn-sm" id="fwdPrev" onclick="FwdAnim.prev()" title="上一步">&#9664;</button>
+                <button class="btn btn-sm btn-primary" id="fwdPlay" onclick="FwdAnim.togglePlay()">&#9654; 播放</button>
+                <button class="btn btn-sm" id="fwdNext" onclick="FwdAnim.next()" title="下一步">&#9654;&#124;</button>
+                <button class="btn btn-sm" id="fwdReset" onclick="FwdAnim.reset()">重置</button>
+                <div class="progress-bar" id="fwdProgress" onclick="FwdAnim.clickProgress(event)">
+                    <div class="fill" id="fwdFill"></div>
+                </div>
+                <span class="step-label" id="fwdStepLabel">0 / 0</span>
+                <div class="speed-control">
+                    <label>速度</label>
+                    <select id="fwdSpeed" onchange="FwdAnim.setSpeed(this.value)" style="background:var(--bg-card);border:1px solid var(--border-color);color:var(--text-primary);border-radius:var(--radius-sm);padding:0.2rem 0.4rem;font-size:0.8rem;">
+                        <option value="2500">慢 0.5x</option>
+                        <option value="1500" selected>正常 1x</option>
+                        <option value="800">快 2x</option>
+                        <option value="400">极快 4x</option>
+                    </select>
+                </div>
+            </div>
+            <div class="fwd-canvas-wrap">
+                <canvas id="fwdCanvas" width="1200" height="460"></canvas>
+            </div>
+            <div class="fwd-step-info" id="fwdInfo">
+                <div class="step-title">准备开始</div>
+                <div>点击"播放"或逐步按钮开始前向传播演示。每一步会高亮当前正在处理的层。</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ====== Section 4: 1x1 Convolution ====== -->
+    <div class="section" id="sec-1x1">
+        <div class="section-title">
+            <div class="icon">4</div>
+            <h2>1x1 卷积的妙用</h2>
+        </div>
+        <p>1x1 卷积本质上是对每个空间位置做 <strong>通道维度的线性组合</strong>，可以高效地改变通道数（升维或降维），大幅减少参数量。它是 GoogLeNet Inception 和 ResNet Bottleneck 等现代架构的核心组件。</p>
+
+        <div class="card">
+            <div class="dim-controls" style="margin-bottom:1.2rem;">
+                <div class="field">
+                    <label>输入通道 C_in</label>
+                    <input type="number" id="in1x1C" value="256" min="1" max="2048">
+                </div>
+                <div class="field">
+                    <label>输出通道 C_out</label>
+                    <input type="number" id="out1x1C" value="64" min="1" max="2048">
+                </div>
+                <div class="field">
+                    <label>空间尺寸 HxW</label>
+                    <input type="number" id="spatial1x1" value="14" min="1" max="112">
+                </div>
+                <button class="btn btn-primary" onclick="Conv1x1.update()">更新可视化</button>
+            </div>
+
+            <h4 style="color:var(--accent-blue);">通道维度变化</h4>
+            <p class="text-sm text-muted">每个 1x1 卷积核的权重向量长度 = 输入通道数，输出的每个通道是输入所有通道的加权求和。</p>
+
+            <div style="display:flex; align-items:center; justify-content:center; gap:1.5rem; flex-wrap:wrap; margin:1.5rem 0; padding:1rem; background:rgba(0,0,0,0.15); border-radius:var(--radius-md);">
+                <div style="text-align:center;">
+                    <div class="text-sm text-muted mb-1">输入特征图</div>
+                    <div class="channel-stack" id="inChannelStack"></div>
+                    <div class="text-sm" style="color:var(--accent-blue); margin-top:6px;" id="inLabel">256 通道</div>
+                </div>
+                <div class="conv1x1-arrow">&#10132;</div>
+                <div style="text-align:center;">
+                    <div class="text-sm text-muted mb-1">1x1 Conv 核</div>
+                    <div style="width:54px;height:54px;background:var(--accent-purple);border-radius:var(--radius-sm);display:flex;align-items:center;justify-content:center;font-size:0.8rem;font-weight:700;color:#fff;">1x1</div>
+                    <div class="text-sm" style="color:var(--accent-purple);margin-top:6px;" id="conv1x1ParamLabel">参数量</div>
+                </div>
+                <div class="conv1x1-arrow">&#10132;</div>
+                <div style="text-align:center;">
+                    <div class="text-sm text-muted mb-1">输出特征图</div>
+                    <div class="channel-stack" id="outChannelStack"></div>
+                    <div class="text-sm" style="color:var(--accent-green); margin-top:6px;" id="outLabel">64 通道</div>
+                </div>
+            </div>
+
+            <div class="info-box" style="margin-bottom:1.5rem;">
+                <p><strong>1x1 卷积的数学本质：</strong></p>
+                <p>$$y_{h,w,j} = \sum_{i=1}^{C_{in}} w_{i,j} \cdot x_{h,w,i} + b_j \quad (j = 1, \ldots, C_{out})$$</p>
+                <p class="text-sm text-muted mt-1">对于每个空间位置 $(h,w)$，输出通道 $j$ 是输入所有通道的加权和。等价于对通道维度做全连接变换。</p>
+            </div>
+
+            <h4 style="color:var(--accent-orange);">参数量与计算量对比：1x1 vs 3x3 vs 5x5</h4>
+            <p class="text-sm text-muted mb-1">相同的输入/输出通道数下，不同卷积核尺寸的参数量差异。</p>
+            <div id="savingsViz" style="margin-bottom:1.5rem;"></div>
+
+            <h4 style="color:var(--accent-blue);">Bottleneck 结构：参数节省对比</h4>
+            <p class="text-sm text-muted">ResNet 的 Bottleneck 策略：用 1x1 卷积先降低通道数，再做 3x3 卷积，最后 1x1 恢复通道数。</p>
+            <div style="overflow-x:auto; margin-bottom:1.5rem;">
+                <table class="compare-table" id="bottleneckTable">
+                    <thead>
+                        <tr>
+                            <th>方案</th>
+                            <th>操作路径</th>
+                            <th>参数量</th>
+                            <th>FLOPs</th>
+                            <th>节省比例</th>
+                        </tr>
+                    </thead>
+                    <tbody id="bottleneckBody"></tbody>
+                </table>
+            </div>
+
+            <h4 style="color:var(--accent-green);">1x1 卷积的典型应用场景</h4>
+            <div class="use-case-cards">
+                <div class="use-case-card">
+                    <h5>GoogLeNet / Inception</h5>
+                    <p>在 3x3 和 5x5 卷积之前，使用 1x1 卷积降低通道数，减少后续计算量。Inception v1 通过此设计在 22 层深度下控制了参数量。</p>
+                </div>
+                <div class="use-case-card">
+                    <h5>ResNet Bottleneck</h5>
+                    <p>50 层以上的 ResNet 使用 1x1&rarr;3x3&rarr;1x1 的瓶颈结构，使得网络可以做到 152 层甚至更深，同时参数量可控。</p>
+                </div>
+                <div class="use-case-card">
+                    <h5>通道注意力 (SE-Net)</h5>
+                    <p>Squeeze-and-Excitation 模块中使用 1x1 卷积（等价 FC）来学习通道间的重要性权重，自适应地增强/抑制不同通道。</p>
+                </div>
+                <div class="use-case-card">
+                    <h5>语义分割的 1x1 分类头</h5>
+                    <p>在 FCN 等分割网络中，最后一层使用 1x1 卷积将特征通道映射为类别数，为每个像素输出分类概率。</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<script src="../shared/scripts/nav.js"></script>
+<script src="../shared/scripts/cnn-utils.js"></script>
+<script>
+/* =================================================================
+   Section 1 — CNN Architecture Diagram (interactive)
+   ================================================================= */
+const ArchDiagram = (() => {
+    const layers = [
+        { id:'input', name:'输入图像', color:'#78909c', dims:'32x32x3', type:'input',
+          detail:{
+            desc:'原始 RGB 图像输入', params:'0', ops:'无计算',
+            notes:'通常需要归一化 (x/255) 或标准化 ((x-mean)/std)',
+            internal: ['读取像素数据 (H x W x 3)', '归一化到 [0,1] 区间', '可选：数据增强 (翻转/裁剪/旋转)']
+          }},
+        { id:'conv1', name:'Conv1', color:'#4fc3f7', dims:'32x32x16', type:'conv',
+          detail:{
+            desc:'3x3 卷积层，16 个滤波器，padding=1, stride=1',
+            params:'(3x3x3 + 1) x 16 = 448',
+            ops:'卷积运算 + 偏置相加',
+            notes:'提取低级特征：边缘、颜色变化、简单纹理',
+            internal: ['对每个 3x3x3 的局部区域做点积', '16 个卷积核各产生一张特征图', '加上偏置 bias', '输出: 32x32x16']
+          }},
+        { id:'relu1', name:'ReLU', color:'#16c79a', dims:'32x32x16', type:'relu',
+          detail:{
+            desc:'ReLU 逐元素激活函数',
+            params:'0', ops:'max(0, x)',
+            notes:'将负值置零，引入非线性能力',
+            internal: ['逐元素计算 max(0, x)', '负值 -> 0, 正值不变', '维度保持不变: 32x32x16']
+          }},
+        { id:'pool1', name:'MaxPool', color:'#ffab40', dims:'16x16x16', type:'pool',
+          detail:{
+            desc:'2x2 最大池化层, stride=2',
+            params:'0', ops:'取窗口内最大值',
+            notes:'空间尺寸减半，保留最显著的激活值，增加平移不变性',
+            internal: ['在 2x2 窗口内取最大值', '步长 2，无重叠滑动', '32x32 -> 16x16', '通道数不变: 16']
+          }},
+        { id:'conv2', name:'Conv2', color:'#4fc3f7', dims:'16x16x32', type:'conv',
+          detail:{
+            desc:'3x3 卷积层，32 个滤波器，padding=1',
+            params:'(3x3x16 + 1) x 32 = 4,640',
+            ops:'卷积运算 + 偏置',
+            notes:'提取中级特征：角点、纹理组合、简单形状',
+            internal: ['每个核大小为 3x3x16', '32 个核产生 32 张特征图', '输出: 16x16x32']
+          }},
+        { id:'relu2', name:'ReLU', color:'#16c79a', dims:'16x16x32', type:'relu',
+          detail:{
+            desc:'ReLU 激活', params:'0', ops:'max(0, x)',
+            notes:'保持非线性',
+            internal: ['逐元素 max(0, x)', '维度不变: 16x16x32']
+          }},
+        { id:'pool2', name:'MaxPool', color:'#ffab40', dims:'8x8x32', type:'pool',
+          detail:{
+            desc:'2x2 最大池化, stride=2',
+            params:'0', ops:'窗口最大值',
+            notes:'空间尺寸再减半',
+            internal: ['16x16 -> 8x8', '通道数不变: 32']
+          }},
+        { id:'conv3', name:'Conv3', color:'#4fc3f7', dims:'8x8x64', type:'conv',
+          detail:{
+            desc:'3x3 卷积层，64 个滤波器，padding=1',
+            params:'(3x3x32 + 1) x 64 = 18,496',
+            ops:'卷积 + 偏置',
+            notes:'提取高级语义特征：物体部件、语义模式',
+            internal: ['每个核 3x3x32', '64 个核 -> 64 张特征图', '输出: 8x8x64']
+          }},
+        { id:'relu3', name:'ReLU', color:'#16c79a', dims:'8x8x64', type:'relu',
+          detail:{
+            desc:'ReLU 激活', params:'0', ops:'max(0, x)',
+            notes:'非线性变换',
+            internal: ['逐元素 max(0, x)', '维度不变: 8x8x64']
+          }},
+        { id:'pool3', name:'MaxPool', color:'#ffab40', dims:'4x4x64', type:'pool',
+          detail:{
+            desc:'2x2 最大池化, stride=2',
+            params:'0', ops:'窗口最大值',
+            notes:'产生紧凑的高层特征表示',
+            internal: ['8x8 -> 4x4', '通道不变: 64', '输出包含高度抽象的语义信息']
+          }},
+        { id:'flatten', name:'Flatten', color:'#b0bec5', dims:'1024', type:'flatten',
+          detail:{
+            desc:'展平: 将三维特征图重塑为一维向量',
+            params:'0', ops:'reshape / view',
+            notes:'从空间特征转向全局特征表示',
+            internal: ['4 x 4 x 64 = 1024', '将所有特征图拼接为一维', '准备输入全连接层']
+          }},
+        { id:'fc1', name:'FC-256', color:'#ab47bc', dims:'256', type:'fc',
+          detail:{
+            desc:'全连接层，256 个神经元 + ReLU',
+            params:'1024 x 256 + 256 = 262,400',
+            ops:'矩阵乘法 + 偏置 + ReLU',
+            notes:'学习高层特征的非线性组合',
+            internal: ['y = Wx + b', 'W: 1024x256 矩阵', '加 ReLU 激活', '参数量占网络大部分！']
+          }},
+        { id:'fc2', name:'FC-10', color:'#ab47bc', dims:'10', type:'fc',
+          detail:{
+            desc:'输出全连接层，10 个类别',
+            params:'256 x 10 + 10 = 2,570',
+            ops:'矩阵乘法 + 偏置',
+            notes:'每个输出对应一个类别的原始得分 (logit)',
+            internal: ['y = Wx + b', 'W: 256x10 矩阵', '输出 10 维向量 (logits)']
+          }},
+        { id:'softmax', name:'Softmax', color:'#ff5252', dims:'10 (prob)', type:'softmax',
+          detail:{
+            desc:'Softmax 归一化为概率分布',
+            params:'0', ops:'exp(x_i) / sum(exp(x_j))',
+            notes:'各类别概率之和为 1，用于最终预测',
+            internal: ['计算每个 logit 的指数 exp(z_i)', '除以所有指数的和', '得到概率分布 [0,1]', '最大概率对应的类别即为预测结果']
+          }},
+    ];
+
+    const groups = [
+        { start: 1, end: 3, label: 'Block 1' },
+        { start: 4, end: 6, label: 'Block 2' },
+        { start: 7, end: 9, label: 'Block 3' },
+    ];
+
+    function init() {
+        const container = document.getElementById('archDiagram');
+        container.innerHTML = '';
+        let currentGroup = null;
+        let groupDiv = null;
+
+        layers.forEach((layer, idx) => {
+            const group = groups.find(g => idx >= g.start && idx <= g.end);
+
+            if (group && group !== currentGroup) {
+                if (groupDiv) container.appendChild(groupDiv);
+                if (idx > 0) {
+                    const arrow = document.createElement('span');
+                    arrow.className = 'arch-arrow';
+                    arrow.textContent = '\u2192';
+                    container.appendChild(arrow);
+                }
+                groupDiv = document.createElement('div');
+                groupDiv.className = 'arch-group';
+                groupDiv.innerHTML = `<span class="arch-group-label">${group.label}</span>`;
+                currentGroup = group;
+            } else if (!group && currentGroup) {
+                if (groupDiv) container.appendChild(groupDiv);
+                groupDiv = null;
+                currentGroup = null;
+            }
+
+            if (idx > 0 && !group) {
+                const arrow = document.createElement('span');
+                arrow.className = 'arch-arrow';
+                arrow.textContent = '\u2192';
+                container.appendChild(arrow);
+            } else if (group && idx > group.start) {
+                const arrow = document.createElement('span');
+                arrow.className = 'arch-arrow';
+                arrow.textContent = '\u2192';
+                if (groupDiv) groupDiv.appendChild(arrow);
+            }
+
+            const block = document.createElement('div');
+            block.className = 'arch-block';
+            block.innerHTML = `
+                <div class="block-box" style="background:${layer.color}22; color:${layer.color};" data-idx="${idx}">
+                    ${layer.name}
+                </div>
+                <div class="block-dim">${layer.dims}</div>
+            `;
+            block.addEventListener('click', () => showDetail(idx));
+            block.addEventListener('mouseenter', () => {
+                block.querySelector('.block-box').classList.add('active');
+            });
+            block.addEventListener('mouseleave', () => {
+                block.querySelector('.block-box').classList.remove('active');
+            });
+
+            if (groupDiv && group) {
+                groupDiv.appendChild(block);
+            } else {
+                container.appendChild(block);
+            }
+        });
+        if (groupDiv) container.appendChild(groupDiv);
+    }
+
+    function showDetail(idx) {
+        const layer = layers[idx];
+        const d = layer.detail;
+        const panel = document.getElementById('archDetail');
+
+        let internalHTML = '';
+        if (d.internal && d.internal.length > 0) {
+            internalHTML = `
+                <div class="internal-ops">
+                    <h5>内部操作步骤</h5>
+                    ${d.internal.map((step, i) => `
+                        <div class="op-step">
+                            <span class="op-num">${i+1}</span>
+                            <span>${step}</span>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        }
+
+        panel.innerHTML = `
+            <h4>${layer.name} &#8212; ${d.desc}</h4>
+            <div class="detail-grid">
+                <span class="label">输出维度</span><span class="value">${layer.dims}</span>
+                <span class="label">参数量</span><span class="value">${d.params}</span>
+                <span class="label">核心操作</span><span class="value">${d.ops}</span>
+                <span class="label">设计意图</span><span class="value" style="font-family:var(--font-cn);white-space:normal;">${d.notes}</span>
+            </div>
+            ${internalHTML}
+        `;
+        panel.classList.add('visible');
+    }
+
+    return { init };
+})();
+
+/* =================================================================
+   Section 2 — Dimension Tracker
+   ================================================================= */
+const DimTracker = (() => {
+    let layers = [];
+
+    function getInputDims() {
+        return {
+            h: parseInt(document.getElementById('inputH').value) || 32,
+            w: parseInt(document.getElementById('inputW').value) || 32,
+            c: parseInt(document.getElementById('inputC').value) || 3,
+        };
+    }
+
+    function addLayer() {
+        const type = document.getElementById('layerType').value;
+        const kernel = parseInt(document.getElementById('kernelSize').value) || 3;
+        const stride = parseInt(document.getElementById('strideSize').value) || 1;
+        const pad = parseInt(document.getElementById('padSize').value) || 0;
+        const filters = parseInt(document.getElementById('filtersNum').value) || 16;
+        layers.push({ type, kernel, stride, pad, filters });
+        render();
+    }
+
+    function removeLayer(idx) {
+        layers.splice(idx, 1);
+        render();
+    }
+
+    function reset() {
+        layers = [];
+        render();
+    }
+
+    function loadPreset() {
+        document.getElementById('inputH').value = 32;
+        document.getElementById('inputW').value = 32;
+        document.getElementById('inputC').value = 3;
+        layers = [
+            { type:'conv', kernel:3, stride:1, pad:1, filters:64 },
+            { type:'conv', kernel:3, stride:1, pad:1, filters:64 },
+            { type:'pool', kernel:2, stride:2, pad:0, filters:0 },
+            { type:'conv', kernel:3, stride:1, pad:1, filters:128 },
+            { type:'conv', kernel:3, stride:1, pad:1, filters:128 },
+            { type:'pool', kernel:2, stride:2, pad:0, filters:0 },
+            { type:'conv', kernel:3, stride:1, pad:1, filters:256 },
+            { type:'conv', kernel:3, stride:1, pad:1, filters:256 },
+            { type:'pool', kernel:2, stride:2, pad:0, filters:0 },
+            { type:'flatten', kernel:0, stride:0, pad:0, filters:0 },
+            { type:'fc', kernel:0, stride:0, pad:0, filters:512 },
+            { type:'fc', kernel:0, stride:0, pad:0, filters:10 },
+        ];
+        render();
+    }
+
+    function loadPreset2() {
+        document.getElementById('inputH').value = 28;
+        document.getElementById('inputW').value = 28;
+        document.getElementById('inputC').value = 1;
+        layers = [
+            { type:'conv', kernel:5, stride:1, pad:0, filters:6 },
+            { type:'pool', kernel:2, stride:2, pad:0, filters:0 },
+            { type:'conv', kernel:5, stride:1, pad:0, filters:16 },
+            { type:'pool', kernel:2, stride:2, pad:0, filters:0 },
+            { type:'flatten', kernel:0, stride:0, pad:0, filters:0 },
+            { type:'fc', kernel:0, stride:0, pad:0, filters:120 },
+            { type:'fc', kernel:0, stride:0, pad:0, filters:84 },
+            { type:'fc', kernel:0, stride:0, pad:0, filters:10 },
+        ];
+        render();
+    }
+
+    function formatNum(n) {
+        if (n >= 1e9) return (n / 1e9).toFixed(2) + 'G';
+        if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M';
+        if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+        return n.toString();
+    }
+
+    function render() {
+        const input = getInputDims();
+        let h = input.h, w = input.w, c = input.c;
+        let flattened = false;
+        let totalParams = 0, totalFlops = 0, totalMem = 0;
+        const initSpatial = h * w;
+        const container = document.getElementById('layerList');
+        container.innerHTML = '';
+
+        // Input row
+        const inputRow = document.createElement('div');
+        inputRow.className = 'layer-row';
+        inputRow.innerHTML = `
+            <div class="layer-idx" style="background:#78909c33;color:#78909c;">In</div>
+            <div class="layer-info">
+                <strong>输入</strong>
+                <div class="dim-bar-container">
+                    <div class="dim-bar" style="width:100%;background:#78909c;"></div>
+                    <span class="dim-bar-label">${h}x${w}</span>
+                </div>
+            </div>
+            <div class="layer-dims">${h} x ${w} x ${c}</div>
+            <div class="layer-params" style="min-width:80px;"></div>
+            <div style="width:22px;"></div>
+        `;
+        container.appendChild(inputRow);
+        totalMem += h * w * c;
+
+        const colors = {
+            conv: '#4fc3f7', pool: '#ffab40', avgpool: '#ffab40',
+            fc: '#ab47bc', flatten: '#b0bec5'
+        };
+        const names = {
+            conv: 'Conv2D', pool: 'MaxPool2D', avgpool: 'AvgPool2D',
+            fc: '全连接 FC', flatten: 'Flatten'
+        };
+
+        layers.forEach((layer, idx) => {
+            let outH = h, outW = w, outC = c;
+            let params = 0, flops = 0;
+            let desc = '';
+            let prevFlatSize = h * w * c;
+
+            if (layer.type === 'conv') {
+                outH = Math.floor((h + 2 * layer.pad - layer.kernel) / layer.stride) + 1;
+                outW = Math.floor((w + 2 * layer.pad - layer.kernel) / layer.stride) + 1;
+                outC = layer.filters;
+                params = (layer.kernel * layer.kernel * c + 1) * layer.filters;
+                flops = (2 * layer.kernel * layer.kernel * c) * layer.filters * outH * outW;
+                desc = `K=${layer.kernel}x${layer.kernel}, S=${layer.stride}, P=${layer.pad}, F=${layer.filters}`;
+            } else if (layer.type === 'pool' || layer.type === 'avgpool') {
+                outH = Math.floor((h - layer.kernel) / layer.stride) + 1;
+                outW = Math.floor((w - layer.kernel) / layer.stride) + 1;
+                outC = c;
+                flops = layer.kernel * layer.kernel * outH * outW * c;
+                desc = `K=${layer.kernel}x${layer.kernel}, S=${layer.stride}`;
+            } else if (layer.type === 'flatten') {
+                flattened = true;
+                outH = 1; outW = 1; outC = h * w * c;
+                desc = `${h} * ${w} * ${c} = ${outC}`;
+            } else if (layer.type === 'fc') {
+                const inSize = flattened ? c : h * w * c;
+                if (!flattened) flattened = true;
+                outH = 1; outW = 1; outC = layer.filters;
+                params = (inSize + 1) * layer.filters;
+                flops = 2 * inSize * layer.filters;
+                desc = `${inSize} \u2192 ${layer.filters}`;
+            }
+
+            if (outH < 1) outH = 1;
+            if (outW < 1) outW = 1;
+
+            totalParams += params;
+            totalFlops += flops;
+            totalMem += outH * outW * outC;
+
+            const isSpatial = !flattened || layer.type === 'conv' || layer.type === 'pool' || layer.type === 'avgpool';
+            const dimsText = isSpatial ? `${outH} x ${outW} x ${outC}` : `${outC}`;
+            const barWidth = isSpatial ? Math.max(4, (outH * outW / initSpatial) * 100) : 0;
+            const barColor = colors[layer.type] || '#888';
+
+            const row = document.createElement('div');
+            row.className = 'layer-row';
+            row.innerHTML = `
+                <div class="layer-idx" style="background:${barColor}33;color:${barColor};">${idx + 1}</div>
+                <div class="layer-info">
+                    <strong>${names[layer.type]}</strong>
+                    <span class="text-sm text-muted" style="margin-left:0.5rem;">${desc}</span>
+                    ${isSpatial ? `
+                    <div class="dim-bar-container">
+                        <div class="dim-bar" style="width:${barWidth}%;background:${barColor};"></div>
+                        <span class="dim-bar-label">${outH}x${outW}</span>
+                    </div>` : ''}
+                </div>
+                <div class="layer-dims">${dimsText}</div>
+                <div class="layer-params">${params > 0 ? formatNum(params) + ' params' : ''}</div>
+                <button class="layer-remove" onclick="DimTracker.removeLayer(${idx})" title="删除">&times;</button>
+            `;
+            container.appendChild(row);
+
+            h = outH; w = outW; c = outC;
+        });
+
+        const spatialReduction = layers.length > 0
+            ? ((1 - (h * w) / initSpatial) * 100).toFixed(0) + '%'
+            : '-';
+
+        document.getElementById('statLayers').textContent = layers.length;
+        document.getElementById('statParams').textContent = formatNum(totalParams);
+        document.getElementById('statFlops').textContent = formatNum(totalFlops);
+        document.getElementById('statMemory').textContent = formatNum(totalMem * 4) + 'B';
+        document.getElementById('statReduction').textContent = spatialReduction;
+    }
+
+    // Reactively show/hide parameter fields
+    document.getElementById('layerType').addEventListener('change', function () {
+        const t = this.value;
+        const isFC = t === 'fc';
+        const isFlatten = t === 'flatten';
+        const isPool = t === 'pool' || t === 'avgpool';
+        document.getElementById('kernelField').style.display = (isFC || isFlatten) ? 'none' : '';
+        document.getElementById('strideField').style.display = (isFC || isFlatten) ? 'none' : '';
+        document.getElementById('padField').style.display = (isFC || isFlatten || isPool) ? 'none' : '';
+        document.getElementById('filtersField').style.display = (isPool || isFlatten) ? 'none' : '';
+        if (isPool) {
+            document.getElementById('kernelSize').value = 2;
+            document.getElementById('strideSize').value = 2;
+        } else if (t === 'conv') {
+            document.getElementById('kernelSize').value = 3;
+            document.getElementById('strideSize').value = 1;
+            document.getElementById('padSize').value = 1;
+        }
+    });
+
+    // Re-render when input dims change
+    ['inputH', 'inputW', 'inputC'].forEach(id => {
+        document.getElementById(id).addEventListener('change', render);
+    });
+
+    return { addLayer, removeLayer, reset, loadPreset, loadPreset2, render };
+})();
+
+/* =================================================================
+   Section 3 — Forward Pass Animation
+   ================================================================= */
+const FwdAnim = (() => {
+    const canvas = document.getElementById('fwdCanvas');
+    const ctx = canvas.getContext('2d');
+    let playing = false, timer = null, step = 0;
+    let speed = 1500;
+
+    // Build a small CNN: 8x8x1 -> Conv3x3(4) -> ReLU -> Pool -> Conv3x3(8) -> ReLU -> Flatten -> FC(4) -> Softmax
+    const rng = CNNUtils.seededRandom(123);
+    const inputImg = Array.from({ length: 8 }, () =>
+        Array.from({ length: 8 }, () => +(rng() * 1).toFixed(2))
+    );
+
+    const kernels1 = Array.from({ length: 4 }, (_, k) =>
+        CNNUtils.randomMatrix(3, 3, 0.5, 100 + k)
+    );
+    const kernels2 = Array.from({ length: 8 }, (_, k) =>
+        Array.from({ length: 4 }, (_, c) =>
+            CNNUtils.randomMatrix(3, 3, 0.3, 200 + k * 4 + c)
+        )
+    );
+
+    // Pre-compute all intermediate results
+    let conv1Out = [], relu1Out = [], pool1Out = [];
+    let conv2Out = [], relu2Out = [];
+    let flatOut = [], fcOut = [], probOut = [];
+
+    function computeAll() {
+        conv1Out = kernels1.map(k => CNNUtils.conv2d(inputImg, k, 1, 0));
+        relu1Out = conv1Out.map(fm => CNNUtils.applyRelu2d(fm));
+        pool1Out = relu1Out.map(fm => CNNUtils.maxPool2d(fm, 2, 2));
+
+        conv2Out = kernels2.map(kGroup => {
+            const results = kGroup.map((k, c) => CNNUtils.conv2d(pool1Out[c], k, 1, 0));
+            const h = results[0].length, w = results[0][0].length;
+            const sum = CNNUtils.zerosMatrix(h, w);
+            for (let r = 0; r < h; r++) {
+                for (let col = 0; col < w; col++) {
+                    for (let ch = 0; ch < results.length; ch++) {
+                        sum[r][col] += results[ch][r][col];
+                    }
+                }
+            }
+            return sum;
+        });
+        relu2Out = conv2Out.map(fm => CNNUtils.applyRelu2d(fm));
+
+        flatOut = [];
+        relu2Out.forEach(fm => fm.forEach(row => row.forEach(v => flatOut.push(v))));
+
+        const rng2 = CNNUtils.seededRandom(999);
+        const fcWeights = Array.from({ length: 4 }, () =>
+            Array.from({ length: flatOut.length }, () => (rng2() - 0.5) * 0.5)
+        );
+        fcOut = fcWeights.map(w => CNNUtils.dot(w, flatOut));
+        probOut = CNNUtils.softmax(fcOut);
+    }
+    computeAll();
+
+    const steps = [
+        {
+            title: '输入图像 (8x8)',
+            desc: '8x8 灰度图像输入网络。每个像素值在 [0, 1] 之间，共 64 个数值。',
+            formula: 'X \\in \\mathbb{R}^{8 \\times 8 \\times 1}'
+        },
+        {
+            title: 'Conv1: 3x3 卷积 (4个滤波器)',
+            desc: '4 个 3x3 卷积核分别在输入上滑动，无 padding，得到 4 张 6x6 特征图。参数: 4 x (3x3+1) = 40',
+            formula: 'Y = X * W + b, \\quad Y \\in \\mathbb{R}^{6 \\times 6 \\times 4}'
+        },
+        {
+            title: 'ReLU 激活',
+            desc: '对 Conv1 的输出逐元素应用 ReLU，将所有负值置零。维度不变 6x6x4。',
+            formula: 'A = \\max(0, Y)'
+        },
+        {
+            title: 'MaxPool 2x2 (stride=2)',
+            desc: '2x2 窗口内取最大值，步长 2。空间 6x6 缩减为 3x3，通道不变。',
+            formula: 'P_{i,j} = \\max(A_{2i:2i+2, 2j:2j+2}), \\quad P \\in \\mathbb{R}^{3 \\times 3 \\times 4}'
+        },
+        {
+            title: 'Conv2: 3x3 卷积 (8个滤波器)',
+            desc: '8 组卷积核，每组 4 个 3x3 核对应 4 个输入通道。3x3 输入无 padding 得到 1x1。输出 1x1x8。',
+            formula: 'Z_k = \\sum_{c=1}^{4} P_c * W_{k,c} + b_k'
+        },
+        {
+            title: 'ReLU 激活',
+            desc: '对 Conv2 输出应用 ReLU。每个 1x1 特征图就是一个标量值。',
+            formula: 'A_2 = \\max(0, Z)'
+        },
+        {
+            title: 'Flatten 展平',
+            desc: '将 1x1x8 的特征图展平为长度 8 的一维向量，作为全连接层的输入。',
+            formula: '\\text{flatten}(A_2) \\in \\mathbb{R}^{8}'
+        },
+        {
+            title: 'FC 全连接层 (8 -> 4)',
+            desc: '8 维输入向量乘以 8x4 权重矩阵加偏置，输出 4 个类别的 logit 得分。',
+            formula: 'o = W_{fc} \\cdot f + b_{fc}, \\quad o \\in \\mathbb{R}^{4}'
+        },
+        {
+            title: 'Softmax 输出',
+            desc: '将 4 个 logit 通过 Softmax 转为概率分布，概率最高的类别即为预测结果。',
+            formula: 'p_i = \\frac{e^{o_i}}{\\sum_j e^{o_j}}'
+        },
+    ];
+
+    function drawGrid(data, x, y, cellSize, label, isActive) {
+        const rows = data.length, cols = data[0].length;
+        let min = Infinity, max = -Infinity;
+        data.forEach(r => r.forEach(v => {
+            if (v < min) min = v;
+            if (v > max) max = v;
+        }));
+        if (min === max) { min -= 0.5; max += 0.5; }
+
+        for (let r = 0; r < rows; r++) {
+            for (let c = 0; c < cols; c++) {
+                const color = CNNUtils.valueToColor(data[r][c], min, max);
+                ctx.fillStyle = color;
+                ctx.globalAlpha = isActive ? 1.0 : 0.35;
+                ctx.fillRect(x + c * cellSize, y + r * cellSize, cellSize - 1, cellSize - 1);
+            }
+        }
+        ctx.globalAlpha = 1.0;
+        if (label) {
+            ctx.fillStyle = '#a8a8b8';
+            ctx.font = '10px monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText(label, x + (cols * cellSize) / 2, y + rows * cellSize + 13);
+        }
+    }
+
+    function drawBar(values, x, y, barW, barH, label, isActive) {
+        const max = Math.max(...values.map(Math.abs), 0.01);
+        values.forEach((v, i) => {
+            const h = (Math.abs(v) / max) * barH;
+            const color = v >= 0 ? '#16c79a' : '#ff5252';
+            ctx.fillStyle = color;
+            ctx.globalAlpha = isActive ? 1.0 : 0.3;
+            ctx.fillRect(x + i * (barW + 3), y + barH - h, barW, h);
+        });
+        ctx.globalAlpha = 1.0;
+        if (label) {
+            ctx.fillStyle = '#a8a8b8';
+            ctx.font = '10px monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText(label, x + (values.length * (barW + 3)) / 2, y + barH + 13);
+        }
+    }
+
+    function drawArrow(x, y, active) {
+        ctx.fillStyle = active ? '#e8e8e8' : '#3a3a5a';
+        ctx.font = '16px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('\u2192', x, y);
+    }
+
+    function draw() {
+        const W = canvas.width, H = canvas.height;
+        ctx.clearRect(0, 0, W, H);
+        ctx.fillStyle = '#16213e';
+        ctx.fillRect(0, 0, W, H);
+
+        const s = step;
+        let xOff = 20;
+        const yBase = 50;
+
+        // Stage label
+        ctx.fillStyle = '#6c6c7c';
+        ctx.font = '11px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText('8x8x1 \u2192 Conv(4) \u2192 ReLU \u2192 Pool \u2192 Conv(8) \u2192 ReLU \u2192 Flatten \u2192 FC(4) \u2192 Softmax', 20, 22);
+
+        // 1) Input 8x8
+        const cs1 = 12;
+        drawGrid(inputImg, xOff, yBase, cs1, '输入 8x8', s === 0);
+        xOff += 8 * cs1 + 10;
+        drawArrow(xOff + 8, yBase + 48, s >= 1);
+        xOff += 24;
+
+        // 2) Conv1 / ReLU1 output: 4 x 6x6
+        const cs2 = 13;
+        const gap2 = 6 * cs2 + 16;
+        for (let f = 0; f < 4; f++) {
+            const yy = yBase + f * (6 * cs2 + 18) * 0.32;
+            const data = s < 1 ? CNNUtils.zerosMatrix(6, 6)
+                : (s >= 2 ? relu1Out[f] : conv1Out[f]);
+            drawGrid(data, xOff, yBase + f * 82, cs2,
+                f === 0 ? (s >= 2 ? 'ReLU 6x6x4' : 'Conv1 6x6x4') : '', s >= 1 && s <= 2);
+        }
+        xOff += 6 * cs2 + 12;
+        drawArrow(xOff + 8, yBase + 48, s >= 3);
+        xOff += 24;
+
+        // 3) Pool1: 4 x 3x3
+        const cs3 = 18;
+        for (let f = 0; f < 4; f++) {
+            const data = s >= 3 ? pool1Out[f] : CNNUtils.zerosMatrix(3, 3);
+            drawGrid(data, xOff, yBase + f * 76, cs3,
+                f === 0 ? 'Pool 3x3x4' : '', s === 3);
+        }
+        xOff += 3 * cs3 + 12;
+        drawArrow(xOff + 8, yBase + 48, s >= 4);
+        xOff += 24;
+
+        // 4) Conv2 / ReLU2: 8 x 1x1
+        const cs4 = 28;
+        for (let f = 0; f < 8; f++) {
+            const data = s < 4 ? [[0]]
+                : (s >= 5 ? relu2Out[f] : conv2Out[f]);
+            drawGrid(data, xOff, yBase + f * 36, cs4,
+                f === 0 ? (s >= 5 ? 'ReLU 1x1x8' : 'Conv2 1x1x8') : '',
+                s >= 4 && s <= 5);
+        }
+        xOff += 1 * cs4 + 16;
+        drawArrow(xOff + 8, yBase + 48, s >= 6);
+        xOff += 24;
+
+        // 5) Flatten: 8 bars
+        if (s >= 6) {
+            drawBar(flatOut, xOff, yBase, 10, 130, 'Flat [8]', s === 6);
+        }
+        xOff += flatOut.length * 13 + 12;
+        drawArrow(xOff + 8, yBase + 48, s >= 7);
+        xOff += 24;
+
+        // 6) FC output: 4 bars
+        if (s >= 7) {
+            drawBar(fcOut, xOff, yBase, 22, 130, 'FC logits [4]', s === 7);
+        }
+        xOff += 4 * 25 + 12;
+        drawArrow(xOff + 8, yBase + 48, s >= 8);
+        xOff += 24;
+
+        // 7) Softmax: 4 probability bars
+        if (s >= 8) {
+            const barW = 30, barH = 130;
+            const maxProb = Math.max(...probOut);
+            probOut.forEach((v, i) => {
+                const h = v * barH;
+                ctx.fillStyle = i === probOut.indexOf(maxProb) ? '#16c79a' : '#ff5252';
+                ctx.globalAlpha = 1.0;
+                ctx.fillRect(xOff + i * (barW + 5), yBase + barH - h, barW, h);
+                ctx.fillStyle = '#e8e8e8';
+                ctx.font = '9px monospace';
+                ctx.textAlign = 'center';
+                ctx.fillText(
+                    (v * 100).toFixed(1) + '%',
+                    xOff + i * (barW + 5) + barW / 2,
+                    yBase + barH - h - 5
+                );
+            });
+            ctx.fillStyle = '#a8a8b8';
+            ctx.font = '10px monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText('Softmax [4]', xOff + (4 * (barW + 5)) / 2, yBase + barH + 13);
+        }
+
+        // Step info
+        if (s >= 0 && s < steps.length) {
+            const info = steps[s];
+            document.getElementById('fwdInfo').innerHTML = `
+                <div class="step-title">Step ${s + 1}/${steps.length}: ${info.title}</div>
+                <div>${info.desc}</div>
+                <div class="step-formula">$${info.formula}$$</div>
+            `;
+            renderMathInElement(document.getElementById('fwdInfo'), {
+                delimiters: [
+                    { left: '$$', right: '$$', display: true },
+                    { left: '$', right: '$', display: false },
+                ],
+                throwOnError: false,
+            });
+        }
+        document.getElementById('fwdStepLabel').textContent = `${s + 1} / ${steps.length}`;
+        document.getElementById('fwdFill').style.width = ((s / (steps.length - 1)) * 100) + '%';
+    }
+
+    function next() {
+        if (step < steps.length - 1) { step++; draw(); }
+        else if (playing) togglePlay();
+    }
+
+    function prev() {
+        if (step > 0) { step--; draw(); }
+    }
+
+    function togglePlay() {
+        playing = !playing;
+        document.getElementById('fwdPlay').innerHTML = playing
+            ? '&#9646;&#9646; \u6682\u505c'
+            : '&#9654; \u64AD\u653E';
+        if (playing) {
+            timer = setInterval(() => {
+                if (step < steps.length - 1) { step++; draw(); }
+                else togglePlay();
+            }, speed);
+        } else {
+            clearInterval(timer);
+        }
+    }
+
+    function resetAnim() {
+        step = 0;
+        if (playing) togglePlay();
+        draw();
+    }
+
+    function clickProgress(e) {
+        const rect = e.currentTarget.getBoundingClientRect();
+        const pct = (e.clientX - rect.left) / rect.width;
+        step = Math.round(pct * (steps.length - 1));
+        step = Math.max(0, Math.min(steps.length - 1, step));
+        draw();
+    }
+
+    function setSpeed(ms) {
+        speed = parseInt(ms);
+        if (playing) {
+            clearInterval(timer);
+            timer = setInterval(() => {
+                if (step < steps.length - 1) { step++; draw(); }
+                else togglePlay();
+            }, speed);
+        }
+    }
+
+    return { next, prev, togglePlay, reset: resetAnim, clickProgress, setSpeed, draw };
+})();
+
+/* =================================================================
+   Section 4 — 1x1 Convolution
+   ================================================================= */
+const Conv1x1 = (() => {
+    function formatNum(n) {
+        if (n >= 1e9) return (n / 1e9).toFixed(2) + 'G';
+        if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M';
+        if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+        return n.toString();
+    }
+
+    function update() {
+        const inC = parseInt(document.getElementById('in1x1C').value) || 256;
+        const outC = parseInt(document.getElementById('out1x1C').value) || 64;
+        const spatial = parseInt(document.getElementById('spatial1x1').value) || 14;
+
+        // Render channel stacks
+        renderStack('inChannelStack', inC, '#4fc3f7');
+        renderStack('outChannelStack', outC, '#16c79a');
+        document.getElementById('inLabel').textContent = inC + ' \u901a\u9053';
+        document.getElementById('outLabel').textContent = outC + ' \u901a\u9053';
+
+        // Parameter counts for different kernel sizes
+        const params1x1 = inC * outC + outC;
+        const params3x3 = inC * 9 * outC + outC;
+        const params5x5 = inC * 25 * outC + outC;
+        const params7x7 = inC * 49 * outC + outC;
+        document.getElementById('conv1x1ParamLabel').textContent = formatNum(params1x1) + ' params';
+
+        // FLOPs (multiply-add counted as 2 ops)
+        const flops1x1 = (2 * inC * 1 * 1) * outC * spatial * spatial;
+        const flops3x3 = (2 * inC * 3 * 3) * outC * spatial * spatial;
+        const flops5x5 = (2 * inC * 5 * 5) * outC * spatial * spatial;
+        const flops7x7 = (2 * inC * 7 * 7) * outC * spatial * spatial;
+
+        // Savings viz bars
+        const maxParams = params7x7;
+        const savingsDiv = document.getElementById('savingsViz');
+        savingsDiv.innerHTML = '';
+        [
+            { label: '1x1', params: params1x1, flops: flops1x1, color: '#16c79a' },
+            { label: '3x3', params: params3x3, flops: flops3x3, color: '#4fc3f7' },
+            { label: '5x5', params: params5x5, flops: flops5x5, color: '#ffab40' },
+            { label: '7x7', params: params7x7, flops: flops7x7, color: '#ff5252' },
+        ].forEach(item => {
+            const pct = (item.params / maxParams) * 100;
+            const savePct = item.label === '1x1' ? '-' : ((1 - params1x1 / item.params) * 100).toFixed(0) + '%';
+            const row = document.createElement('div');
+            row.className = 'savings-bar';
+            row.style.marginBottom = '0.5rem';
+            row.innerHTML = `
+                <span style="min-width:30px;color:${item.color};font-weight:600;font-family:var(--font-mono);">${item.label}</span>
+                <div class="bar-track">
+                    <div class="bar-fill" style="width:${pct}%;background:${item.color};color:#fff;">${formatNum(item.params)}</div>
+                </div>
+                <span style="min-width:90px;font-family:var(--font-mono);font-size:0.78rem;color:var(--text-muted);">${formatNum(item.flops)} FLOPs</span>
+                <span style="min-width:50px;font-family:var(--font-mono);font-size:0.78rem;color:var(--accent-green);">${savePct !== '-' ? '\u2193' + savePct : ''}</span>
+            `;
+            savingsDiv.appendChild(row);
+        });
+
+        // Bottleneck comparison table
+        const directParams = inC * 9 * inC + inC;
+        const directFlops = (2 * inC * 9 * inC) * spatial * spatial;
+
+        const bnMid = outC;
+        const bn1Params = inC * bnMid + bnMid;
+        const bn2Params = bnMid * 9 * bnMid + bnMid;
+        const bn3Params = bnMid * inC + inC;
+        const bnTotalParams = bn1Params + bn2Params + bn3Params;
+        const bnTotalFlops = ((2 * inC * bnMid) + (2 * bnMid * 9 * bnMid) + (2 * bnMid * inC)) * spatial * spatial;
+        const saving = ((1 - bnTotalParams / directParams) * 100).toFixed(1);
+
+        document.getElementById('bottleneckBody').innerHTML = `
+            <tr>
+                <td style="color:var(--accent-orange);">直接 3x3</td>
+                <td>${inC} \u2192 3x3 \u2192 ${inC}</td>
+                <td>${formatNum(directParams)}</td>
+                <td>${formatNum(directFlops)}</td>
+                <td style="color:var(--text-muted);">基准</td>
+            </tr>
+            <tr>
+                <td style="color:var(--accent-green);">Bottleneck</td>
+                <td>${inC} \u2192 1x1 \u2192 ${bnMid} \u2192 3x3 \u2192 ${bnMid} \u2192 1x1 \u2192 ${inC}</td>
+                <td class="highlight-cell">${formatNum(bnTotalParams)}</td>
+                <td class="highlight-cell">${formatNum(bnTotalFlops)}</td>
+                <td class="highlight-cell">\u2193 ${saving}%</td>
+            </tr>
+            <tr>
+                <td style="color:var(--text-muted);" colspan="2">
+                    <span style="font-family:var(--font-cn);font-size:0.8rem;">Bottleneck 拆分: 1x1(${formatNum(bn1Params)}) + 3x3(${formatNum(bn2Params)}) + 1x1(${formatNum(bn3Params)})</span>
+                </td>
+                <td colspan="3"></td>
+            </tr>
+        `;
+    }
+
+    function renderStack(containerId, channels, color) {
+        const container = document.getElementById(containerId);
+        container.innerHTML = '';
+        const maxShow = 24;
+        const show = Math.min(channels, maxShow);
+        const sliceW = 4;
+        const sliceH = 44;
+        for (let i = 0; i < show; i++) {
+            const alpha = 0.25 + 0.75 * (i / show);
+            const slice = document.createElement('div');
+            slice.className = 'channel-slice';
+            slice.style.cssText = `width:${sliceW}px;height:${sliceH}px;background:${color};opacity:${alpha};`;
+            container.appendChild(slice);
+        }
+        if (channels > maxShow) {
+            const dots = document.createElement('span');
+            dots.textContent = '\u2026';
+            dots.style.cssText = 'font-size:0.75rem;color:var(--text-muted);margin-left:3px;';
+            container.appendChild(dots);
+        }
+    }
+
+    return { update };
+})();
+
+/* =================================================================
+   Initialization
+   ================================================================= */
+document.addEventListener('DOMContentLoaded', () => {
+    ArchDiagram.init();
+    DimTracker.render();
+    FwdAnim.draw();
+    Conv1x1.update();
+
+    // Render KaTeX formulas
+    renderMathInElement(document.body, {
+        delimiters: [
+            { left: '$$', right: '$$', display: true },
+            { left: '$', right: '$', display: false },
+        ],
+        throwOnError: false,
+    });
+});
+</script>
+</body>
+</html>

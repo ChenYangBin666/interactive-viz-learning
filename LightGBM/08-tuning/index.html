@@ -1,0 +1,1402 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>调参指南 — LightGBM</title>
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" defer>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" defer></script>
+    <script src="../shared/scripts/nav.js" defer></script>
+    <script src="../shared/scripts/lgbm-utils.js" defer></script>
+    <style>
+        /* ===== Section Tabs ===== */
+        .main-tabs {
+            display: flex;
+            gap: 0;
+            border-bottom: 2px solid var(--border-color);
+            margin-bottom: 2rem;
+            flex-wrap: wrap;
+        }
+        .main-tab {
+            padding: .7rem 1.3rem;
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            font-family: inherit;
+            font-size: .92rem;
+            cursor: pointer;
+            position: relative;
+            transition: color .2s;
+        }
+        .main-tab:hover { color: var(--text-secondary); }
+        .main-tab.active { color: var(--accent-green); }
+        .main-tab.active::after {
+            content: '';
+            position: absolute;
+            bottom: -2px;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: var(--accent-green);
+        }
+        .main-panel { display: none; }
+        .main-panel.active { display: block; }
+
+        /* ===== Parameter Map ===== */
+        .param-map {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 1rem;
+        }
+        .param-group {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1.1rem;
+            transition: border-color .3s;
+        }
+        .param-group:hover {
+            border-color: rgba(22, 199, 154, .3);
+        }
+        .param-group h4 {
+            color: var(--accent-blue);
+            margin-bottom: .6rem;
+            font-size: .95rem;
+            display: flex;
+            align-items: center;
+            gap: .4rem;
+        }
+        .param-group h4 .dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+        .param-item {
+            padding: .45rem .6rem;
+            margin: .3rem 0;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            font-size: .85rem;
+            color: var(--text-secondary);
+            transition: all .2s;
+            border: 1px solid transparent;
+            font-family: var(--font-mono);
+        }
+        .param-item:hover,
+        .param-item.active {
+            background: rgba(22, 199, 154, .12);
+            border-color: var(--accent-green);
+            color: var(--accent-green);
+        }
+        .param-detail {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1.2rem;
+            margin-top: 1.2rem;
+            min-height: 180px;
+            transition: border-color .3s;
+        }
+        .param-detail:hover {
+            border-color: rgba(22, 199, 154, .2);
+        }
+        .param-detail h3 {
+            color: var(--accent-green);
+            font-family: var(--font-mono);
+            margin-bottom: .5rem;
+        }
+        .param-detail .meta {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: .4rem .8rem;
+            font-size: .85rem;
+            margin: .6rem 0;
+        }
+        .param-detail .meta span { color: var(--text-muted); }
+        .param-detail .meta strong { color: var(--accent-orange); font-family: var(--font-mono); }
+        .param-detail .desc {
+            color: var(--text-secondary);
+            font-size: .9rem;
+            line-height: 1.7;
+        }
+        .param-detail .effect-indicator {
+            display: flex;
+            gap: 1.5rem;
+            margin-top: .8rem;
+            padding-top: .6rem;
+            border-top: 1px solid var(--border-color);
+        }
+        .effect-indicator .ef-item {
+            font-size: .82rem;
+            color: var(--text-muted);
+        }
+        .effect-indicator .ef-item strong {
+            display: block;
+            color: var(--text-secondary);
+        }
+        .param-interactions { margin-top: .8rem; }
+        .param-interactions h4 {
+            font-size: .85rem;
+            color: var(--text-muted);
+            margin-bottom: .3rem;
+        }
+        .interaction-tag {
+            display: inline-block;
+            padding: .15rem .5rem;
+            margin: .2rem;
+            background: rgba(79, 195, 247, .1);
+            color: var(--accent-blue);
+            border-radius: 9999px;
+            font-size: .78rem;
+            font-family: var(--font-mono);
+            cursor: pointer;
+            transition: background .2s;
+        }
+        .interaction-tag:hover {
+            background: rgba(79, 195, 247, .2);
+        }
+
+        /* ===== Connection Canvas ===== */
+        .param-overview-layout {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 1rem;
+        }
+        #connectionCanvas {
+            width: 100%;
+            display: block;
+            border-radius: var(--radius-md);
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+        }
+
+        /* ===== Single Param Effects ===== */
+        .effect-controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1rem;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+        .effect-controls select {
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            padding: .4rem .8rem;
+            font-family: inherit;
+            font-size: .85rem;
+            cursor: pointer;
+        }
+        .effect-canvases {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+        }
+        .canvas-wrap {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: .5rem;
+            position: relative;
+        }
+        .canvas-wrap canvas { width: 100%; display: block; }
+        .canvas-wrap .label {
+            position: absolute;
+            top: .5rem;
+            left: .8rem;
+            font-size: .78rem;
+            color: var(--text-muted);
+        }
+        .zone-legend {
+            display: flex;
+            gap: 1rem;
+            font-size: .8rem;
+            color: var(--text-secondary);
+            margin-top: .5rem;
+            flex-wrap: wrap;
+        }
+        .zone-legend span { display: flex; align-items: center; gap: .3rem; }
+        .zone-legend .swatch { width: 14px; height: 8px; border-radius: 2px; }
+        .param-info-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1rem;
+            margin-top: 1rem;
+            font-size: .88rem;
+            color: var(--text-secondary);
+            line-height: 1.6;
+        }
+        .param-info-card h4 {
+            color: var(--accent-green);
+            margin-bottom: .4rem;
+        }
+
+        /* ===== Heatmap ===== */
+        .heatmap-container { position: relative; }
+        .heatmap-container canvas {
+            width: 100%;
+            display: block;
+            border-radius: var(--radius-md);
+        }
+        .heatmap-legend {
+            display: flex;
+            align-items: center;
+            gap: .5rem;
+            margin-top: .6rem;
+            font-size: .8rem;
+            color: var(--text-secondary);
+        }
+        .heatmap-legend .bar {
+            flex: 1;
+            height: 12px;
+            border-radius: 4px;
+        }
+        .heatmap-annotations {
+            margin-top: .8rem;
+            display: flex;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+        .heatmap-annotations .ann {
+            padding: .3rem .7rem;
+            border-radius: var(--radius-sm);
+            font-size: .8rem;
+        }
+        .heatmap-insight {
+            margin-top: 1rem;
+            padding: 1rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+        }
+        .heatmap-insight h4 {
+            color: var(--accent-blue);
+            margin-bottom: .5rem;
+        }
+        .heatmap-insight ul {
+            list-style: none;
+            padding: 0;
+        }
+        .heatmap-insight li {
+            padding: .3rem 0;
+            font-size: .88rem;
+            color: var(--text-secondary);
+            display: flex;
+            gap: .4rem;
+            align-items: baseline;
+        }
+        .heatmap-insight li::before {
+            content: '>';
+            color: var(--accent-green);
+            font-family: var(--font-mono);
+        }
+
+        /* ===== Regularization ===== */
+        .reg-panels {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 1rem;
+        }
+        .reg-panel {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: .8rem;
+        }
+        .reg-panel h4 { text-align: center; font-size: .9rem; margin-bottom: .4rem; }
+        .reg-panel canvas { width: 100%; display: block; }
+        .feat-importance { margin-top: .5rem; }
+        .feat-bar-wrap {
+            display: flex;
+            align-items: center;
+            gap: .4rem;
+            margin: .2rem 0;
+            font-size: .78rem;
+        }
+        .feat-bar-wrap .fname {
+            width: 20px;
+            color: var(--text-muted);
+            text-align: right;
+        }
+        .feat-bar {
+            height: 10px;
+            border-radius: 3px;
+            transition: width .4s var(--anim-ease);
+        }
+        .reg-explanation {
+            margin-top: 1rem;
+            padding: 1rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            font-size: .88rem;
+            color: var(--text-secondary);
+            line-height: 1.7;
+        }
+        .reg-explanation h4 {
+            color: var(--accent-purple);
+            margin-bottom: .5rem;
+        }
+
+        /* ===== Workflow ===== */
+        .workflow-layout {
+            display: grid;
+            grid-template-columns: 1fr 1.2fr;
+            gap: 1.5rem;
+            align-items: start;
+        }
+        .workflow-steps { display: flex; flex-direction: column; gap: 0; }
+        .wf-step {
+            display: flex;
+            gap: 1rem;
+            cursor: pointer;
+            padding: .8rem 1rem;
+            border-left: 3px solid var(--border-color);
+            transition: all .25s;
+        }
+        .wf-step:hover { background: rgba(22, 199, 154, .04); }
+        .wf-step.active {
+            border-left-color: var(--accent-green);
+            background: rgba(22, 199, 154, .08);
+        }
+        .wf-num {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: var(--border-color);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: .85rem;
+            flex-shrink: 0;
+            transition: all .25s;
+        }
+        .wf-step.active .wf-num {
+            background: var(--accent-green);
+            color: var(--bg-primary);
+        }
+        .wf-body h4 { font-size: .95rem; margin-bottom: .2rem; }
+        .wf-body p { font-size: .85rem; color: var(--text-secondary); margin: 0; }
+        .wf-detail {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1.2rem;
+        }
+        .wf-detail h3 { color: var(--accent-green); margin-bottom: .6rem; }
+        .wf-detail .range-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: .85rem;
+            margin-top: .5rem;
+        }
+        .wf-detail .range-table th {
+            text-align: left;
+            color: var(--text-muted);
+            padding: .3rem .5rem;
+            border-bottom: 1px solid var(--border-color);
+        }
+        .wf-detail .range-table td {
+            padding: .3rem .5rem;
+            border-bottom: 1px solid rgba(42, 42, 74, .3);
+        }
+        .wf-detail .range-table td:nth-child(2) {
+            font-family: var(--font-mono);
+            color: var(--accent-orange);
+        }
+        .wf-detail .tip {
+            margin-top: .6rem;
+            padding: .5rem .8rem;
+            background: rgba(79, 195, 247, .06);
+            border-left: 3px solid var(--accent-blue);
+            border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+            font-size: .85rem;
+            color: var(--text-secondary);
+        }
+        .wf-detail .code-snippet {
+            margin-top: .8rem;
+            padding: .6rem .8rem;
+            background: rgba(0, 0, 0, .2);
+            border-radius: var(--radius-sm);
+            font-family: var(--font-mono);
+            font-size: .82rem;
+            color: var(--accent-green);
+            overflow-x: auto;
+            white-space: pre;
+            line-height: 1.6;
+        }
+
+        @media (max-width: 900px) {
+            .effect-canvases,
+            .reg-panels { grid-template-columns: 1fr; }
+            .param-map { grid-template-columns: 1fr; }
+            .workflow-layout { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+<div class="page-container">
+    <h1>调参指南</h1>
+    <p>系统掌握 LightGBM 超参数调优的策略与方法，理解每个参数的作用、相互关系以及推荐的调参流程。</p>
+
+    <div class="main-tabs">
+        <button class="main-tab active" data-tab="overview">参数全景图</button>
+        <button class="main-tab" data-tab="single">单参数效果</button>
+        <button class="main-tab" data-tab="lr-nest">LR 与 n_estimators</button>
+        <button class="main-tab" data-tab="reg">正则化效果</button>
+        <button class="main-tab" data-tab="workflow">调参流程</button>
+    </div>
+
+    <!-- ============ 1. 参数全景图 ============ -->
+    <div class="main-panel active" id="panel-overview">
+        <div class="section">
+            <div class="section-title"><div class="icon">&#x1f5fa;</div><h2>参数全景图</h2></div>
+            <p>点击任意参数查看详情、取值范围和关联参数。下方的连接图展示参数之间的交互关系。</p>
+            <div class="param-overview-layout">
+                <div class="param-map" id="paramMap"></div>
+                <canvas id="connectionCanvas" width="900" height="200"></canvas>
+                <div class="param-detail" id="paramDetail">
+                    <p style="color:var(--text-muted);text-align:center;margin-top:2.5rem;">点击上方任意参数查看详细说明、推荐范围与调参建议</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============ 2. 单参数效果 ============ -->
+    <div class="main-panel" id="panel-single">
+        <div class="section">
+            <div class="section-title"><div class="icon">&#x1f4c8;</div><h2>单参数效果</h2></div>
+            <p>选择一个参数并拖动滑块，实时观察训练/验证损失曲线与决策边界的变化。蓝色区域表示欠拟合，红色区域表示过拟合。</p>
+            <div class="effect-controls">
+                <select id="paramSelect"></select>
+                <div class="slider-group" style="flex:1;max-width:400px;">
+                    <label id="sliderLabel">num_leaves</label>
+                    <input type="range" id="paramSlider" min="0" max="100" value="50">
+                    <span class="slider-value" id="sliderVal">31</span>
+                </div>
+            </div>
+            <div class="effect-canvases">
+                <div class="canvas-wrap">
+                    <div class="label">损失曲线（训练 vs 验证）</div>
+                    <canvas id="lossCanvas" width="560" height="380"></canvas>
+                </div>
+                <div class="canvas-wrap">
+                    <div class="label">决策边界（2D 分类）</div>
+                    <canvas id="boundaryCanvas" width="560" height="380"></canvas>
+                </div>
+            </div>
+            <div class="zone-legend">
+                <span><span class="swatch" style="background:var(--accent-blue);"></span>训练损失</span>
+                <span><span class="swatch" style="background:var(--accent-orange);"></span>验证损失</span>
+                <span><span class="swatch" style="background:rgba(255,82,82,.25);"></span>过拟合区域</span>
+                <span><span class="swatch" style="background:rgba(79,195,247,.25);"></span>欠拟合区域</span>
+                <span><span class="swatch" style="background:var(--accent-green);"></span>最优点</span>
+            </div>
+            <div class="param-info-card" id="paramInfoCard">
+                <h4>参数说明</h4>
+                <p>选择参数后这里会显示该参数的调优建议。</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============ 3. LR & n_estimators ============ -->
+    <div class="main-panel" id="panel-lr-nest">
+        <div class="section">
+            <div class="section-title"><div class="icon">&#x1f525;</div><h2>learning_rate 与 n_estimators 的权衡</h2></div>
+            <p>热力图展示不同 learning_rate 和 n_estimators 组合下的验证得分。绿色方框标记最优区域，橙色虚线为早停线。</p>
+            <div class="heatmap-container">
+                <canvas id="heatmapCanvas" width="720" height="500"></canvas>
+            </div>
+            <div class="heatmap-legend">
+                <span>低分</span>
+                <div class="bar" style="background:linear-gradient(to right,#1a237e,#4fc3f7,#16c79a,#ffd740,#ff5252);"></div>
+                <span>高分</span>
+            </div>
+            <div class="heatmap-annotations">
+                <div class="ann" style="background:rgba(22,199,154,.15);color:var(--accent-green);">最优区域：中低 LR + 适量树</div>
+                <div class="ann" style="background:rgba(255,82,82,.15);color:var(--accent-red);">过拟合区：高 LR + 过多树</div>
+                <div class="ann" style="background:rgba(79,195,247,.15);color:var(--accent-blue);">欠拟合区：极低 LR + 少树</div>
+                <div class="ann" style="background:rgba(255,171,64,.15);color:var(--accent-orange);">早停线：最佳迭代数随 LR 变化</div>
+            </div>
+            <div class="heatmap-insight">
+                <h4>核心洞察</h4>
+                <ul>
+                    <li>learning_rate 减半时，n_estimators 大约需要翻倍才能达到同等效果</li>
+                    <li>较小的 learning_rate 配合充足的树通常泛化能力更强</li>
+                    <li>在计算预算有限时，中等 learning_rate（0.05~0.1）是性价比最高的选择</li>
+                    <li>始终配合 early_stopping 自动确定最优迭代次数，避免过拟合</li>
+                    <li>公式关系（近似）：$\text{score} \approx f(\text{lr} \times \text{n\_estimators})$，但并非简单线性</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============ 4. 正则化效果 ============ -->
+    <div class="main-panel" id="panel-reg">
+        <div class="section">
+            <div class="section-title"><div class="icon">&#x1f6e1;</div><h2>正则化效果</h2></div>
+            <p>对比无正则化、L1 正则化（reg_alpha）和 L2 正则化（reg_lambda）对决策边界复杂度和特征重要性的影响。</p>
+            <div class="slider-group" style="max-width:400px;margin-bottom:1rem;">
+                <label>正则化强度</label>
+                <input type="range" id="regSlider" min="0" max="100" value="50">
+                <span class="slider-value" id="regVal">5.0</span>
+            </div>
+            <div class="reg-panels">
+                <div class="reg-panel">
+                    <h4>无正则化</h4>
+                    <canvas id="regCanvas0" width="340" height="280"></canvas>
+                    <div class="feat-importance" id="feat0"></div>
+                </div>
+                <div class="reg-panel">
+                    <h4 style="color:var(--accent-purple);">L1 正则化 (reg_alpha)</h4>
+                    <canvas id="regCanvas1" width="340" height="280"></canvas>
+                    <div class="feat-importance" id="feat1"></div>
+                </div>
+                <div class="reg-panel">
+                    <h4 style="color:var(--accent-blue);">L2 正则化 (reg_lambda)</h4>
+                    <canvas id="regCanvas2" width="340" height="280"></canvas>
+                    <div class="feat-importance" id="feat2"></div>
+                </div>
+            </div>
+            <div class="reg-explanation">
+                <h4>正则化对比说明</h4>
+                <p><strong>无正则化：</strong>模型自由拟合数据，决策边界可能非常复杂，容易捕获噪声导致过拟合。</p>
+                <p><strong>L1 正则化（reg_alpha）：</strong>在损失函数中添加 $\lambda_1 \sum |w_j|$ 惩罚项。
+                    倾向于将部分特征的贡献压缩为零，起到特征选择的作用。边界更简洁，适合存在无关特征的场景。</p>
+                <p><strong>L2 正则化（reg_lambda）：</strong>在损失函数中添加 $\lambda_2 \sum w_j^2$ 惩罚项。
+                    让所有特征的权重都趋于更小但不为零，使模型更平滑。通常是首选的正则化方式。</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============ 5. 调参流程 ============ -->
+    <div class="main-panel" id="panel-workflow">
+        <div class="section">
+            <div class="section-title"><div class="icon">&#x1f527;</div><h2>推荐调参流程</h2></div>
+            <p>按照以下五步顺序逐步调参，每一步都基于前一步确定的最优参数。点击每个步骤查看详细说明和示例代码。</p>
+            <div class="workflow-layout">
+                <div class="workflow-steps" id="workflowSteps"></div>
+                <div class="wf-detail" id="wfDetail">
+                    <p style="color:var(--text-muted);text-align:center;margin-top:2rem;">点击左侧步骤查看详情</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+
+    // ===============================
+    // Tab switching
+    // ===============================
+    const tabs = document.querySelectorAll('.main-tab');
+    const panels = document.querySelectorAll('.main-panel');
+    tabs.forEach(t => t.addEventListener('click', () => {
+        tabs.forEach(x => x.classList.remove('active'));
+        panels.forEach(x => x.classList.remove('active'));
+        t.classList.add('active');
+        document.getElementById('panel-' + t.dataset.tab).classList.add('active');
+        if (t.dataset.tab === 'overview') drawConnections();
+        if (t.dataset.tab === 'single') drawSingleParam();
+        if (t.dataset.tab === 'lr-nest') drawHeatmap();
+        if (t.dataset.tab === 'reg') drawRegularization();
+    }));
+
+    // ===============================
+    // 1. Parameter Overview
+    // ===============================
+    const paramGroups = [
+        { name: '树结构', color: 'var(--accent-green)', params: [
+            { key: 'num_leaves', def: '31', range: '2 ~ 131072',
+              desc: '一棵树的最大叶子数。LightGBM 使用 leaf-wise 生长策略，num_leaves 是控制模型复杂度的最重要参数。增大可以提升模型拟合能力，但过大容易过拟合。通常设为小于 2^(max_depth) 的值。',
+              effect: { complexity: '高', speed: '中', overfit: '高' },
+              interactions: ['max_depth', 'min_child_samples', 'learning_rate'] },
+            { key: 'max_depth', def: '-1（不限）', range: '-1 ~ +Inf',
+              desc: '树的最大深度。-1 表示不限制。配合 num_leaves 一起使用，建议设为 num_leaves 能达到的理论深度。例如 num_leaves=31 时可设 max_depth=6。深度过大加剧过拟合。',
+              effect: { complexity: '高', speed: '低', overfit: '中' },
+              interactions: ['num_leaves'] },
+            { key: 'min_child_samples', def: '20', range: '1 ~ +Inf',
+              desc: '叶子节点的最少样本数。增大可以防止模型在噪声数据上创建过于精细的分裂。对小数据集尤为重要。太大则导致欠拟合。',
+              effect: { complexity: '中', speed: '低', overfit: '中' },
+              interactions: ['num_leaves', 'min_child_weight'] },
+        ]},
+        { name: '正则化', color: 'var(--accent-purple)', params: [
+            { key: 'reg_alpha', def: '0', range: '0 ~ +Inf',
+              desc: 'L1 正则化系数。促使部分叶子节点的输出值变为零，起到特征选择和模型简化的作用。适合特征稀疏或存在大量无关特征的场景。',
+              effect: { complexity: '中', speed: '低', overfit: '中' },
+              interactions: ['reg_lambda', 'num_leaves'] },
+            { key: 'reg_lambda', def: '0', range: '0 ~ +Inf',
+              desc: 'L2 正则化系数。让叶子节点的输出值更平滑，防止单个叶子的预测值过大。一般比 L1 更常用，对防止过拟合效果稳定。',
+              effect: { complexity: '中', speed: '低', overfit: '中' },
+              interactions: ['reg_alpha', 'num_leaves'] },
+        ]},
+        { name: '速度优化', color: 'var(--accent-orange)', params: [
+            { key: 'subsample', def: '1.0', range: '(0, 1]',
+              desc: '每次迭代使用的样本比例（行采样）。设为小于 1 可以加速训练并引入随机性来减少过拟合，类似随机森林的 bagging 思想。推荐范围 0.6~0.9。',
+              effect: { complexity: '低', speed: '高', overfit: '中' },
+              interactions: ['colsample_bytree', 'n_estimators'] },
+            { key: 'colsample_bytree', def: '1.0', range: '(0, 1]',
+              desc: '每棵树使用的特征比例（列采样）。减小可以增加模型的随机性、降低特征间共线性的影响。高维特征数据时尤其有效。推荐范围 0.6~0.9。',
+              effect: { complexity: '低', speed: '高', overfit: '中' },
+              interactions: ['subsample', 'num_leaves'] },
+        ]},
+        { name: '精度优化', color: 'var(--accent-blue)', params: [
+            { key: 'learning_rate', def: '0.1', range: '(0, 1]',
+              desc: '每棵树的贡献缩放因子（收缩率/步长）。小的学习率让模型更保守地学习，需要更多树但泛化更好。典型值 0.01~0.3。最终调参时常用较小 LR 配合更多迭代和早停。',
+              effect: { complexity: '高', speed: '低', overfit: '低' },
+              interactions: ['n_estimators'] },
+            { key: 'n_estimators', def: '100', range: '1 ~ +Inf',
+              desc: '提升迭代次数，即树的总棵数。更多树一般能提升精度，但过多会过拟合（尤其在学习率较大时）。建议配合 early_stopping 自动确定最优值。',
+              effect: { complexity: '高', speed: '低', overfit: '高' },
+              interactions: ['learning_rate', 'subsample'] },
+        ]},
+    ];
+
+    const mapEl = document.getElementById('paramMap');
+    const detailEl = document.getElementById('paramDetail');
+    let allParamItems = [];
+    const allParams = [];
+
+    paramGroups.forEach(g => {
+        const div = document.createElement('div');
+        div.className = 'param-group';
+        div.innerHTML = '<h4><span class="dot" style="background:' + g.color + ';"></span>' + g.name + '</h4>';
+        g.params.forEach(p => {
+            allParams.push({ ...p, groupColor: g.color });
+            const item = document.createElement('div');
+            item.className = 'param-item';
+            item.textContent = p.key;
+            item.dataset.key = p.key;
+            item.addEventListener('click', () => {
+                allParamItems.forEach(x => x.classList.remove('active'));
+                item.classList.add('active');
+                showParamDetail(p, g.color);
+                drawConnections(p.key);
+            });
+            div.appendChild(item);
+            allParamItems.push(item);
+        });
+        mapEl.appendChild(div);
+    });
+
+    function showParamDetail(p, color) {
+        const efLabels = { '高': 'var(--accent-red)', '中': 'var(--accent-orange)', '低': 'var(--accent-green)' };
+        detailEl.innerHTML =
+            '<h3 style="color:' + color + '">' + p.key + '</h3>' +
+            '<div class="meta">' +
+                '<div><span>默认值：</span><strong>' + p.def + '</strong></div>' +
+                '<div><span>取值范围：</span><strong>' + p.range + '</strong></div>' +
+            '</div>' +
+            '<div class="desc">' + p.desc + '</div>' +
+            '<div class="effect-indicator">' +
+                '<div class="ef-item"><span>复杂度影响</span><strong style="color:' + (efLabels[p.effect.complexity]) + '">' + p.effect.complexity + '</strong></div>' +
+                '<div class="ef-item"><span>速度影响</span><strong style="color:' + (efLabels[p.effect.speed]) + '">' + p.effect.speed + '</strong></div>' +
+                '<div class="ef-item"><span>过拟合风险</span><strong style="color:' + (efLabels[p.effect.overfit]) + '">' + p.effect.overfit + '</strong></div>' +
+            '</div>' +
+            '<div class="param-interactions"><h4>关联参数</h4>' +
+                p.interactions.map(i => '<span class="interaction-tag">' + i + '</span>').join('') +
+            '</div>';
+    }
+
+    // Draw connection graph between parameters
+    function drawConnections(activeKey) {
+        const canvas = document.getElementById('connectionCanvas');
+        const ctx = canvas.getContext('2d');
+        const W = canvas.width, H = canvas.height;
+        ctx.clearRect(0, 0, W, H);
+
+        const keys = allParams.map(p => p.key);
+        const n = keys.length;
+        const nodeR = 6;
+        const padX = 60, padY = 30;
+        const spacing = (W - 2 * padX) / (n - 1);
+
+        // Positions
+        const pos = {};
+        keys.forEach((k, i) => {
+            pos[k] = { x: padX + i * spacing, y: H / 2 };
+        });
+
+        // Draw edges first
+        allParams.forEach(p => {
+            p.interactions.forEach(target => {
+                if (pos[target]) {
+                    const isActive = activeKey && (p.key === activeKey || target === activeKey);
+                    ctx.strokeStyle = isActive ? 'rgba(22,199,154,0.7)' : 'rgba(42,42,74,0.5)';
+                    ctx.lineWidth = isActive ? 2.5 : 1;
+                    ctx.beginPath();
+                    const sx = pos[p.key].x, sy = pos[p.key].y;
+                    const tx = pos[target].x, ty = pos[target].y;
+                    const cp = (sx + tx) / 2;
+                    const cpy = sy - 30 - Math.abs(sx - tx) * 0.15;
+                    ctx.moveTo(sx, sy);
+                    ctx.quadraticCurveTo(cp, cpy, tx, ty);
+                    ctx.stroke();
+                }
+            });
+        });
+
+        // Draw nodes
+        keys.forEach((k, i) => {
+            const p = allParams[i];
+            const x = pos[k].x, y = pos[k].y;
+            const isActive = k === activeKey;
+            ctx.beginPath();
+            ctx.arc(x, y, isActive ? 9 : nodeR, 0, Math.PI * 2);
+            ctx.fillStyle = isActive ? '#16c79a' : p.groupColor;
+            ctx.fill();
+            if (isActive) {
+                ctx.strokeStyle = '#16c79a';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+            }
+            // Label
+            ctx.fillStyle = isActive ? '#e8e8e8' : '#a8a8b8';
+            ctx.font = (isActive ? 'bold ' : '') + '10px monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText(k, x, y + 22);
+        });
+    }
+
+    drawConnections(null);
+
+    // ===============================
+    // 2. Single Parameter Effects
+    // ===============================
+    const singleParams = [
+        { key: 'num_leaves', min: 4, max: 128, def: 31, step: 1, format: v => Math.round(v),
+          info: 'num_leaves 控制模型的复杂度上限。值越大，模型能表达越复杂的模式，但过大时验证损失会上升（过拟合）。观察左图：当 num_leaves 较小时两条曲线都高（欠拟合），增大后训练损失持续下降但验证损失先降后升。' },
+        { key: 'max_depth', min: 2, max: 15, def: 6, step: 1, format: v => Math.round(v),
+          info: 'max_depth 限制树的最大深度。较浅的树决策边界简单，较深的树可以拟合更复杂的模式。配合 num_leaves 使用效果最佳。' },
+        { key: 'learning_rate', min: 0.005, max: 0.5, def: 0.1, step: 0.005, format: v => v.toFixed(3),
+          info: 'learning_rate 控制每棵树的贡献大小。较小的 LR 使学习更保守，需要更多迭代才能收敛，但通常泛化更好。较大的 LR 收敛快但容易过拟合。' },
+        { key: 'n_estimators', min: 5, max: 300, def: 100, step: 5, format: v => Math.round(v),
+          info: 'n_estimators 决定模型使用多少棵树。更多的树让模型有更多机会纠正残差，但过多时验证损失会上升。实际使用时配合 early_stopping 自动确定。' },
+        { key: 'min_child_samples', min: 1, max: 100, def: 20, step: 1, format: v => Math.round(v),
+          info: 'min_child_samples 限制叶节点最少需要多少样本。较小的值允许更精细的分裂（可能过拟合），较大的值使模型更保守（可能欠拟合）。' },
+        { key: 'subsample', min: 0.1, max: 1.0, def: 1.0, step: 0.05, format: v => v.toFixed(2),
+          info: 'subsample 控制每次迭代的行采样比例。降低比例引入随机性，可以提升泛化能力。观察决策边界：采样比例越低，边界越平滑。' },
+        { key: 'colsample_bytree', min: 0.1, max: 1.0, def: 1.0, step: 0.05, format: v => v.toFixed(2),
+          info: 'colsample_bytree 控制每棵树的列采样比例。减小比例让每棵树只看到部分特征，增加多样性。在特征较多的数据集上效果显著。' },
+        { key: 'reg_alpha', min: 0, max: 20, def: 0, step: 0.5, format: v => v.toFixed(1),
+          info: 'reg_alpha 是 L1 正则化系数。增大会让一些特征的贡献被压为零（稀疏化）。适合存在无关特征的数据集，可以简化模型。' },
+        { key: 'reg_lambda', min: 0, max: 20, def: 0, step: 0.5, format: v => v.toFixed(1),
+          info: 'reg_lambda 是 L2 正则化系数。增大会让所有叶子的输出值趋于更小，使模型更平滑。是最常用的正则化手段。' },
+    ];
+
+    const paramSelect = document.getElementById('paramSelect');
+    const paramSlider = document.getElementById('paramSlider');
+    const sliderLabel = document.getElementById('sliderLabel');
+    const sliderVal = document.getElementById('sliderVal');
+    const paramInfoCard = document.getElementById('paramInfoCard');
+
+    singleParams.forEach(p => {
+        const opt = document.createElement('option');
+        opt.value = p.key; opt.textContent = p.key;
+        paramSelect.appendChild(opt);
+    });
+
+    paramSelect.addEventListener('change', () => { updateSlider(); drawSingleParam(); });
+    paramSlider.addEventListener('input', () => drawSingleParam());
+
+    function currentSP() { return singleParams.find(p => p.key === paramSelect.value) || singleParams[0]; }
+
+    function updateSlider() {
+        const sp = currentSP();
+        sliderLabel.textContent = sp.key;
+        paramSlider.min = 0; paramSlider.max = 100;
+        paramSlider.value = Math.round(((sp.def - sp.min) / (sp.max - sp.min)) * 100);
+        sliderVal.textContent = sp.format(sp.def);
+        paramInfoCard.innerHTML = '<h4>' + sp.key + ' 调参说明</h4><p>' + sp.info + '</p>';
+    }
+
+    function getParamValue() {
+        const sp = currentSP();
+        const t = paramSlider.value / 100;
+        const v = sp.min + t * (sp.max - sp.min);
+        sliderVal.textContent = sp.format(v);
+        return sp.format === singleParams[0].format ? Math.round(v) : parseFloat(sp.format(v));
+    }
+
+    // Generate fixed dataset
+    const rng = LGBMUtils.seededRandom(42);
+    const trainData = [], trainLabels = [], valData = [], valLabels = [];
+    for (let i = 0; i < 200; i++) {
+        const x1 = rng() * 4 - 2, x2 = rng() * 4 - 2;
+        const label = (Math.sin(x1 * 1.5) + x2 * 0.5 + (rng() - 0.5) * 0.4) > 0 ? 1 : 0;
+        if (i < 140) { trainData.push([x1, x2]); trainLabels.push(label); }
+        else { valData.push([x1, x2]); valLabels.push(label); }
+    }
+
+    function simulateLoss(paramKey, paramValue) {
+        const baseParams = { numTrees: 80, lr: 0.1, maxDepth: 6, minSamples: 20, lambda: 1, loss: 'logloss' };
+        if (paramKey === 'num_leaves') baseParams.maxDepth = Math.max(2, Math.ceil(Math.log2(paramValue)));
+        if (paramKey === 'max_depth') baseParams.maxDepth = paramValue;
+        if (paramKey === 'learning_rate') baseParams.lr = paramValue;
+        if (paramKey === 'n_estimators') baseParams.numTrees = paramValue;
+        if (paramKey === 'min_child_samples') baseParams.minSamples = paramValue;
+        if (paramKey === 'reg_alpha' || paramKey === 'reg_lambda') baseParams.lambda = paramValue + 1;
+        if (paramKey === 'subsample' || paramKey === 'colsample_bytree') {
+            baseParams.numTrees = Math.max(5, Math.round(baseParams.numTrees * paramValue));
+        }
+
+        const nTrees = Math.min(baseParams.numTrees, 120);
+        const trainPred = new Array(trainData.length).fill(0);
+        const valPred = new Array(valData.length).fill(0);
+        const trainLoss = [], valLoss = [];
+        const trees = [];
+
+        for (let t = 0; t < nTrees; t++) {
+            const gh = LGBMUtils.computeGradients(trainPred, trainLabels, 'logloss');
+            const tree = LGBMUtils.boostingStep(trainData, gh.gradients, gh.hessians, {
+                maxDepth: baseParams.maxDepth, minSamples: baseParams.minSamples, lambda: baseParams.lambda
+            });
+            trees.push(tree);
+            for (let i = 0; i < trainData.length; i++) trainPred[i] += baseParams.lr * LGBMUtils.predictTree(tree, trainData[i]);
+            for (let i = 0; i < valData.length; i++) valPred[i] += baseParams.lr * LGBMUtils.predictTree(tree, valData[i]);
+            let tl = 0, vl = 0;
+            for (let i = 0; i < trainData.length; i++) {
+                const p = LGBMUtils.sigmoid(trainPred[i]);
+                tl -= trainLabels[i] * Math.log(p + 1e-15) + (1 - trainLabels[i]) * Math.log(1 - p + 1e-15);
+            }
+            for (let i = 0; i < valData.length; i++) {
+                const p = LGBMUtils.sigmoid(valPred[i]);
+                vl -= valLabels[i] * Math.log(p + 1e-15) + (1 - valLabels[i]) * Math.log(1 - p + 1e-15);
+            }
+            trainLoss.push(tl / trainData.length);
+            valLoss.push(vl / valData.length);
+        }
+        return { trainLoss, valLoss, trees, lr: baseParams.lr };
+    }
+
+    function drawSingleParam() {
+        const sp = currentSP();
+        const val = getParamValue();
+        paramInfoCard.innerHTML = '<h4>' + sp.key + ' = ' + sp.format(val) + '</h4><p>' + sp.info + '</p>';
+        const result = simulateLoss(sp.key, val);
+
+        // ---- Draw loss curves ----
+        const lc = document.getElementById('lossCanvas');
+        const ctx = lc.getContext('2d');
+        const W = lc.width, H = lc.height;
+        ctx.clearRect(0, 0, W, H);
+        const pad = { t: 45, r: 20, b: 45, l: 58 };
+        const pw = W - pad.l - pad.r, ph = H - pad.t - pad.b;
+        const n = result.trainLoss.length;
+        if (n === 0) return;
+
+        const allLoss = result.trainLoss.concat(result.valLoss);
+        let minL = Math.min(...allLoss), maxL = Math.max(...allLoss);
+        if (maxL - minL < 0.01) maxL = minL + 0.1;
+
+        // Best validation point
+        let bestValIdx = 0;
+        for (let i = 1; i < result.valLoss.length; i++) {
+            if (result.valLoss[i] < result.valLoss[bestValIdx]) bestValIdx = i;
+        }
+        const underfitEnd = Math.min(Math.round(n * 0.15), bestValIdx);
+        const overfitStart = bestValIdx;
+
+        // Zones
+        if (underfitEnd > 0) {
+            ctx.fillStyle = 'rgba(79,195,247,0.08)';
+            ctx.fillRect(pad.l, pad.t, (underfitEnd / n) * pw, ph);
+            ctx.fillStyle = 'rgba(79,195,247,0.5)';
+            ctx.font = '10px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('欠拟合', pad.l + (underfitEnd / n) * pw / 2, pad.t + 15);
+        }
+        if (overfitStart < n - 2) {
+            ctx.fillStyle = 'rgba(255,82,82,0.07)';
+            const sx = pad.l + (overfitStart / n) * pw;
+            ctx.fillRect(sx, pad.t, pw - (overfitStart / n) * pw, ph);
+            ctx.fillStyle = 'rgba(255,82,82,0.5)';
+            ctx.font = '10px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('过拟合', sx + (pw - (overfitStart / n) * pw) / 2, pad.t + 15);
+        }
+
+        // Grid lines
+        ctx.strokeStyle = 'rgba(42,42,74,0.5)';
+        ctx.lineWidth = 1;
+        for (let i = 0; i <= 5; i++) {
+            const y = pad.t + (i / 5) * ph;
+            ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(pad.l + pw, y); ctx.stroke();
+        }
+
+        // Axis labels
+        ctx.fillStyle = '#6c6c7c';
+        ctx.font = '11px sans-serif';
+        ctx.textAlign = 'right';
+        for (let i = 0; i <= 5; i++) {
+            const y = pad.t + (i / 5) * ph;
+            ctx.fillText((maxL - (i / 5) * (maxL - minL)).toFixed(3), pad.l - 6, y + 4);
+        }
+        ctx.textAlign = 'center';
+        ctx.fillText('迭代次数 (Boosting Rounds)', pad.l + pw / 2, H - 5);
+        for (let i = 0; i <= 4; i++) {
+            ctx.fillText(Math.round((i / 4) * n), pad.l + (i / 4) * pw, H - 25);
+        }
+
+        // Curves
+        function drawCurve(data, color, dash) {
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 2.5;
+            ctx.setLineDash(dash || []);
+            ctx.beginPath();
+            for (let i = 0; i < data.length; i++) {
+                const x = pad.l + (i / n) * pw;
+                const y = pad.t + ((maxL - data[i]) / (maxL - minL)) * ph;
+                i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+            ctx.setLineDash([]);
+        }
+        drawCurve(result.trainLoss, '#4fc3f7');
+        drawCurve(result.valLoss, '#ffab40');
+
+        // Best validation marker
+        const bx = pad.l + (bestValIdx / n) * pw;
+        const by = pad.t + ((maxL - result.valLoss[bestValIdx]) / (maxL - minL)) * ph;
+        ctx.beginPath();
+        ctx.arc(bx, by, 6, 0, Math.PI * 2);
+        ctx.fillStyle = '#16c79a';
+        ctx.fill();
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        ctx.fillStyle = '#16c79a';
+        ctx.font = 'bold 10px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('最优 (iter=' + bestValIdx + ')', bx, by - 12);
+
+        // ---- Draw decision boundary ----
+        const bc = document.getElementById('boundaryCanvas');
+        const bctx = bc.getContext('2d');
+        const BW = bc.width, BH = bc.height;
+        bctx.clearRect(0, 0, BW, BH);
+        const bPad = { t: 25, r: 20, b: 35, l: 35 };
+        const bpw = BW - bPad.l - bPad.r, bph = BH - bPad.t - bPad.b;
+        const res = 4;
+        const xMin = -2.3, xMax = 2.3, yMin = -2.3, yMax = 2.3;
+
+        for (let px = 0; px < bpw; px += res) {
+            for (let py = 0; py < bph; py += res) {
+                const x1 = xMin + (px / bpw) * (xMax - xMin);
+                const x2 = yMax - (py / bph) * (yMax - yMin);
+                let pred = 0;
+                for (let ti = 0; ti < result.trees.length; ti++) pred += result.lr * LGBMUtils.predictTree(result.trees[ti], [x1, x2]);
+                const prob = LGBMUtils.sigmoid(pred);
+                bctx.fillStyle = prob > 0.5
+                    ? 'rgba(22,199,154,' + (0.08 + (prob - 0.5) * 0.35) + ')'
+                    : 'rgba(79,195,247,' + (0.08 + (0.5 - prob) * 0.35) + ')';
+                bctx.fillRect(bPad.l + px, bPad.t + py, res, res);
+            }
+        }
+
+        // Data points
+        function drawPts(data, labels, r, alpha) {
+            data.forEach((d, i) => {
+                const px = bPad.l + ((d[0] - xMin) / (xMax - xMin)) * bpw;
+                const py = bPad.t + ((yMax - d[1]) / (yMax - yMin)) * bph;
+                bctx.beginPath();
+                bctx.arc(px, py, r, 0, Math.PI * 2);
+                bctx.fillStyle = labels[i] === 1 ? 'rgba(22,199,154,' + alpha + ')' : 'rgba(79,195,247,' + alpha + ')';
+                bctx.fill();
+                bctx.strokeStyle = 'rgba(255,255,255,' + (alpha * 0.4) + ')';
+                bctx.lineWidth = 0.6;
+                bctx.stroke();
+            });
+        }
+        drawPts(trainData, trainLabels, 3, 0.6);
+        drawPts(valData, valLabels, 4, 1.0);
+
+        // Border and labels
+        bctx.strokeStyle = 'rgba(42,42,74,0.6)';
+        bctx.lineWidth = 1;
+        bctx.strokeRect(bPad.l, bPad.t, bpw, bph);
+        bctx.fillStyle = '#6c6c7c';
+        bctx.font = '10px sans-serif';
+        bctx.textAlign = 'center';
+        bctx.fillText('x\u2081', bPad.l + bpw / 2, BH - 8);
+        bctx.save();
+        bctx.translate(12, bPad.t + bph / 2);
+        bctx.rotate(-Math.PI / 2);
+        bctx.fillText('x\u2082', 0, 0);
+        bctx.restore();
+    }
+
+    updateSlider();
+
+    // ===============================
+    // 3. LR & n_estimators Heatmap
+    // ===============================
+    function drawHeatmap() {
+        const canvas = document.getElementById('heatmapCanvas');
+        const ctx = canvas.getContext('2d');
+        const W = canvas.width, H = canvas.height;
+        ctx.clearRect(0, 0, W, H);
+
+        const pad = { t: 45, r: 65, b: 55, l: 75 };
+        const pw = W - pad.l - pad.r, ph = H - pad.t - pad.b;
+        const lrValues = [0.005, 0.01, 0.02, 0.05, 0.08, 0.1, 0.15, 0.2, 0.3, 0.5];
+        const nEstValues = [10, 20, 40, 60, 80, 100, 140, 180, 220, 280];
+        const cols = lrValues.length, rows = nEstValues.length;
+        const cellW = pw / cols, cellH = ph / rows;
+
+        const scores = [];
+        let minS = Infinity, maxS = -Infinity;
+        const rng2 = LGBMUtils.seededRandom(77);
+
+        for (let r = 0; r < rows; r++) {
+            scores[r] = [];
+            for (let c = 0; c < cols; c++) {
+                const lr = lrValues[c], nEst = nEstValues[r];
+                const effectiveCap = lr * nEst;
+                const complexity = lr * Math.sqrt(nEst);
+                const fitQuality = 1 - Math.exp(-effectiveCap * 0.8);
+                const overfit = 0.15 * complexity * complexity;
+                const score = fitQuality - overfit + (rng2() - 0.5) * 0.02;
+                scores[r][c] = Math.max(0.05, Math.min(0.98, score));
+                if (scores[r][c] < minS) minS = scores[r][c];
+                if (scores[r][c] > maxS) maxS = scores[r][c];
+            }
+        }
+
+        let bestR = 0, bestC = 0, bestScore = -1;
+        const earlyStopRow = [];
+        for (let c = 0; c < cols; c++) {
+            let bestForLR = 0, bestRowForLR = 0;
+            for (let r = 0; r < rows; r++) {
+                if (scores[r][c] > bestForLR) { bestForLR = scores[r][c]; bestRowForLR = r; }
+                if (scores[r][c] > bestScore) { bestScore = scores[r][c]; bestR = r; bestC = c; }
+            }
+            earlyStopRow.push(bestRowForLR);
+        }
+
+        function scoreColor(s) {
+            const t = (s - minS) / (maxS - minS + 1e-10);
+            if (t < 0.25) { const u = t / 0.25; return 'rgb(' + Math.round(26 + u * 53) + ',' + Math.round(35 + u * 160) + ',' + Math.round(126 + u * 121) + ')'; }
+            else if (t < 0.5) { const u = (t - 0.25) / 0.25; return 'rgb(' + Math.round(79 - u * 57) + ',' + Math.round(195 + u * 4) + ',' + Math.round(247 - u * 93) + ')'; }
+            else if (t < 0.75) { const u = (t - 0.5) / 0.25; return 'rgb(' + Math.round(22 + u * 233) + ',' + Math.round(199 + u * 16) + ',' + Math.round(154 - u * 90) + ')'; }
+            else { const u = (t - 0.75) / 0.25; return 'rgb(255,' + Math.round(215 - u * 133) + ',' + Math.round(64 - u * 12) + ')'; }
+        }
+
+        // Cells
+        for (let r = 0; r < rows; r++) {
+            for (let c = 0; c < cols; c++) {
+                const x = pad.l + c * cellW, y = pad.t + (rows - 1 - r) * cellH;
+                ctx.fillStyle = scoreColor(scores[r][c]);
+                ctx.fillRect(x + 1, y + 1, cellW - 2, cellH - 2);
+                ctx.fillStyle = scores[r][c] > (minS + maxS) / 2 ? '#1a1a2e' : '#e8e8e8';
+                ctx.font = '9px monospace';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(scores[r][c].toFixed(2), x + cellW / 2, y + cellH / 2);
+            }
+        }
+
+        // Best cell
+        const bx = pad.l + bestC * cellW, by = pad.t + (rows - 1 - bestR) * cellH;
+        ctx.strokeStyle = '#16c79a';
+        ctx.lineWidth = 3;
+        ctx.strokeRect(bx, by, cellW, cellH);
+        ctx.fillStyle = '#16c79a';
+        ctx.font = 'bold 9px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('\u2605 \u6700\u4F18', bx + cellW / 2, by - 5);
+
+        // Early stopping line
+        ctx.strokeStyle = '#ffab40';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([6, 3]);
+        ctx.beginPath();
+        for (let c = 0; c < cols; c++) {
+            const x = pad.l + c * cellW + cellW / 2;
+            const y = pad.t + (rows - 1 - earlyStopRow[c]) * cellH + cellH / 2;
+            c === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = '#ffab40';
+        ctx.font = '10px sans-serif';
+        ctx.textAlign = 'left';
+        const lx = pad.l + (cols - 1) * cellW + cellW + 5;
+        const ly = pad.t + (rows - 1 - earlyStopRow[cols - 1]) * cellH + cellH / 2;
+        ctx.fillText('\u65E9\u505C\u7EBF', lx, ly);
+
+        // Axes
+        ctx.fillStyle = '#a8a8b8';
+        ctx.font = '10px sans-serif';
+        ctx.textAlign = 'center';
+        for (let c = 0; c < cols; c++) ctx.fillText(lrValues[c], pad.l + c * cellW + cellW / 2, H - pad.b + 16);
+        ctx.font = '11px sans-serif';
+        ctx.fillText('learning_rate', pad.l + pw / 2, H - 8);
+        ctx.textAlign = 'right';
+        ctx.font = '10px sans-serif';
+        for (let r = 0; r < rows; r++) ctx.fillText(nEstValues[r], pad.l - 6, pad.t + (rows - 1 - r) * cellH + cellH / 2 + 3);
+        ctx.save();
+        ctx.translate(14, pad.t + ph / 2);
+        ctx.rotate(-Math.PI / 2);
+        ctx.textAlign = 'center';
+        ctx.font = '11px sans-serif';
+        ctx.fillText('n_estimators', 0, 0);
+        ctx.restore();
+    }
+
+    // ===============================
+    // 4. Regularization
+    // ===============================
+    const regSlider = document.getElementById('regSlider');
+    const regValEl = document.getElementById('regVal');
+    regSlider.addEventListener('input', drawRegularization);
+
+    function drawRegularization() {
+        const t = regSlider.value / 100;
+        const strength = t * 10;
+        regValEl.textContent = strength.toFixed(1);
+
+        const configs = [
+            { alpha: 0, lambda: 0, canvasId: 'regCanvas0', featId: 'feat0' },
+            { alpha: strength, lambda: 0, canvasId: 'regCanvas1', featId: 'feat1' },
+            { alpha: 0, lambda: strength, canvasId: 'regCanvas2', featId: 'feat2' },
+        ];
+
+        configs.forEach((cfg, idx) => {
+            const result = trainWithReg(cfg.alpha, cfg.lambda);
+            drawRegBoundary(cfg.canvasId, result.trees, result.lr);
+            const color = idx === 0 ? 'var(--accent-green)' : idx === 1 ? 'var(--accent-purple)' : 'var(--accent-blue)';
+            drawFeatureImportance(cfg.featId, result.importance, color);
+        });
+    }
+
+    function trainWithReg(alpha, lambda) {
+        const regLambda = 1 + lambda;
+        const nTrees = 40;
+        const lr = 0.1;
+        const pred = new Array(trainData.length).fill(0);
+        const trees = [];
+        const featureGains = [0, 0];
+
+        for (let t = 0; t < nTrees; t++) {
+            const gh = LGBMUtils.computeGradients(pred, trainLabels, 'logloss');
+            if (alpha > 0) {
+                for (let i = 0; i < gh.gradients.length; i++) {
+                    const g = gh.gradients[i];
+                    if (g > alpha) gh.gradients[i] = g - alpha;
+                    else if (g < -alpha) gh.gradients[i] = g + alpha;
+                    else gh.gradients[i] = 0;
+                }
+            }
+            const tree = LGBMUtils.boostingStep(trainData, gh.gradients, gh.hessians, {
+                maxDepth: 4, minSamples: 5, lambda: regLambda
+            });
+            trees.push(tree);
+            for (let i = 0; i < trainData.length; i++) pred[i] += lr * LGBMUtils.predictTree(tree, trainData[i]);
+            const nodes = LGBMUtils.treeToNodes(tree);
+            nodes.forEach(nd => { if (!nd.isLeaf && nd.feature !== null) featureGains[nd.feature] += nd.gain; });
+        }
+        const total = featureGains[0] + featureGains[1] + 1e-10;
+        return { trees, lr, importance: [featureGains[0] / total, featureGains[1] / total] };
+    }
+
+    function drawRegBoundary(canvasId, trees, lr) {
+        const c = document.getElementById(canvasId);
+        const ctx = c.getContext('2d');
+        const W = c.width, H = c.height;
+        ctx.clearRect(0, 0, W, H);
+        const pad = 15, pw = W - 2 * pad, ph = H - 2 * pad;
+        const xMin = -2.3, xMax = 2.3, yMin = -2.3, yMax = 2.3;
+        const res = 5;
+
+        for (let px = 0; px < pw; px += res) {
+            for (let py = 0; py < ph; py += res) {
+                const x1 = xMin + (px / pw) * (xMax - xMin);
+                const x2 = yMax - (py / ph) * (yMax - yMin);
+                let p = 0;
+                for (let ti = 0; ti < trees.length; ti++) p += lr * LGBMUtils.predictTree(trees[ti], [x1, x2]);
+                const prob = LGBMUtils.sigmoid(p);
+                ctx.fillStyle = prob > 0.5
+                    ? 'rgba(22,199,154,' + (0.1 + (prob - 0.5) * 0.4) + ')'
+                    : 'rgba(79,195,247,' + (0.1 + (0.5 - prob) * 0.4) + ')';
+                ctx.fillRect(pad + px, pad + py, res, res);
+            }
+        }
+
+        // 0.5 contour approximation
+        ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([3, 3]);
+        for (let px = 0; px < pw - res; px += res) {
+            for (let py = 0; py < ph - res; py += res) {
+                const x1a = xMin + (px / pw) * (xMax - xMin), x2a = yMax - (py / ph) * (yMax - yMin);
+                const x1b = xMin + ((px + res) / pw) * (xMax - xMin), x2b = yMax - ((py + res) / ph) * (yMax - yMin);
+                let p1 = 0, p2 = 0;
+                for (let ti = 0; ti < trees.length; ti++) {
+                    p1 += lr * LGBMUtils.predictTree(trees[ti], [x1a, x2a]);
+                    p2 += lr * LGBMUtils.predictTree(trees[ti], [x1b, x2b]);
+                }
+                if ((p1 > 0) !== (p2 > 0)) {
+                    ctx.beginPath();
+                    ctx.moveTo(pad + px, pad + py);
+                    ctx.lineTo(pad + px + res, pad + py + res);
+                    ctx.stroke();
+                }
+            }
+        }
+        ctx.setLineDash([]);
+
+        // Points
+        trainData.forEach((d, i) => {
+            const px = pad + ((d[0] - xMin) / (xMax - xMin)) * pw;
+            const py = pad + ((yMax - d[1]) / (yMax - yMin)) * ph;
+            ctx.beginPath();
+            ctx.arc(px, py, 2.5, 0, Math.PI * 2);
+            ctx.fillStyle = trainLabels[i] === 1 ? 'rgba(22,199,154,0.7)' : 'rgba(79,195,247,0.7)';
+            ctx.fill();
+        });
+    }
+
+    function drawFeatureImportance(containerId, importance, color) {
+        const el = document.getElementById(containerId);
+        const names = ['x\u2081', 'x\u2082'];
+        let html = '<div style="font-size:.78rem;color:var(--text-muted);margin-bottom:.2rem;">\u7279\u5F81\u91CD\u8981\u6027</div>';
+        importance.forEach((v, i) => {
+            html += '<div class="feat-bar-wrap">' +
+                '<span class="fname">' + names[i] + '</span>' +
+                '<div class="feat-bar" style="width:' + Math.max(3, v * 130) + 'px;background:' + color + ';"></div>' +
+                '<span style="font-size:.75rem;color:var(--text-secondary);margin-left:.3rem;">' + (v * 100).toFixed(1) + '%</span>' +
+                '</div>';
+        });
+        el.innerHTML = html;
+    }
+
+    // ===============================
+    // 5. Tuning Workflow
+    // ===============================
+    const workflowData = [
+        {
+            title: '\u6811\u7ED3\u6784\u53C2\u6570',
+            short: '\u56FA\u5B9A learning_rate=0.1\uFF0C\u8C03\u6574 num_leaves \u548C max_depth',
+            detail: '\u9996\u5148\u56FA\u5B9A\u4E00\u4E2A\u4E2D\u7B49\u5927\u5C0F\u7684\u5B66\u4E60\u7387\uFF080.1\uFF09\uFF0C\u91CD\u70B9\u8C03\u4F18\u6811\u7684\u7ED3\u6784\u53C2\u6570\u3002num_leaves \u662F LightGBM \u6700\u5173\u952E\u7684\u53C2\u6570\uFF0C\u76F4\u63A5\u51B3\u5B9A\u6A21\u578B\u590D\u6742\u5EA6\u4E0A\u9650\u3002',
+            params: [
+                { name: 'num_leaves', range: '20 ~ 150', tip: '\u4ECE 31 \u5F00\u59CB\uFF0C\u7528\u4E8C\u500D\u9012\u589E\u6CD5\u5FEB\u901F\u641C\u7D22' },
+                { name: 'max_depth', range: '4 ~ 10', tip: '\u8BBE\u4E3A log\u2082(num_leaves) \u9644\u8FD1' },
+            ],
+            tip: 'num_leaves \u592A\u5927\u5BB9\u6613\u8FC7\u62DF\u5408\uFF0C\u592A\u5C0F\u5219\u6B20\u62DF\u5408\u3002\u5EFA\u8BAE\u7528 GridSearchCV \u6216 Optuna \u81EA\u52A8\u641C\u7D22\u3002',
+            code: 'param_grid = {\n    "num_leaves": [15, 31, 63, 127],\n    "max_depth": [4, 5, 6, 7, 8]\n}\n# GridSearchCV or Optuna ...'
+        },
+        {
+            title: '\u53F6\u5B50\u7EA6\u675F\u53C2\u6570',
+            short: '\u8C03\u6574 min_child_samples \u548C min_child_weight',
+            detail: '\u5728\u786E\u5B9A\u6811\u7ED3\u6784\u540E\uFF0C\u901A\u8FC7\u9650\u5236\u53F6\u5B50\u8282\u70B9\u7684\u6700\u5C0F\u6837\u672C\u6570\u6765\u9632\u6B62\u6A21\u578B\u5728\u566A\u58F0\u6570\u636E\u4E0A\u8FC7\u62DF\u5408\u3002\u5BF9\u5C0F\u6570\u636E\u96C6\u5C24\u5176\u91CD\u8981\u3002',
+            params: [
+                { name: 'min_child_samples', range: '5 ~ 100', tip: '\u6570\u636E\u91CF\u5927\u65F6\u53EF\u9002\u5F53\u51CF\u5C0F' },
+                { name: 'min_child_weight', range: '1e-3 ~ 10', tip: '\u63A7\u5236\u53F6\u5B50\u8282\u70B9\u7684\u6700\u5C0F Hessian \u548C' },
+            ],
+            tip: '\u5BF9\u4E8E\u4E0D\u5E73\u8861\u6570\u636E\u96C6\uFF0Cmin_child_samples \u9700\u8981\u7279\u522B\u5173\u6CE8\u5C11\u6570\u7C7B\u7684\u6837\u672C\u6570\u3002',
+            code: 'param_grid = {\n    "min_child_samples": [5, 10, 20, 50, 100],\n    "min_child_weight": [0.001, 0.01, 0.1, 1, 10]\n}'
+        },
+        {
+            title: '\u968F\u673A\u5316\u53C2\u6570',
+            short: '\u8C03\u6574 subsample \u548C colsample_bytree',
+            detail: '\u5F15\u5165\u968F\u673A\u6027\u53EF\u4EE5\u63D0\u5347\u6A21\u578B\u6CDB\u5316\u80FD\u529B\uFF0C\u7C7B\u4F3C\u968F\u673A\u68EE\u6797\u7684 bagging \u548C\u968F\u673A\u7279\u5F81\u9009\u62E9\u601D\u60F3\u3002',
+            params: [
+                { name: 'subsample', range: '0.5 ~ 0.9', tip: '\u6BCF\u6B21\u8FED\u4EE3\u7684\u884C\u91C7\u6837\u6BD4\u4F8B' },
+                { name: 'colsample_bytree', range: '0.5 ~ 0.9', tip: '\u6BCF\u68F5\u6811\u7684\u5217\u91C7\u6837\u6BD4\u4F8B' },
+                { name: 'subsample_freq', range: '1 ~ 10', tip: '\u884C\u91C7\u6837\u9891\u7387\uFF0C\u5EFA\u8BAE\u8BBE\u4E3A 1' },
+            ],
+            tip: '\u5F53\u6570\u636E\u91CF\u8F83\u5927\u65F6\uFF08>10000\uFF09\uFF0C\u964D\u4F4E\u91C7\u6837\u6BD4\u4F8B\u4E0D\u4EC5\u52A0\u901F\u8BAD\u7EC3\uFF0C\u8FD8\u80FD\u63D0\u5347\u6CDB\u5316\u3002',
+            code: 'param_grid = {\n    "subsample": [0.5, 0.6, 0.7, 0.8, 0.9, 1.0],\n    "colsample_bytree": [0.5, 0.6, 0.7, 0.8, 0.9, 1.0],\n    "subsample_freq": [1]\n}'
+        },
+        {
+            title: '\u6B63\u5219\u5316\u53C2\u6570',
+            short: '\u8C03\u6574 reg_alpha \u548C reg_lambda',
+            detail: 'L1 \u6B63\u5219\u5316\u53EF\u8FDB\u884C\u7279\u5F81\u9009\u62E9\uFF0CL2 \u6B63\u5219\u5316\u8BA9\u6A21\u578B\u66F4\u5E73\u6ED1\u3002\u901A\u5E38\u5148\u8BD5 L2\uFF0C\u518D\u8BD5 L1\u3002',
+            params: [
+                { name: 'reg_alpha', range: '0 ~ 10', tip: 'L1 \u6B63\u5219\u5316\uFF0C\u4FC3\u4F7F\u7279\u5F81\u6743\u91CD\u7A00\u758F' },
+                { name: 'reg_lambda', range: '0 ~ 10', tip: 'L2 \u6B63\u5219\u5316\uFF0C\u9650\u5236\u6743\u91CD\u5927\u5C0F' },
+            ],
+            tip: '\u5982\u679C\u6A21\u578B\u7279\u5F81\u8F83\u591A\u4E14\u6709\u566A\u58F0\u7279\u5F81\uFF0C\u4F18\u5148\u5C1D\u8BD5\u589E\u5927 reg_alpha \u505A\u7279\u5F81\u9009\u62E9\u3002',
+            code: 'param_grid = {\n    "reg_alpha": [0, 0.1, 0.5, 1, 5, 10],\n    "reg_lambda": [0, 0.1, 0.5, 1, 5, 10]\n}'
+        },
+        {
+            title: '\u7CBE\u7EC6\u8C03\u4F18',
+            short: '\u964D\u4F4E learning_rate\uFF0C\u589E\u5927 n_estimators\uFF0C\u914D\u5408\u65E9\u505C',
+            detail: '\u6700\u540E\u4E00\u6B65\u662F\u964D\u4F4E\u5B66\u4E60\u7387\uFF0C\u76F8\u5E94\u589E\u52A0\u6811\u6570\uFF0C\u8BA9\u6A21\u578B\u66F4\u7CBE\u7EC6\u5730\u62DF\u5408\u3002\u5FC5\u987B\u914D\u5408 early_stopping \u4F7F\u7528\u3002',
+            params: [
+                { name: 'learning_rate', range: '0.01 ~ 0.05', tip: '\u6700\u7EC8\u6A21\u578B\u7528\u66F4\u5C0F\u7684\u5B66\u4E60\u7387' },
+                { name: 'n_estimators', range: '1000 ~ 10000', tip: '\u8BBE\u8F83\u5927\u503C\uFF0C\u7531\u65E9\u505C\u51B3\u5B9A\u5B9E\u9645\u6570\u91CF' },
+                { name: 'early_stopping_rounds', range: '50 ~ 200', tip: '\u9A8C\u8BC1\u96C6\u8FDE\u7EED N \u8F6E\u65E0\u63D0\u5347\u5219\u505C\u6B62' },
+            ],
+            tip: '\u7ECF\u9A8C\u6CD5\u5219\uFF1Alearning_rate \u51CF\u534A\u65F6\uFF0Cn_estimators \u5927\u7EA6\u7FFB\u500D\uFF0C\u603B\u6548\u679C\u76F8\u5F53\u3002',
+            code: 'model = lgb.LGBMClassifier(\n    learning_rate=0.02,\n    n_estimators=5000,\n    # ... other best params ...\n)\nmodel.fit(\n    X_train, y_train,\n    eval_set=[(X_val, y_val)],\n    callbacks=[\n        lgb.early_stopping(100),\n        lgb.log_evaluation(50)\n    ]\n)'
+        },
+    ];
+
+    const stepsContainer = document.getElementById('workflowSteps');
+    const wfDetailEl = document.getElementById('wfDetail');
+
+    workflowData.forEach((step, idx) => {
+        const div = document.createElement('div');
+        div.className = 'wf-step' + (idx === 0 ? ' active' : '');
+        div.innerHTML = '<div class="wf-num">' + (idx + 1) + '</div><div class="wf-body"><h4>\u6B65\u9AA4 ' + (idx + 1) + '\uFF1A' + step.title + '</h4><p>' + step.short + '</p></div>';
+        div.addEventListener('click', () => {
+            document.querySelectorAll('.wf-step').forEach(s => s.classList.remove('active'));
+            div.classList.add('active');
+            showWfDetail(step, idx);
+        });
+        stepsContainer.appendChild(div);
+    });
+
+    function showWfDetail(step, idx) {
+        let paramsHtml = step.params.map(p =>
+            '<tr><td>' + p.name + '</td><td>' + p.range + '</td><td style="color:var(--text-secondary);">' + p.tip + '</td></tr>'
+        ).join('');
+
+        wfDetailEl.innerHTML =
+            '<h3>\u6B65\u9AA4 ' + (idx + 1) + '\uFF1A' + step.title + '</h3>' +
+            '<p style="color:var(--text-secondary);font-size:.9rem;">' + step.detail + '</p>' +
+            '<table class="range-table">' +
+            '<thead><tr><th>\u53C2\u6570</th><th>\u63A8\u8350\u8303\u56F4</th><th>\u8BF4\u660E</th></tr></thead>' +
+            '<tbody>' + paramsHtml + '</tbody></table>' +
+            '<div class="tip">' + step.tip + '</div>' +
+            '<div class="code-snippet">' + step.code + '</div>';
+    }
+
+    showWfDetail(workflowData[0], 0);
+
+    // Delayed init for non-visible panels
+    setTimeout(() => {
+        drawHeatmap();
+        drawRegularization();
+    }, 200);
+});
+</script>
+
+<!-- KaTeX auto-render -->
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+        if (typeof renderMathInElement === 'function') {
+            renderMathInElement(document.body, {
+                delimiters: [
+                    { left: '$$', right: '$$', display: true },
+                    { left: '$', right: '$', display: false },
+                    { left: '\\(', right: '\\)', display: false },
+                    { left: '\\[', right: '\\]', display: true },
+                ],
+                throwOnError: false,
+            });
+        }
+    });
+</script>
+</body>
+</html>

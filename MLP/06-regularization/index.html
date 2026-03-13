@@ -1,0 +1,1046 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>正则化 — Regularization | MLP 多层感知机</title>
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+    <style>
+        .canvas-wrap { position: relative; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-md); overflow: hidden; }
+        .canvas-wrap canvas { display: block; width: 100%; height: 100%; }
+        .controls-row { display: flex; flex-wrap: wrap; align-items: center; gap: 1rem; margin-top: 0.75rem; }
+        .control-item { display: flex; align-items: center; gap: 0.5rem; }
+        .control-item label { font-size: 0.82rem; color: var(--text-secondary); white-space: nowrap; }
+        .control-item .val { font-family: var(--font-mono); font-size: 0.82rem; color: var(--accent-green); min-width: 2.5rem; text-align: center; }
+        .section-desc { color: var(--text-secondary); font-size: 0.92rem; margin-bottom: 1rem; line-height: 1.7; }
+        .dual-canvas { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+        .dual-canvas .canvas-wrap { min-height: 280px; }
+        .canvas-label { position: absolute; top: 0.5rem; left: 0.75rem; font-size: 0.75rem; color: var(--accent-green); font-weight: 600; background: rgba(26,26,46,0.8); padding: 2px 8px; border-radius: 4px; z-index: 2; }
+        .info-row { display: flex; gap: 1rem; margin-top: 0.75rem; flex-wrap: wrap; }
+        .info-chip { font-size: 0.78rem; padding: 0.25rem 0.6rem; background: rgba(79,195,247,0.1); border: 1px solid rgba(79,195,247,0.2); border-radius: var(--radius-sm); color: var(--accent-blue); font-family: var(--font-mono); }
+        .info-chip.warn { background: rgba(255,82,82,0.1); border-color: rgba(255,82,82,0.2); color: var(--accent-red); }
+        .info-chip.ok { background: rgba(22,199,154,0.1); border-color: rgba(22,199,154,0.2); color: var(--accent-green); }
+        .network-canvas { min-height: 320px; }
+        .triple-hist { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.75rem; }
+        .triple-hist .canvas-wrap { min-height: 200px; }
+        @media (max-width: 768px) {
+            .dual-canvas, .triple-hist { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+<div class="page-container">
+    <!-- Section 1: Overfitting vs Underfitting -->
+    <div class="section">
+        <div class="section-title">
+            <div class="icon">1</div>
+            <h2>过拟合 vs 欠拟合</h2>
+        </div>
+        <p class="section-desc">
+            模型复杂度决定了拟合能力。<strong>欠拟合</strong>（高偏差）：模型太简单，无法捕捉数据规律；
+            <strong>过拟合</strong>（高方差）：模型太复杂，记住了噪声而非真实模式。
+            调整多项式阶数观察变化：$$\hat{y} = w_0 + w_1 x + w_2 x^2 + \cdots + w_d x^d$$
+        </p>
+        <div class="dual-canvas">
+            <div class="canvas-wrap" style="min-height:320px">
+                <div class="canvas-label">多项式拟合</div>
+                <canvas id="cvFit" width="560" height="320"></canvas>
+            </div>
+            <div class="canvas-wrap" style="min-height:320px">
+                <div class="canvas-label">训练/测试误差</div>
+                <canvas id="cvError" width="560" height="320"></canvas>
+            </div>
+        </div>
+        <div class="controls-row">
+            <div class="control-item">
+                <label>多项式阶数 d：</label>
+                <input type="range" id="sliderDegree" min="1" max="15" value="3" style="width:180px">
+                <span class="val" id="valDegree">3</span>
+            </div>
+            <div class="info-row" id="fitStatus"></div>
+        </div>
+    </div>
+
+    <!-- Section 2: L1 & L2 Regularization -->
+    <div class="section">
+        <div class="section-title">
+            <div class="icon">2</div>
+            <h2>L1 与 L2 正则化</h2>
+        </div>
+        <p class="section-desc">
+            在损失函数中加入权重惩罚项，抑制过大的权重值：
+            $$L = L_{\text{data}} + \lambda \|\mathbf{w}\|_p$$
+            <strong>L1</strong>（Lasso，$p=1$）：产生稀疏权重（许多为零）。
+            <strong>L2</strong>（Ridge，$p=2$）：使权重均匀缩小但不为零。
+        </p>
+        <div class="dual-canvas">
+            <div class="canvas-wrap" style="min-height:300px">
+                <div class="canvas-label">权重分布直方图</div>
+                <canvas id="cvHist" width="560" height="300"></canvas>
+            </div>
+            <div class="canvas-wrap" style="min-height:300px">
+                <div class="canvas-label">约束区域（等高线）</div>
+                <canvas id="cvContour" width="560" height="300"></canvas>
+            </div>
+        </div>
+        <div class="controls-row">
+            <div class="control-item">
+                <label>正则化强度 &lambda;：</label>
+                <input type="range" id="sliderLambda" min="0" max="100" value="20" style="width:180px">
+                <span class="val" id="valLambda">0.20</span>
+            </div>
+            <div class="btn-group">
+                <button class="btn active" id="btnL1">L1</button>
+                <button class="btn" id="btnL2">L2</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Section 3: Dropout -->
+    <div class="section">
+        <div class="section-title">
+            <div class="icon">3</div>
+            <h2>Dropout</h2>
+        </div>
+        <p class="section-desc">
+            训练时随机"丢弃"神经元（输出置零），迫使网络不依赖任何单个特征。
+            每次前向传播使用不同的子网络，等价于训练了大量模型的集成。
+            测试时使用所有神经元，但输出需要乘以 $(1 - p)$ 进行缩放。
+        </p>
+        <div class="canvas-wrap network-canvas">
+            <div class="canvas-label">Dropout 网络可视化</div>
+            <canvas id="cvDropout" width="900" height="340"></canvas>
+        </div>
+        <div class="controls-row">
+            <div class="control-item">
+                <label>Dropout 比率 p：</label>
+                <input type="range" id="sliderDropout" min="0" max="80" value="30" style="width:180px">
+                <span class="val" id="valDropout">0.30</span>
+            </div>
+            <button class="btn btn-primary" id="btnDropForward">前向传播</button>
+            <button class="btn" id="btnDropAuto">自动播放</button>
+            <div class="info-chip" id="dropInfo">子网络 #1</div>
+        </div>
+    </div>
+
+    <!-- Section 4: Early Stopping & Batch Normalization -->
+    <div class="section">
+        <div class="section-title">
+            <div class="icon">4</div>
+            <h2>Early Stopping 与 Batch Normalization</h2>
+        </div>
+        <p class="section-desc">
+            <strong>Early Stopping</strong>：监控验证集损失，当它开始上升时停止训练，防止过拟合。<br>
+            <strong>Batch Normalization</strong>：对每层的激活值进行归一化 $\hat{x} = \frac{x - \mu}{\sqrt{\sigma^2 + \epsilon}}$，
+            使分布更稳定，加速训练并起到轻微正则化效果。
+        </p>
+        <div class="dual-canvas">
+            <div class="canvas-wrap" style="min-height:300px">
+                <div class="canvas-label">训练/验证损失曲线</div>
+                <canvas id="cvEarly" width="560" height="300"></canvas>
+            </div>
+            <div class="canvas-wrap" style="min-height:300px">
+                <div class="canvas-label">Batch Norm 激活分布</div>
+                <canvas id="cvBN" width="560" height="300"></canvas>
+            </div>
+        </div>
+        <div class="controls-row">
+            <button class="btn btn-primary" id="btnTrain">开始训练</button>
+            <button class="btn" id="btnResetTrain">重置</button>
+            <div class="info-chip ok" id="earlyInfo">等待开始...</div>
+            <div class="control-item" style="margin-left:auto">
+                <label>BN 层：</label>
+                <div class="btn-group">
+                    <button class="btn btn-sm active" data-bn="1">层 1</button>
+                    <button class="btn btn-sm" data-bn="2">层 2</button>
+                    <button class="btn btn-sm" data-bn="3">层 3</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="../shared/scripts/nav.js"></script>
+<script src="../shared/scripts/mlp-utils.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    renderMathInElement(document.body, {
+        delimiters: [
+            {left: '$$', right: '$$', display: true},
+            {left: '$', right: '$', display: false}
+        ]
+    });
+
+    const C = {
+        green: '#16c79a', blue: '#4fc3f7', purple: '#b388ff',
+        orange: '#ffab40', red: '#ff5252', yellow: '#ffd740',
+        pink: '#ff80ab', text: '#a8a8b8', muted: '#6c6c7c',
+        bg: '#1a1a2e', bgSec: '#16213e', border: '#2a2a4a'
+    };
+
+    function getCtx(id) {
+        const canvas = document.getElementById(id);
+        const dpr = window.devicePixelRatio || 1;
+        const rect = canvas.getBoundingClientRect();
+        canvas.width = rect.width * dpr;
+        canvas.height = rect.height * dpr;
+        const ctx = canvas.getContext('2d');
+        ctx.scale(dpr, dpr);
+        return { ctx, w: rect.width, h: rect.height, canvas };
+    }
+
+    /* ===== Section 1: Polynomial Fitting ===== */
+    const rng1 = MLPUtils.seededRandom(77);
+    const trueFunc = x => 0.5 * Math.sin(2.5 * x) + 0.3 * Math.cos(1.2 * x);
+    const nTrain = 20, nTest = 20;
+    const trainX = [], trainY = [], testX = [], testY = [];
+    for (let i = 0; i < nTrain; i++) {
+        const x = -1 + 2 * rng1();
+        trainX.push(x);
+        trainY.push(trueFunc(x) + (rng1() - 0.5) * 0.3);
+    }
+    for (let i = 0; i < nTest; i++) {
+        const x = -1 + 2 * rng1();
+        testX.push(x);
+        testY.push(trueFunc(x) + (rng1() - 0.5) * 0.3);
+    }
+
+    function polyFit(xs, ys, degree) {
+        const n = xs.length;
+        const m = degree + 1;
+        // Build Vandermonde matrix and solve via normal equations
+        const XtX = Array.from({length: m}, () => new Float64Array(m));
+        const XtY = new Float64Array(m);
+        for (let i = 0; i < n; i++) {
+            const powers = new Float64Array(m);
+            powers[0] = 1;
+            for (let j = 1; j < m; j++) powers[j] = powers[j-1] * xs[i];
+            for (let j = 0; j < m; j++) {
+                XtY[j] += powers[j] * ys[i];
+                for (let k = 0; k < m; k++) XtX[j][k] += powers[j] * powers[k];
+            }
+        }
+        // Ridge tiny regularization for numerical stability
+        for (let j = 0; j < m; j++) XtX[j][j] += 1e-10;
+        // Gaussian elimination
+        const A = XtX.map((r, i) => [...r, XtY[i]]);
+        for (let col = 0; col < m; col++) {
+            let maxR = col;
+            for (let r = col+1; r < m; r++) if (Math.abs(A[r][col]) > Math.abs(A[maxR][col])) maxR = r;
+            [A[col], A[maxR]] = [A[maxR], A[col]];
+            if (Math.abs(A[col][col]) < 1e-14) continue;
+            const pivot = A[col][col];
+            for (let j = col; j <= m; j++) A[col][j] /= pivot;
+            for (let r = 0; r < m; r++) {
+                if (r === col) continue;
+                const f = A[r][col];
+                for (let j = col; j <= m; j++) A[r][j] -= f * A[col][j];
+            }
+        }
+        return A.map(r => r[m]);
+    }
+
+    function polyEval(coeffs, x) {
+        let val = 0, xp = 1;
+        for (let i = 0; i < coeffs.length; i++) { val += coeffs[i] * xp; xp *= x; }
+        return val;
+    }
+
+    function mse(xs, ys, coeffs) {
+        let s = 0;
+        for (let i = 0; i < xs.length; i++) { const d = ys[i] - polyEval(coeffs, xs[i]); s += d*d; }
+        return s / xs.length;
+    }
+
+    // Precompute all errors
+    const allTrainErr = [], allTestErr = [];
+    for (let d = 1; d <= 15; d++) {
+        const c = polyFit(trainX, trainY, d);
+        allTrainErr.push(mse(trainX, trainY, c));
+        allTestErr.push(mse(testX, testY, c));
+    }
+
+    function drawFitting() {
+        const deg = +document.getElementById('sliderDegree').value;
+        document.getElementById('valDegree').textContent = deg;
+        const coeffs = polyFit(trainX, trainY, deg);
+
+        // Fitting canvas
+        const {ctx, w, h} = getCtx('cvFit');
+        const pad = {l:45, r:15, t:35, b:30};
+        const pw = w - pad.l - pad.r, ph = h - pad.t - pad.b;
+        ctx.clearRect(0,0,w,h);
+
+        const xMin = -1.1, xMax = 1.1, yMin = -1.2, yMax = 1.2;
+        const toX = v => pad.l + (v - xMin)/(xMax - xMin) * pw;
+        const toY = v => pad.t + (1 - (v - yMin)/(yMax - yMin)) * ph;
+
+        // Grid
+        ctx.strokeStyle = C.border; ctx.lineWidth = 0.5;
+        for (let gx = -1; gx <= 1; gx += 0.5) {
+            ctx.beginPath(); ctx.moveTo(toX(gx), pad.t); ctx.lineTo(toX(gx), pad.t+ph); ctx.stroke();
+        }
+        for (let gy = -1; gy <= 1; gy += 0.5) {
+            ctx.beginPath(); ctx.moveTo(pad.l, toY(gy)); ctx.lineTo(pad.l+pw, toY(gy)); ctx.stroke();
+        }
+
+        // Axes
+        ctx.strokeStyle = C.muted; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(pad.l, toY(0)); ctx.lineTo(pad.l+pw, toY(0)); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(toX(0), pad.t); ctx.lineTo(toX(0), pad.t+ph); ctx.stroke();
+
+        // True function (dashed)
+        ctx.strokeStyle = C.muted; ctx.lineWidth = 1.5; ctx.setLineDash([4,4]);
+        ctx.beginPath();
+        for (let px = 0; px <= pw; px++) {
+            const x = xMin + px/pw * (xMax - xMin);
+            const y = trueFunc(x);
+            px === 0 ? ctx.moveTo(toX(x), toY(y)) : ctx.lineTo(toX(x), toY(y));
+        }
+        ctx.stroke(); ctx.setLineDash([]);
+
+        // Fitted curve
+        const curveColor = deg <= 3 ? C.blue : deg <= 7 ? C.green : C.red;
+        ctx.strokeStyle = curveColor; ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        for (let px = 0; px <= pw; px++) {
+            const x = xMin + px/pw * (xMax - xMin);
+            let y = polyEval(coeffs, x);
+            y = Math.max(yMin - 0.5, Math.min(yMax + 0.5, y));
+            px === 0 ? ctx.moveTo(toX(x), toY(y)) : ctx.lineTo(toX(x), toY(y));
+        }
+        ctx.stroke();
+
+        // Training points
+        trainX.forEach((x, i) => {
+            ctx.beginPath(); ctx.arc(toX(x), toY(trainY[i]), 4, 0, Math.PI*2);
+            ctx.fillStyle = C.orange; ctx.fill();
+            ctx.strokeStyle = 'rgba(255,171,64,0.4)'; ctx.lineWidth = 1; ctx.stroke();
+        });
+
+        // Test points
+        testX.forEach((x, i) => {
+            ctx.beginPath(); ctx.arc(toX(x), toY(testY[i]), 3.5, 0, Math.PI*2);
+            ctx.fillStyle = C.purple; ctx.fill();
+        });
+
+        // Legend
+        ctx.font = '11px sans-serif';
+        const lx = pad.l + 8, ly = pad.t + 14;
+        ctx.fillStyle = C.orange; ctx.fillRect(lx, ly-4, 10, 10);
+        ctx.fillStyle = C.text; ctx.fillText('训练集', lx+14, ly+5);
+        ctx.fillStyle = C.purple; ctx.fillRect(lx+60, ly-4, 10, 10);
+        ctx.fillStyle = C.text; ctx.fillText('测试集', lx+74, ly+5);
+        ctx.strokeStyle = C.muted; ctx.lineWidth = 1; ctx.setLineDash([3,3]);
+        ctx.beginPath(); ctx.moveTo(lx+120, ly+1); ctx.lineTo(lx+140, ly+1); ctx.stroke();
+        ctx.setLineDash([]); ctx.fillStyle = C.text; ctx.fillText('真实函数', lx+144, ly+5);
+
+        // Status
+        const te = mse(trainX, trainY, coeffs);
+        const ve = mse(testX, testY, coeffs);
+        const status = document.getElementById('fitStatus');
+        let label = '', cls = '';
+        if (deg <= 2) { label = '欠拟合（高偏差）'; cls = 'warn'; }
+        else if (deg <= 5) { label = '适当拟合'; cls = 'ok'; }
+        else { label = '过拟合（高方差）'; cls = 'warn'; }
+        status.innerHTML = `<span class="info-chip">训练 MSE: ${te.toFixed(4)}</span>
+            <span class="info-chip">测试 MSE: ${ve.toFixed(4)}</span>
+            <span class="info-chip ${cls}">${label}</span>`;
+
+        // Error curves
+        drawErrorCurves(deg);
+    }
+
+    function drawErrorCurves(currentDeg) {
+        const {ctx, w, h} = getCtx('cvError');
+        const pad = {l:50, r:20, t:35, b:35};
+        const pw = w - pad.l - pad.r, ph = h - pad.t - pad.b;
+        ctx.clearRect(0,0,w,h);
+
+        const maxErr = Math.min(0.5, Math.max(...allTrainErr, ...allTestErr) * 1.2);
+        const toX = d => pad.l + (d-1)/14 * pw;
+        const toY = e => pad.t + (1 - e/maxErr) * ph;
+
+        // Grid
+        ctx.strokeStyle = C.border; ctx.lineWidth = 0.5;
+        for (let d = 1; d <= 15; d += 2) {
+            ctx.beginPath(); ctx.moveTo(toX(d), pad.t); ctx.lineTo(toX(d), pad.t+ph); ctx.stroke();
+        }
+
+        // Axes
+        ctx.strokeStyle = C.muted; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(pad.l, pad.t+ph); ctx.lineTo(pad.l+pw, pad.t+ph); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(pad.l, pad.t); ctx.lineTo(pad.l, pad.t+ph); ctx.stroke();
+
+        // Axis labels
+        ctx.font = '11px sans-serif'; ctx.fillStyle = C.muted; ctx.textAlign = 'center';
+        for (let d = 1; d <= 15; d += 2) ctx.fillText(d, toX(d), pad.t+ph+16);
+        ctx.fillText('多项式阶数', pad.l + pw/2, pad.t+ph+30);
+        ctx.textAlign = 'right';
+        for (let e = 0; e <= maxErr; e += 0.1) {
+            if (e > maxErr) break;
+            ctx.fillText(e.toFixed(1), pad.l-6, toY(e)+4);
+        }
+        ctx.save(); ctx.translate(14, pad.t+ph/2); ctx.rotate(-Math.PI/2);
+        ctx.textAlign = 'center'; ctx.fillText('MSE', 0, 0); ctx.restore();
+
+        // Train error line
+        ctx.strokeStyle = C.orange; ctx.lineWidth = 2;
+        ctx.beginPath();
+        allTrainErr.forEach((e, i) => {
+            const y = toY(Math.min(e, maxErr));
+            i === 0 ? ctx.moveTo(toX(i+1), y) : ctx.lineTo(toX(i+1), y);
+        });
+        ctx.stroke();
+
+        // Test error line
+        ctx.strokeStyle = C.purple; ctx.lineWidth = 2;
+        ctx.beginPath();
+        allTestErr.forEach((e, i) => {
+            const y = toY(Math.min(e, maxErr));
+            i === 0 ? ctx.moveTo(toX(i+1), y) : ctx.lineTo(toX(i+1), y);
+        });
+        ctx.stroke();
+
+        // Current degree marker
+        ctx.beginPath(); ctx.arc(toX(currentDeg), toY(Math.min(allTrainErr[currentDeg-1], maxErr)), 5, 0, Math.PI*2);
+        ctx.fillStyle = C.orange; ctx.fill();
+        ctx.beginPath(); ctx.arc(toX(currentDeg), toY(Math.min(allTestErr[currentDeg-1], maxErr)), 5, 0, Math.PI*2);
+        ctx.fillStyle = C.purple; ctx.fill();
+
+        // Vertical line at current
+        ctx.strokeStyle = 'rgba(22,199,154,0.4)'; ctx.lineWidth = 1; ctx.setLineDash([3,3]);
+        ctx.beginPath(); ctx.moveTo(toX(currentDeg), pad.t); ctx.lineTo(toX(currentDeg), pad.t+ph); ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Zones
+        ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
+        ctx.fillStyle = 'rgba(79,195,247,0.3)'; ctx.fillText('欠拟合区', toX(1.5), pad.t+14);
+        ctx.fillStyle = 'rgba(22,199,154,0.4)'; ctx.fillText('合适区', toX(4), pad.t+14);
+        ctx.fillStyle = 'rgba(255,82,82,0.3)'; ctx.fillText('过拟合区', toX(12), pad.t+14);
+
+        // Legend
+        ctx.textAlign = 'left';
+        const lx = pad.l + pw - 110, ly = pad.t + 12;
+        ctx.strokeStyle = C.orange; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(lx, ly); ctx.lineTo(lx+18, ly); ctx.stroke();
+        ctx.fillStyle = C.text; ctx.font = '11px sans-serif'; ctx.fillText('训练误差', lx+22, ly+4);
+        ctx.strokeStyle = C.purple;
+        ctx.beginPath(); ctx.moveTo(lx, ly+16); ctx.lineTo(lx+18, ly+16); ctx.stroke();
+        ctx.fillText('测试误差', lx+22, ly+20);
+    }
+
+    document.getElementById('sliderDegree').addEventListener('input', drawFitting);
+
+    /* ===== Section 2: L1 & L2 Regularization ===== */
+    let regType = 'L1';
+    const rng2 = MLPUtils.seededRandom(99);
+    // Generate "original" weights (no regularization)
+    const origWeights = Array.from({length: 50}, () => (rng2() - 0.5) * 4);
+
+    function getRegWeights(weights, lambda, type) {
+        return weights.map(w => {
+            if (type === 'L1') {
+                // Soft-thresholding
+                if (Math.abs(w) <= lambda) return 0;
+                return w > 0 ? w - lambda : w + lambda;
+            } else {
+                // L2: shrinkage
+                return w / (1 + lambda);
+            }
+        });
+    }
+
+    function drawHistogram() {
+        const lambda = +document.getElementById('sliderLambda').value / 100;
+        document.getElementById('valLambda').textContent = lambda.toFixed(2);
+        const regW = getRegWeights(origWeights, lambda, regType);
+
+        const {ctx, w, h} = getCtx('cvHist');
+        const pad = {l:45, r:15, t:35, b:35};
+        const pw = w - pad.l - pad.r, ph = h - pad.t - pad.b;
+        ctx.clearRect(0,0,w,h);
+
+        const bins = 25;
+        const binMin = -2.5, binMax = 2.5;
+        const binW = (binMax - binMin) / bins;
+
+        function makeBins(arr) {
+            const counts = new Array(bins).fill(0);
+            arr.forEach(v => {
+                const idx = Math.floor((v - binMin) / binW);
+                if (idx >= 0 && idx < bins) counts[idx]++;
+            });
+            return counts;
+        }
+
+        const origBins = makeBins(origWeights);
+        const regBins = makeBins(regW);
+        const maxCount = Math.max(...origBins, ...regBins, 1);
+        const barW = pw / bins;
+
+        // Axes
+        ctx.strokeStyle = C.muted; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(pad.l, pad.t+ph); ctx.lineTo(pad.l+pw, pad.t+ph); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(pad.l, pad.t); ctx.lineTo(pad.l, pad.t+ph); ctx.stroke();
+
+        // Original bars (semi-transparent)
+        origBins.forEach((count, i) => {
+            const bh = (count / maxCount) * ph;
+            ctx.fillStyle = 'rgba(79,195,247,0.25)';
+            ctx.fillRect(pad.l + i * barW + 1, pad.t + ph - bh, barW - 2, bh);
+            ctx.strokeStyle = 'rgba(79,195,247,0.4)'; ctx.lineWidth = 0.5;
+            ctx.strokeRect(pad.l + i * barW + 1, pad.t + ph - bh, barW - 2, bh);
+        });
+
+        // Regularized bars
+        const regColor = regType === 'L1' ? C.green : C.purple;
+        regBins.forEach((count, i) => {
+            const bh = (count / maxCount) * ph;
+            ctx.fillStyle = regType === 'L1' ? 'rgba(22,199,154,0.5)' : 'rgba(179,136,255,0.5)';
+            ctx.fillRect(pad.l + i * barW + 3, pad.t + ph - bh, barW - 6, bh);
+        });
+
+        // Axis labels
+        ctx.font = '10px sans-serif'; ctx.fillStyle = C.muted; ctx.textAlign = 'center';
+        for (let v = -2; v <= 2; v++) {
+            const x = pad.l + (v - binMin)/(binMax - binMin) * pw;
+            ctx.fillText(v.toFixed(0), x, pad.t+ph+14);
+        }
+        ctx.fillText('权重值', pad.l+pw/2, pad.t+ph+28);
+
+        // Zero line highlight
+        const zeroX = pad.l + (0 - binMin)/(binMax - binMin) * pw;
+        ctx.strokeStyle = 'rgba(255,215,64,0.4)'; ctx.lineWidth = 1; ctx.setLineDash([3,3]);
+        ctx.beginPath(); ctx.moveTo(zeroX, pad.t); ctx.lineTo(zeroX, pad.t+ph); ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Count non-zeros
+        const nZero = regW.filter(v => Math.abs(v) < 0.01).length;
+        ctx.font = '11px sans-serif'; ctx.textAlign = 'left';
+        ctx.fillStyle = C.text;
+        ctx.fillText(`零权重: ${nZero}/${regW.length}`, pad.l+8, pad.t+16);
+
+        // Legend
+        const lx = pad.l + pw - 130;
+        ctx.fillStyle = 'rgba(79,195,247,0.4)'; ctx.fillRect(lx, pad.t+6, 12, 12);
+        ctx.fillStyle = C.text; ctx.fillText('原始权重', lx+16, pad.t+16);
+        ctx.fillStyle = regType === 'L1' ? 'rgba(22,199,154,0.6)' : 'rgba(179,136,255,0.6)';
+        ctx.fillRect(lx, pad.t+22, 12, 12);
+        ctx.fillStyle = C.text; ctx.fillText(`${regType} 正则化后`, lx+16, pad.t+32);
+    }
+
+    function drawContour() {
+        const lambda = +document.getElementById('sliderLambda').value / 100;
+        const {ctx, w, h} = getCtx('cvContour');
+        const pad = {l:40, r:20, t:30, b:35};
+        const pw = w - pad.l - pad.r, ph = h - pad.t - pad.b;
+        ctx.clearRect(0,0,w,h);
+
+        const range = 3;
+        const toX = v => pad.l + (v + range)/(2*range) * pw;
+        const toY = v => pad.t + (1 - (v + range)/(2*range)) * ph;
+
+        // Draw loss contours (elliptical, center at 1.5, 1.0)
+        const cx = 1.5, cy = 1.0;
+        for (let level = 0.5; level <= 5; level += 0.5) {
+            ctx.strokeStyle = `rgba(255,171,64,${0.15 + level*0.03})`;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            for (let t = 0; t <= Math.PI*2; t += 0.05) {
+                const ex = cx + Math.sqrt(level) * 1.2 * Math.cos(t);
+                const ey = cy + Math.sqrt(level) * 0.8 * Math.sin(t);
+                t === 0 ? ctx.moveTo(toX(ex), toY(ey)) : ctx.lineTo(toX(ex), toY(ey));
+            }
+            ctx.closePath(); ctx.stroke();
+        }
+
+        // Constraint region
+        const constraintR = Math.max(0.3, 2.5 - lambda * 3);
+        if (regType === 'L1') {
+            // Diamond |w1| + |w2| <= r
+            ctx.fillStyle = 'rgba(22,199,154,0.12)';
+            ctx.strokeStyle = C.green; ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(toX(constraintR), toY(0));
+            ctx.lineTo(toX(0), toY(constraintR));
+            ctx.lineTo(toX(-constraintR), toY(0));
+            ctx.lineTo(toX(0), toY(-constraintR));
+            ctx.closePath(); ctx.fill(); ctx.stroke();
+        } else {
+            // Circle w1^2 + w2^2 <= r^2
+            ctx.fillStyle = 'rgba(179,136,255,0.12)';
+            ctx.strokeStyle = C.purple; ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(toX(0), toY(0), constraintR/(2*range) * pw, 0, Math.PI*2);
+            ctx.fill(); ctx.stroke();
+        }
+
+        // Optimal point (intersection of contour and constraint)
+        let optW1, optW2;
+        if (regType === 'L1') {
+            // L1 tends to push solutions to axes
+            if (lambda > 0.3) { optW1 = 0; optW2 = Math.min(constraintR, cy); }
+            else { optW1 = constraintR * 0.4; optW2 = constraintR * 0.6; }
+        } else {
+            const angle = Math.atan2(cy, cx);
+            optW1 = constraintR * Math.cos(angle) * 0.8;
+            optW2 = constraintR * Math.sin(angle) * 0.8;
+        }
+
+        // Unconstrained optimum
+        ctx.beginPath(); ctx.arc(toX(cx), toY(cy), 5, 0, Math.PI*2);
+        ctx.fillStyle = C.orange; ctx.fill();
+        ctx.font = '10px sans-serif'; ctx.fillStyle = C.orange; ctx.textAlign = 'left';
+        ctx.fillText('w*无约束', toX(cx)+8, toY(cy)+4);
+
+        // Constrained optimum
+        ctx.beginPath(); ctx.arc(toX(optW1), toY(optW2), 5, 0, Math.PI*2);
+        ctx.fillStyle = regType === 'L1' ? C.green : C.purple; ctx.fill();
+        ctx.fillStyle = regType === 'L1' ? C.green : C.purple;
+        ctx.fillText(`w*${regType}`, toX(optW1)+8, toY(optW2)+4);
+
+        // Axes
+        ctx.strokeStyle = C.muted; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(pad.l, toY(0)); ctx.lineTo(pad.l+pw, toY(0)); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(toX(0), pad.t); ctx.lineTo(toX(0), pad.t+ph); ctx.stroke();
+
+        ctx.font = '11px sans-serif'; ctx.fillStyle = C.muted; ctx.textAlign = 'center';
+        ctx.fillText('w₁', pad.l+pw-5, toY(0)-6);
+        ctx.fillText('w₂', toX(0)+12, pad.t+12);
+
+        // Shape label
+        ctx.font = '11px sans-serif'; ctx.textAlign = 'left';
+        ctx.fillStyle = regType === 'L1' ? C.green : C.purple;
+        const shapeLabel = regType === 'L1' ? '菱形约束区 |w₁|+|w₂| ≤ r' : '圆形约束区 w₁²+w₂² ≤ r²';
+        ctx.fillText(shapeLabel, pad.l+6, pad.t+16);
+    }
+
+    document.getElementById('sliderLambda').addEventListener('input', () => { drawHistogram(); drawContour(); });
+    document.getElementById('btnL1').addEventListener('click', () => {
+        regType = 'L1';
+        document.getElementById('btnL1').classList.add('active');
+        document.getElementById('btnL2').classList.remove('active');
+        drawHistogram(); drawContour();
+    });
+    document.getElementById('btnL2').addEventListener('click', () => {
+        regType = 'L2';
+        document.getElementById('btnL2').classList.add('active');
+        document.getElementById('btnL1').classList.remove('active');
+        drawHistogram(); drawContour();
+    });
+
+    /* ===== Section 3: Dropout ===== */
+    const layers = [4, 6, 6, 6, 3];
+    let dropMask = null;
+    let dropCounter = 0;
+    let dropAutoTimer = null;
+
+    function generateDropoutMask(rate) {
+        const rng = Math.random;
+        const mask = [];
+        for (let l = 0; l < layers.length; l++) {
+            mask[l] = [];
+            for (let n = 0; n < layers[l]; n++) {
+                // Don't drop input or output
+                if (l === 0 || l === layers.length - 1) mask[l][n] = true;
+                else mask[l][n] = rng() > rate;
+            }
+        }
+        return mask;
+    }
+
+    function drawDropout() {
+        const rate = +document.getElementById('sliderDropout').value / 100;
+        document.getElementById('valDropout').textContent = rate.toFixed(2);
+
+        if (!dropMask) dropMask = generateDropoutMask(rate);
+
+        const {ctx, w, h} = getCtx('cvDropout');
+        ctx.clearRect(0,0,w,h);
+        const pad = {l:40, r:40, t:25, b:25};
+        const pw = w - pad.l - pad.r, ph = h - pad.t - pad.b;
+
+        const nLayers = layers.length;
+        const layerX = layers.map((_, i) => pad.l + i/(nLayers-1) * pw);
+        const neuronR = 14;
+
+        // Positions
+        const positions = [];
+        for (let l = 0; l < nLayers; l++) {
+            positions[l] = [];
+            const n = layers[l];
+            const totalH = (n-1) * (neuronR * 3);
+            const startY = pad.t + ph/2 - totalH/2;
+            for (let j = 0; j < n; j++) {
+                positions[l][j] = { x: layerX[l], y: startY + j * neuronR * 3 };
+            }
+        }
+
+        // Draw connections
+        for (let l = 0; l < nLayers - 1; l++) {
+            for (let i = 0; i < layers[l]; i++) {
+                for (let j = 0; j < layers[l+1]; j++) {
+                    const fromActive = dropMask[l][i];
+                    const toActive = dropMask[l+1][j];
+                    const active = fromActive && toActive;
+                    ctx.strokeStyle = active ? 'rgba(22,199,154,0.3)' : 'rgba(42,42,74,0.2)';
+                    ctx.lineWidth = active ? 1.5 : 0.5;
+                    ctx.beginPath();
+                    ctx.moveTo(positions[l][i].x + neuronR, positions[l][i].y);
+                    ctx.lineTo(positions[l+1][j].x - neuronR, positions[l+1][j].y);
+                    ctx.stroke();
+                }
+            }
+        }
+
+        // Draw neurons
+        for (let l = 0; l < nLayers; l++) {
+            for (let j = 0; j < layers[l]; j++) {
+                const {x, y} = positions[l][j];
+                const active = dropMask[l][j];
+
+                ctx.beginPath(); ctx.arc(x, y, neuronR, 0, Math.PI*2);
+                if (active) {
+                    const colors = [C.blue, C.green, C.green, C.green, C.orange];
+                    ctx.fillStyle = colors[l];
+                    ctx.globalAlpha = 1;
+                } else {
+                    ctx.fillStyle = '#333';
+                    ctx.globalAlpha = 0.4;
+                }
+                ctx.fill();
+                ctx.strokeStyle = active ? 'rgba(255,255,255,0.3)' : 'rgba(255,82,82,0.5)';
+                ctx.lineWidth = active ? 1 : 2;
+                ctx.stroke();
+                ctx.globalAlpha = 1;
+
+                // Cross for dropped
+                if (!active) {
+                    ctx.strokeStyle = C.red; ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.moveTo(x - 7, y - 7); ctx.lineTo(x + 7, y + 7);
+                    ctx.moveTo(x + 7, y - 7); ctx.lineTo(x - 7, y + 7);
+                    ctx.stroke();
+                }
+            }
+        }
+
+        // Layer labels
+        ctx.font = '11px sans-serif'; ctx.textAlign = 'center'; ctx.fillStyle = C.muted;
+        const layerNames = ['输入层', '隐藏层1', '隐藏层2', '隐藏层3', '输出层'];
+        layerX.forEach((x, i) => ctx.fillText(layerNames[i], x, h - 6));
+
+        // Count active
+        let totalHidden = 0, activeHidden = 0;
+        for (let l = 1; l < nLayers - 1; l++) {
+            for (let j = 0; j < layers[l]; j++) {
+                totalHidden++;
+                if (dropMask[l][j]) activeHidden++;
+            }
+        }
+        ctx.font = '11px sans-serif'; ctx.textAlign = 'right'; ctx.fillStyle = C.text;
+        ctx.fillText(`活跃神经元: ${activeHidden}/${totalHidden}`, w - pad.r - 5, pad.t + 14);
+
+        document.getElementById('dropInfo').textContent = `子网络 #${dropCounter}`;
+    }
+
+    document.getElementById('btnDropForward').addEventListener('click', () => {
+        const rate = +document.getElementById('sliderDropout').value / 100;
+        dropCounter++;
+        dropMask = generateDropoutMask(rate);
+        drawDropout();
+    });
+
+    document.getElementById('sliderDropout').addEventListener('input', () => {
+        const rate = +document.getElementById('sliderDropout').value / 100;
+        dropCounter++;
+        dropMask = generateDropoutMask(rate);
+        drawDropout();
+    });
+
+    let dropAutoPlaying = false;
+    document.getElementById('btnDropAuto').addEventListener('click', function() {
+        dropAutoPlaying = !dropAutoPlaying;
+        this.textContent = dropAutoPlaying ? '停止' : '自动播放';
+        this.classList.toggle('btn-primary', dropAutoPlaying);
+        if (dropAutoPlaying) {
+            dropAutoTimer = setInterval(() => {
+                const rate = +document.getElementById('sliderDropout').value / 100;
+                dropCounter++;
+                dropMask = generateDropoutMask(rate);
+                drawDropout();
+            }, 600);
+        } else {
+            clearInterval(dropAutoTimer);
+        }
+    });
+
+    /* ===== Section 4: Early Stopping & Batch Normalization ===== */
+    let trainAnim = null;
+    let trainEpoch = 0;
+    const maxEpochs = 200;
+    let trainLosses = [], valLosses = [];
+    let earlyStopped = false;
+    let bestEpoch = 0;
+    let bnLayer = 1;
+
+    // Pre-generate realistic training curves
+    function genTrainingCurves() {
+        trainLosses = []; valLosses = [];
+        const rng = MLPUtils.seededRandom(42 + Math.floor(Math.random() * 100));
+        for (let e = 0; e < maxEpochs; e++) {
+            const t = e / maxEpochs;
+            const tLoss = 2.0 * Math.exp(-4 * t) + 0.05 + (rng() - 0.5) * 0.02;
+            // Val loss: decreases then increases
+            const vBase = 2.2 * Math.exp(-3.5 * t) + 0.08;
+            const vRise = t > 0.35 ? 0.6 * Math.pow(t - 0.35, 1.5) : 0;
+            const vLoss = vBase + vRise + (rng() - 0.5) * 0.03;
+            trainLosses.push(Math.max(0.01, tLoss));
+            valLosses.push(Math.max(0.01, vLoss));
+        }
+        // Find best epoch
+        bestEpoch = 0;
+        let minVal = Infinity;
+        for (let e = 0; e < maxEpochs; e++) {
+            if (valLosses[e] < minVal) { minVal = valLosses[e]; bestEpoch = e; }
+        }
+    }
+
+    function drawEarlyStopping() {
+        const {ctx, w, h} = getCtx('cvEarly');
+        const pad = {l:50, r:20, t:30, b:35};
+        const pw = w - pad.l - pad.r, ph = h - pad.t - pad.b;
+        ctx.clearRect(0,0,w,h);
+
+        if (trainLosses.length === 0) {
+            ctx.font = '14px sans-serif'; ctx.fillStyle = C.muted; ctx.textAlign = 'center';
+            ctx.fillText('点击"开始训练"观察损失曲线', w/2, h/2);
+            return;
+        }
+
+        const maxLoss = Math.max(...trainLosses.slice(0, trainEpoch+1), ...valLosses.slice(0, trainEpoch+1)) * 1.1;
+        const toX = e => pad.l + e/(maxEpochs-1) * pw;
+        const toY = v => pad.t + (1 - v/maxLoss) * ph;
+
+        // Axes
+        ctx.strokeStyle = C.muted; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(pad.l, pad.t+ph); ctx.lineTo(pad.l+pw, pad.t+ph); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(pad.l, pad.t); ctx.lineTo(pad.l, pad.t+ph); ctx.stroke();
+
+        ctx.font = '10px sans-serif'; ctx.fillStyle = C.muted; ctx.textAlign = 'center';
+        for (let e = 0; e <= maxEpochs; e += 50) ctx.fillText(e, toX(e), pad.t+ph+14);
+        ctx.fillText('Epoch', pad.l+pw/2, pad.t+ph+28);
+
+        ctx.textAlign = 'right';
+        for (let v = 0; v <= maxLoss; v += 0.5) {
+            if (v > maxLoss) break;
+            ctx.fillText(v.toFixed(1), pad.l-6, toY(v)+4);
+        }
+
+        // Train loss
+        ctx.strokeStyle = C.blue; ctx.lineWidth = 2;
+        ctx.beginPath();
+        for (let e = 0; e <= trainEpoch; e++) {
+            e === 0 ? ctx.moveTo(toX(e), toY(trainLosses[e])) : ctx.lineTo(toX(e), toY(trainLosses[e]));
+        }
+        ctx.stroke();
+
+        // Val loss
+        ctx.strokeStyle = C.orange; ctx.lineWidth = 2;
+        ctx.beginPath();
+        for (let e = 0; e <= trainEpoch; e++) {
+            e === 0 ? ctx.moveTo(toX(e), toY(valLosses[e])) : ctx.lineTo(toX(e), toY(valLosses[e]));
+        }
+        ctx.stroke();
+
+        // Best epoch line
+        if (trainEpoch >= bestEpoch) {
+            ctx.strokeStyle = C.green; ctx.lineWidth = 2; ctx.setLineDash([5,3]);
+            ctx.beginPath(); ctx.moveTo(toX(bestEpoch), pad.t); ctx.lineTo(toX(bestEpoch), pad.t+ph); ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.font = '11px sans-serif'; ctx.fillStyle = C.green; ctx.textAlign = 'center';
+            ctx.fillText(`最佳停止点 (${bestEpoch})`, toX(bestEpoch), pad.t - 6);
+        }
+
+        // Shading for overfitting zone
+        if (trainEpoch > bestEpoch) {
+            ctx.fillStyle = 'rgba(255,82,82,0.06)';
+            ctx.fillRect(toX(bestEpoch), pad.t, toX(trainEpoch) - toX(bestEpoch), ph);
+            ctx.font = '10px sans-serif'; ctx.fillStyle = 'rgba(255,82,82,0.5)'; ctx.textAlign = 'center';
+            ctx.fillText('过拟合区域', (toX(bestEpoch) + toX(Math.min(trainEpoch, maxEpochs-1)))/2, pad.t + 18);
+        }
+
+        // Legend
+        ctx.textAlign = 'left'; ctx.font = '11px sans-serif';
+        const lx = pad.l + pw - 100, ly = pad.t + 10;
+        ctx.strokeStyle = C.blue; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(lx, ly); ctx.lineTo(lx+18, ly); ctx.stroke();
+        ctx.fillStyle = C.text; ctx.fillText('训练损失', lx+22, ly+4);
+        ctx.strokeStyle = C.orange;
+        ctx.beginPath(); ctx.moveTo(lx, ly+16); ctx.lineTo(lx+18, ly+16); ctx.stroke();
+        ctx.fillText('验证损失', lx+22, ly+20);
+    }
+
+    // Batch Normalization visualization
+    function genLayerActivations(layer, normalized) {
+        const rng = MLPUtils.seededRandom(layer * 37 + 7);
+        const n = 200;
+        const vals = [];
+        // Raw activations: shift and wide spread
+        const shift = [0, 2.5, -1.8, 4.0][layer] || 0;
+        const spread = [1, 3.5, 2.8, 5.0][layer] || 1;
+        for (let i = 0; i < n; i++) {
+            // Box-Muller for Gaussian
+            const u1 = rng(), u2 = rng();
+            const z = Math.sqrt(-2 * Math.log(u1 + 1e-10)) * Math.cos(2 * Math.PI * u2);
+            if (normalized) {
+                vals.push(z * 0.8); // centered, unit-ish variance
+            } else {
+                vals.push(z * spread + shift);
+            }
+        }
+        return vals;
+    }
+
+    function drawBN() {
+        const {ctx, w, h} = getCtx('cvBN');
+        const pad = {l:10, r:10, t:25, b:30};
+        const pw = w - pad.l - pad.r, ph = h - pad.t - pad.b;
+        ctx.clearRect(0,0,w,h);
+
+        const halfW = pw / 2 - 10;
+        const binRange = 8;
+        const bins = 30;
+        const binWidth = (2 * binRange) / bins;
+
+        function drawHist(vals, ox, color, label) {
+            const counts = new Array(bins).fill(0);
+            vals.forEach(v => {
+                const idx = Math.floor((v + binRange) / binWidth);
+                if (idx >= 0 && idx < bins) counts[idx]++;
+            });
+            const maxC = Math.max(...counts, 1);
+            const barW = halfW / bins;
+
+            // Bars
+            counts.forEach((c, i) => {
+                const bh = (c / maxC) * (ph - 10);
+                ctx.fillStyle = color;
+                ctx.fillRect(ox + i * barW + 0.5, pad.t + ph - bh, barW - 1, bh);
+            });
+
+            // Zero line
+            const zeroX = ox + (0 + binRange) / (2 * binRange) * halfW;
+            ctx.strokeStyle = 'rgba(255,215,64,0.4)'; ctx.lineWidth = 1; ctx.setLineDash([3,3]);
+            ctx.beginPath(); ctx.moveTo(zeroX, pad.t); ctx.lineTo(zeroX, pad.t + ph); ctx.stroke();
+            ctx.setLineDash([]);
+
+            // Label
+            ctx.font = '11px sans-serif'; ctx.fillStyle = C.text; ctx.textAlign = 'center';
+            ctx.fillText(label, ox + halfW/2, pad.t + 14);
+
+            // X axis values
+            ctx.font = '9px sans-serif'; ctx.fillStyle = C.muted;
+            for (let v = -6; v <= 6; v += 3) {
+                const x = ox + (v + binRange) / (2 * binRange) * halfW;
+                ctx.fillText(v, x, pad.t + ph + 14);
+            }
+        }
+
+        const rawVals = genLayerActivations(bnLayer, false);
+        const normVals = genLayerActivations(bnLayer, true);
+
+        drawHist(rawVals, pad.l, 'rgba(255,82,82,0.45)', `层${bnLayer} BN前（偏移大）`);
+        drawHist(normVals, pad.l + halfW + 20, 'rgba(22,199,154,0.5)', `层${bnLayer} BN后（标准化）`);
+
+        // Divider
+        ctx.strokeStyle = C.border; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(pad.l + halfW + 10, pad.t); ctx.lineTo(pad.l + halfW + 10, pad.t + ph); ctx.stroke();
+
+        // Stats
+        const rawMean = rawVals.reduce((a,b)=>a+b,0) / rawVals.length;
+        const rawStd = Math.sqrt(rawVals.reduce((a,v)=>a+(v-rawMean)**2,0) / rawVals.length);
+        const normMean = normVals.reduce((a,b)=>a+b,0) / normVals.length;
+        const normStd = Math.sqrt(normVals.reduce((a,v)=>a+(v-normMean)**2,0) / normVals.length);
+
+        ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
+        ctx.fillStyle = C.red;
+        ctx.fillText(`μ=${rawMean.toFixed(1)} σ=${rawStd.toFixed(1)}`, pad.l + halfW/2, pad.t + ph + 26);
+        ctx.fillStyle = C.green;
+        ctx.fillText(`μ=${normMean.toFixed(2)} σ=${normStd.toFixed(2)}`, pad.l + halfW + 20 + halfW/2, pad.t + ph + 26);
+    }
+
+    document.querySelectorAll('[data-bn]').forEach(btn => {
+        btn.addEventListener('click', function() {
+            document.querySelectorAll('[data-bn]').forEach(b => b.classList.remove('active'));
+            this.classList.add('active');
+            bnLayer = +this.dataset.bn;
+            drawBN();
+        });
+    });
+
+    document.getElementById('btnTrain').addEventListener('click', function() {
+        if (trainAnim) return;
+        genTrainingCurves();
+        trainEpoch = 0;
+        earlyStopped = false;
+        document.getElementById('earlyInfo').textContent = '训练中...';
+        document.getElementById('earlyInfo').className = 'info-chip';
+
+        trainAnim = setInterval(() => {
+            trainEpoch++;
+            drawEarlyStopping();
+
+            if (trainEpoch >= bestEpoch && !earlyStopped) {
+                earlyStopped = true;
+                document.getElementById('earlyInfo').textContent = `Early Stop @ epoch ${bestEpoch}`;
+                document.getElementById('earlyInfo').className = 'info-chip ok';
+            }
+
+            if (trainEpoch >= maxEpochs - 1) {
+                clearInterval(trainAnim);
+                trainAnim = null;
+                if (trainEpoch > bestEpoch + 10) {
+                    document.getElementById('earlyInfo').textContent = `过拟合！应在 epoch ${bestEpoch} 停止`;
+                    document.getElementById('earlyInfo').className = 'info-chip warn';
+                }
+            }
+        }, 30);
+    });
+
+    document.getElementById('btnResetTrain').addEventListener('click', () => {
+        if (trainAnim) { clearInterval(trainAnim); trainAnim = null; }
+        trainEpoch = 0; trainLosses = []; valLosses = [];
+        earlyStopped = false;
+        document.getElementById('earlyInfo').textContent = '等待开始...';
+        document.getElementById('earlyInfo').className = 'info-chip ok';
+        drawEarlyStopping();
+    });
+
+    /* ===== Initial Draw ===== */
+    function initAll() {
+        drawFitting();
+        drawHistogram();
+        drawContour();
+        drawDropout();
+        drawEarlyStopping();
+        drawBN();
+    }
+
+    initAll();
+
+    // Redraw on resize
+    let resizeTimer;
+    window.addEventListener('resize', () => {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(initAll, 200);
+    });
+});
+</script>
+</body>
+</html>

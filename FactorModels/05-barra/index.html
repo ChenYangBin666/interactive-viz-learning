@@ -1,0 +1,1203 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Barra 风险模型 — 因子模型</title>
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" defer>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" defer></script>
+    <script src="../shared/scripts/nav.js" defer></script>
+    <style>
+        /* ===== Page-specific Styles ===== */
+        .model-compare-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 1rem;
+            margin: 1rem 0;
+        }
+        .model-type-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1.2rem;
+            text-align: center;
+            transition: all 0.3s;
+            cursor: default;
+        }
+        .model-type-card.active-card {
+            border-color: var(--accent-green);
+            box-shadow: var(--shadow-glow);
+        }
+        .model-type-card .card-icon {
+            font-size: 2rem;
+            margin-bottom: 0.5rem;
+        }
+        .model-type-card h4 { margin-bottom: 0.3rem; }
+        .model-type-card p { font-size: 0.82rem; margin: 0; }
+
+        .factor-category-row {
+            display: flex; gap: 0.75rem; flex-wrap: wrap; margin: 1rem 0;
+        }
+        .factor-cat-badge {
+            display: inline-flex; align-items: center; gap: 0.4rem;
+            padding: 0.4rem 1rem; border-radius: 20px;
+            font-size: 0.85rem; font-weight: 600;
+        }
+        .factor-cat-badge.country { background: rgba(79,195,247,0.15); color: var(--accent-blue); }
+        .factor-cat-badge.industry { background: rgba(255,171,64,0.15); color: var(--accent-orange); }
+        .factor-cat-badge.style { background: rgba(22,199,154,0.15); color: var(--accent-green); }
+
+        /* Matrix viz canvas */
+        .matrix-canvas-wrap {
+            position: relative;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+        }
+        .matrix-canvas-wrap canvas { display: block; width: 100%; }
+
+        /* Style factor cards grid */
+        .style-factors-grid {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 0.6rem;
+            margin: 1rem 0;
+        }
+        .sf-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            padding: 0.7rem;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.25s;
+            font-size: 0.82rem;
+        }
+        .sf-card:hover, .sf-card.active {
+            border-color: var(--accent-green);
+            background: rgba(22,199,154,0.08);
+        }
+        .sf-card .sf-icon { font-size: 1.3rem; margin-bottom: 0.25rem; }
+        .sf-card .sf-name { font-weight: 600; color: var(--text-primary); }
+
+        .sf-detail-box {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1.2rem;
+            margin-top: 0.75rem;
+            min-height: 80px;
+        }
+        .sf-detail-box h4 { color: var(--accent-green); }
+
+        .radar-controls { display: flex; gap: 0.75rem; align-items: center; margin: 0.75rem 0; flex-wrap: wrap; }
+        .radar-controls select {
+            background: var(--bg-secondary); color: var(--text-primary);
+            border: 1px solid var(--border-color); border-radius: var(--radius-sm);
+            padding: 0.4rem 0.8rem; font-family: inherit; font-size: 0.85rem;
+            cursor: pointer;
+        }
+
+        /* Heatmap section */
+        .heatmap-wrap {
+            position: relative;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+        }
+        .heatmap-wrap canvas { display: block; width: 100%; }
+        .heatmap-legend {
+            display: flex; justify-content: center; align-items: center;
+            gap: 0.5rem; padding: 0.5rem; font-size: 0.78rem; color: var(--text-secondary);
+        }
+        .heatmap-gradient {
+            width: 160px; height: 14px; border-radius: 3px;
+            background: linear-gradient(to right, #4fc3f7, #1a1a2e, #ff5252);
+        }
+
+        /* Covariance decomposition */
+        .decomp-step-btns { display: flex; gap: 0.5rem; flex-wrap: wrap; margin: 0.75rem 0; }
+        .cov-compare {
+            display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-top: 1rem;
+        }
+        .cov-compare canvas { display: block; width: 100%; border-radius: var(--radius-sm); }
+        .cov-label {
+            text-align: center; font-size: 0.82rem; color: var(--text-secondary);
+            margin-top: 0.3rem;
+        }
+
+        /* Risk decomposition */
+        .weight-sliders {
+            display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem 1.5rem;
+            margin: 0.75rem 0;
+        }
+        .risk-bar-wrap {
+            position: relative;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+        }
+        .risk-bar-wrap canvas { display: block; width: 100%; }
+        .risk-stats {
+            display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.75rem; margin-top: 0.75rem;
+        }
+        .risk-stat-card {
+            background: var(--bg-secondary); border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm); padding: 0.8rem; text-align: center;
+        }
+        .risk-stat-card .stat-val {
+            font-family: var(--font-mono); font-size: 1.3rem;
+            color: var(--accent-green); font-weight: 700;
+        }
+        .risk-stat-card .stat-label {
+            font-size: 0.78rem; color: var(--text-secondary); margin-top: 0.2rem;
+        }
+
+        @media (max-width: 1024px) {
+            .model-compare-grid { grid-template-columns: 1fr; }
+            .style-factors-grid { grid-template-columns: repeat(3, 1fr); }
+            .cov-compare { grid-template-columns: 1fr; }
+            .weight-sliders { grid-template-columns: 1fr; }
+        }
+        @media (max-width: 768px) {
+            .style-factors-grid { grid-template-columns: repeat(2, 1fr); }
+            .risk-stats { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="page-container">
+
+    <!-- =============== Section 1: Barra 模型概述 =============== -->
+    <section class="section" id="sec-overview">
+        <div class="section-title">
+            <div class="icon">1</div>
+            <h2>Barra 模型概述</h2>
+        </div>
+
+        <p>Barra 风险模型是业界最广泛使用的<strong>结构化风险模型</strong>（Structural Risk Model），由 MSCI/Barra 开发。与统计因子模型（PCA）不同，Barra 使用经济直觉预定义因子，并通过横截面回归估计因子收益。</p>
+
+        <div class="info-box success">
+            <p><strong>核心方程：</strong> $$r_i = \sum_{k=1}^{K} X_{ik} \cdot f_k + \varepsilon_i$$
+            其中 \(r_i\) 为股票 \(i\) 的超额收益，\(X_{ik}\) 为因子暴露，\(f_k\) 为因子收益，\(\varepsilon_i\) 为特异性收益。</p>
+        </div>
+
+        <p>用矩阵形式表示：<strong>r = X &middot; f + &epsilon;</strong>，其中 X 是 N&times;K 的因子暴露矩阵。</p>
+
+        <div class="matrix-canvas-wrap" style="margin:1rem 0;">
+            <canvas id="cvs-matrix-overview" height="260"></canvas>
+        </div>
+
+        <h3 style="margin-top:1.5rem;">三类风险模型对比</h3>
+        <div class="model-compare-grid">
+            <div class="model-type-card">
+                <div class="card-icon">📉</div>
+                <h4>统计模型</h4>
+                <p>PCA 提取因子，因子无经济含义，难以解释</p>
+            </div>
+            <div class="model-type-card">
+                <div class="card-icon">📚</div>
+                <h4>基本面模型</h4>
+                <p>Fama-French 等，少量宏观/风格因子，时间序列回归</p>
+            </div>
+            <div class="model-type-card active-card">
+                <div class="card-icon">🏗</div>
+                <h4>结构化模型 (Barra)</h4>
+                <p>预定义数十个因子，横截面回归，覆盖国家/行业/风格</p>
+            </div>
+        </div>
+
+        <h3 style="margin-top:1.5rem;">Barra 因子类别</h3>
+        <div class="factor-category-row">
+            <span class="factor-cat-badge country">🌍 国家因子</span>
+            <span class="factor-cat-badge industry">🏭 行业因子</span>
+            <span class="factor-cat-badge style">📐 风格因子</span>
+        </div>
+
+        <div class="info-box" style="margin-top:1rem;">
+            <p><strong>与 Fama-French 对比：</strong>Barra 模型使用更多因子（30-70个），采用横截面回归（每日估计因子收益），暴露矩阵每月更新，能精确分解每只股票的风险来源。Fama-French 使用3-5个因子，采用时间序列回归。</p>
+        </div>
+    </section>
+
+    <!-- =============== Section 2: 风格因子详解 =============== -->
+    <section class="section" id="sec-style-factors">
+        <div class="section-title">
+            <div class="icon">2</div>
+            <h2>风格因子详解</h2>
+        </div>
+
+        <p>Barra CNE5/CNE6 模型中定义了约 10 个风格因子，每个因子捕捉股票的某种系统性风险特征。点击下方卡片查看详情。</p>
+
+        <div class="style-factors-grid" id="sf-grid"></div>
+        <div class="sf-detail-box" id="sf-detail">
+            <p class="text-muted">请点击上方因子卡片查看详细说明</p>
+        </div>
+
+        <h3 style="margin-top:1.5rem;">因子暴露雷达图</h3>
+        <div class="radar-controls">
+            <label>选择股票类型：</label>
+            <select id="radar-stock-type">
+                <option value="growth">成长股</option>
+                <option value="value">价值股</option>
+                <option value="small">小盘股</option>
+                <option value="large">大盘蓝筹</option>
+                <option value="momentum">动量股</option>
+                <option value="defensive">防御型</option>
+            </select>
+        </div>
+        <div class="matrix-canvas-wrap">
+            <canvas id="cvs-radar" height="400"></canvas>
+        </div>
+    </section>
+
+    <!-- =============== Section 3: 因子暴露矩阵 =============== -->
+    <section class="section" id="sec-exposure-matrix">
+        <div class="section-title">
+            <div class="icon">3</div>
+            <h2>因子暴露矩阵</h2>
+        </div>
+
+        <p>因子暴露矩阵 X 是 Barra 模型的核心输入。每行代表一只股票，每列代表一个因子。数值经过 Z-score 标准化（均值0，标准差1），正值表示正暴露，负值表示负暴露。</p>
+
+        <div class="info-box">
+            <p><strong>Z-score 标准化：</strong> $$z_{ik} = \frac{x_{ik} - \bar{x}_k}{\sigma_k}$$
+            将原始因子值转化为标准化暴露，使不同因子可以比较。</p>
+        </div>
+
+        <p class="text-sm text-muted" style="margin-top:0.5rem;">点击股票名称高亮该行 | 点击因子列头按该因子排序</p>
+
+        <div class="heatmap-wrap" style="margin-top:0.75rem;">
+            <canvas id="cvs-heatmap" height="420"></canvas>
+        </div>
+        <div class="heatmap-legend">
+            <span>-3.0 (负暴露)</span>
+            <div class="heatmap-gradient"></div>
+            <span>+3.0 (正暴露)</span>
+        </div>
+    </section>
+
+    <!-- =============== Section 4: 协方差矩阵分解 =============== -->
+    <section class="section" id="sec-covariance">
+        <div class="section-title">
+            <div class="icon">4</div>
+            <h2>协方差矩阵分解</h2>
+        </div>
+
+        <p>Barra 模型的关键优势在于将高维的股票协方差矩阵分解为低维的因子协方差矩阵，大幅降低估计难度。</p>
+
+        <div class="info-box success">
+            <p><strong>核心公式：</strong> $$V = X \cdot F \cdot X^\top + \Delta$$
+            其中 V 为 N&times;N 股票协方差矩阵，F 为 K&times;K 因子协方差矩阵，&Delta; 为 N&times;N 对角特异性方差矩阵。</p>
+        </div>
+
+        <p>对于 3000 只股票，直接估计协方差矩阵需要约 450 万个参数；而 Barra 模型只需估计因子协方差（约几百个参数）+ 特异性方差（3000 个），大幅减少噪声。</p>
+
+        <h3 style="margin-top:1rem;">分步可视化</h3>
+        <div class="decomp-step-btns">
+            <button class="btn btn-sm active" data-step="0">X (暴露矩阵)</button>
+            <button class="btn btn-sm" data-step="1">F (因子协方差)</button>
+            <button class="btn btn-sm" data-step="2">X&middot;F&middot;X'</button>
+            <button class="btn btn-sm" data-step="3">&Delta; (特异方差)</button>
+            <button class="btn btn-sm" data-step="4">V = X&middot;F&middot;X' + &Delta;</button>
+        </div>
+        <div class="matrix-canvas-wrap">
+            <canvas id="cvs-decomp" height="350"></canvas>
+        </div>
+
+        <h3 style="margin-top:1.5rem;">样本协方差 vs Barra 模型协方差</h3>
+        <p class="text-sm text-muted">左侧：直接用历史收益估计的样本协方差（噪声大）。右侧：Barra 结构化模型估计（结构清晰）。</p>
+        <div class="cov-compare">
+            <div>
+                <canvas id="cvs-cov-sample" height="250"></canvas>
+                <div class="cov-label">样本协方差矩阵（噪声大）</div>
+            </div>
+            <div>
+                <canvas id="cvs-cov-barra" height="250"></canvas>
+                <div class="cov-label">Barra 模型协方差（结构化）</div>
+            </div>
+        </div>
+    </section>
+
+    <!-- =============== Section 5: 风险预测与应用 =============== -->
+    <section class="section" id="sec-risk">
+        <div class="section-title">
+            <div class="icon">5</div>
+            <h2>风险预测与应用</h2>
+        </div>
+
+        <p>给定组合权重 w，组合方差可分解为因子风险和特异性风险：</p>
+        <div class="info-box success">
+            <p>$$\sigma^2_p = w^\top V w = w^\top X F X^\top w + w^\top \Delta w = \sigma^2_{\text{factor}} + \sigma^2_{\text{specific}}$$</p>
+        </div>
+
+        <p>调整下方股票权重，观察风险分解的变化：</p>
+
+        <div class="weight-sliders" id="weight-sliders"></div>
+
+        <div class="risk-bar-wrap" style="margin-top:1rem;">
+            <canvas id="cvs-risk-bar" height="360"></canvas>
+        </div>
+
+        <div class="risk-stats" id="risk-stats">
+            <div class="risk-stat-card">
+                <div class="stat-val" id="stat-total">--</div>
+                <div class="stat-label">组合总风险 (年化%)</div>
+            </div>
+            <div class="risk-stat-card">
+                <div class="stat-val" id="stat-factor">--</div>
+                <div class="stat-label">因子风险 (年化%)</div>
+            </div>
+            <div class="risk-stat-card">
+                <div class="stat-val" id="stat-specific">--</div>
+                <div class="stat-label">特异风险 (年化%)</div>
+            </div>
+        </div>
+
+        <div class="info-box" style="margin-top:1.2rem;">
+            <p><strong>应用场景：</strong>1) <em>组合构建</em>：在目标因子暴露约束下最小化风险；2) <em>风险预算</em>：按因子分配风险限额；3) <em>跟踪误差</em>：控制相对基准的偏离。</p>
+        </div>
+    </section>
+
+</div><!-- /page-container -->
+
+<script>
+// =====================================================================
+// DATA & CONSTANTS
+// =====================================================================
+const COLORS = {
+    green: '#16c79a', blue: '#4fc3f7', purple: '#b388ff',
+    orange: '#ffab40', red: '#ff5252', yellow: '#ffd740',
+    pink: '#ff80ab', bg: '#1a1a2e', bgSec: '#16213e',
+    bgCard: '#0f3460', border: '#2a2a4a', textP: '#e8e8e8',
+    textS: '#a8a8b8', textM: '#6c6c7c'
+};
+
+const STYLE_FACTORS = [
+    { id:'size', name:'市值', icon:'📏', desc:'以流通市值的对数衡量。大市值股票暴露为正，小市值为负。', calc:'ln(流通市值)', intuition:'大/小盘效应，小盘股历史上有超额收益但波动更大。' },
+    { id:'value', name:'价值', icon:'💰', desc:'综合 B/P、E/P、CF/P 等指标衡量股票的相对便宜程度。', calc:'Book-to-Price, Earnings-to-Price 等加权', intuition:'价值股（低估值）长期跑赢成长股，但可能陷入"价值陷阱"。' },
+    { id:'momentum', name:'动量', icon:'🚀', desc:'过去 12 个月收益率（剔除最近 1 个月），捕捉趋势延续效应。', calc:'过去12个月累计收益 - 最近1个月收益', intuition:'赢家继续赢、输家继续输，但动量反转风险大。' },
+    { id:'volatility', name:'波动率', icon:'📊', desc:'历史日收益率标准差，衡量股票的总风险水平。', calc:'过去252个交易日日收益标准差', intuition:'低波动异象：低波动股票风险调整后收益更高。' },
+    { id:'quality', name:'质量', icon:'⭐', desc:'综合 ROE、盈利稳定性、资产负债表健康度等。', calc:'ROE, 盈利波动率, 资产负债率 等加权', intuition:'高质量公司盈利稳定，下行风险小，长期表现优异。' },
+    { id:'growth', name:'成长', icon:'🌱', desc:'预期与历史盈利增长率，衡量公司的增长潜力。', calc:'预期EPS增长率, 历史营收增长率', intuition:'高成长公司估值溢价，但增长不及预期时回撤巨大。' },
+    { id:'leverage', name:'杠杆', icon:'⚖', desc:'债务权益比、资产负债率，衡量财务杠杆水平。', calc:'总负债/总权益, 长期负债/总资产', intuition:'高杠杆放大收益和损失，在经济下行时风险暴增。' },
+    { id:'liquidity', name:'流动性', icon:'💧', desc:'换手率、成交金额，衡量股票的交易活跃度。', calc:'月均换手率, 日均成交额', intuition:'低流动性股票有流动性溢价，但交易成本高。' },
+    { id:'beta', name:'Beta', icon:'📈', desc:'对市场收益的敏感度，即 CAPM 中的 Beta 系数。', calc:'滚动回归 ri = alpha + beta * rm', intuition:'高 Beta 股在牛市跑赢、熊市跑输，低 Beta 异象显著。' },
+    { id:'divyield', name:'股息率', icon:'🎁', desc:'过去 12 个月现金股息与股价的比值。', calc:'过去12个月每股股息 / 当前股价', intuition:'高股息策略提供稳定现金流，在利率下行期表现好。' }
+];
+
+const STOCK_PROFILES = {
+    growth:     { name:'成长股', exposures:[-.5, -1.2, 1.5, 1.0, .3, 2.0, .5, .8, 1.2, -.8] },
+    value:      { name:'价值股', exposures:[.3, 2.0, -.8, -.3, .8, -.5, .5, -.3, .7, 1.5] },
+    small:      { name:'小盘股', exposures:[-2.0, .5, .3, 1.5, -.5, .8, .3, -1.2, 1.0, .2] },
+    large:      { name:'大盘蓝筹', exposures:[2.0, .8, .2, -.8, 1.5, .3, -.5, 1.2, .6, 1.0] },
+    momentum:   { name:'动量股', exposures:[.2, -.5, 2.5, 1.2, .0, 1.0, .3, 1.0, 1.5, -.5] },
+    defensive:  { name:'防御型', exposures:[.8, 1.0, -.3, -1.5, 1.8, .0, -.8, .5, -.5, 1.2] },
+};
+
+// Sample stocks for heatmap/exposure
+const STOCKS = ['平安银行','万科A','格力电器','贵州茅台','宁德时代','隆基绿能','比亚迪','中国中免','招商银行','海天味业','药明康德','紫光国微'];
+const FACTORS_SHORT = ['市值','价值','动量','波动','质量','成长','杠杆','流动','Beta','股息'];
+
+// Generate deterministic exposure matrix
+function seededRandom(seed) {
+    let s = seed;
+    return function() {
+        s = (s * 9301 + 49297) % 233280;
+        return s / 233280;
+    };
+}
+
+const rng = seededRandom(42);
+const EXPOSURE_DATA = STOCKS.map((_, i) => {
+    return FACTORS_SHORT.map((_, j) => {
+        const base = [
+            [1.8,.3,-.2,-.5,1.2,.1,-.3,1.0,.5,.8],   // 平安银行
+            [.5,1.5,-.8,.8,-.2,-.5,1.5,.3,.9,.2],     // 万科A
+            [1.2,1.8,.3,-.3,1.5,.2,-.2,.8,.4,1.5],    // 格力电器
+            [2.5,.5,.8,-1.2,2.0,.5,-.8,1.5,.3,1.0],   // 贵州茅台
+            [1.0,-1.5,2.0,1.5,-.3,2.5,.8,.5,1.8,-.5], // 宁德时代
+            [-.5,-1.0,1.5,1.8,-.5,2.0,.3,-.3,1.5,-.2],// 隆基绿能
+            [1.5,-1.2,1.8,1.0,.5,1.8,.5,.8,1.3,-.3],  // 比亚迪
+            [1.0,.2,.5,.3,1.0,1.2,-.2,1.2,.6,.3],     // 中国中免
+            [2.0,.8,-.1,-.8,1.8,.3,-.5,1.3,.5,1.2],   // 招商银行
+            [.8,1.0,-.5,-.5,2.0,.2,-.3,.5,.2,1.8],    // 海天味业
+            [.3,-1.0,1.2,1.2,.5,2.2,.5,.3,1.2,-.5],   // 药明康德
+            [-1.5,-.2,.8,1.8,-.8,1.5,.2,-1.5,1.0,-.3], // 紫光国微
+        ];
+        return base[i][j];
+    });
+});
+
+// Factor covariance matrix (10x10, symmetric positive definite)
+const F_COV = (() => {
+    const K = 10;
+    const m = [];
+    const r = seededRandom(123);
+    for (let i = 0; i < K; i++) {
+        m[i] = [];
+        for (let j = 0; j < K; j++) m[i][j] = 0;
+    }
+    // Generate from random lower triangular
+    const L = [];
+    for (let i = 0; i < K; i++) {
+        L[i] = [];
+        for (let j = 0; j <= i; j++) {
+            L[i][j] = (j === i) ? 0.5 + r() * 1.0 : (r() - 0.5) * 0.3;
+        }
+        for (let j = i + 1; j < K; j++) L[i][j] = 0;
+    }
+    for (let i = 0; i < K; i++)
+        for (let j = 0; j < K; j++)
+            for (let k = 0; k < K; k++)
+                m[i][j] += L[i][k] * L[j][k];
+    return m;
+})();
+
+// Specific variances
+const SPEC_VAR = STOCKS.map((_, i) => 0.02 + seededRandom(i * 7 + 99)() * 0.06);
+
+// =====================================================================
+// UTILITY FUNCTIONS
+// =====================================================================
+function getCtx(id) {
+    const c = document.getElementById(id);
+    const dpr = window.devicePixelRatio || 1;
+    const rect = c.getBoundingClientRect();
+    c.width = rect.width * dpr;
+    c.height = rect.height * dpr;
+    const ctx = c.getContext('2d');
+    ctx.scale(dpr, dpr);
+    ctx.W = rect.width;
+    ctx.H = rect.height;
+    ctx.canvas_ = c;
+    return ctx;
+}
+
+function lerpColor(a, b, t) {
+    const ar = parseInt(a.slice(1,3),16), ag = parseInt(a.slice(3,5),16), ab = parseInt(a.slice(5,7),16);
+    const br_ = parseInt(b.slice(1,3),16), bg_ = parseInt(b.slice(3,5),16), bb = parseInt(b.slice(5,7),16);
+    const r = Math.round(ar + (br_ - ar) * t);
+    const g = Math.round(ag + (bg_ - ag) * t);
+    const bl = Math.round(ab + (bb - ab) * t);
+    return `rgb(${r},${g},${bl})`;
+}
+
+function exposureColor(val) {
+    // blue (-3) -> dark (0) -> red (+3)
+    const t = (val + 3) / 6; // 0..1
+    if (t < 0.5) return lerpColor('#4fc3f7', '#1a1a2e', t * 2);
+    return lerpColor('#1a1a2e', '#ff5252', (t - 0.5) * 2);
+}
+
+function covColor(val, maxAbs) {
+    const t = (val / maxAbs + 1) / 2;
+    if (t < 0.5) return lerpColor('#4fc3f7', '#1a1a2e', t * 2);
+    return lerpColor('#1a1a2e', '#ff5252', (t - 0.5) * 2);
+}
+
+function matMul(A, B, rA, cA, cB) {
+    const C = [];
+    for (let i = 0; i < rA; i++) {
+        C[i] = [];
+        for (let j = 0; j < cB; j++) {
+            let s = 0;
+            for (let k = 0; k < cA; k++) s += A[i][k] * B[k][j];
+            C[i][j] = s;
+        }
+    }
+    return C;
+}
+
+function transpose(A, r, c) {
+    const T = [];
+    for (let i = 0; i < c; i++) {
+        T[i] = [];
+        for (let j = 0; j < r; j++) T[i][j] = A[j][i];
+    }
+    return T;
+}
+
+// =====================================================================
+// SECTION 1: Matrix overview viz
+// =====================================================================
+function drawMatrixOverview() {
+    const ctx = getCtx('cvs-matrix-overview');
+    const W = ctx.W, H = ctx.H;
+    ctx.clearRect(0, 0, W, H);
+
+    const mW = 80, mH = 100, gap = 30, cellH = mH / 6, startY = (H - mH) / 2;
+
+    // r = X * f + eps
+    // Draw labels
+    ctx.font = '600 16px "Noto Sans SC", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    const cx = W / 2;
+    const xR = cx - 200, xX = cx - 80, xF = cx + 50, xEps = cx + 170;
+
+    // r vector (Nx1)
+    const drawVec = (x, y, rows, label, color) => {
+        ctx.fillStyle = color + '22';
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.5;
+        const vW = 30, vH = rows * cellH;
+        ctx.beginPath();
+        ctx.roundRect(x - vW/2, y, vW, vH, 4);
+        ctx.fill(); ctx.stroke();
+        for (let i = 0; i < rows; i++) {
+            ctx.fillStyle = color + '88';
+            ctx.fillRect(x - vW/2 + 3, y + i * cellH + 3, vW - 6, cellH - 6);
+        }
+        ctx.fillStyle = color;
+        ctx.fillText(label, x, y - 14);
+        ctx.fillStyle = COLORS.textM;
+        ctx.font = '11px monospace';
+        ctx.fillText(`${rows}×1`, x, y + vH + 14);
+        ctx.font = '600 16px "Noto Sans SC", sans-serif';
+    };
+
+    const drawMat = (x, y, rows, cols, label, color) => {
+        ctx.fillStyle = color + '22';
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.5;
+        const mW2 = cols * 16, mH2 = rows * cellH;
+        ctx.beginPath();
+        ctx.roundRect(x - mW2/2, y, mW2, mH2, 4);
+        ctx.fill(); ctx.stroke();
+        for (let i = 0; i < rows; i++)
+            for (let j = 0; j < cols; j++) {
+                ctx.fillStyle = color + '55';
+                ctx.fillRect(x - mW2/2 + j*16 + 2, y + i*cellH + 2, 12, cellH - 4);
+            }
+        ctx.fillStyle = color;
+        ctx.fillText(label, x, y - 14);
+        ctx.fillStyle = COLORS.textM;
+        ctx.font = '11px monospace';
+        ctx.fillText(`${rows}×${cols}`, x, y + mH2 + 14);
+        ctx.font = '600 16px "Noto Sans SC", sans-serif';
+    };
+
+    drawVec(xR, startY, 6, 'r', COLORS.green);
+
+    ctx.fillStyle = COLORS.textS;
+    ctx.fillText('=', (xR + xX) / 2, H / 2);
+
+    drawMat(xX, startY, 6, 4, 'X', COLORS.blue);
+
+    ctx.fillStyle = COLORS.textS;
+    ctx.fillText('·', (xX + xF) / 2 + 10, H / 2);
+
+    drawVec(xF, startY, 4, 'f', COLORS.orange);
+
+    ctx.fillStyle = COLORS.textS;
+    ctx.fillText('+', (xF + xEps) / 2, H / 2);
+
+    drawVec(xEps, startY, 6, 'ε', COLORS.purple);
+
+    // Dimension labels at bottom
+    ctx.fillStyle = COLORS.textM;
+    ctx.font = '12px "Noto Sans SC", sans-serif';
+    ctx.fillText('N只股票', (xR + xX) / 2 - 40, H - 10);
+    ctx.fillText('K个因子', (xF + xEps) / 2 - 10, H - 10);
+}
+
+// =====================================================================
+// SECTION 2: Style Factor Cards & Radar
+// =====================================================================
+function initStyleFactors() {
+    const grid = document.getElementById('sf-grid');
+    STYLE_FACTORS.forEach((f, i) => {
+        const div = document.createElement('div');
+        div.className = 'sf-card';
+        div.dataset.idx = i;
+        div.innerHTML = `<div class="sf-icon">${f.icon}</div><div class="sf-name">${f.name}</div>`;
+        div.addEventListener('click', () => selectFactor(i));
+        grid.appendChild(div);
+    });
+    selectFactor(0);
+}
+
+function selectFactor(idx) {
+    document.querySelectorAll('.sf-card').forEach((c, i) => c.classList.toggle('active', i === idx));
+    const f = STYLE_FACTORS[idx];
+    document.getElementById('sf-detail').innerHTML = `
+        <h4>${f.icon} ${f.name} (${f.id})</h4>
+        <p style="margin-top:0.5rem;"><strong>定义：</strong>${f.desc}</p>
+        <p><strong>计算方法：</strong><code>${f.calc}</code></p>
+        <p><strong>投资直觉：</strong>${f.intuition}</p>
+    `;
+}
+
+function drawRadar() {
+    const ctx = getCtx('cvs-radar');
+    const W = ctx.W, H = ctx.H;
+    ctx.clearRect(0, 0, W, H);
+
+    const type = document.getElementById('radar-stock-type').value;
+    const profile = STOCK_PROFILES[type];
+    const exposures = profile.exposures;
+    const K = exposures.length;
+    const cx = W / 2, cy = H / 2;
+    const R = Math.min(W, H) * 0.35;
+
+    // Draw grid circles
+    for (let ring = 1; ring <= 3; ring++) {
+        const r = R * ring / 3;
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx.strokeStyle = COLORS.border;
+        ctx.lineWidth = 1;
+        ctx.stroke();
+
+        ctx.fillStyle = COLORS.textM;
+        ctx.font = '10px monospace';
+        ctx.textAlign = 'left';
+        ctx.fillText((ring).toFixed(0), cx + 3, cy - r + 12);
+    }
+
+    // Draw axes
+    const angles = [];
+    for (let i = 0; i < K; i++) {
+        const angle = -Math.PI / 2 + (2 * Math.PI * i / K);
+        angles.push(angle);
+        const ex = cx + Math.cos(angle) * (R + 20);
+        const ey = cy + Math.sin(angle) * (R + 20);
+
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(cx + Math.cos(angle) * R, cy + Math.sin(angle) * R);
+        ctx.strokeStyle = COLORS.border;
+        ctx.lineWidth = 1;
+        ctx.stroke();
+
+        ctx.fillStyle = COLORS.textS;
+        ctx.font = '12px "Noto Sans SC", sans-serif';
+        ctx.textAlign = Math.abs(Math.cos(angle)) < 0.1 ? 'center' : Math.cos(angle) > 0 ? 'left' : 'right';
+        ctx.textBaseline = Math.abs(Math.sin(angle)) < 0.1 ? 'middle' : Math.sin(angle) > 0 ? 'top' : 'bottom';
+        ctx.fillText(STYLE_FACTORS[i].name, ex, ey);
+    }
+
+    // Draw data polygon
+    ctx.beginPath();
+    for (let i = 0; i < K; i++) {
+        const val = Math.max(0, exposures[i] + 0.5); // shift so we can show negative as small
+        const norm = Math.min(val / 3, 1); // normalize to 0..1 (3 = max ring)
+        const px = cx + Math.cos(angles[i]) * R * norm;
+        const py = cy + Math.sin(angles[i]) * R * norm;
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.fillStyle = COLORS.green + '33';
+    ctx.fill();
+    ctx.strokeStyle = COLORS.green;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Draw dots
+    for (let i = 0; i < K; i++) {
+        const val = Math.max(0, exposures[i] + 0.5);
+        const norm = Math.min(val / 3, 1);
+        const px = cx + Math.cos(angles[i]) * R * norm;
+        const py = cy + Math.sin(angles[i]) * R * norm;
+        ctx.beginPath();
+        ctx.arc(px, py, 4, 0, Math.PI * 2);
+        ctx.fillStyle = COLORS.green;
+        ctx.fill();
+    }
+
+    // Title
+    ctx.fillStyle = COLORS.textP;
+    ctx.font = '600 14px "Noto Sans SC", sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.fillText(`${profile.name} — 因子暴露雷达图`, 12, 12);
+}
+
+// =====================================================================
+// SECTION 3: Heatmap
+// =====================================================================
+let heatmapHighlightRow = -1;
+let heatmapSortCol = -1;
+let heatmapSortOrder = [];
+
+function getDisplayOrder() {
+    if (heatmapSortCol >= 0) return [...heatmapSortOrder];
+    return STOCKS.map((_, i) => i);
+}
+
+function drawHeatmap() {
+    const ctx = getCtx('cvs-heatmap');
+    const W = ctx.W, H = ctx.H;
+    ctx.clearRect(0, 0, W, H);
+
+    const order = getDisplayOrder();
+    const N = STOCKS.length, K = FACTORS_SHORT.length;
+    const leftPad = 85, topPad = 35, rightPad = 15, bottomPad = 10;
+    const cellW = (W - leftPad - rightPad) / K;
+    const cellH = (H - topPad - bottomPad) / N;
+
+    // Column headers
+    ctx.font = '600 11px "Noto Sans SC", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    for (let j = 0; j < K; j++) {
+        const x = leftPad + j * cellW + cellW / 2;
+        ctx.fillStyle = heatmapSortCol === j ? COLORS.green : COLORS.textS;
+        ctx.fillText(FACTORS_SHORT[j], x, topPad - 5);
+    }
+
+    // Row labels & cells
+    for (let di = 0; di < N; di++) {
+        const i = order[di];
+        const y = topPad + di * cellH;
+
+        // Row label
+        ctx.font = '11px "Noto Sans SC", sans-serif';
+        ctx.textAlign = 'right';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = heatmapHighlightRow === i ? COLORS.green : COLORS.textS;
+        ctx.fillText(STOCKS[i], leftPad - 8, y + cellH / 2);
+
+        // Cells
+        for (let j = 0; j < K; j++) {
+            const x = leftPad + j * cellW;
+            const val = EXPOSURE_DATA[i][j];
+            ctx.fillStyle = exposureColor(val);
+            ctx.fillRect(x + 1, y + 1, cellW - 2, cellH - 2);
+
+            // Value text
+            ctx.fillStyle = Math.abs(val) > 1.5 ? '#fff' : COLORS.textM;
+            ctx.font = '10px monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText(val.toFixed(1), x + cellW / 2, y + cellH / 2);
+        }
+
+        // Highlight row
+        if (heatmapHighlightRow === i) {
+            ctx.strokeStyle = COLORS.green;
+            ctx.lineWidth = 2;
+            ctx.strokeRect(leftPad, y, cellW * K, cellH);
+        }
+    }
+}
+
+function initHeatmapInteraction() {
+    const c = document.getElementById('cvs-heatmap');
+    c.addEventListener('click', (e) => {
+        const rect = c.getBoundingClientRect();
+        const mx = e.clientX - rect.left;
+        const my = e.clientY - rect.top;
+
+        const N = STOCKS.length, K = FACTORS_SHORT.length;
+        const leftPad = 85, topPad = 35, rightPad = 15, bottomPad = 10;
+        const cellW = (rect.width - leftPad - rightPad) / K;
+        const cellH = (rect.height - topPad - bottomPad) / N;
+        const order = getDisplayOrder();
+
+        if (my < topPad && mx >= leftPad) {
+            // Clicked header => sort
+            const col = Math.floor((mx - leftPad) / cellW);
+            if (col >= 0 && col < K) {
+                heatmapSortCol = col;
+                heatmapSortOrder = STOCKS.map((_, i) => i).sort((a, b) => EXPOSURE_DATA[b][col] - EXPOSURE_DATA[a][col]);
+                drawHeatmap();
+            }
+        } else if (mx < leftPad && my >= topPad) {
+            // Clicked row label
+            const row = Math.floor((my - topPad) / cellH);
+            if (row >= 0 && row < N) {
+                const stockIdx = order[row];
+                heatmapHighlightRow = heatmapHighlightRow === stockIdx ? -1 : stockIdx;
+                drawHeatmap();
+            }
+        }
+    });
+}
+
+// =====================================================================
+// SECTION 4: Covariance Decomposition
+// =====================================================================
+let decompStep = 0;
+
+function drawDecomp() {
+    const ctx = getCtx('cvs-decomp');
+    const W = ctx.W, H = ctx.H;
+    ctx.clearRect(0, 0, W, H);
+
+    const N = STOCKS.length, K = FACTORS_SHORT.length;
+    const pad = 20;
+
+    const drawMatrix = (data, rows, cols, x, y, w, h, label, maxAbs) => {
+        const cw = w / cols, ch = h / rows;
+        for (let i = 0; i < rows; i++)
+            for (let j = 0; j < cols; j++) {
+                const val = data[i][j];
+                ctx.fillStyle = covColor(val, maxAbs || 1);
+                ctx.fillRect(x + j * cw, y + i * ch, cw - 1, ch - 1);
+            }
+        ctx.strokeStyle = COLORS.border;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(x, y, w, h);
+        ctx.fillStyle = COLORS.textS;
+        ctx.font = '600 12px "Noto Sans SC", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(label, x + w / 2, y - 8);
+        ctx.fillStyle = COLORS.textM;
+        ctx.font = '10px monospace';
+        ctx.fillText(`${rows}×${cols}`, x + w / 2, y + h + 14);
+    };
+
+    const X = EXPOSURE_DATA;
+    const Xt = transpose(X, N, K);
+    const XF = matMul(X, F_COV, N, K, K);
+    const XFXt = matMul(XF, Xt, N, K, N);
+    const Delta = [];
+    for (let i = 0; i < N; i++) {
+        Delta[i] = [];
+        for (let j = 0; j < N; j++) Delta[i][j] = i === j ? SPEC_VAR[i] : 0;
+    }
+    const V = XFXt.map((row, i) => row.map((v, j) => v + Delta[i][j]));
+
+    // Find max abs for color scaling
+    let maxV = 0;
+    V.forEach(r => r.forEach(v => { if (Math.abs(v) > maxV) maxV = Math.abs(v); }));
+    let maxF = 0;
+    F_COV.forEach(r => r.forEach(v => { if (Math.abs(v) > maxF) maxF = Math.abs(v); }));
+
+    if (decompStep === 0) {
+        // Show X
+        const mw = Math.min(300, W * 0.5), mh = Math.min(280, H - 60);
+        drawMatrix(X, N, K, (W - mw) / 2, 30, mw, mh, 'X (因子暴露矩阵 N×K)', 3);
+    } else if (decompStep === 1) {
+        // Show F
+        const mw = Math.min(250, W * 0.4), mh = Math.min(250, H - 60);
+        drawMatrix(F_COV, K, K, (W - mw) / 2, 30, mw, mh, 'F (因子协方差 K×K)', maxF);
+    } else if (decompStep === 2) {
+        // Show X*F*X'
+        const mw = Math.min(280, W * 0.45), mh = Math.min(280, H - 60);
+        drawMatrix(XFXt, N, N, (W - mw) / 2, 30, mw, mh, 'X·F·X\' (因子风险部分)', maxV);
+    } else if (decompStep === 3) {
+        // Show Delta
+        const mw = Math.min(280, W * 0.45), mh = Math.min(280, H - 60);
+        let maxD = 0;
+        Delta.forEach(r => r.forEach(v => { if (v > maxD) maxD = v; }));
+        drawMatrix(Delta, N, N, (W - mw) / 2, 30, mw, mh, 'Δ (特异性方差，对角矩阵)', maxD);
+    } else {
+        // Show V = XFX' + Delta
+        const mw = Math.min(280, W * 0.45), mh = Math.min(280, H - 60);
+        drawMatrix(V, N, N, (W - mw) / 2, 30, mw, mh, 'V = X·F·X\' + Δ (总协方差)', maxV);
+    }
+}
+
+function drawCovCompare() {
+    // Sample covariance (noisy)
+    const N = STOCKS.length;
+    const rng2 = seededRandom(777);
+
+    // Compute barra covariance
+    const X = EXPOSURE_DATA;
+    const Xt = transpose(X, N, 10);
+    const XF = matMul(X, F_COV, N, 10, 10);
+    const XFXt = matMul(XF, Xt, N, 10, N);
+    const V_barra = XFXt.map((row, i) => row.map((v, j) => v + (i === j ? SPEC_VAR[i] : 0)));
+
+    // Generate noisy sample cov
+    const V_sample = V_barra.map((row, i) => row.map((v, j) => {
+        const noise = (rng2() - 0.5) * 0.8;
+        return v + noise + (i === j ? Math.abs(rng2() * 0.3) : 0);
+    }));
+    // Symmetrize
+    for (let i = 0; i < N; i++)
+        for (let j = i + 1; j < N; j++)
+            V_sample[j][i] = V_sample[i][j];
+
+    let maxAbs = 0;
+    V_barra.forEach(r => r.forEach(v => { if (Math.abs(v) > maxAbs) maxAbs = Math.abs(v); }));
+    V_sample.forEach(r => r.forEach(v => { if (Math.abs(v) > maxAbs) maxAbs = Math.abs(v); }));
+
+    [['cvs-cov-sample', V_sample], ['cvs-cov-barra', V_barra]].forEach(([id, data]) => {
+        const ctx = getCtx(id);
+        const W = ctx.W, H = ctx.H;
+        ctx.clearRect(0, 0, W, H);
+        const pad = 5;
+        const cw = (W - 2 * pad) / N, ch = (H - 2 * pad) / N;
+        for (let i = 0; i < N; i++)
+            for (let j = 0; j < N; j++) {
+                ctx.fillStyle = covColor(data[i][j], maxAbs);
+                ctx.fillRect(pad + j * cw, pad + i * ch, cw - 1, ch - 1);
+            }
+    });
+}
+
+function initDecompButtons() {
+    document.querySelectorAll('.decomp-step-btns .btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            decompStep = parseInt(btn.dataset.step);
+            document.querySelectorAll('.decomp-step-btns .btn').forEach(b => b.classList.toggle('active', parseInt(b.dataset.step) === decompStep));
+            drawDecomp();
+        });
+    });
+}
+
+// =====================================================================
+// SECTION 5: Risk Decomposition
+// =====================================================================
+const PORT_STOCKS = STOCKS.slice(0, 6);
+let portWeights = [0.25, 0.15, 0.20, 0.15, 0.10, 0.15];
+
+function initWeightSliders() {
+    const container = document.getElementById('weight-sliders');
+    PORT_STOCKS.forEach((name, i) => {
+        const div = document.createElement('div');
+        div.className = 'slider-group';
+        div.innerHTML = `
+            <label style="min-width:70px">${name}</label>
+            <input type="range" min="0" max="50" value="${Math.round(portWeights[i]*100)}" data-idx="${i}">
+            <span class="slider-value" id="wv-${i}">${Math.round(portWeights[i]*100)}%</span>
+        `;
+        div.querySelector('input').addEventListener('input', (e) => {
+            portWeights[i] = parseInt(e.target.value) / 100;
+            document.getElementById(`wv-${i}`).textContent = `${parseInt(e.target.value)}%`;
+            // Normalize
+            const sum = portWeights.reduce((a, b) => a + b, 0);
+            if (sum > 0) {
+                const normW = portWeights.map(w => w / sum);
+                // Update display but keep raw sliders
+                drawRiskDecomp(normW);
+            }
+        });
+        container.appendChild(div);
+    });
+}
+
+function drawRiskDecomp(weights) {
+    if (!weights) {
+        const sum = portWeights.reduce((a, b) => a + b, 0);
+        weights = sum > 0 ? portWeights.map(w => w / sum) : portWeights.map(() => 1 / PORT_STOCKS.length);
+    }
+
+    const N = PORT_STOCKS.length, K = 10;
+    const X_sub = EXPOSURE_DATA.slice(0, N);
+    const Xt_sub = transpose(X_sub, N, K);
+
+    // Portfolio factor exposure: Xp = X' * w (K x 1)
+    const Xp = [];
+    for (let k = 0; k < K; k++) {
+        let s = 0;
+        for (let i = 0; i < N; i++) s += X_sub[i][k] * weights[i];
+        Xp[k] = s;
+    }
+
+    // Factor risk contribution by factor
+    // sigma^2_factor_k = Xp[k] * sum_j(F[k][j] * Xp[j])
+    const factorRiskContrib = [];
+    let totalFactorVar = 0;
+    for (let k = 0; k < K; k++) {
+        let contrib = 0;
+        for (let j = 0; j < K; j++) contrib += F_COV[k][j] * Xp[j];
+        contrib *= Xp[k];
+        factorRiskContrib[k] = Math.abs(contrib);
+        totalFactorVar += contrib;
+    }
+
+    // Specific risk
+    let specVar = 0;
+    for (let i = 0; i < N; i++) specVar += weights[i] * weights[i] * SPEC_VAR[i];
+
+    const totalVar = Math.max(totalFactorVar, 0) + specVar;
+    const annFactor = Math.sqrt(252);
+    const totalRisk = Math.sqrt(totalVar) * annFactor * 100;
+    const factorRisk = Math.sqrt(Math.max(totalFactorVar, 0)) * annFactor * 100;
+    const specificRisk = Math.sqrt(specVar) * annFactor * 100;
+
+    document.getElementById('stat-total').textContent = totalRisk.toFixed(1) + '%';
+    document.getElementById('stat-factor').textContent = factorRisk.toFixed(1) + '%';
+    document.getElementById('stat-specific').textContent = specificRisk.toFixed(1) + '%';
+
+    // Draw stacked bar chart
+    const ctx = getCtx('cvs-risk-bar');
+    const W = ctx.W, H = ctx.H;
+    ctx.clearRect(0, 0, W, H);
+
+    const barColors = [COLORS.green, COLORS.blue, COLORS.orange, COLORS.purple, COLORS.red,
+                       COLORS.yellow, COLORS.pink, '#80cbc4', '#a5d6a7', '#ce93d8', '#90a4ae'];
+    const labels = [...FACTORS_SHORT, '特异风险'];
+    const contribs = [...factorRiskContrib, specVar];
+    const totalContrib = contribs.reduce((a, b) => a + b, 0);
+
+    const leftPad = 80, rightPad = 30, topPad = 50, bottomPad = 60;
+    const chartW = W - leftPad - rightPad;
+    const chartH = H - topPad - bottomPad;
+    const barW = Math.min(50, chartW / (labels.length + 1));
+    const gap2 = (chartW - barW * labels.length) / (labels.length + 1);
+
+    // Max for scale
+    const maxContrib = Math.max(...contribs) * 1.2;
+
+    // Axes
+    ctx.strokeStyle = COLORS.border;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(leftPad, topPad);
+    ctx.lineTo(leftPad, topPad + chartH);
+    ctx.lineTo(leftPad + chartW, topPad + chartH);
+    ctx.stroke();
+
+    // Y axis labels
+    ctx.fillStyle = COLORS.textM;
+    ctx.font = '10px monospace';
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'middle';
+    for (let i = 0; i <= 4; i++) {
+        const val = maxContrib * i / 4;
+        const y = topPad + chartH - (chartH * i / 4);
+        ctx.fillText((val * 100).toFixed(2), leftPad - 8, y);
+        ctx.strokeStyle = COLORS.border + '44';
+        ctx.beginPath();
+        ctx.moveTo(leftPad, y);
+        ctx.lineTo(leftPad + chartW, y);
+        ctx.stroke();
+    }
+
+    // Y label
+    ctx.save();
+    ctx.translate(14, topPad + chartH / 2);
+    ctx.rotate(-Math.PI / 2);
+    ctx.fillStyle = COLORS.textS;
+    ctx.font = '11px "Noto Sans SC", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('方差贡献', 0, 0);
+    ctx.restore();
+
+    // Bars
+    labels.forEach((label, idx) => {
+        const x = leftPad + gap2 + idx * (barW + gap2);
+        const h = maxContrib > 0 ? (contribs[idx] / maxContrib) * chartH : 0;
+        const y = topPad + chartH - h;
+
+        ctx.fillStyle = barColors[idx % barColors.length];
+        ctx.beginPath();
+        ctx.roundRect(x, y, barW, h, [3, 3, 0, 0]);
+        ctx.fill();
+
+        // Percentage label on top
+        const pct = totalContrib > 0 ? (contribs[idx] / totalContrib * 100) : 0;
+        if (pct > 1) {
+            ctx.fillStyle = COLORS.textS;
+            ctx.font = '10px monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText(pct.toFixed(1) + '%', x + barW / 2, y - 6);
+        }
+
+        // X label
+        ctx.save();
+        ctx.translate(x + barW / 2, topPad + chartH + 8);
+        ctx.rotate(Math.PI / 4);
+        ctx.fillStyle = COLORS.textS;
+        ctx.font = '10px "Noto Sans SC", sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText(label, 0, 0);
+        ctx.restore();
+    });
+
+    // Title
+    ctx.fillStyle = COLORS.textP;
+    ctx.font = '600 13px "Noto Sans SC", sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.fillText('组合风险分解 — 各因子方差贡献', leftPad, 10);
+
+    // Factor vs specific summary bar
+    const summaryY = topPad + 4;
+    const summaryW = 180, summaryH = 14;
+    const summaryX = W - rightPad - summaryW;
+    const factorPct = totalContrib > 0 ? (totalFactorVar / totalContrib) : 0.5;
+    ctx.fillStyle = COLORS.green + '44';
+    ctx.fillRect(summaryX, summaryY, summaryW * factorPct, summaryH);
+    ctx.fillStyle = COLORS.purple + '44';
+    ctx.fillRect(summaryX + summaryW * factorPct, summaryY, summaryW * (1 - factorPct), summaryH);
+    ctx.strokeStyle = COLORS.border;
+    ctx.strokeRect(summaryX, summaryY, summaryW, summaryH);
+    ctx.fillStyle = COLORS.textM;
+    ctx.font = '9px "Noto Sans SC", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(`因子 ${(factorPct*100).toFixed(0)}%`, summaryX + summaryW * factorPct / 2, summaryY + summaryH + 10);
+    ctx.fillText(`特异 ${((1-factorPct)*100).toFixed(0)}%`, summaryX + summaryW * factorPct + summaryW * (1-factorPct) / 2, summaryY + summaryH + 10);
+}
+
+// =====================================================================
+// INIT
+// =====================================================================
+function init() {
+    drawMatrixOverview();
+    initStyleFactors();
+    drawRadar();
+    drawHeatmap();
+    initHeatmapInteraction();
+    drawDecomp();
+    initDecompButtons();
+    drawCovCompare();
+    initWeightSliders();
+    drawRiskDecomp();
+
+    document.getElementById('radar-stock-type').addEventListener('change', drawRadar);
+
+    // Resize handler
+    let resizeTimer;
+    window.addEventListener('resize', () => {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(() => {
+            drawMatrixOverview();
+            drawRadar();
+            drawHeatmap();
+            drawDecomp();
+            drawCovCompare();
+            drawRiskDecomp();
+        }, 200);
+    });
+}
+
+window.addEventListener('DOMContentLoaded', init);
+</script>
+
+<!-- KaTeX auto-render -->
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    if (typeof renderMathInElement !== 'undefined') {
+        renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '\\(', right: '\\)', display: false},
+                {left: '\\[', right: '\\]', display: true}
+            ],
+            throwOnError: false
+        });
+    } else {
+        // Retry after scripts load
+        setTimeout(function() {
+            if (typeof renderMathInElement !== 'undefined') {
+                renderMathInElement(document.body, {
+                    delimiters: [
+                        {left: '$$', right: '$$', display: true},
+                        {left: '\\(', right: '\\)', display: false},
+                        {left: '\\[', right: '\\]', display: true}
+                    ],
+                    throwOnError: false
+                });
+            }
+        }, 1000);
+    }
+});
+</script>
+
+</body>
+</html>

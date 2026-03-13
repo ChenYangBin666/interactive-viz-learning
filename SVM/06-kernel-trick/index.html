@@ -1,0 +1,1287 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>核技巧 — The Kernel Trick | SVM 支持向量机</title>
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+SC:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+    <style>
+        /* ===== Page-specific styles ===== */
+        .page-header {
+            text-align: center;
+            margin-bottom: 2.5rem;
+            padding-bottom: 1.5rem;
+            border-bottom: 1px solid var(--border-color);
+        }
+        .page-header h1 {
+            font-size: 2.2rem;
+            margin-bottom: 0.4rem;
+            background: linear-gradient(135deg, var(--accent-purple), var(--accent-blue));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .page-header .subtitle {
+            color: var(--text-secondary);
+            font-size: 1rem;
+        }
+        .dual-canvas {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+        .canvas-wrap {
+            position: relative;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+        }
+        .canvas-wrap canvas {
+            display: block;
+            width: 100%;
+            height: auto;
+        }
+        .canvas-label {
+            position: absolute;
+            top: 0.5rem;
+            left: 0.75rem;
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: var(--accent-green);
+            background: rgba(26,26,46,0.85);
+            padding: 0.2rem 0.6rem;
+            border-radius: var(--radius-sm);
+        }
+        .canvas-status {
+            position: absolute;
+            bottom: 0.5rem;
+            right: 0.75rem;
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            background: rgba(26,26,46,0.85);
+            padding: 0.15rem 0.5rem;
+            border-radius: var(--radius-sm);
+            font-family: var(--font-mono);
+        }
+        .controls-row {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 0.75rem;
+            margin-top: 1rem;
+        }
+        .math-step {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1rem 1.2rem;
+            margin: 0.75rem 0;
+            font-size: 0.95rem;
+        }
+        .math-step.active {
+            border-color: var(--accent-green);
+            box-shadow: 0 0 12px rgba(22,199,154,0.15);
+        }
+        .math-step .step-num {
+            display: inline-block;
+            width: 24px; height: 24px;
+            line-height: 24px;
+            text-align: center;
+            border-radius: 50%;
+            background: var(--accent-green);
+            color: var(--bg-primary);
+            font-size: 0.75rem;
+            font-weight: 700;
+            margin-right: 0.5rem;
+        }
+        .race-bar {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin: 0.4rem 0;
+        }
+        .race-bar .bar {
+            height: 30px;
+            border-radius: 4px;
+            transition: width 1s var(--anim-ease);
+            display: flex;
+            align-items: center;
+            padding: 0 0.6rem;
+            font-size: 0.75rem;
+            font-family: var(--font-mono);
+            color: var(--bg-primary);
+            font-weight: 600;
+            white-space: nowrap;
+            min-width: 0;
+        }
+        .race-bar .label {
+            min-width: 80px;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+        }
+        .race-result {
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            padding: 0.5rem 0.75rem;
+            background: rgba(22,199,154,0.08);
+            border-radius: var(--radius-sm);
+            margin-top: 0.5rem;
+            display: none;
+        }
+        .heatmap-grid {
+            display: inline-grid;
+            gap: 2px;
+            border-radius: var(--radius-sm);
+            overflow: hidden;
+        }
+        .heatmap-cell {
+            width: 36px;
+            height: 36px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: var(--font-mono);
+            font-size: 0.6rem;
+            color: var(--text-primary);
+            transition: background 0.5s;
+            cursor: default;
+        }
+        .heatmap-wrap {
+            display: flex;
+            gap: 2rem;
+            flex-wrap: wrap;
+            align-items: start;
+            margin-top: 1rem;
+        }
+        .heatmap-block {
+            text-align: center;
+        }
+        .heatmap-block h4 {
+            margin-bottom: 0.5rem;
+            font-size: 0.9rem;
+        }
+        .point-table {
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            border-collapse: collapse;
+            margin: 0.75rem 0;
+            width: 100%;
+            max-width: 600px;
+        }
+        .point-table th, .point-table td {
+            padding: 0.4rem 0.75rem;
+            border: 1px solid var(--border-color);
+            text-align: center;
+        }
+        .point-table th {
+            background: var(--bg-card);
+            color: var(--accent-green);
+            font-weight: 600;
+        }
+        .point-table tr {
+            transition: background 0.3s;
+        }
+        .point-table tr.highlight {
+            background: rgba(22,199,154,0.12);
+        }
+        .single-canvas {
+            margin-top: 0.5rem;
+        }
+        .single-canvas canvas {
+            display: block;
+            width: 100%;
+            height: auto;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+        }
+        .deriv-block {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1.2rem 1.5rem;
+            margin: 1rem 0;
+        }
+        .deriv-block .deriv-title {
+            font-weight: 700;
+            color: var(--accent-purple);
+            margin-bottom: 0.5rem;
+            font-size: 0.9rem;
+        }
+        .kernel-badge {
+            display: inline-block;
+            padding: 0.15rem 0.5rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            margin-left: 0.5rem;
+        }
+        .kernel-badge.linear { background: rgba(79,195,247,0.15); color: var(--accent-blue); }
+        .kernel-badge.rbf { background: rgba(179,136,255,0.15); color: var(--accent-purple); }
+        .kernel-badge.poly { background: rgba(255,171,64,0.15); color: var(--accent-orange); }
+        .sv-count {
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            margin-top: 0.5rem;
+        }
+        @media (max-width: 768px) {
+            .dual-canvas { grid-template-columns: 1fr; }
+            .heatmap-wrap { flex-direction: column; align-items: center; }
+            .page-header h1 { font-size: 1.6rem; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="page-container">
+    <div class="page-header">
+        <h1>核技巧 — The Kernel Trick</h1>
+        <p class="subtitle">不用真正进入高维空间，也能享受高维空间的分类能力</p>
+    </div>
+
+    <!-- ========== Section 1: 低维不可分 → 高维可分 ========== -->
+    <div class="section">
+        <div class="section-title">
+            <div class="icon">1</div>
+            <h2>低维不可分 → 高维可分</h2>
+        </div>
+        <p>有些数据在原始空间（二维）中无法用一条直线分开。但如果我们把数据映射到更高维的空间，
+           原本纠缠在一起的点就可能被一个超平面整齐地分开。</p>
+        <p>下面的例子中，内圈（绿色）和外圈（红色）在 2D 中无法线性分离。我们给每个点
+           $(x_1, x_2)$ 增加第三个维度 $z = x_1^2 + x_2^2$，内圈点的 $z$ 值小，外圈点的 $z$ 值大，
+           于是一个水平切面就能完美分割它们。</p>
+
+        <div class="controls-row">
+            <button class="btn btn-primary" id="btn-transform">开始变换</button>
+            <button class="btn" id="btn-reset1">重置</button>
+            <div class="slider-group">
+                <label>动画进度</label>
+                <input type="range" id="slider-transform" min="0" max="100" value="0" style="width:180px">
+                <span class="slider-value" id="val-transform">0%</span>
+            </div>
+        </div>
+
+        <div class="dual-canvas">
+            <div class="canvas-wrap">
+                <canvas id="canvas-2d" width="420" height="420"></canvas>
+                <div class="canvas-label">原始 2D 空间</div>
+                <div class="canvas-status" id="status-2d">线性不可分</div>
+            </div>
+            <div class="canvas-wrap">
+                <canvas id="canvas-3d" width="420" height="420"></canvas>
+                <div class="canvas-label">映射到 3D 空间</div>
+                <div class="canvas-status" id="status-3d">拖动滑块查看变换</div>
+            </div>
+        </div>
+
+        <div class="legend mt-1">
+            <div class="legend-item">
+                <div class="swatch" style="background:#22c55e"></div> 内圈（正类 +1）
+            </div>
+            <div class="legend-item">
+                <div class="swatch" style="background:#ef4444"></div> 外圈（负类 -1）
+            </div>
+            <div class="legend-item">
+                <div class="swatch" style="background:#facc15"></div> 分割面 / 决策边界
+            </div>
+        </div>
+
+        <div class="info-box success mt-2">
+            <p>2D 中的圆形边界 $x_1^2 + x_2^2 = r^2$ 在 3D 空间中变成了水平平面 $z = r^2$ — 这就是一个线性超平面！映射到高维后，复杂的非线性分界变成了简单的线性分割。</p>
+        </div>
+    </div>
+
+    <!-- ========== Section 2: 映射函数 φ ========== -->
+    <div class="section">
+        <div class="section-title">
+            <div class="icon">2</div>
+            <h2>映射函数 $\phi$</h2>
+        </div>
+        <p>为了在高维空间中操作，我们需要定义一个映射函数 $\phi$ 把原始数据送入特征空间。
+           以二次多项式映射为例：</p>
+
+        <div class="deriv-block">
+            <div class="deriv-title">二次多项式映射</div>
+            $$\phi(x_1, x_2) = \big(x_1^2,\; \sqrt{2}\,x_1 x_2,\; x_2^2\big)$$
+            <p class="text-sm text-muted mt-1" style="margin-bottom:0">
+                将 2 维输入映射到 3 维特征空间。$\sqrt{2}$ 系数是为了保证内积等价性（后面会看到）。
+            </p>
+        </div>
+
+        <p>选择输入点，观察它被映射到特征空间后的坐标：</p>
+
+        <div class="controls-row">
+            <button class="btn btn-primary" id="btn-map">逐行计算</button>
+            <button class="btn" id="btn-add-point">添加随机点</button>
+            <button class="btn" id="btn-clear-points">清空</button>
+        </div>
+
+        <div id="phi-demo" class="mt-1">
+            <table class="point-table" id="phi-table">
+                <thead>
+                    <tr>
+                        <th>#</th>
+                        <th>输入 $(x_1, x_2)$</th>
+                        <th>$x_1^2$</th>
+                        <th>$\sqrt{2}\,x_1 x_2$</th>
+                        <th>$x_2^2$</th>
+                        <th>$\phi(x_1, x_2)$</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+
+        <div class="deriv-block mt-2">
+            <div class="deriv-title">维度爆炸问题</div>
+            <p style="margin-bottom:0.5rem;color:var(--text-primary)">
+                对于 $d$ 维输入，度数为 $p$ 的多项式映射产生的特征维度为：
+            </p>
+            $$\dim(\phi) = \binom{d+p}{p}$$
+            <table class="point-table" style="margin-top:0.75rem;max-width:400px">
+                <thead><tr><th>$d$（输入维度）</th><th>$p$（多项式度数）</th><th>特征维度</th></tr></thead>
+                <tbody>
+                    <tr><td>2</td><td>2</td><td>6</td></tr>
+                    <tr><td>10</td><td>3</td><td>286</td></tr>
+                    <tr><td>100</td><td>3</td><td>176,851</td></tr>
+                    <tr><td>100</td><td>5</td><td>96,560,646</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="info-box warning mt-2">
+            <p>当 $d=100, p=5$ 时，特征维度超过 <strong>9600 万</strong>！在这样的空间中计算 $\phi(x)$ 然后再做内积，
+               时间和内存都完全无法承受。我们需要一条捷径 — 这就是核函数的用武之地。</p>
+        </div>
+    </div>
+
+    <!-- ========== Section 3: 核函数的魔法 ========== -->
+    <div class="section">
+        <div class="section-title">
+            <div class="icon">3</div>
+            <h2>核函数的魔法</h2>
+        </div>
+        <p>核心洞察：SVM 的对偶形式中，我们只需要数据点之间的<strong>内积</strong>
+           $\phi(x) \cdot \phi(y)$，而不需要 $\phi(x)$ 本身！如果存在一个函数 $K$ 使得：</p>
+
+        <div class="deriv-block">
+            <div class="deriv-title">核函数定义</div>
+            $$K(x, y) = \phi(x) \cdot \phi(y)$$
+            <p class="text-sm text-muted mt-1" style="margin-bottom:0">
+                我们可以直接在原始空间中用 $K$ 计算高维空间中的内积 — 完全不需要显式构造 $\phi$。
+            </p>
+        </div>
+
+        <div class="deriv-block">
+            <div class="deriv-title">验证：二次多项式核</div>
+            <p style="color:var(--text-secondary);margin-bottom:0.5rem">
+                令 $x = (x_1, x_2)$，$y = (y_1, y_2)$，验证 $K(x,y) = (x \cdot y)^2 = \phi(x) \cdot \phi(y)$：
+            </p>
+            $$(x \cdot y)^2 = (x_1 y_1 + x_2 y_2)^2$$
+            $$= x_1^2 y_1^2 + 2 x_1 x_2 y_1 y_2 + x_2^2 y_2^2$$
+            $$= (x_1^2)(y_1^2) + (\sqrt{2}\,x_1 x_2)(\sqrt{2}\,y_1 y_2) + (x_2^2)(y_2^2)$$
+            $$= \phi(x) \cdot \phi(y) \quad \checkmark$$
+        </div>
+
+        <p>下面用具体数字比较两种方法。设 $x = (1, 2)$，$y = (3, -1)$：</p>
+
+        <div class="controls-row">
+            <button class="btn btn-primary" id="btn-race">开始比赛</button>
+            <button class="btn" id="btn-race-reset">重置</button>
+        </div>
+
+        <div class="compare-grid cols-2 mt-2">
+            <div class="card" id="card-explicit">
+                <h4 style="color:var(--accent-orange)">方法 A：显式映射（3 步）</h4>
+                <div class="math-step" id="step-exp-1" style="opacity:0.3">
+                    <span class="step-num">1</span> 计算 $\phi(x) = (x_1^2,\,\sqrt{2}\,x_1 x_2,\,x_2^2)$
+                    <div id="step-exp-1-val" class="text-sm mt-1" style="color:var(--accent-blue)"></div>
+                </div>
+                <div class="math-step" id="step-exp-2" style="opacity:0.3">
+                    <span class="step-num">2</span> 计算 $\phi(y) = (y_1^2,\,\sqrt{2}\,y_1 y_2,\,y_2^2)$
+                    <div id="step-exp-2-val" class="text-sm mt-1" style="color:var(--accent-blue)"></div>
+                </div>
+                <div class="math-step" id="step-exp-3" style="opacity:0.3">
+                    <span class="step-num">3</span> 内积 $\phi(x) \cdot \phi(y) = \sum_k \phi_k(x)\,\phi_k(y)$
+                    <div id="step-exp-3-val" class="text-sm mt-1" style="color:var(--accent-green);font-weight:700"></div>
+                </div>
+            </div>
+            <div class="card" id="card-kernel">
+                <h4 style="color:var(--accent-green)">方法 B：核函数（1 步）</h4>
+                <div class="math-step" id="step-ker-1" style="opacity:0.3">
+                    <span class="step-num">1</span> 计算 $K(x,y) = (x \cdot y)^2$
+                    <div id="step-ker-1-val" class="text-sm mt-1" style="color:var(--accent-green);font-weight:700"></div>
+                </div>
+                <div style="margin-top:1rem;padding:1rem;border:1px dashed var(--border-color);border-radius:var(--radius-sm);text-align:center;color:var(--text-muted);font-size:0.85rem" id="kernel-wait">
+                    核函数已计算完成，等待显式映射追赶...
+                </div>
+            </div>
+        </div>
+
+        <div class="mt-2" style="max-width:500px">
+            <p class="text-sm mb-1" style="color:var(--text-secondary)">计算进度对比</p>
+            <div class="race-bar">
+                <span class="label">显式映射</span>
+                <div class="bar" id="bar-explicit" style="width:0;background:var(--accent-orange)"></div>
+            </div>
+            <div class="race-bar">
+                <span class="label">核函数</span>
+                <div class="bar" id="bar-kernel" style="width:0;background:var(--accent-green)"></div>
+            </div>
+            <div class="race-result" id="race-result"></div>
+        </div>
+
+        <div class="info-box success mt-2">
+            <p>两种方法得到 <strong>完全相同</strong> 的结果！但核函数只需 1 步运算。在高维情形下（如 9600 万维），
+               显式映射需要存储和计算 $10^8$ 维向量，核函数仍然只需 1 次内积 + 1 次平方。这就是核技巧 (Kernel Trick) 的威力。</p>
+        </div>
+    </div>
+
+    <!-- ========== Section 4: 核函数替换 ========== -->
+    <div class="section">
+        <div class="section-title">
+            <div class="icon">4</div>
+            <h2>核函数替换</h2>
+        </div>
+        <p>在 SVM 的对偶问题中，目标函数和决策函数只涉及数据点之间的内积 $x_i \cdot x_j$。
+           我们只需将所有内积替换为核函数 $K(x_i, x_j)$，就能隐式地在高维特征空间中操作：</p>
+
+        <div class="deriv-block">
+            <div class="deriv-title">核化后的对偶形式</div>
+            $$\max_\alpha \sum_i \alpha_i - \frac{1}{2}\sum_{i,j} \alpha_i \alpha_j y_i y_j \, \color{#b388ff}{K(x_i, x_j)}$$
+            <p class="text-sm mt-1" style="color:var(--text-secondary);margin-bottom:0.3rem">决策函数：</p>
+            $$f(x) = \sum_{i=1}^n \alpha_i y_i \, \color{#b388ff}{K(x_i, x)} + b$$
+            <p class="text-sm text-muted mt-1" style="margin-bottom:0">
+                紫色部分是唯一需要修改的地方 — 用核函数代替内积即可。
+            </p>
+        </div>
+
+        <p>切换不同的核函数，观察 <strong>Gram 矩阵</strong>（所有点对的核值）和 <strong>决策边界</strong> 如何变化：</p>
+
+        <div class="controls-row">
+            <div class="btn-group" id="kernel-toggle">
+                <button class="btn active" data-kernel="linear">线性核</button>
+                <button class="btn" data-kernel="rbf">RBF 核</button>
+                <button class="btn" data-kernel="poly">多项式核</button>
+            </div>
+            <div class="slider-group">
+                <label>RBF $\gamma$</label>
+                <input type="range" id="slider-gamma" min="0.1" max="5" step="0.1" value="1.0" style="width:130px">
+                <span class="slider-value" id="val-gamma">1.0</span>
+            </div>
+            <div class="slider-group">
+                <label>C</label>
+                <input type="range" id="slider-C" min="0.1" max="10" step="0.1" value="1.0" style="width:100px">
+                <span class="slider-value" id="val-C">1.0</span>
+            </div>
+            <button class="btn" id="btn-retrain">重新训练</button>
+        </div>
+
+        <div class="heatmap-wrap">
+            <div class="heatmap-block">
+                <h4>Gram 矩阵 $K(x_i, x_j)$
+                    <span class="kernel-badge linear" id="gram-badge">线性</span>
+                </h4>
+                <div id="gram-matrix"></div>
+                <p class="text-sm text-muted mt-1" id="gram-info">显示前 10 个数据点</p>
+            </div>
+            <div class="heatmap-block" style="flex:1;min-width:300px">
+                <h4>决策边界</h4>
+                <div class="single-canvas">
+                    <canvas id="canvas-boundary" width="420" height="420"></canvas>
+                </div>
+                <div class="sv-count" id="sv-info">支持向量: 0 / 40</div>
+            </div>
+        </div>
+
+        <div class="legend mt-1">
+            <div class="legend-item">
+                <div class="swatch" style="background:#22c55e"></div> 正类 +1
+            </div>
+            <div class="legend-item">
+                <div class="swatch" style="background:#ef4444"></div> 负类 -1
+            </div>
+            <div class="legend-item">
+                <div class="swatch" style="background:#facc15;border-radius:50%"></div> 支持向量
+            </div>
+            <div class="legend-item">
+                <div class="swatch" style="background:#facc15"></div> 决策边界
+            </div>
+        </div>
+
+        <div class="info-box mt-2">
+            <p>线性核产生平滑渐变的 Gram 矩阵和直线决策边界。RBF 核的矩阵对角线集中（远处点核值趋零），
+               决策边界弯曲成圆形 — 完美匹配环形数据分布。多项式核介于两者之间，产生曲线边界。</p>
+        </div>
+
+        <div class="deriv-block mt-2">
+            <div class="deriv-title">常用核函数一览</div>
+            <table class="point-table" style="max-width:100%">
+                <thead>
+                    <tr><th>核函数</th><th>表达式</th><th>特点</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>线性核</td><td>$K(x,y) = x \cdot y$</td><td>无映射，等价于线性SVM</td></tr>
+                    <tr><td>多项式核</td><td>$K(x,y) = (x \cdot y + c)^p$</td><td>有限维特征空间</td></tr>
+                    <tr><td>RBF / 高斯核</td><td>$K(x,y) = e^{-\gamma\|x-y\|^2}$</td><td>无穷维特征空间</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script src="../shared/scripts/nav.js"></script>
+<script src="../shared/scripts/svm-utils.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    // KaTeX auto-render
+    if (typeof renderMathInElement === 'function') {
+        renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ]
+        });
+    }
+
+    const {
+        seededRandom, dot, vecSub, rbfKernel, linearKernel, polynomialKernel,
+        generateCircleData, trainKernelSVM, predictKernelSVM, classToColor
+    } = SVMUtils;
+
+    /* ================================================================
+       Section 1: 低维不可分 → 高维可分
+    ================================================================ */
+    const c2d = document.getElementById('canvas-2d');
+    const ctx2d = c2d.getContext('2d');
+    const c3d = document.getElementById('canvas-3d');
+    const ctx3d = c3d.getContext('2d');
+    const sliderT = document.getElementById('slider-transform');
+    const valT = document.getElementById('val-transform');
+    const status2d = document.getElementById('status-2d');
+    const status3d = document.getElementById('status-3d');
+
+    // Generate circle data
+    const circleData = generateCircleData(80, 0.15, 123);
+    const pts2d = circleData.data;
+    const lbl2d = circleData.labels;
+
+    // Compute z = x1^2 + x2^2 for 3D
+    const pts3d = pts2d.map(p => [p[0], p[1], p[0] * p[0] + p[1] * p[1]]);
+    const maxZ = Math.max(...pts3d.map(p => p[2]));
+
+    let transformT = 0;
+    let animating1 = false;
+
+    function draw2D() {
+        const w = c2d.width, h = c2d.height;
+        ctx2d.clearRect(0, 0, w, h);
+        ctx2d.fillStyle = '#16213e';
+        ctx2d.fillRect(0, 0, w, h);
+
+        const scale = w / 5;
+        const cx = w / 2, cy = h / 2;
+
+        // Grid lines
+        ctx2d.strokeStyle = '#1e2d50';
+        ctx2d.lineWidth = 0.5;
+        for (let g = -2; g <= 2; g++) {
+            ctx2d.beginPath();
+            ctx2d.moveTo(cx + g * scale, 0);
+            ctx2d.lineTo(cx + g * scale, h);
+            ctx2d.stroke();
+            ctx2d.beginPath();
+            ctx2d.moveTo(0, cy + g * scale);
+            ctx2d.lineTo(w, cy + g * scale);
+            ctx2d.stroke();
+        }
+
+        // Axes
+        ctx2d.strokeStyle = '#2a3a5a';
+        ctx2d.lineWidth = 1;
+        ctx2d.beginPath();
+        ctx2d.moveTo(cx, 0); ctx2d.lineTo(cx, h);
+        ctx2d.moveTo(0, cy); ctx2d.lineTo(w, cy);
+        ctx2d.stroke();
+
+        // "No linear boundary possible" annotation
+        if (transformT < 0.1) {
+            ctx2d.save();
+            ctx2d.strokeStyle = 'rgba(255,82,82,0.4)';
+            ctx2d.lineWidth = 2;
+            ctx2d.setLineDash([6, 4]);
+            // Draw an attempted line that fails
+            ctx2d.beginPath();
+            ctx2d.moveTo(40, 40);
+            ctx2d.lineTo(w - 40, h - 40);
+            ctx2d.stroke();
+            ctx2d.setLineDash([]);
+            // Cross it out
+            ctx2d.strokeStyle = 'rgba(255,82,82,0.6)';
+            ctx2d.lineWidth = 3;
+            ctx2d.beginPath();
+            ctx2d.moveTo(w / 2 - 12, h / 2 - 50);
+            ctx2d.lineTo(w / 2 + 12, h / 2 - 30);
+            ctx2d.moveTo(w / 2 + 12, h / 2 - 50);
+            ctx2d.lineTo(w / 2 - 12, h / 2 - 30);
+            ctx2d.stroke();
+            ctx2d.restore();
+        }
+
+        // Decision boundary (circle) — show based on transformT
+        if (transformT > 0.3) {
+            const alpha = Math.min(1, (transformT - 0.3) / 0.4);
+            const sepR = 1.0;
+            const pr = sepR * scale;
+
+            // Outer region tint
+            ctx2d.fillStyle = `rgba(239,68,68,${alpha * 0.04})`;
+            ctx2d.fillRect(0, 0, w, h);
+
+            // Inner region fill
+            ctx2d.fillStyle = `rgba(34,197,94,${alpha * 0.06})`;
+            ctx2d.beginPath();
+            ctx2d.arc(cx, cy, pr, 0, Math.PI * 2);
+            ctx2d.fill();
+
+            // Boundary circle
+            ctx2d.strokeStyle = `rgba(250,204,21,${alpha * 0.9})`;
+            ctx2d.lineWidth = 2.5;
+            ctx2d.beginPath();
+            ctx2d.arc(cx, cy, pr, 0, Math.PI * 2);
+            ctx2d.stroke();
+
+            // Label
+            ctx2d.fillStyle = `rgba(250,204,21,${alpha})`;
+            ctx2d.font = '11px Inter, sans-serif';
+            ctx2d.fillText('x₁² + x₂² = 1', cx + pr * 0.6, cy - pr * 0.7);
+        }
+
+        // Points
+        for (let i = 0; i < pts2d.length; i++) {
+            const x = cx + pts2d[i][0] * scale;
+            const y = cy - pts2d[i][1] * scale;
+            ctx2d.beginPath();
+            ctx2d.arc(x, y, 4.5, 0, Math.PI * 2);
+            ctx2d.fillStyle = classToColor(lbl2d[i]);
+            ctx2d.fill();
+            ctx2d.strokeStyle = 'rgba(0,0,0,0.3)';
+            ctx2d.lineWidth = 0.5;
+            ctx2d.stroke();
+        }
+
+        // Axis labels
+        ctx2d.fillStyle = '#6c6c7c';
+        ctx2d.font = '12px JetBrains Mono, monospace';
+        ctx2d.fillText('x₁', w - 24, cy - 10);
+        ctx2d.fillText('x₂', cx + 10, 18);
+    }
+
+    function project3D(x, y, z, t) {
+        const angle = -0.6 + t * 0.4;
+        const tilt = 0.45 + t * 0.35;
+        const cosA = Math.cos(angle), sinA = Math.sin(angle);
+        const cosT = Math.cos(tilt), sinT = Math.sin(tilt);
+        const rx = x * cosA - y * sinA;
+        const ry = x * sinA * cosT + y * cosA * cosT - z * sinT;
+        return [rx, ry];
+    }
+
+    function draw3D() {
+        const w = c3d.width, h = c3d.height;
+        ctx3d.clearRect(0, 0, w, h);
+        ctx3d.fillStyle = '#16213e';
+        ctx3d.fillRect(0, 0, w, h);
+
+        const scale = w / 6;
+        const cx = w / 2, cy = h / 2 + 40;
+
+        // Grid on the z=0 ground plane
+        ctx3d.strokeStyle = '#1e2d50';
+        ctx3d.lineWidth = 0.5;
+        for (let g = -2; g <= 2; g++) {
+            const [x1, y1] = project3D(g, -2, 0, transformT);
+            const [x2, y2] = project3D(g, 2, 0, transformT);
+            ctx3d.beginPath();
+            ctx3d.moveTo(cx + x1 * scale, cy - y1 * scale);
+            ctx3d.lineTo(cx + x2 * scale, cy - y2 * scale);
+            ctx3d.stroke();
+            const [x3, y3] = project3D(-2, g, 0, transformT);
+            const [x4, y4] = project3D(2, g, 0, transformT);
+            ctx3d.beginPath();
+            ctx3d.moveTo(cx + x3 * scale, cy - y3 * scale);
+            ctx3d.lineTo(cx + x4 * scale, cy - y4 * scale);
+            ctx3d.stroke();
+        }
+
+        // Axes
+        const axes = [
+            {dir: [2.5, 0, 0], label: 'x₁', color: '#4fc3f7'},
+            {dir: [0, 2.5, 0], label: 'x₂', color: '#b388ff'},
+            {dir: [0, 0, maxZ * 1.2], label: 'z = x₁²+x₂²', color: '#ffab40'}
+        ];
+        for (const ax of axes) {
+            const [px, py] = project3D(ax.dir[0], ax.dir[1], ax.dir[2], transformT);
+            ctx3d.strokeStyle = ax.color + '70';
+            ctx3d.lineWidth = 1.5;
+            ctx3d.beginPath();
+            ctx3d.moveTo(cx, cy);
+            ctx3d.lineTo(cx + px * scale, cy - py * scale);
+            ctx3d.stroke();
+            // Arrow head
+            ctx3d.fillStyle = ax.color;
+            ctx3d.font = '10px JetBrains Mono, monospace';
+            ctx3d.fillText(ax.label, cx + px * scale + 4, cy - py * scale - 4);
+        }
+
+        // Separating plane in 3D (z = 1.0)
+        if (transformT > 0.4) {
+            const alpha = Math.min(1, (transformT - 0.4) / 0.3);
+            const planeZ = 1.0;
+            ctx3d.fillStyle = `rgba(250,204,21,${alpha * 0.1})`;
+            ctx3d.strokeStyle = `rgba(250,204,21,${alpha * 0.5})`;
+            ctx3d.lineWidth = 1.5;
+            const corners = [[-2.2, -2.2], [2.2, -2.2], [2.2, 2.2], [-2.2, 2.2]];
+            ctx3d.beginPath();
+            for (let i = 0; i < corners.length; i++) {
+                const [px, py] = project3D(corners[i][0], corners[i][1], planeZ, transformT);
+                const sx = cx + px * scale, sy = cy - py * scale;
+                if (i === 0) ctx3d.moveTo(sx, sy);
+                else ctx3d.lineTo(sx, sy);
+            }
+            ctx3d.closePath();
+            ctx3d.fill();
+            ctx3d.stroke();
+
+            // Plane label
+            if (alpha > 0.5) {
+                const [lx, ly] = project3D(2.3, 0, planeZ, transformT);
+                ctx3d.fillStyle = `rgba(250,204,21,${alpha})`;
+                ctx3d.font = '11px Inter, sans-serif';
+                ctx3d.fillText('z = 1 (分割平面)', cx + lx * scale + 5, cy - ly * scale);
+            }
+        }
+
+        // Points with interpolated z for animation
+        const pointsWithDepth = [];
+        for (let i = 0; i < pts3d.length; i++) {
+            const x = pts3d[i][0], y = pts3d[i][1];
+            const z = pts3d[i][2] * transformT;
+            const [px, py] = project3D(x, y, z, transformT);
+            // Depth for sorting
+            const angle = -0.6 + transformT * 0.4;
+            const depthVal = x * Math.sin(angle) + y * Math.cos(angle);
+            pointsWithDepth.push({px, py, depth: depthVal, label: lbl2d[i], z});
+        }
+        pointsWithDepth.sort((a, b) => a.depth - b.depth);
+
+        for (const pt of pointsWithDepth) {
+            const sx = cx + pt.px * scale;
+            const sy = cy - pt.py * scale;
+            // Shadow / height line
+            if (transformT > 0.1 && pt.z > 0) {
+                ctx3d.strokeStyle = 'rgba(255,255,255,0.06)';
+                ctx3d.lineWidth = 0.5;
+                const [bx, by] = project3D(
+                    pt.px / scale * (scale) - (cx - cx), // we need original x,y
+                    0, 0, transformT
+                );
+                // Actually draw a simple vertical line from ground to point
+                const groundPt = project3D(
+                    pts3d[pointsWithDepth.indexOf(pt)] ? pts3d[0][0] : 0,
+                    0, 0, transformT
+                );
+            }
+            ctx3d.beginPath();
+            ctx3d.arc(sx, sy, 4.5, 0, Math.PI * 2);
+            ctx3d.fillStyle = classToColor(pt.label);
+            ctx3d.fill();
+            ctx3d.strokeStyle = 'rgba(0,0,0,0.3)';
+            ctx3d.lineWidth = 0.5;
+            ctx3d.stroke();
+        }
+
+        // Status update
+        if (transformT > 0.7) {
+            status3d.textContent = '线性可分！超平面 z=1 完美分割';
+            status3d.style.color = 'var(--accent-green)';
+        } else if (transformT > 0.1) {
+            status3d.textContent = `变换中... ${Math.round(transformT * 100)}%`;
+            status3d.style.color = '';
+        } else {
+            status3d.textContent = '拖动滑块查看变换';
+            status3d.style.color = '';
+        }
+    }
+
+    function drawSection1() {
+        draw2D();
+        draw3D();
+    }
+
+    sliderT.addEventListener('input', () => {
+        transformT = parseInt(sliderT.value) / 100;
+        valT.textContent = sliderT.value + '%';
+        drawSection1();
+    });
+
+    document.getElementById('btn-transform').addEventListener('click', () => {
+        if (animating1) return;
+        animating1 = true;
+        transformT = 0;
+        sliderT.value = 0;
+        const start = performance.now();
+        const dur = 2500;
+        function tick(now) {
+            const p = Math.min(1, (now - start) / dur);
+            const eased = p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2;
+            transformT = eased;
+            sliderT.value = Math.round(eased * 100);
+            valT.textContent = Math.round(eased * 100) + '%';
+            drawSection1();
+            if (p < 1) requestAnimationFrame(tick);
+            else animating1 = false;
+        }
+        requestAnimationFrame(tick);
+    });
+
+    document.getElementById('btn-reset1').addEventListener('click', () => {
+        animating1 = false;
+        transformT = 0;
+        sliderT.value = 0;
+        valT.textContent = '0%';
+        drawSection1();
+    });
+
+    drawSection1();
+
+    /* ================================================================
+       Section 2: 映射函数 φ
+    ================================================================ */
+    const phiTableBody = document.getElementById('phi-table').querySelector('tbody');
+    let phiPoints = [[1, 2], [-1, 0.5], [0.7, -1.3]];
+
+    function phiMap(x1, x2) {
+        return [x1 * x1, Math.sqrt(2) * x1 * x2, x2 * x2];
+    }
+
+    function fmt(v) { return v.toFixed(3); }
+
+    function renderPhiTable() {
+        phiTableBody.innerHTML = '';
+        for (let idx = 0; idx < phiPoints.length; idx++) {
+            const p = phiPoints[idx];
+            const m = phiMap(p[0], p[1]);
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td style="color:var(--text-muted)">${idx + 1}</td>
+                <td>(${fmt(p[0])}, ${fmt(p[1])})</td>
+                <td>${fmt(m[0])}</td>
+                <td>${fmt(m[1])}</td>
+                <td>${fmt(m[2])}</td>
+                <td style="color:var(--accent-blue)">(${fmt(m[0])}, ${fmt(m[1])}, ${fmt(m[2])})</td>`;
+            phiTableBody.appendChild(tr);
+        }
+    }
+
+    document.getElementById('btn-map').addEventListener('click', () => {
+        const rows = phiTableBody.querySelectorAll('tr');
+        let idx = 0;
+        // Clear all highlights first
+        rows.forEach(r => r.classList.remove('highlight'));
+        function highlightNext() {
+            if (idx > 0 && idx - 1 < rows.length) rows[idx - 1].classList.remove('highlight');
+            if (idx < rows.length) {
+                rows[idx].classList.add('highlight');
+                idx++;
+                setTimeout(highlightNext, 500);
+            }
+        }
+        highlightNext();
+    });
+
+    document.getElementById('btn-add-point').addEventListener('click', () => {
+        const x1 = +(Math.random() * 4 - 2).toFixed(2);
+        const x2 = +(Math.random() * 4 - 2).toFixed(2);
+        phiPoints.push([x1, x2]);
+        renderPhiTable();
+    });
+
+    document.getElementById('btn-clear-points').addEventListener('click', () => {
+        phiPoints = [];
+        renderPhiTable();
+    });
+
+    renderPhiTable();
+
+    /* ================================================================
+       Section 3: 核函数的魔法 — 计算比赛
+    ================================================================ */
+    const raceX = [1, 2], raceY = [3, -1];
+
+    function resetRaceUI() {
+        ['step-exp-1', 'step-exp-2', 'step-exp-3', 'step-ker-1'].forEach(id => {
+            const el = document.getElementById(id);
+            el.style.opacity = '0.3';
+            el.classList.remove('active');
+        });
+        document.getElementById('step-exp-1-val').textContent = '';
+        document.getElementById('step-exp-2-val').textContent = '';
+        document.getElementById('step-exp-3-val').textContent = '';
+        document.getElementById('step-ker-1-val').textContent = '';
+        document.getElementById('bar-explicit').style.width = '0';
+        document.getElementById('bar-kernel').style.width = '0';
+        document.getElementById('bar-explicit').textContent = '';
+        document.getElementById('bar-kernel').textContent = '';
+        document.getElementById('kernel-wait').style.display = '';
+        document.getElementById('kernel-wait').textContent = '核函数已计算完成，等待显式映射追赶...';
+        document.getElementById('race-result').style.display = 'none';
+    }
+
+    function runRace() {
+        resetRaceUI();
+
+        const phiX = phiMap(raceX[0], raceX[1]);
+        const phiY = phiMap(raceY[0], raceY[1]);
+        const dotPhi = phiX[0] * phiY[0] + phiX[1] * phiY[1] + phiX[2] * phiY[2];
+        const dotXY = raceX[0] * raceY[0] + raceX[1] * raceY[1];
+        const kernelVal = dotXY * dotXY;
+
+        // Kernel finishes at 600ms
+        setTimeout(() => {
+            const el = document.getElementById('step-ker-1');
+            el.style.opacity = '1';
+            el.classList.add('active');
+            document.getElementById('step-ker-1-val').textContent =
+                `x·y = ${raceX[0]}*${raceY[0]} + ${raceX[1]}*(${raceY[1]}) = ${dotXY}，K = ${dotXY}² = ${fmt(kernelVal)}`;
+            document.getElementById('bar-kernel').style.width = '100%';
+            document.getElementById('bar-kernel').textContent = `完成: ${fmt(kernelVal)}`;
+            document.getElementById('kernel-wait').textContent = '核函数已完成！等待显式映射...';
+        }, 500);
+
+        // Explicit step 1 (800ms)
+        setTimeout(() => {
+            const el = document.getElementById('step-exp-1');
+            el.style.opacity = '1';
+            el.classList.add('active');
+            document.getElementById('step-exp-1-val').textContent =
+                `φ(1,2) = (1², √2·1·2, 2²) = (${fmt(phiX[0])}, ${fmt(phiX[1])}, ${fmt(phiX[2])})`;
+            document.getElementById('bar-explicit').style.width = '33%';
+            document.getElementById('bar-explicit').textContent = '1/3';
+        }, 800);
+
+        // Explicit step 2 (1400ms)
+        setTimeout(() => {
+            document.getElementById('step-exp-1').classList.remove('active');
+            const el = document.getElementById('step-exp-2');
+            el.style.opacity = '1';
+            el.classList.add('active');
+            document.getElementById('step-exp-2-val').textContent =
+                `φ(3,-1) = (9, √2·3·(-1), 1) = (${fmt(phiY[0])}, ${fmt(phiY[1])}, ${fmt(phiY[2])})`;
+            document.getElementById('bar-explicit').style.width = '66%';
+            document.getElementById('bar-explicit').textContent = '2/3';
+        }, 1400);
+
+        // Explicit step 3 (2000ms)
+        setTimeout(() => {
+            document.getElementById('step-exp-2').classList.remove('active');
+            const el = document.getElementById('step-exp-3');
+            el.style.opacity = '1';
+            el.classList.add('active');
+            document.getElementById('step-exp-3-val').textContent =
+                `${fmt(phiX[0])}·${fmt(phiY[0])} + ${fmt(phiX[1])}·${fmt(phiY[1])} + ${fmt(phiX[2])}·${fmt(phiY[2])} = ${fmt(dotPhi)}`;
+            document.getElementById('bar-explicit').style.width = '100%';
+            document.getElementById('bar-explicit').textContent = `完成: ${fmt(dotPhi)}`;
+
+            // Show result
+            const resEl = document.getElementById('race-result');
+            resEl.style.display = 'block';
+            resEl.innerHTML = `<span style="color:var(--accent-green)">结果一致</span>：
+                显式映射 = <strong>${fmt(dotPhi)}</strong>，核函数 = <strong>${fmt(kernelVal)}</strong>。
+                核函数快了 <strong>3 倍</strong>！在高维空间中这个优势是天文数字。`;
+        }, 2000);
+    }
+
+    document.getElementById('btn-race').addEventListener('click', runRace);
+    document.getElementById('btn-race-reset').addEventListener('click', resetRaceUI);
+
+    /* ================================================================
+       Section 4: 核函数替换 — Gram matrix + decision boundary
+    ================================================================ */
+    const canvasB = document.getElementById('canvas-boundary');
+    const ctxB = canvasB.getContext('2d');
+    const gramDiv = document.getElementById('gram-matrix');
+    const sliderGamma = document.getElementById('slider-gamma');
+    const valGamma = document.getElementById('val-gamma');
+    const sliderC = document.getElementById('slider-C');
+    const valC = document.getElementById('val-C');
+    const gramBadge = document.getElementById('gram-badge');
+    const svInfo = document.getElementById('sv-info');
+
+    // Training data for section 4 (circle pattern, small set for speed)
+    const s4data = generateCircleData(40, 0.2, 77);
+    const s4pts = s4data.data;
+    const s4lbl = s4data.labels;
+
+    let currentKernel = 'linear';
+    let gamma = 1.0;
+    let paramC = 1.0;
+
+    // Kernel toggle buttons
+    document.getElementById('kernel-toggle').addEventListener('click', e => {
+        const btn = e.target.closest('[data-kernel]');
+        if (!btn) return;
+        document.querySelectorAll('#kernel-toggle .btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        currentKernel = btn.dataset.kernel;
+        updateBadge();
+        trainAndDraw4();
+    });
+
+    sliderGamma.addEventListener('input', () => {
+        gamma = parseFloat(sliderGamma.value);
+        valGamma.textContent = gamma.toFixed(1);
+        if (currentKernel === 'rbf') trainAndDraw4();
+    });
+
+    sliderC.addEventListener('input', () => {
+        paramC = parseFloat(sliderC.value);
+        valC.textContent = paramC.toFixed(1);
+        trainAndDraw4();
+    });
+
+    document.getElementById('btn-retrain').addEventListener('click', () => trainAndDraw4());
+
+    function updateBadge() {
+        gramBadge.className = 'kernel-badge ' + currentKernel;
+        const names = {linear: '线性', rbf: 'RBF', poly: '多项式'};
+        gramBadge.textContent = names[currentKernel] || currentKernel;
+    }
+
+    function getKernelFn() {
+        if (currentKernel === 'rbf') return (a, b) => rbfKernel(a, b, gamma);
+        if (currentKernel === 'poly') return (a, b) => polynomialKernel(a, b, 3, 1);
+        return linearKernel;
+    }
+
+    function computeGramMatrix() {
+        const n = s4pts.length;
+        const kf = getKernelFn();
+        const G = [];
+        for (let i = 0; i < n; i++) {
+            G[i] = [];
+            for (let j = 0; j < n; j++) {
+                G[i][j] = kf(s4pts[i], s4pts[j]);
+            }
+        }
+        return G;
+    }
+
+    function heatColor(v, min, max) {
+        const t = max === min ? 0.5 : (v - min) / (max - min);
+        // Deep blue -> teal -> green -> yellow -> red
+        let r, g, b;
+        if (t < 0.25) {
+            const s = t / 0.25;
+            r = Math.round(10 + s * 0);
+            g = Math.round(20 + s * 80);
+            b = Math.round(80 + s * 60);
+        } else if (t < 0.5) {
+            const s = (t - 0.25) / 0.25;
+            r = Math.round(10 + s * 30);
+            g = Math.round(100 + s * 80);
+            b = Math.round(140 - s * 70);
+        } else if (t < 0.75) {
+            const s = (t - 0.5) / 0.25;
+            r = Math.round(40 + s * 180);
+            g = Math.round(180 + s * 40);
+            b = Math.round(70 - s * 40);
+        } else {
+            const s = (t - 0.75) / 0.25;
+            r = Math.round(220 + s * 35);
+            g = Math.round(220 - s * 140);
+            b = Math.round(30 - s * 20);
+        }
+        return `rgb(${r},${g},${b})`;
+    }
+
+    function drawGramMatrix(G) {
+        const maxN = Math.min(10, G.length);
+        let min = Infinity, max = -Infinity;
+        for (let i = 0; i < maxN; i++) {
+            for (let j = 0; j < maxN; j++) {
+                if (G[i][j] < min) min = G[i][j];
+                if (G[i][j] > max) max = G[i][j];
+            }
+        }
+
+        gramDiv.innerHTML = '';
+        const grid = document.createElement('div');
+        grid.className = 'heatmap-grid';
+        grid.style.gridTemplateColumns = `repeat(${maxN}, 36px)`;
+
+        for (let i = 0; i < maxN; i++) {
+            for (let j = 0; j < maxN; j++) {
+                const cell = document.createElement('div');
+                cell.className = 'heatmap-cell';
+                cell.style.background = heatColor(G[i][j], min, max);
+                const val = G[i][j];
+                cell.textContent = Math.abs(val) >= 10 ? val.toFixed(0) : val.toFixed(1);
+                cell.title = `K(x${i}, x${j}) = ${val.toFixed(4)}`;
+                grid.appendChild(cell);
+            }
+        }
+        gramDiv.appendChild(grid);
+        document.getElementById('gram-info').textContent =
+            `显示前 ${maxN} 个点 | 值域 [${min.toFixed(2)}, ${max.toFixed(2)}]`;
+    }
+
+    function drawBoundary(model) {
+        const w = canvasB.width, h = canvasB.height;
+        ctxB.clearRect(0, 0, w, h);
+
+        const scale = w / 5;
+        const cx = w / 2, cy = h / 2;
+        const kf = getKernelFn();
+
+        // Precompute decision values on grid for heatmap
+        const res = 3;
+        const imgData = ctxB.createImageData(w, h);
+        const vals = [];
+
+        for (let py = 0; py < h; py += res) {
+            for (let px = 0; px < w; px += res) {
+                const x1 = (px - cx) / scale;
+                const x2 = (cy - py) / scale;
+                let val = model.b;
+                for (let i = 0; i < s4pts.length; i++) {
+                    if (model.alphas[i] > 1e-6) {
+                        val += model.alphas[i] * s4lbl[i] * kf(s4pts[i], [x1, x2]);
+                    }
+                }
+                vals.push({px, py, val});
+
+                // Region coloring
+                const cls = val >= 0 ? 1 : -1;
+                const intensity = Math.min(1, Math.abs(val) * 0.3);
+                let r, g, b;
+                if (cls === 1) {
+                    r = Math.round(22 + intensity * 12);
+                    g = Math.round(38 + intensity * 25);
+                    b = Math.round(30 + intensity * 15);
+                } else {
+                    r = Math.round(38 + intensity * 15);
+                    g = Math.round(22 + intensity * 8);
+                    b = Math.round(30 + intensity * 20);
+                }
+                for (let dx = 0; dx < res && px + dx < w; dx++) {
+                    for (let dy = 0; dy < res && py + dy < h; dy++) {
+                        const idx = ((py + dy) * w + (px + dx)) * 4;
+                        imgData.data[idx] = r;
+                        imgData.data[idx + 1] = g;
+                        imgData.data[idx + 2] = b;
+                        imgData.data[idx + 3] = 200;
+                    }
+                }
+            }
+        }
+        ctxB.putImageData(imgData, 0, 0);
+
+        // Decision boundary contour (where sign changes)
+        const contourRes = 4;
+        ctxB.fillStyle = '#facc15';
+        for (let px = 0; px < w - contourRes; px += contourRes) {
+            for (let py = 0; py < h - contourRes; py += contourRes) {
+                const x1 = (px - cx) / scale;
+                const x2 = (cy - py) / scale;
+                const x1r = (px + contourRes - cx) / scale;
+                const x2b = (cy - py - contourRes) / scale;
+                let v00 = model.b, v10 = model.b, v01 = model.b;
+                for (let i = 0; i < s4pts.length; i++) {
+                    if (model.alphas[i] > 1e-6) {
+                        const ay = model.alphas[i] * s4lbl[i];
+                        v00 += ay * kf(s4pts[i], [x1, x2]);
+                        v10 += ay * kf(s4pts[i], [x1r, x2]);
+                        v01 += ay * kf(s4pts[i], [x1, x2b]);
+                    }
+                }
+                if ((v00 >= 0) !== (v10 >= 0) || (v00 >= 0) !== (v01 >= 0)) {
+                    ctxB.fillRect(px, py, 2.5, 2.5);
+                }
+            }
+        }
+
+        // Grid lines
+        ctxB.strokeStyle = '#1e2d50';
+        ctxB.lineWidth = 0.5;
+        for (let g = -2; g <= 2; g++) {
+            ctxB.beginPath();
+            ctxB.moveTo(cx + g * scale, 0);
+            ctxB.lineTo(cx + g * scale, h);
+            ctxB.stroke();
+            ctxB.beginPath();
+            ctxB.moveTo(0, cy + g * scale);
+            ctxB.lineTo(w, cy + g * scale);
+            ctxB.stroke();
+        }
+
+        // Axes
+        ctxB.strokeStyle = '#2a3a5a';
+        ctxB.lineWidth = 1;
+        ctxB.beginPath();
+        ctxB.moveTo(cx, 0); ctxB.lineTo(cx, h);
+        ctxB.moveTo(0, cy); ctxB.lineTo(w, cy);
+        ctxB.stroke();
+
+        // Data points
+        for (let i = 0; i < s4pts.length; i++) {
+            const sx = cx + s4pts[i][0] * scale;
+            const sy = cy - s4pts[i][1] * scale;
+            ctxB.beginPath();
+            ctxB.arc(sx, sy, 5, 0, Math.PI * 2);
+            ctxB.fillStyle = classToColor(s4lbl[i]);
+            ctxB.fill();
+            ctxB.strokeStyle = 'rgba(0,0,0,0.4)';
+            ctxB.lineWidth = 0.7;
+            ctxB.stroke();
+        }
+
+        // Support vectors (highlighted ring)
+        for (const i of model.supportIndices) {
+            const sx = cx + s4pts[i][0] * scale;
+            const sy = cy - s4pts[i][1] * scale;
+            ctxB.strokeStyle = '#facc15';
+            ctxB.lineWidth = 2;
+            ctxB.beginPath();
+            ctxB.arc(sx, sy, 9, 0, Math.PI * 2);
+            ctxB.stroke();
+        }
+
+        // Update SV info
+        svInfo.textContent =
+            `支持向量: ${model.supportIndices.length} / ${s4pts.length}`;
+    }
+
+    function trainAndDraw4() {
+        const kf = getKernelFn();
+        const model = trainKernelSVM(s4pts, s4lbl, kf, paramC, 0.001, 25);
+        const G = computeGramMatrix();
+        drawGramMatrix(G);
+        drawBoundary(model);
+    }
+
+    updateBadge();
+    trainAndDraw4();
+});
+</script>
+</body>
+</html>

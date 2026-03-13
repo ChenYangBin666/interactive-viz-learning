@@ -1,0 +1,1378 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Leaf-wise 生长 — LightGBM</title>
+<link rel="stylesheet" href="../shared/styles/common.css">
+<link rel="stylesheet" href="../shared/styles/components.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+<script defer src="../shared/scripts/nav.js"></script>
+<script defer src="../shared/scripts/lgbm-utils.js"></script>
+<style>
+/* ========== Page-specific styles ========== */
+.dual-tree-container {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.5rem;
+}
+.tree-panel {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+}
+.tree-panel-header {
+    padding: 0.75rem 1rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--border-color);
+}
+.tree-panel-header h4 { margin: 0; font-size: 0.95rem; }
+.tree-canvas-wrap {
+    position: relative;
+    height: 360px;
+}
+.tree-canvas-wrap canvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+.step-info-bar {
+    padding: 0.5rem 1rem;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    border-top: 1px solid var(--border-color);
+    font-family: var(--font-mono);
+    min-height: 2rem;
+    display: flex;
+    justify-content: space-between;
+}
+.metrics-row {
+    display: flex;
+    gap: 1.5rem;
+    padding: 0.6rem 1rem;
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    border-top: 1px solid var(--border-color);
+    font-family: var(--font-mono);
+}
+.metrics-row .metric-val {
+    color: var(--accent-green);
+    font-weight: 600;
+}
+
+/* Candidate list */
+.candidate-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-top: 0.5rem;
+}
+.candidate-chip {
+    padding: 0.2rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-family: var(--font-mono);
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    transition: all 0.3s;
+}
+.candidate-chip.best {
+    border-color: var(--accent-green);
+    background: rgba(22, 199, 154, 0.15);
+    color: var(--accent-green);
+    font-weight: 600;
+}
+.candidate-chip.split {
+    opacity: 0.4;
+    text-decoration: line-through;
+}
+
+/* Charts */
+.chart-area {
+    position: relative;
+    width: 100%;
+    height: 300px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+}
+.chart-area canvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+/* Relationship grid */
+.rel-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.5rem;
+    align-items: start;
+}
+.rel-panel {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 1.2rem;
+}
+.rel-panel h4 { margin-bottom: 0.75rem; }
+.param-display {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 0.3rem 1rem;
+    font-size: 0.85rem;
+    margin-top: 0.75rem;
+}
+.param-display .param-label { color: var(--text-muted); }
+.param-display .param-val {
+    color: var(--accent-green);
+    font-family: var(--font-mono);
+    font-weight: 600;
+}
+
+.zone-legend {
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+    margin-top: 1rem;
+    font-size: 0.8rem;
+}
+.zone-item {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+}
+.zone-swatch {
+    width: 14px;
+    height: 14px;
+    border-radius: 3px;
+}
+
+@media (max-width: 900px) {
+    .dual-tree-container, .rel-grid { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="page-container">
+
+<!-- ======== Hero ======== -->
+<div class="section">
+    <h1>Leaf-wise 生长策略</h1>
+    <p>LightGBM 的核心创新之一：抛弃传统 Level-wise（逐层）生长方式，改用 Leaf-wise（最优叶子优先）策略。
+    每一步都选择全局增益最大的叶子节点进行分裂，以更少的叶子数量达到更低的损失值。</p>
+    <div class="info-box">
+        <p>$$\text{Leaf-wise: } \quad \text{split leaf } = \arg\max_{l \in \mathcal{L}} \; \text{Gain}(l)$$</p>
+        <p>其中 \(\mathcal{L}\) 是当前所有叶子节点的集合，Gain 为该叶子最佳分裂点的增益。</p>
+    </div>
+</div>
+
+<!-- ======== Section 1: Level-wise Growth ======== -->
+<div class="section" id="sec-levelwise">
+    <div class="section-title">
+        <div class="icon">📊</div>
+        <h2>Level-wise 生长（逐层）</h2>
+        <span class="badge badge-blue">XGBoost 风格</span>
+    </div>
+    <p>传统方法对同一层的所有节点同时分裂，类似广度优先搜索（BFS）。即使某些节点增益很低，也必须分裂以保持层级平衡。</p>
+    <div class="tree-panel">
+        <div class="tree-panel-header">
+            <h4>Level-wise 生长动画</h4>
+            <div class="flex gap-sm items-center">
+                <button class="btn btn-sm" id="lw-reset">重置</button>
+                <button class="btn btn-primary btn-sm" id="lw-step">下一步</button>
+                <button class="btn btn-sm" id="lw-auto">自动播放</button>
+            </div>
+        </div>
+        <div class="tree-canvas-wrap"><canvas id="canvas-levelwise"></canvas></div>
+        <div class="step-info-bar">
+            <span id="lw-info">点击「下一步」开始逐层生长</span>
+            <span id="lw-stats"></span>
+        </div>
+        <div style="padding: 0.5rem 1rem;">
+            <div class="candidate-list" id="lw-candidates"></div>
+        </div>
+    </div>
+</div>
+
+<!-- ======== Section 2: Leaf-wise Growth ======== -->
+<div class="section" id="sec-leafwise">
+    <div class="section-title">
+        <div class="icon">🍃</div>
+        <h2>Leaf-wise 生长（最优叶子优先）</h2>
+        <span class="badge badge-green">LightGBM 风格</span>
+    </div>
+    <p>每一步从所有叶子中选择增益最大的节点进行分裂。树可能不对称，但能更快地降低整体损失。使用与上面相同的数据和增益计算。</p>
+    <div class="tree-panel">
+        <div class="tree-panel-header">
+            <h4>Leaf-wise 生长动画</h4>
+            <div class="flex gap-sm items-center">
+                <button class="btn btn-sm" id="bw-reset">重置</button>
+                <button class="btn btn-primary btn-sm" id="bw-step">下一步</button>
+                <button class="btn btn-sm" id="bw-auto">自动播放</button>
+            </div>
+        </div>
+        <div class="tree-canvas-wrap"><canvas id="canvas-leafwise"></canvas></div>
+        <div class="step-info-bar">
+            <span id="bw-info">点击「下一步」开始 Leaf-wise 生长</span>
+            <span id="bw-stats"></span>
+        </div>
+        <div style="padding: 0.5rem 1rem;">
+            <div class="candidate-list" id="bw-candidates"></div>
+        </div>
+    </div>
+</div>
+
+<!-- ======== Section 3: Side-by-side Comparison ======== -->
+<div class="section" id="sec-compare">
+    <div class="section-title">
+        <div class="icon">⚖️</div>
+        <h2>并排对比</h2>
+    </div>
+    <p>相同数据集和相同叶子数限制下，观察两种策略的差异。Leaf-wise 通常以更少的分裂步骤达到更低的损失。</p>
+    <div class="card" style="margin-bottom:1rem; padding:1rem;">
+        <div class="slider-group">
+            <label>max_leaves:</label>
+            <input type="range" id="cmp-leaves" min="4" max="32" value="10" step="1">
+            <span class="slider-value" id="cmp-leaves-val">10</span>
+            <button class="btn btn-primary btn-sm" id="cmp-play">同时生长</button>
+            <button class="btn btn-sm" id="cmp-reset">重置</button>
+        </div>
+    </div>
+    <div class="dual-tree-container">
+        <div class="tree-panel">
+            <div class="tree-panel-header">
+                <h4>Level-wise</h4>
+                <span class="badge badge-blue">XGBoost</span>
+            </div>
+            <div class="tree-canvas-wrap"><canvas id="canvas-cmp-lw"></canvas></div>
+            <div class="metrics-row" id="cmp-lw-metrics">
+                <span>叶子数: <span class="metric-val" id="cmp-lw-leaves">1</span></span>
+                <span>深度: <span class="metric-val" id="cmp-lw-depth">0</span></span>
+                <span>损失: <span class="metric-val" id="cmp-lw-loss">-</span></span>
+            </div>
+        </div>
+        <div class="tree-panel">
+            <div class="tree-panel-header">
+                <h4>Leaf-wise</h4>
+                <span class="badge badge-green">LightGBM</span>
+            </div>
+            <div class="tree-canvas-wrap"><canvas id="canvas-cmp-bw"></canvas></div>
+            <div class="metrics-row" id="cmp-bw-metrics">
+                <span>叶子数: <span class="metric-val" id="cmp-bw-leaves">1</span></span>
+                <span>深度: <span class="metric-val" id="cmp-bw-depth">0</span></span>
+                <span>损失: <span class="metric-val" id="cmp-bw-loss">-</span></span>
+            </div>
+        </div>
+    </div>
+    <div class="chart-area mt-2"><canvas id="canvas-loss-curve"></canvas></div>
+    <div class="legend" style="justify-content:center;">
+        <div class="legend-item"><div class="swatch" style="background:var(--accent-blue);"></div> Level-wise 损失</div>
+        <div class="legend-item"><div class="swatch" style="background:var(--accent-green);"></div> Leaf-wise 损失</div>
+    </div>
+</div>
+
+<!-- ======== Section 4: Overfitting Risk ======== -->
+<div class="section" id="sec-overfit">
+    <div class="section-title">
+        <div class="icon">⚠️</div>
+        <h2>过拟合风险</h2>
+    </div>
+    <p>Leaf-wise 可能在一侧生长很深，导致对训练数据过拟合。增大 <code>num_leaves</code> 时，
+    验证集损失可能反弹。通过 <code>max_depth</code> 限制可以有效缓解。</p>
+    <div class="card" style="padding:1rem; margin-bottom:1rem;">
+        <div class="flex gap-lg" style="flex-wrap:wrap;">
+            <div class="slider-group" style="flex:1; min-width:220px;">
+                <label>num_leaves:</label>
+                <input type="range" id="of-leaves" min="4" max="64" value="16" step="2">
+                <span class="slider-value" id="of-leaves-val">16</span>
+            </div>
+            <div class="slider-group" style="flex:1; min-width:220px;">
+                <label>max_depth (0=不限):</label>
+                <input type="range" id="of-depth" min="0" max="12" value="0" step="1">
+                <span class="slider-value" id="of-depth-val">不限</span>
+            </div>
+        </div>
+    </div>
+    <div class="chart-area" style="height:320px;"><canvas id="canvas-overfit"></canvas></div>
+    <div class="legend" style="justify-content:center;">
+        <div class="legend-item"><div class="swatch" style="background:var(--accent-green);"></div> 训练损失</div>
+        <div class="legend-item"><div class="swatch" style="background:var(--accent-red);"></div> 验证损失</div>
+        <div class="legend-item"><div class="swatch" style="background:var(--accent-orange); opacity:0.5;"></div> 有 max_depth 限制的验证损失</div>
+    </div>
+    <div class="info-box warning mt-2">
+        <p>经验法则：当 <code>num_leaves</code> 越大，越需要配合 <code>max_depth</code>、<code>min_data_in_leaf</code> 等正则化参数来防止过拟合。</p>
+    </div>
+</div>
+
+<!-- ======== Section 5: num_leaves vs max_depth ======== -->
+<div class="section" id="sec-relationship">
+    <div class="section-title">
+        <div class="icon">🔗</div>
+        <h2>num_leaves 与 max_depth 关系</h2>
+    </div>
+    <p>对于一棵完全二叉树，深度为 \(d\) 时最多有 \(2^d\) 个叶子。
+    LightGBM 推荐 <code>num_leaves &lt; 2^max_depth</code>，以避免 leaf-wise 生长产生过深的树。</p>
+    <div class="info-box">
+        <p>$$\text{num\_leaves} \leq 2^{\text{max\_depth}}$$</p>
+        <p>当 <code>num_leaves = 2^max_depth</code> 时等价于完全二叉树；更小的 <code>num_leaves</code> 意味着树更稀疏，不会填满每一层。</p>
+    </div>
+    <div class="rel-grid mt-2">
+        <div class="rel-panel">
+            <h4>交互计算</h4>
+            <div class="slider-group mb-2">
+                <label>max_depth:</label>
+                <input type="range" id="rel-depth" min="2" max="8" value="5" step="1">
+                <span class="slider-value" id="rel-depth-val">5</span>
+            </div>
+            <div class="param-display">
+                <span class="param-label">最大叶子数 (2^depth):</span>
+                <span class="param-val" id="rel-max-leaves">32</span>
+                <span class="param-label">推荐 num_leaves:</span>
+                <span class="param-val" id="rel-rec-leaves">&le; 31</span>
+            </div>
+            <div class="zone-legend mt-2">
+                <div class="zone-item"><div class="zone-swatch" style="background:rgba(22,199,154,0.3);"></div> 推荐区域</div>
+                <div class="zone-item"><div class="zone-swatch" style="background:rgba(255,171,64,0.3);"></div> 边界区域</div>
+                <div class="zone-item"><div class="zone-swatch" style="background:rgba(255,82,82,0.3);"></div> 过拟合风险区</div>
+            </div>
+            <div class="chart-area mt-2" style="height:260px;"><canvas id="canvas-zone"></canvas></div>
+        </div>
+        <div class="rel-panel">
+            <h4>树形对比</h4>
+            <div class="slider-group mb-2">
+                <label>num_leaves:</label>
+                <input type="range" id="rel-leaves" min="3" max="32" value="10" step="1">
+                <span class="slider-value" id="rel-leaves-val">10</span>
+            </div>
+            <div class="dual-tree-container" style="grid-template-columns:1fr 1fr; gap:0.75rem;">
+                <div>
+                    <div class="text-sm text-muted text-center mb-1">完全二叉树 (2^depth 叶子)</div>
+                    <div class="tree-canvas-wrap" style="height:220px;"><canvas id="canvas-full-tree"></canvas></div>
+                </div>
+                <div>
+                    <div class="text-sm text-muted text-center mb-1">Leaf-wise 稀疏树</div>
+                    <div class="tree-canvas-wrap" style="height:220px;"><canvas id="canvas-sparse-tree"></canvas></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+</div><!-- .page-container -->
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    // ============================================================
+    // Utility: seeded random
+    // ============================================================
+    function seededRandom(seed) {
+        let s = seed | 0;
+        return function() {
+            s = (s + 0x6d2b79f5) | 0;
+            let t = Math.imul(s ^ (s >>> 15), 1 | s);
+            t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+            return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+        };
+    }
+
+    // ============================================================
+    // Dataset & gain computation
+    // ============================================================
+    const SEED = 42;
+    const rng = seededRandom(SEED);
+
+    function genData(n, seed) {
+        const r = seededRandom(seed);
+        const data = [], labels = [];
+        for (let i = 0; i < n; i++) {
+            const x1 = r() * 10;
+            const x2 = r() * 10;
+            const y = Math.sin(x1 * 0.5) * 3 + (x2 > 5 ? 2 : -1) + (r() - 0.5) * 1.5;
+            data.push([x1, x2]);
+            labels.push(y);
+        }
+        return { data, labels };
+    }
+
+    const DATASET = genData(60, SEED);
+
+    function computeBestSplit(indices, data, labels) {
+        if (indices.length < 4) return { gain: 0 };
+        const n = indices.length;
+        let mean = 0;
+        for (const i of indices) mean += labels[i];
+        mean /= n;
+        let totalVar = 0;
+        for (const i of indices) totalVar += (labels[i] - mean) ** 2;
+
+        let bestGain = 0, bestF = -1, bestT = 0;
+        for (let f = 0; f < 2; f++) {
+            const vals = indices.map(i => ({ v: data[i][f], idx: i }));
+            vals.sort((a, b) => a.v - b.v);
+            let leftSum = 0, leftSq = 0, leftN = 0;
+            let rightSum = 0, rightSq = 0, rightN = n;
+            for (const { idx } of vals) {
+                rightSum += labels[idx];
+                rightSq += labels[idx] ** 2;
+            }
+            for (let k = 0; k < vals.length - 1; k++) {
+                const { v, idx } = vals[k];
+                const y = labels[idx];
+                leftSum += y; leftSq += y * y; leftN++;
+                rightSum -= y; rightSq -= y * y; rightN--;
+                if (leftN < 2 || rightN < 2) continue;
+                if (k < vals.length - 1 && vals[k].v === vals[k + 1].v) continue;
+                const leftVar = leftSq - leftSum * leftSum / leftN;
+                const rightVar = rightSq - rightSum * rightSum / rightN;
+                const gain = totalVar - leftVar - rightVar;
+                if (gain > bestGain) {
+                    bestGain = gain;
+                    bestF = f;
+                    bestT = (vals[k].v + vals[k + 1].v) / 2;
+                }
+            }
+        }
+        return { gain: bestGain, feature: bestF, threshold: bestT };
+    }
+
+    // ============================================================
+    // Tree data structure
+    // ============================================================
+    function createRoot(data, labels) {
+        data = data || DATASET.data;
+        labels = labels || DATASET.labels;
+        const allIdx = [];
+        for (let i = 0; i < labels.length; i++) allIdx.push(i);
+        let sum = 0;
+        for (const i of allIdx) sum += labels[i];
+        const split = computeBestSplit(allIdx, data, labels);
+        return {
+            nodes: [{
+                id: 0, depth: 0, gain: split.gain, isLeaf: true,
+                children: [], parentId: null, side: null,
+                value: sum / allIdx.length, samples: allIdx,
+                splitInfo: split, _data: data, _labels: labels
+            }],
+            nextId: 1,
+            _data: data,
+            _labels: labels
+        };
+    }
+
+    function splitNode(tree, nodeId) {
+        const node = tree.nodes.find(n => n.id === nodeId);
+        if (!node || !node.isLeaf || !node.splitInfo || node.splitInfo.gain <= 0) return null;
+        const si = node.splitInfo;
+        const data = tree._data;
+        const labels = tree._labels;
+        const leftIdx = [], rightIdx = [];
+        for (const i of node.samples) {
+            if (data[i][si.feature] <= si.threshold) leftIdx.push(i);
+            else rightIdx.push(i);
+        }
+        if (leftIdx.length < 2 || rightIdx.length < 2) return null;
+        let leftSum = 0, rightSum = 0;
+        for (const i of leftIdx) leftSum += labels[i];
+        for (const i of rightIdx) rightSum += labels[i];
+        const leftSplit = computeBestSplit(leftIdx, data, labels);
+        const rightSplit = computeBestSplit(rightIdx, data, labels);
+
+        const leftId = tree.nextId++;
+        const rightId = tree.nextId++;
+        node.isLeaf = false;
+        node.splitFeature = si.feature;
+        node.splitThresh = si.threshold;
+        node.children = [leftId, rightId];
+
+        tree.nodes.push({
+            id: leftId, depth: node.depth + 1, gain: leftSplit.gain,
+            isLeaf: true, children: [], parentId: node.id, side: 'left',
+            value: leftIdx.length > 0 ? leftSum / leftIdx.length : 0,
+            samples: leftIdx, splitInfo: leftSplit
+        });
+        tree.nodes.push({
+            id: rightId, depth: node.depth + 1, gain: rightSplit.gain,
+            isLeaf: true, children: [], parentId: node.id, side: 'right',
+            value: rightIdx.length > 0 ? rightSum / rightIdx.length : 0,
+            samples: rightIdx, splitInfo: rightSplit
+        });
+        return { leftId, rightId };
+    }
+
+    function getLeaves(tree) {
+        return tree.nodes.filter(n => n.isLeaf);
+    }
+
+    function treeDepth(tree) {
+        let m = 0;
+        for (const n of tree.nodes) if (n.depth > m) m = n.depth;
+        return m;
+    }
+
+    function treeLoss(tree) {
+        const labels = tree._labels || DATASET.labels;
+        let sse = 0, count = 0;
+        for (const leaf of getLeaves(tree)) {
+            for (const i of leaf.samples) {
+                sse += (labels[i] - leaf.value) ** 2;
+                count++;
+            }
+        }
+        return count > 0 ? sse / count : 0;
+    }
+
+    // Level-wise: split all leaves at shallowest depth
+    function levelwiseStep(tree) {
+        const leaves = getLeaves(tree).filter(n => n.splitInfo && n.splitInfo.gain > 0);
+        if (leaves.length === 0) return [];
+        const minDepth = Math.min(...leaves.map(n => n.depth));
+        const toSplit = leaves.filter(n => n.depth === minDepth);
+        const splitIds = [];
+        for (const leaf of toSplit) {
+            const result = splitNode(tree, leaf.id);
+            if (result) splitIds.push(leaf.id);
+        }
+        return splitIds;
+    }
+
+    // Leaf-wise: split leaf with highest gain
+    function leafwiseStep(tree) {
+        const leaves = getLeaves(tree).filter(n => n.splitInfo && n.splitInfo.gain > 0);
+        if (leaves.length === 0) return [];
+        leaves.sort((a, b) => b.gain - a.gain);
+        const best = leaves[0];
+        const result = splitNode(tree, best.id);
+        return result ? [best.id] : [];
+    }
+
+    // ============================================================
+    // Canvas setup & tree drawing
+    // ============================================================
+    function setupCanvas(canvas) {
+        const rect = canvas.parentElement.getBoundingClientRect();
+        const dpr = window.devicePixelRatio || 1;
+        canvas.width = rect.width * dpr;
+        canvas.height = rect.height * dpr;
+        const ctx = canvas.getContext('2d');
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        return { ctx, W: rect.width, H: rect.height };
+    }
+
+    function layoutNodes(tree, W, H) {
+        const positions = {};
+        const maxD = Math.max(1, treeDepth(tree));
+        const yPad = 35, xPad = 25;
+        const yStep = (H - yPad * 2) / Math.max(1, maxD);
+
+        function assignPos(nodeId, xMin, xMax, depth) {
+            const node = tree.nodes.find(n => n.id === nodeId);
+            if (!node) return;
+            const x = (xMin + xMax) / 2;
+            const y = yPad + depth * yStep;
+            positions[nodeId] = { x, y };
+            if (node.children.length === 2) {
+                const mid = (xMin + xMax) / 2;
+                assignPos(node.children[0], xMin, mid, depth + 1);
+                assignPos(node.children[1], mid, xMax, depth + 1);
+            }
+        }
+        const root = tree.nodes.find(n => n.parentId === null);
+        if (root) assignPos(root.id, xPad, W - xPad, 0);
+        return positions;
+    }
+
+    function drawTree(canvas, tree, highlightIds) {
+        const { ctx, W, H } = setupCanvas(canvas);
+        const pos = layoutNodes(tree, W, H);
+
+        ctx.clearRect(0, 0, W, H);
+
+        // Edges
+        for (const node of tree.nodes) {
+            if (node.children.length === 2) {
+                const from = pos[node.id];
+                if (!from) continue;
+                for (const cid of node.children) {
+                    const to = pos[cid];
+                    if (!to) continue;
+                    ctx.beginPath();
+                    ctx.strokeStyle = '#445566';
+                    ctx.lineWidth = 1.5;
+                    ctx.moveTo(from.x, from.y + 14);
+                    ctx.lineTo(to.x, to.y - 14);
+                    ctx.stroke();
+                }
+            }
+        }
+
+        // Nodes
+        for (const node of tree.nodes) {
+            const p = pos[node.id];
+            if (!p) continue;
+            const isHL = highlightIds && highlightIds.includes(node.id);
+
+            if (node.isLeaf) {
+                const hw = 20, hh = 12;
+                ctx.beginPath();
+                ctx.moveTo(p.x - hw + 4, p.y - hh);
+                ctx.lineTo(p.x + hw - 4, p.y - hh);
+                ctx.arcTo(p.x + hw, p.y - hh, p.x + hw, p.y - hh + 4, 4);
+                ctx.lineTo(p.x + hw, p.y + hh - 4);
+                ctx.arcTo(p.x + hw, p.y + hh, p.x + hw - 4, p.y + hh, 4);
+                ctx.lineTo(p.x - hw + 4, p.y + hh);
+                ctx.arcTo(p.x - hw, p.y + hh, p.x - hw, p.y + hh - 4, 4);
+                ctx.lineTo(p.x - hw, p.y - hh + 4);
+                ctx.arcTo(p.x - hw, p.y - hh, p.x - hw + 4, p.y - hh, 4);
+                ctx.closePath();
+
+                if (isHL) {
+                    ctx.fillStyle = 'rgba(22, 199, 154, 0.45)';
+                    ctx.strokeStyle = '#16c79a';
+                    ctx.lineWidth = 2.5;
+                    ctx.shadowColor = 'rgba(22,199,154,0.5)';
+                    ctx.shadowBlur = 12;
+                } else {
+                    ctx.fillStyle = 'rgba(22, 199, 154, 0.15)';
+                    ctx.strokeStyle = 'rgba(22,199,154,0.5)';
+                    ctx.lineWidth = 1.5;
+                }
+                ctx.fill();
+                ctx.stroke();
+                ctx.shadowColor = 'transparent';
+                ctx.shadowBlur = 0;
+
+                // Gain text
+                ctx.fillStyle = '#e0e0e0';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.font = '10px JetBrains Mono, Consolas, monospace';
+                const gainText = node.splitInfo && node.splitInfo.gain > 0.01
+                    ? `G=${node.splitInfo.gain.toFixed(1)}` : 'G=0';
+                ctx.fillText(gainText, p.x, p.y);
+            } else {
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, 14, 0, Math.PI * 2);
+                if (isHL) {
+                    ctx.fillStyle = 'rgba(79,195,247,0.4)';
+                    ctx.strokeStyle = '#4fc3f7';
+                    ctx.lineWidth = 2.5;
+                    ctx.shadowColor = 'rgba(79,195,247,0.4)';
+                    ctx.shadowBlur = 10;
+                } else {
+                    ctx.fillStyle = 'rgba(74, 111, 165, 0.35)';
+                    ctx.strokeStyle = '#5a8fcf';
+                    ctx.lineWidth = 1.5;
+                }
+                ctx.fill();
+                ctx.stroke();
+                ctx.shadowColor = 'transparent';
+                ctx.shadowBlur = 0;
+
+                ctx.fillStyle = '#e0e0e0';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.font = '9px JetBrains Mono, Consolas, monospace';
+                ctx.fillText(`x${node.splitFeature}`, p.x, p.y - 4);
+                ctx.fillStyle = '#a8a8b8';
+                ctx.font = '8px JetBrains Mono, Consolas, monospace';
+                ctx.fillText('\u2264' + node.splitThresh.toFixed(1), p.x, p.y + 6);
+            }
+        }
+    }
+
+    // ============================================================
+    // Section 1 & 2: Individual growth animations
+    // ============================================================
+    function initSection(canvasId, prefix, stepFn) {
+        let tree = createRoot();
+        let autoTimer = null;
+        let lastHighlight = [];
+
+        const canvas = document.getElementById(canvasId);
+        const infoEl = document.getElementById(`${prefix}-info`);
+        const statsEl = document.getElementById(`${prefix}-stats`);
+        const candEl = document.getElementById(`${prefix}-candidates`);
+
+        function render() {
+            drawTree(canvas, tree, lastHighlight);
+            const leaves = getLeaves(tree);
+            const depth = treeDepth(tree);
+            const loss = treeLoss(tree);
+            statsEl.textContent = `叶子=${leaves.length}  深度=${depth}  MSE=${loss.toFixed(3)}`;
+
+            // Show candidate gains
+            candEl.innerHTML = '';
+            const splittable = leaves.filter(n => n.splitInfo && n.splitInfo.gain > 0);
+            splittable.sort((a, b) => b.gain - a.gain);
+            for (let i = 0; i < splittable.length; i++) {
+                const leaf = splittable[i];
+                const chip = document.createElement('span');
+                chip.className = 'candidate-chip';
+                chip.textContent = `叶${leaf.id}: G=${leaf.gain.toFixed(1)}`;
+                if (i === 0 && canvasId === 'canvas-leafwise') {
+                    chip.classList.add('best');
+                }
+                candEl.appendChild(chip);
+            }
+        }
+
+        function step() {
+            const result = stepFn(tree);
+            if (result.length === 0) {
+                infoEl.textContent = '已无可分裂叶子';
+                stopAuto();
+                return;
+            }
+            lastHighlight = [];
+            for (const nid of result) {
+                const node = tree.nodes.find(n => n.id === nid);
+                if (node && node.children.length === 2) {
+                    lastHighlight.push(...node.children);
+                }
+            }
+            if (canvasId === 'canvas-levelwise') {
+                infoEl.textContent = `第 ${treeDepth(tree)} 层: 同时分裂 ${result.length} 个节点`;
+            } else {
+                infoEl.textContent = `分裂叶子 ${result[0]} (全局增益最大)`;
+            }
+            render();
+        }
+
+        function reset() {
+            stopAuto();
+            tree = createRoot();
+            lastHighlight = [];
+            infoEl.textContent = canvasId === 'canvas-levelwise'
+                ? '点击「下一步」开始逐层生长'
+                : '点击「下一步」开始 Leaf-wise 生长';
+            render();
+        }
+
+        function stopAuto() {
+            if (autoTimer) { clearInterval(autoTimer); autoTimer = null; }
+            document.getElementById(`${prefix}-auto`).textContent = '自动播放';
+        }
+
+        function toggleAuto() {
+            if (autoTimer) {
+                stopAuto();
+            } else {
+                document.getElementById(`${prefix}-auto`).textContent = '暂停';
+                autoTimer = setInterval(() => {
+                    const leaves = getLeaves(tree).filter(n => n.splitInfo && n.splitInfo.gain > 0);
+                    if (leaves.length === 0) { stopAuto(); return; }
+                    step();
+                }, 800);
+            }
+        }
+
+        document.getElementById(`${prefix}-reset`).addEventListener('click', reset);
+        document.getElementById(`${prefix}-step`).addEventListener('click', step);
+        document.getElementById(`${prefix}-auto`).addEventListener('click', toggleAuto);
+
+        render();
+    }
+
+    initSection('canvas-levelwise', 'lw', levelwiseStep);
+    initSection('canvas-leafwise', 'bw', leafwiseStep);
+
+    // ============================================================
+    // Section 3: Side-by-side comparison
+    // ============================================================
+    (function() {
+        const slider = document.getElementById('cmp-leaves');
+        const valSpan = document.getElementById('cmp-leaves-val');
+        const playBtn = document.getElementById('cmp-play');
+        const resetBtn = document.getElementById('cmp-reset');
+
+        let lwTree, bwTree, animTimer, lwLossHist, bwLossHist;
+
+        function reset() {
+            if (animTimer) { clearInterval(animTimer); animTimer = null; }
+            lwTree = createRoot();
+            bwTree = createRoot();
+            lwLossHist = [treeLoss(lwTree)];
+            bwLossHist = [treeLoss(bwTree)];
+            render();
+            playBtn.textContent = '同时生长';
+        }
+
+        function render() {
+            drawTree(document.getElementById('canvas-cmp-lw'), lwTree);
+            drawTree(document.getElementById('canvas-cmp-bw'), bwTree);
+
+            document.getElementById('cmp-lw-leaves').textContent = getLeaves(lwTree).length;
+            document.getElementById('cmp-lw-depth').textContent = treeDepth(lwTree);
+            document.getElementById('cmp-lw-loss').textContent = treeLoss(lwTree).toFixed(3);
+            document.getElementById('cmp-bw-leaves').textContent = getLeaves(bwTree).length;
+            document.getElementById('cmp-bw-depth').textContent = treeDepth(bwTree);
+            document.getElementById('cmp-bw-loss').textContent = treeLoss(bwTree).toFixed(3);
+
+            drawLossCurve();
+        }
+
+        function drawLossCurve() {
+            const canvas = document.getElementById('canvas-loss-curve');
+            const { ctx, W, H } = setupCanvas(canvas);
+            ctx.clearRect(0, 0, W, H);
+
+            const pad = { l: 60, r: 25, t: 20, b: 40 };
+            const pw = W - pad.l - pad.r;
+            const ph = H - pad.t - pad.b;
+
+            const allVals = [...lwLossHist, ...bwLossHist];
+            const maxLoss = Math.max(...allVals) * 1.1;
+            const minLoss = 0;
+            const maxSteps = Math.max(lwLossHist.length, bwLossHist.length, 2);
+
+            // Grid lines
+            ctx.strokeStyle = 'rgba(42,42,74,0.6)';
+            ctx.lineWidth = 0.5;
+            for (let i = 0; i <= 5; i++) {
+                const y = pad.t + (ph / 5) * i;
+                ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(pad.l + pw, y); ctx.stroke();
+                ctx.fillStyle = '#6c6c7c';
+                ctx.font = '10px JetBrains Mono, monospace';
+                ctx.textAlign = 'right';
+                ctx.fillText((maxLoss - (maxLoss - minLoss) / 5 * i).toFixed(2), pad.l - 6, y + 3);
+            }
+
+            ctx.fillStyle = '#6c6c7c';
+            ctx.font = '11px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('分裂步骤', pad.l + pw / 2, H - 6);
+
+            function drawLine(hist, color) {
+                if (hist.length < 2) return;
+                ctx.beginPath();
+                ctx.strokeStyle = color;
+                ctx.lineWidth = 2;
+                for (let i = 0; i < hist.length; i++) {
+                    const x = pad.l + (i / (maxSteps - 1)) * pw;
+                    const y = pad.t + (1 - (hist[i] - minLoss) / (maxLoss - minLoss)) * ph;
+                    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+                }
+                ctx.stroke();
+                for (let i = 0; i < hist.length; i++) {
+                    const x = pad.l + (i / (maxSteps - 1)) * pw;
+                    const y = pad.t + (1 - (hist[i] - minLoss) / (maxLoss - minLoss)) * ph;
+                    ctx.beginPath();
+                    ctx.arc(x, y, 3, 0, Math.PI * 2);
+                    ctx.fillStyle = color;
+                    ctx.fill();
+                }
+            }
+
+            drawLine(lwLossHist, '#4fc3f7');
+            drawLine(bwLossHist, '#16c79a');
+        }
+
+        function play() {
+            const maxLeaves = parseInt(slider.value);
+            if (animTimer) { clearInterval(animTimer); animTimer = null; playBtn.textContent = '同时生长'; return; }
+            reset();
+            playBtn.textContent = '暂停';
+
+            animTimer = setInterval(() => {
+                let lwDone = getLeaves(lwTree).length >= maxLeaves ||
+                    getLeaves(lwTree).filter(n => n.splitInfo && n.splitInfo.gain > 0).length === 0;
+                let bwDone = getLeaves(bwTree).length >= maxLeaves ||
+                    getLeaves(bwTree).filter(n => n.splitInfo && n.splitInfo.gain > 0).length === 0;
+
+                if (!lwDone) {
+                    levelwiseStep(lwTree);
+                    lwLossHist.push(treeLoss(lwTree));
+                }
+                if (!bwDone) {
+                    leafwiseStep(bwTree);
+                    bwLossHist.push(treeLoss(bwTree));
+                }
+                render();
+
+                if (lwDone && bwDone) {
+                    clearInterval(animTimer);
+                    animTimer = null;
+                    playBtn.textContent = '同时生长';
+                }
+            }, 600);
+        }
+
+        slider.addEventListener('input', () => { valSpan.textContent = slider.value; reset(); });
+        playBtn.addEventListener('click', play);
+        resetBtn.addEventListener('click', reset);
+        reset();
+    })();
+
+    // ============================================================
+    // Section 4: Overfitting Risk
+    // ============================================================
+    (function() {
+        const sliderLeaves = document.getElementById('of-leaves');
+        const sliderDepth = document.getElementById('of-depth');
+        const valLeaves = document.getElementById('of-leaves-val');
+        const valDepth = document.getElementById('of-depth-val');
+
+        function genTrainVal(seed) {
+            const r = seededRandom(seed);
+            const tD = [], tL = [], vD = [], vL = [];
+            for (let i = 0; i < 80; i++) {
+                const x1 = r() * 10, x2 = r() * 10;
+                const y = Math.sin(x1 * 0.5) * 3 + (x2 > 5 ? 2 : -1) + (r() - 0.5) * 0.8;
+                tD.push([x1, x2]); tL.push(y);
+            }
+            for (let i = 0; i < 40; i++) {
+                const x1 = r() * 10, x2 = r() * 10;
+                const y = Math.sin(x1 * 0.5) * 3 + (x2 > 5 ? 2 : -1) + (r() - 0.5) * 0.8;
+                vD.push([x1, x2]); vL.push(y);
+            }
+            return { tD, tL, vD, vL };
+        }
+
+        const TVD = genTrainVal(123);
+
+        function buildLWTree(maxLeaves, maxDepthLimit, data, labels) {
+            const tree = createRoot(data, labels);
+            while (getLeaves(tree).length < maxLeaves) {
+                const leaves = getLeaves(tree).filter(n => n.splitInfo && n.splitInfo.gain > 0);
+                let candidates = leaves;
+                if (maxDepthLimit > 0) {
+                    candidates = leaves.filter(n => n.depth < maxDepthLimit);
+                }
+                if (candidates.length === 0) break;
+                candidates.sort((a, b) => b.gain - a.gain);
+                if (!splitNode(tree, candidates[0].id)) break;
+            }
+            return tree;
+        }
+
+        function predictSingle(tree, sample) {
+            let node = tree.nodes.find(n => n.parentId === null);
+            while (node && !node.isLeaf) {
+                if (sample[node.splitFeature] <= node.splitThresh) {
+                    node = tree.nodes.find(n => n.id === node.children[0]);
+                } else {
+                    node = tree.nodes.find(n => n.id === node.children[1]);
+                }
+            }
+            return node ? node.value : 0;
+        }
+
+        function calcMSE(tree, data, labels) {
+            let sse = 0;
+            for (let i = 0; i < labels.length; i++) {
+                sse += (predictSingle(tree, data[i]) - labels[i]) ** 2;
+            }
+            return sse / labels.length;
+        }
+
+        function update() {
+            const canvas = document.getElementById('canvas-overfit');
+            const { ctx, W, H } = setupCanvas(canvas);
+            ctx.clearRect(0, 0, W, H);
+
+            const pad = { l: 60, r: 20, t: 25, b: 45 };
+            const pw = W - pad.l - pad.r;
+            const ph = H - pad.t - pad.b;
+
+            const currentLeaves = parseInt(sliderLeaves.value);
+            const currentDepth = parseInt(sliderDepth.value);
+            valLeaves.textContent = currentLeaves;
+            valDepth.textContent = currentDepth === 0 ? '不限' : currentDepth;
+
+            const leafRange = [];
+            for (let nl = 4; nl <= 64; nl += 2) leafRange.push(nl);
+
+            const trainLosses = [], valLosses = [], valLossesD = [];
+            for (const nl of leafRange) {
+                const t1 = buildLWTree(nl, 0, TVD.tD, TVD.tL);
+                trainLosses.push(calcMSE(t1, TVD.tD, TVD.tL));
+                valLosses.push(calcMSE(t1, TVD.vD, TVD.vL));
+                if (currentDepth > 0) {
+                    const t2 = buildLWTree(nl, currentDepth, TVD.tD, TVD.tL);
+                    valLossesD.push(calcMSE(t2, TVD.vD, TVD.vL));
+                }
+            }
+
+            const allVals = [...trainLosses, ...valLosses, ...valLossesD];
+            const maxLoss = Math.max(...allVals) * 1.05;
+            const minLoss = 0;
+
+            // Grid
+            ctx.strokeStyle = 'rgba(42,42,74,0.6)';
+            ctx.lineWidth = 0.5;
+            for (let i = 0; i <= 5; i++) {
+                const y = pad.t + (ph / 5) * i;
+                ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(pad.l + pw, y); ctx.stroke();
+                ctx.fillStyle = '#6c6c7c';
+                ctx.font = '10px JetBrains Mono, monospace';
+                ctx.textAlign = 'right';
+                ctx.fillText((maxLoss - (maxLoss - minLoss) / 5 * i).toFixed(2), pad.l - 6, y + 3);
+            }
+
+            // X labels
+            ctx.fillStyle = '#6c6c7c';
+            ctx.textAlign = 'center';
+            ctx.font = '10px JetBrains Mono, monospace';
+            for (let i = 0; i < leafRange.length; i += 5) {
+                const x = pad.l + (i / (leafRange.length - 1)) * pw;
+                ctx.fillText(leafRange[i], x, H - pad.b + 16);
+            }
+            ctx.font = '11px sans-serif';
+            ctx.fillText('num_leaves', pad.l + pw / 2, H - 6);
+
+            function drawCurve(losses, color, dashed) {
+                ctx.beginPath();
+                ctx.strokeStyle = color;
+                ctx.lineWidth = 2;
+                if (dashed) ctx.setLineDash([6, 4]); else ctx.setLineDash([]);
+                for (let i = 0; i < losses.length; i++) {
+                    const x = pad.l + (i / (leafRange.length - 1)) * pw;
+                    const y = pad.t + (1 - (losses[i] - minLoss) / (maxLoss - minLoss)) * ph;
+                    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+                }
+                ctx.stroke();
+                ctx.setLineDash([]);
+            }
+
+            drawCurve(trainLosses, '#16c79a', false);
+            drawCurve(valLosses, '#ff5252', false);
+            if (valLossesD.length > 0) {
+                drawCurve(valLossesD, '#ffab40', true);
+            }
+
+            // Current marker
+            const idx = leafRange.indexOf(currentLeaves);
+            if (idx >= 0) {
+                const x = pad.l + (idx / (leafRange.length - 1)) * pw;
+                ctx.beginPath();
+                ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+                ctx.lineWidth = 1;
+                ctx.setLineDash([3, 3]);
+                ctx.moveTo(x, pad.t);
+                ctx.lineTo(x, pad.t + ph);
+                ctx.stroke();
+                ctx.setLineDash([]);
+
+                // Dots
+                const yT = pad.t + (1 - (trainLosses[idx] - minLoss) / (maxLoss - minLoss)) * ph;
+                ctx.beginPath(); ctx.arc(x, yT, 5, 0, Math.PI * 2);
+                ctx.fillStyle = '#16c79a'; ctx.fill();
+                ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.stroke();
+
+                const yV = pad.t + (1 - (valLosses[idx] - minLoss) / (maxLoss - minLoss)) * ph;
+                ctx.beginPath(); ctx.arc(x, yV, 5, 0, Math.PI * 2);
+                ctx.fillStyle = '#ff5252'; ctx.fill();
+                ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.stroke();
+
+                if (valLossesD.length > 0 && idx < valLossesD.length) {
+                    const yD = pad.t + (1 - (valLossesD[idx] - minLoss) / (maxLoss - minLoss)) * ph;
+                    ctx.beginPath(); ctx.arc(x, yD, 5, 0, Math.PI * 2);
+                    ctx.fillStyle = '#ffab40'; ctx.fill();
+                    ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.stroke();
+                }
+            }
+        }
+
+        sliderLeaves.addEventListener('input', update);
+        sliderDepth.addEventListener('input', update);
+        update();
+    })();
+
+    // ============================================================
+    // Section 5: num_leaves vs max_depth relationship
+    // ============================================================
+    (function() {
+        const sliderDepth = document.getElementById('rel-depth');
+        const sliderLeaves = document.getElementById('rel-leaves');
+        const valDepth = document.getElementById('rel-depth-val');
+        const valLeaves = document.getElementById('rel-leaves-val');
+        const maxLeavesEl = document.getElementById('rel-max-leaves');
+        const recLeavesEl = document.getElementById('rel-rec-leaves');
+
+        function drawZoneChart() {
+            const canvas = document.getElementById('canvas-zone');
+            const { ctx, W, H } = setupCanvas(canvas);
+            ctx.clearRect(0, 0, W, H);
+
+            const d = parseInt(sliderDepth.value);
+            const nl = parseInt(sliderLeaves.value);
+            const pad = { l: 50, r: 15, t: 15, b: 40 };
+            const pw = W - pad.l - pad.r;
+            const ph = H - pad.t - pad.b;
+
+            const depths = [2, 3, 4, 5, 6, 7, 8];
+            const maxNL = 260;
+
+            // Fill zone backgrounds
+            for (let di = 0; di < depths.length; di++) {
+                const dep = depths[di];
+                const maxL = Math.pow(2, dep);
+                const x = pad.l + (di / (depths.length - 1)) * pw;
+                const colW = pw / (depths.length - 1);
+                const xL = x - colW / 2;
+                const xR = x + colW / 2;
+
+                // Green zone: nl < 0.7 * 2^d
+                const yGreen = pad.t + (1 - Math.min(maxL * 0.7, maxNL) / maxNL) * ph;
+                ctx.fillStyle = 'rgba(22,199,154,0.1)';
+                ctx.fillRect(xL, yGreen, colW, pad.t + ph - yGreen);
+
+                // Orange zone: 0.7*2^d to 2^d
+                const yOrange = pad.t + (1 - Math.min(maxL, maxNL) / maxNL) * ph;
+                ctx.fillStyle = 'rgba(255,171,64,0.1)';
+                ctx.fillRect(xL, yOrange, colW, yGreen - yOrange);
+
+                // Red zone: > 2^d
+                ctx.fillStyle = 'rgba(255,82,82,0.06)';
+                ctx.fillRect(xL, pad.t, colW, yOrange - pad.t);
+            }
+
+            // 2^d curve (boundary)
+            ctx.beginPath();
+            ctx.strokeStyle = '#ffab40';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([6, 3]);
+            for (let di = 0; di < depths.length; di++) {
+                const maxL = Math.pow(2, depths[di]);
+                const x = pad.l + (di / (depths.length - 1)) * pw;
+                const y = pad.t + (1 - Math.min(maxL, maxNL) / maxNL) * ph;
+                if (di === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            // 0.7 * 2^d curve (recommended)
+            ctx.beginPath();
+            ctx.strokeStyle = '#16c79a';
+            ctx.lineWidth = 2;
+            for (let di = 0; di < depths.length; di++) {
+                const recL = Math.pow(2, depths[di]) * 0.7;
+                const x = pad.l + (di / (depths.length - 1)) * pw;
+                const y = pad.t + (1 - Math.min(recL, maxNL) / maxNL) * ph;
+                if (di === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+
+            // Labels for curves
+            ctx.font = '10px sans-serif';
+            ctx.fillStyle = '#ffab40';
+            ctx.textAlign = 'left';
+            const lastDi = depths.length - 1;
+            const yLabel1 = pad.t + (1 - Math.min(Math.pow(2, depths[lastDi]), maxNL) / maxNL) * ph;
+            ctx.fillText('2^d', pad.l + pw + 2, yLabel1 + 3);
+            ctx.fillStyle = '#16c79a';
+            const yLabel2 = pad.t + (1 - Math.min(Math.pow(2, depths[lastDi]) * 0.7, maxNL) / maxNL) * ph;
+            ctx.fillText('0.7*2^d', pad.l + pw + 2, yLabel2 + 3);
+
+            // Current point
+            const curDi = depths.indexOf(d);
+            if (curDi >= 0) {
+                const x = pad.l + (curDi / (depths.length - 1)) * pw;
+                const y = pad.t + (1 - Math.min(nl, maxNL) / maxNL) * ph;
+                ctx.beginPath();
+                ctx.arc(x, y, 7, 0, Math.PI * 2);
+                const maxL = Math.pow(2, d);
+                if (nl > maxL) ctx.fillStyle = 'rgba(255,82,82,0.9)';
+                else if (nl > maxL * 0.7) ctx.fillStyle = 'rgba(255,171,64,0.9)';
+                else ctx.fillStyle = 'rgba(22,199,154,0.9)';
+                ctx.fill();
+                ctx.strokeStyle = '#fff';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+            }
+
+            // Axes
+            ctx.fillStyle = '#6c6c7c';
+            ctx.font = '10px JetBrains Mono, monospace';
+            ctx.textAlign = 'center';
+            for (let di = 0; di < depths.length; di++) {
+                const x = pad.l + (di / (depths.length - 1)) * pw;
+                ctx.fillText(depths[di], x, H - pad.b + 14);
+            }
+            ctx.fillStyle = '#a8a8b8';
+            ctx.font = '11px sans-serif';
+            ctx.fillText('max_depth', pad.l + pw / 2, H - 6);
+
+            ctx.textAlign = 'right';
+            ctx.font = '10px JetBrains Mono, monospace';
+            ctx.fillStyle = '#6c6c7c';
+            const yTicks = [4, 16, 32, 64, 128, 256];
+            for (const t of yTicks) {
+                if (t > maxNL) continue;
+                const y = pad.t + (1 - t / maxNL) * ph;
+                ctx.fillText(t, pad.l - 6, y + 3);
+                ctx.beginPath();
+                ctx.strokeStyle = 'rgba(42,42,74,0.4)';
+                ctx.lineWidth = 0.5;
+                ctx.moveTo(pad.l, y);
+                ctx.lineTo(pad.l + pw, y);
+                ctx.stroke();
+            }
+        }
+
+        function generateFullTree(depth) {
+            const nodes = [];
+            let nextId = 0;
+            function build(d, pid, side) {
+                const nid = nextId++;
+                if (d >= depth) {
+                    nodes.push({ id: nid, depth: d, isLeaf: true, children: [], parentId: pid, side });
+                    return nid;
+                }
+                const leftId = nextId;
+                build(d + 1, nid, 'left');
+                const rightId = nextId;
+                build(d + 1, nid, 'right');
+                nodes.push({ id: nid, depth: d, isLeaf: false, children: [leftId, rightId], parentId: pid, side });
+                return nid;
+            }
+            build(0, null, null);
+            nodes.sort((a, b) => a.id - b.id);
+            return { nodes, nextId, _data: DATASET.data, _labels: DATASET.labels };
+        }
+
+        function generateSparseTree(numLeaves, seed) {
+            const r = seededRandom(seed);
+            const tree = {
+                nodes: [{ id: 0, depth: 0, isLeaf: true, children: [], parentId: null, side: null, gain: r() }],
+                nextId: 1,
+                _data: DATASET.data, _labels: DATASET.labels
+            };
+            while (getLeaves(tree).length < numLeaves) {
+                const leaves = getLeaves(tree);
+                leaves.sort((a, b) => (b.gain || 0) - (a.gain || 0));
+                const best = leaves[0];
+                if (!best) break;
+                const lid = tree.nextId++;
+                const rid = tree.nextId++;
+                best.isLeaf = false;
+                best.children = [lid, rid];
+                tree.nodes.push({ id: lid, depth: best.depth + 1, isLeaf: true, children: [], parentId: best.id, side: 'left', gain: r() * 0.8 + 0.2 });
+                tree.nodes.push({ id: rid, depth: best.depth + 1, isLeaf: true, children: [], parentId: best.id, side: 'right', gain: r() * 0.3 });
+            }
+            return tree;
+        }
+
+        function drawMiniTree(canvas, tree) {
+            const { ctx, W, H } = setupCanvas(canvas);
+            ctx.clearRect(0, 0, W, H);
+            const pos = layoutNodes(tree, W, H);
+
+            for (const node of tree.nodes) {
+                if (node.children.length === 2) {
+                    const from = pos[node.id];
+                    if (!from) continue;
+                    for (const cid of node.children) {
+                        const to = pos[cid];
+                        if (!to) continue;
+                        ctx.beginPath();
+                        ctx.strokeStyle = '#445566';
+                        ctx.lineWidth = 1;
+                        ctx.moveTo(from.x, from.y + 6);
+                        ctx.lineTo(to.x, to.y - 6);
+                        ctx.stroke();
+                    }
+                }
+            }
+            for (const node of tree.nodes) {
+                const p = pos[node.id];
+                if (!p) continue;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, node.isLeaf ? 5 : 4, 0, Math.PI * 2);
+                ctx.fillStyle = node.isLeaf ? 'rgba(22,199,154,0.5)' : 'rgba(74,111,165,0.4)';
+                ctx.strokeStyle = node.isLeaf ? '#16c79a' : '#5a8fcf';
+                ctx.lineWidth = 1.5;
+                ctx.fill();
+                ctx.stroke();
+            }
+            const leafCount = getLeaves(tree).length;
+            const depth = treeDepth(tree);
+            ctx.fillStyle = '#6c6c7c';
+            ctx.font = '10px JetBrains Mono, monospace';
+            ctx.textAlign = 'right';
+            ctx.fillText('叶=' + leafCount + ' 深=' + depth, W - 8, H - 6);
+        }
+
+        function update() {
+            const d = parseInt(sliderDepth.value);
+            const nl = parseInt(sliderLeaves.value);
+            valDepth.textContent = d;
+            valLeaves.textContent = nl;
+            maxLeavesEl.textContent = Math.pow(2, d);
+            const maxL = Math.pow(2, d);
+            if (nl > maxL) {
+                recLeavesEl.textContent = nl + ' > ' + maxL + ' (过拟合风险!)';
+                recLeavesEl.style.color = 'var(--accent-red)';
+            } else if (nl > maxL * 0.7) {
+                recLeavesEl.textContent = nl + ' \u2264 ' + maxL + ' (边界)';
+                recLeavesEl.style.color = 'var(--accent-orange)';
+            } else {
+                recLeavesEl.textContent = nl + ' < ' + Math.round(maxL * 0.7) + ' (推荐)';
+                recLeavesEl.style.color = 'var(--accent-green)';
+            }
+
+            drawZoneChart();
+
+            const effDepth = Math.min(d, 5);
+            const fullTree = generateFullTree(effDepth);
+            drawMiniTree(document.getElementById('canvas-full-tree'), fullTree);
+
+            const sparseTree = generateSparseTree(nl, 77);
+            drawMiniTree(document.getElementById('canvas-sparse-tree'), sparseTree);
+        }
+
+        sliderDepth.addEventListener('input', update);
+        sliderLeaves.addEventListener('input', update);
+        update();
+    })();
+
+    // ============================================================
+    // Handle window resize
+    // ============================================================
+    let resizeTimer;
+    window.addEventListener('resize', () => {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(() => {
+            document.getElementById('of-leaves').dispatchEvent(new Event('input'));
+            document.getElementById('rel-depth').dispatchEvent(new Event('input'));
+            document.getElementById('cmp-leaves').dispatchEvent(new Event('input'));
+        }, 200);
+    });
+
+    // ============================================================
+    // KaTeX auto-render
+    // ============================================================
+    if (typeof renderMathInElement === 'function') {
+        renderMathInElement(document.body, {
+            delimiters: [
+                { left: '$$', right: '$$', display: true },
+                { left: '\\(', right: '\\)', display: false },
+                { left: '\\[', right: '\\]', display: true }
+            ]
+        });
+    }
+});
+</script>
+
+<script>
+window.addEventListener('load', () => {
+    if (typeof renderMathInElement === 'function') {
+        renderMathInElement(document.body, {
+            delimiters: [
+                { left: '$$', right: '$$', display: true },
+                { left: '\\(', right: '\\)', display: false },
+                { left: '\\[', right: '\\]', display: true }
+            ]
+        });
+    }
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,1821 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>游乐场 — 量化交易策略</title>
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+SC:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" defer>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" defer></script>
+    <script src="../shared/scripts/nav.js" defer></script>
+    <style>
+        /* ===== Three-Panel Layout ===== */
+        .playground-layout {
+            display: grid;
+            grid-template-columns: 280px 1fr 300px;
+            gap: 1rem;
+            padding: calc(var(--header-height) + 1rem) 1rem 1rem;
+            min-height: 100vh;
+        }
+
+        .panel {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1rem;
+            overflow-y: auto;
+        }
+
+        .panel-title {
+            font-size: 0.95rem;
+            font-weight: 700;
+            color: var(--accent-green);
+            margin-bottom: 1rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        /* ===== Left Panel: Config ===== */
+        .left-panel {
+            max-height: calc(100vh - var(--header-height) - 2rem);
+        }
+
+        .config-section {
+            margin-bottom: 1.2rem;
+        }
+
+        .config-section h4 {
+            font-size: 0.82rem;
+            color: var(--text-secondary);
+            margin-bottom: 0.6rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .config-group {
+            margin-bottom: 0.6rem;
+        }
+
+        .config-group label {
+            display: block;
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            margin-bottom: 0.25rem;
+        }
+
+        .config-group .val-display {
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            color: var(--accent-green);
+            float: right;
+        }
+
+        .config-group input[type="range"] {
+            width: 100%;
+            margin-top: 2px;
+        }
+
+        .config-group select {
+            width: 100%;
+            padding: 0.4rem 0.6rem;
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            color: var(--text-primary);
+            font-family: inherit;
+            font-size: 0.85rem;
+            cursor: pointer;
+        }
+
+        .config-group select:focus {
+            outline: none;
+            border-color: var(--accent-green);
+        }
+
+        .strategy-params {
+            padding: 0.6rem;
+            background: rgba(22, 199, 154, 0.05);
+            border-radius: var(--radius-sm);
+            border: 1px solid rgba(22, 199, 154, 0.15);
+        }
+
+        /* ===== Center Panel ===== */
+        .center-panel {
+            display: flex;
+            flex-direction: column;
+            max-height: calc(100vh - var(--header-height) - 2rem);
+        }
+
+        .controls-bar {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-bottom: 0.75rem;
+            flex-wrap: wrap;
+        }
+
+        .controls-bar .spacer { flex: 1; }
+
+        .view-tabs {
+            display: flex;
+            gap: 0;
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            overflow: hidden;
+        }
+
+        .view-tab {
+            padding: 0.35rem 0.7rem;
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            font-family: inherit;
+            font-size: 0.8rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .view-tab:hover { color: var(--text-secondary); }
+        .view-tab.active {
+            background: rgba(22, 199, 154, 0.2);
+            color: var(--accent-green);
+        }
+
+        .view-tab + .view-tab {
+            border-left: 1px solid var(--border-color);
+        }
+
+        .chart-container {
+            flex: 1;
+            position: relative;
+            min-height: 0;
+        }
+
+        .chart-canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        .chart-tooltip {
+            position: absolute;
+            padding: 0.5rem 0.75rem;
+            background: rgba(15, 52, 96, 0.95);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            font-size: 0.78rem;
+            color: var(--text-primary);
+            pointer-events: none;
+            z-index: 50;
+            display: none;
+            white-space: nowrap;
+            font-family: var(--font-mono);
+        }
+
+        .speed-control {
+            display: flex;
+            align-items: center;
+            gap: 0.3rem;
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+
+        .speed-control input[type="range"] {
+            width: 60px;
+        }
+
+        /* ===== Right Panel: Results ===== */
+        .right-panel {
+            max-height: calc(100vh - var(--header-height) - 2rem);
+        }
+
+        .perf-cards {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .perf-card {
+            padding: 0.6rem;
+            background: var(--bg-primary);
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border-color);
+            text-align: center;
+        }
+
+        .perf-card .perf-label {
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            margin-bottom: 0.2rem;
+        }
+
+        .perf-card .perf-value {
+            font-family: var(--font-mono);
+            font-size: 1.1rem;
+            font-weight: 700;
+        }
+
+        .perf-card .perf-value.positive { color: var(--accent-green); }
+        .perf-card .perf-value.negative { color: var(--accent-red); }
+        .perf-card .perf-value.neutral { color: var(--accent-blue); }
+
+        /* ===== Heatmap ===== */
+        .heatmap-section {
+            margin-bottom: 1rem;
+        }
+
+        .heatmap-title {
+            font-size: 0.82rem;
+            color: var(--text-secondary);
+            margin-bottom: 0.4rem;
+        }
+
+        .heatmap-grid {
+            display: grid;
+            gap: 2px;
+            font-family: var(--font-mono);
+            font-size: 0.65rem;
+        }
+
+        .heatmap-cell {
+            padding: 0.2rem;
+            text-align: center;
+            border-radius: 2px;
+            color: var(--text-primary);
+            min-height: 22px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .heatmap-header {
+            font-weight: 600;
+            color: var(--text-muted);
+            font-size: 0.6rem;
+        }
+
+        /* ===== Histogram ===== */
+        .histogram-container {
+            position: relative;
+            height: 100px;
+            margin-bottom: 1rem;
+        }
+
+        .histogram-canvas {
+            width: 100%;
+            height: 100%;
+        }
+
+        /* ===== Trade Log ===== */
+        .trade-log-section {
+            margin-top: 0.5rem;
+        }
+
+        .trade-log-title {
+            font-size: 0.82rem;
+            color: var(--text-secondary);
+            margin-bottom: 0.4rem;
+        }
+
+        .trade-log {
+            max-height: 250px;
+            overflow-y: auto;
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+        }
+
+        .trade-log table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.72rem;
+            font-family: var(--font-mono);
+        }
+
+        .trade-log th {
+            background: var(--bg-card);
+            padding: 0.35rem 0.4rem;
+            text-align: left;
+            color: var(--accent-green);
+            font-weight: 600;
+            position: sticky;
+            top: 0;
+        }
+
+        .trade-log td {
+            padding: 0.3rem 0.4rem;
+            border-top: 1px solid rgba(42, 42, 74, 0.3);
+            color: var(--text-secondary);
+        }
+
+        .trade-log tr:hover td {
+            background: rgba(22, 199, 154, 0.05);
+        }
+
+        .trade-buy { color: var(--accent-green) !important; }
+        .trade-sell { color: var(--accent-red) !important; }
+
+        /* ===== Compare Mode ===== */
+        .compare-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.6);
+            z-index: 500;
+            display: none;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .compare-overlay.show {
+            display: flex;
+        }
+
+        .compare-modal {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            padding: 1.5rem;
+            width: 90vw;
+            max-width: 1100px;
+            max-height: 85vh;
+            overflow-y: auto;
+        }
+
+        .compare-modal h3 {
+            color: var(--accent-green);
+            margin-bottom: 1rem;
+        }
+
+        .compare-side-by-side {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+        }
+
+        .compare-panel {
+            background: var(--bg-primary);
+            border-radius: var(--radius-md);
+            padding: 1rem;
+            border: 1px solid var(--border-color);
+        }
+
+        .compare-panel h4 {
+            color: var(--accent-blue);
+            font-size: 0.9rem;
+            margin-bottom: 0.75rem;
+        }
+
+        .compare-chart {
+            width: 100%;
+            height: 200px;
+        }
+
+        .compare-stats {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.4rem;
+            margin-top: 0.75rem;
+            font-size: 0.78rem;
+        }
+
+        .compare-stat {
+            display: flex;
+            justify-content: space-between;
+            padding: 0.3rem 0.5rem;
+            background: var(--bg-secondary);
+            border-radius: var(--radius-sm);
+        }
+
+        .compare-stat .cs-label { color: var(--text-muted); }
+        .compare-stat .cs-val { color: var(--accent-green); font-family: var(--font-mono); }
+
+        /* ===== Animations ===== */
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .animate-in {
+            animation: fadeIn 0.3s ease forwards;
+        }
+
+        /* ===== Running indicator ===== */
+        .running-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            font-size: 0.8rem;
+            color: var(--accent-orange);
+        }
+
+        .running-indicator .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--accent-orange);
+            animation: pulse 1s ease infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+
+        /* ===== Responsive ===== */
+        @media (max-width: 1200px) {
+            .playground-layout {
+                grid-template-columns: 1fr;
+                max-height: none;
+            }
+            .left-panel, .center-panel, .right-panel {
+                max-height: none;
+            }
+            .chart-container {
+                min-height: 400px;
+            }
+        }
+    </style>
+</head>
+<body>
+
+<div class="playground-layout">
+    <!-- ===== LEFT PANEL: Configuration ===== -->
+    <div class="panel left-panel">
+        <div class="panel-title">&#9881; 策略配置</div>
+
+        <div class="config-section">
+            <h4>策略选择</h4>
+            <div class="config-group">
+                <select id="strategyType">
+                    <option value="momentum">动量策略</option>
+                    <option value="meanreversion">均值回归</option>
+                    <option value="pairs">配对交易</option>
+                    <option value="custom">自定义</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="config-section">
+            <h4>数据设置</h4>
+            <div class="config-group">
+                <label>股票数量 <span class="val-display" id="numStocksVal">10</span></label>
+                <input type="range" id="numStocks" min="5" max="30" value="10" step="1">
+            </div>
+            <div class="config-group">
+                <label>时间周期 <span class="val-display" id="timePeriodsVal">250</span></label>
+                <input type="range" id="timePeriods" min="120" max="500" value="250" step="10">
+            </div>
+            <div class="config-group">
+                <label>波动率 <span class="val-display" id="volatilityVal">0.20</span></label>
+                <input type="range" id="volatility" min="0.05" max="0.60" value="0.20" step="0.01">
+            </div>
+            <div class="config-group">
+                <label>漂移率 <span class="val-display" id="driftVal">0.05</span></label>
+                <input type="range" id="drift" min="-0.20" max="0.30" value="0.05" step="0.01">
+            </div>
+        </div>
+
+        <div class="config-section">
+            <h4>策略参数</h4>
+            <div class="strategy-params" id="strategyParams">
+                <!-- Dynamically populated -->
+            </div>
+        </div>
+
+        <div class="config-section">
+            <h4>风险设置</h4>
+            <div class="config-group">
+                <label>仓位大小 <span class="val-display" id="positionSizeVal">0.10</span></label>
+                <input type="range" id="positionSize" min="0.02" max="0.50" value="0.10" step="0.01">
+            </div>
+            <div class="config-group">
+                <label>止损比例 <span class="val-display" id="stopLossVal">0.05</span></label>
+                <input type="range" id="stopLoss" min="0.01" max="0.20" value="0.05" step="0.01">
+            </div>
+            <div class="config-group">
+                <label>最大杠杆 <span class="val-display" id="maxLeverageVal">1.0</span></label>
+                <input type="range" id="maxLeverage" min="0.5" max="3.0" value="1.0" step="0.1">
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== CENTER PANEL: Visualization ===== -->
+    <div class="panel center-panel">
+        <div class="controls-bar">
+            <button class="btn btn-primary" id="btnRun">&#9654; 运行回测</button>
+            <button class="btn" id="btnReset">&#8634; 重置</button>
+            <button class="btn" id="btnAutoplay">&#9199; 动画回放</button>
+            <div class="speed-control">
+                <span>速度</span>
+                <input type="range" id="animSpeed" min="1" max="20" value="10">
+            </div>
+            <span class="running-indicator" id="runningIndicator" style="display:none">
+                <span class="dot"></span> 运行中
+            </span>
+            <div class="spacer"></div>
+            <button class="btn" id="btnCompare">&#9878; 对比模式</button>
+            <div class="view-tabs">
+                <button class="view-tab active" data-view="price">价格</button>
+                <button class="view-tab" data-view="equity">权益</button>
+                <button class="view-tab" data-view="drawdown">回撤</button>
+                <button class="view-tab" data-view="positions">持仓</button>
+            </div>
+        </div>
+
+        <div class="chart-container">
+            <canvas class="chart-canvas" id="mainChart"></canvas>
+            <div class="chart-tooltip" id="chartTooltip"></div>
+        </div>
+    </div>
+
+    <!-- ===== RIGHT PANEL: Results ===== -->
+    <div class="panel right-panel">
+        <div class="panel-title">&#128202; 回测结果</div>
+
+        <div class="perf-cards" id="perfCards">
+            <div class="perf-card">
+                <div class="perf-label">总收益率</div>
+                <div class="perf-value neutral" id="totalReturn">--</div>
+            </div>
+            <div class="perf-card">
+                <div class="perf-label">夏普比率</div>
+                <div class="perf-value neutral" id="sharpeRatio">--</div>
+            </div>
+            <div class="perf-card">
+                <div class="perf-label">最大回撤</div>
+                <div class="perf-value neutral" id="maxDrawdown">--</div>
+            </div>
+            <div class="perf-card">
+                <div class="perf-label">胜率</div>
+                <div class="perf-value neutral" id="winRate">--</div>
+            </div>
+            <div class="perf-card">
+                <div class="perf-label">交易次数</div>
+                <div class="perf-value neutral" id="tradeCount">--</div>
+            </div>
+            <div class="perf-card">
+                <div class="perf-label">盈亏比</div>
+                <div class="perf-value neutral" id="profitFactor">--</div>
+            </div>
+        </div>
+
+        <div class="heatmap-section">
+            <div class="heatmap-title">月度收益热力图</div>
+            <div class="heatmap-grid" id="heatmapGrid" style="grid-template-columns: repeat(13, 1fr);">
+                <!-- Populated by JS -->
+            </div>
+        </div>
+
+        <div class="histogram-container">
+            <div class="heatmap-title">收益分布</div>
+            <canvas class="histogram-canvas" id="histogramCanvas"></canvas>
+        </div>
+
+        <div class="trade-log-section">
+            <div class="trade-log-title">交易记录 (最近20笔)</div>
+            <div class="trade-log">
+                <table>
+                    <thead>
+                        <tr><th>日期</th><th>方向</th><th>股票</th><th>价格</th><th>盈亏</th></tr>
+                    </thead>
+                    <tbody id="tradeLogBody">
+                        <tr><td colspan="5" style="text-align:center;color:var(--text-muted)">运行回测查看交易记录</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ===== Compare Modal ===== -->
+<div class="compare-overlay" id="compareOverlay">
+    <div class="compare-modal">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;">
+            <h3>&#9878; 策略对比</h3>
+            <button class="btn btn-sm" id="btnCloseCompare">&#10005; 关闭</button>
+        </div>
+        <div class="config-group" style="margin-bottom:1rem;">
+            <label style="color:var(--text-secondary);font-size:0.85rem;">选择对比策略</label>
+            <select id="compareStrategy" style="width:auto;padding:0.4rem 0.6rem;background:var(--bg-primary);border:1px solid var(--border-color);border-radius:var(--radius-sm);color:var(--text-primary);font-family:inherit;">
+                <option value="momentum">动量策略</option>
+                <option value="meanreversion">均值回归</option>
+                <option value="pairs">配对交易</option>
+            </select>
+            <button class="btn btn-primary btn-sm" id="btnRunCompare" style="margin-left:0.5rem;">运行对比</button>
+        </div>
+        <div class="compare-side-by-side" id="compareSideBySide">
+            <div class="compare-panel">
+                <h4 id="compareLabel1">策略 A</h4>
+                <canvas class="compare-chart" id="compareChart1"></canvas>
+                <div class="compare-stats" id="compareStats1"></div>
+            </div>
+            <div class="compare-panel">
+                <h4 id="compareLabel2">策略 B</h4>
+                <canvas class="compare-chart" id="compareChart2"></canvas>
+                <div class="compare-stats" id="compareStats2"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// ===== Playground Engine =====
+const PG = (() => {
+    // --- State ---
+    let state = {
+        prices: [],       // array of arrays: [stockIdx][time]
+        signals: [],      // {time, stock, direction, price}
+        trades: [],       // {entryTime, exitTime, stock, direction, entryPrice, exitPrice, pnl}
+        equity: [],       // equity curve values
+        drawdown: [],     // drawdown values
+        positions: [],    // {time, stock, size}
+        currentView: 'price',
+        isRunning: false,
+        animFrame: null,
+        animIdx: 0,
+        compareResult: null
+    };
+
+    // --- Helpers ---
+    function getVal(id) { return parseFloat(document.getElementById(id).value); }
+    function getStr(id) { return document.getElementById(id).value; }
+
+    function randn() {
+        let u = 0, v = 0;
+        while (u === 0) u = Math.random();
+        while (v === 0) v = Math.random();
+        return Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
+    }
+
+    // --- Data Generation (GBM) ---
+    function generatePrices(nStocks, nPeriods, vol, drift) {
+        const dt = 1 / 252;
+        const prices = [];
+        for (let s = 0; s < nStocks; s++) {
+            const p = [100 + (Math.random() - 0.5) * 20];
+            const stockVol = vol * (0.7 + Math.random() * 0.6);
+            const stockDrift = drift + (Math.random() - 0.5) * 0.04;
+            for (let t = 1; t < nPeriods; t++) {
+                const prev = p[t - 1];
+                const shock = randn();
+                const ret = (stockDrift - 0.5 * stockVol * stockVol) * dt + stockVol * Math.sqrt(dt) * shock;
+                p.push(prev * Math.exp(ret));
+            }
+            prices.push(p);
+        }
+        return prices;
+    }
+
+    // --- Strategy Implementations ---
+    function momentumStrategy(prices, params) {
+        const lookback = params.lookback || 20;
+        const holding = params.holding || 10;
+        const signals = [];
+        const nStocks = prices.length;
+        const nPeriods = prices[0].length;
+
+        for (let t = lookback; t < nPeriods; t += holding) {
+            const rets = [];
+            for (let s = 0; s < nStocks; s++) {
+                rets.push({ stock: s, ret: (prices[s][t] / prices[s][t - lookback]) - 1 });
+            }
+            rets.sort((a, b) => b.ret - a.ret);
+            // Long top 20%, short bottom 20%
+            const nLong = Math.max(1, Math.floor(nStocks * 0.2));
+            for (let i = 0; i < nLong; i++) {
+                signals.push({ time: t, stock: rets[i].stock, direction: 1, price: prices[rets[i].stock][t] });
+            }
+            for (let i = rets.length - nLong; i < rets.length; i++) {
+                signals.push({ time: t, stock: rets[i].stock, direction: -1, price: prices[rets[i].stock][t] });
+            }
+        }
+        return signals;
+    }
+
+    function meanReversionStrategy(prices, params) {
+        const lookback = params.lookback || 20;
+        const entryZ = params.entryZ || 2.0;
+        const exitZ = params.exitZ || 0.5;
+        const signals = [];
+        const nStocks = prices.length;
+        const nPeriods = prices[0].length;
+
+        for (let s = 0; s < nStocks; s++) {
+            let inPosition = 0; // 0=flat, 1=long, -1=short
+            for (let t = lookback; t < nPeriods; t++) {
+                const window = prices[s].slice(t - lookback, t);
+                const mean = window.reduce((a, b) => a + b, 0) / lookback;
+                const std = Math.sqrt(window.reduce((a, b) => a + (b - mean) ** 2, 0) / lookback);
+                if (std === 0) continue;
+                const z = (prices[s][t] - mean) / std;
+
+                if (inPosition === 0) {
+                    if (z < -entryZ) {
+                        signals.push({ time: t, stock: s, direction: 1, price: prices[s][t] });
+                        inPosition = 1;
+                    } else if (z > entryZ) {
+                        signals.push({ time: t, stock: s, direction: -1, price: prices[s][t] });
+                        inPosition = -1;
+                    }
+                } else {
+                    if ((inPosition === 1 && z > -exitZ) || (inPosition === -1 && z < exitZ)) {
+                        signals.push({ time: t, stock: s, direction: -inPosition, price: prices[s][t] });
+                        inPosition = 0;
+                    }
+                }
+            }
+        }
+        return signals;
+    }
+
+    function pairsStrategy(prices, params) {
+        const hedgeRatio = params.hedgeRatio || 1.0;
+        const entryThresh = params.entryThreshold || 2.0;
+        const exitThresh = params.exitThreshold || 0.5;
+        const signals = [];
+        const nStocks = prices.length;
+        const nPeriods = prices[0].length;
+        const lookback = 30;
+
+        // Pick pairs of consecutive stocks
+        for (let s = 0; s < nStocks - 1; s += 2) {
+            let inPosition = 0;
+            for (let t = lookback; t < nPeriods; t++) {
+                const spread = [];
+                for (let k = t - lookback; k < t; k++) {
+                    spread.push(prices[s][k] - hedgeRatio * prices[s + 1][k]);
+                }
+                const mean = spread.reduce((a, b) => a + b, 0) / lookback;
+                const std = Math.sqrt(spread.reduce((a, b) => a + (b - mean) ** 2, 0) / lookback);
+                if (std === 0) continue;
+                const currentSpread = prices[s][t] - hedgeRatio * prices[s + 1][t];
+                const z = (currentSpread - mean) / std;
+
+                if (inPosition === 0) {
+                    if (z > entryThresh) {
+                        signals.push({ time: t, stock: s, direction: -1, price: prices[s][t] });
+                        signals.push({ time: t, stock: s + 1, direction: 1, price: prices[s + 1][t] });
+                        inPosition = 1;
+                    } else if (z < -entryThresh) {
+                        signals.push({ time: t, stock: s, direction: 1, price: prices[s][t] });
+                        signals.push({ time: t, stock: s + 1, direction: -1, price: prices[s + 1][t] });
+                        inPosition = -1;
+                    }
+                } else {
+                    if (Math.abs(z) < exitThresh) {
+                        if (inPosition === 1) {
+                            signals.push({ time: t, stock: s, direction: 1, price: prices[s][t] });
+                            signals.push({ time: t, stock: s + 1, direction: -1, price: prices[s + 1][t] });
+                        } else {
+                            signals.push({ time: t, stock: s, direction: -1, price: prices[s][t] });
+                            signals.push({ time: t, stock: s + 1, direction: 1, price: prices[s + 1][t] });
+                        }
+                        inPosition = 0;
+                    }
+                }
+            }
+        }
+        return signals;
+    }
+
+    function customStrategy(prices, params) {
+        // Combination: momentum + mean reversion filter
+        const lookback = params.lookback || 15;
+        const threshold = params.threshold || 0.03;
+        const signals = [];
+        const nStocks = prices.length;
+        const nPeriods = prices[0].length;
+
+        for (let t = lookback + 5; t < nPeriods; t += 5) {
+            for (let s = 0; s < nStocks; s++) {
+                const shortRet = (prices[s][t] / prices[s][t - 5]) - 1;
+                const longRet = (prices[s][t] / prices[s][t - lookback]) - 1;
+                if (longRet > threshold && shortRet < 0) {
+                    signals.push({ time: t, stock: s, direction: 1, price: prices[s][t] });
+                } else if (longRet < -threshold && shortRet > 0) {
+                    signals.push({ time: t, stock: s, direction: -1, price: prices[s][t] });
+                }
+            }
+        }
+        return signals;
+    }
+
+    // --- Backtest Engine ---
+    function runBacktest(prices, signals, posSize, stopLossRatio, maxLev) {
+        const nPeriods = prices[0].length;
+        const equity = [1.0];
+        const trades = [];
+        const positions = [];
+        const openPos = {};  // key: stock -> {direction, entryPrice, entryTime, size}
+
+        for (let t = 1; t < nPeriods; t++) {
+            let dailyPnL = 0;
+            // Update open positions PnL
+            for (const key of Object.keys(openPos)) {
+                const pos = openPos[key];
+                const s = parseInt(key);
+                const ret = (prices[s][t] / prices[s][t - 1] - 1) * pos.direction;
+                dailyPnL += ret * pos.size;
+
+                // Stop loss check
+                const totalRet = (prices[s][t] / pos.entryPrice - 1) * pos.direction;
+                if (totalRet < -stopLossRatio) {
+                    trades.push({
+                        entryTime: pos.entryTime,
+                        exitTime: t,
+                        stock: s,
+                        direction: pos.direction,
+                        entryPrice: pos.entryPrice,
+                        exitPrice: prices[s][t],
+                        pnl: totalRet * pos.size
+                    });
+                    delete openPos[key];
+                }
+            }
+
+            // Process signals for this time
+            const tSignals = signals.filter(sg => sg.time === t);
+            for (const sg of tSignals) {
+                const key = sg.stock.toString();
+                if (openPos[key]) {
+                    // Close existing
+                    const pos = openPos[key];
+                    const totalRet = (sg.price / pos.entryPrice - 1) * pos.direction;
+                    trades.push({
+                        entryTime: pos.entryTime,
+                        exitTime: t,
+                        stock: sg.stock,
+                        direction: pos.direction,
+                        entryPrice: pos.entryPrice,
+                        exitPrice: sg.price,
+                        pnl: totalRet * pos.size
+                    });
+                    delete openPos[key];
+                }
+                // Open new if direction != 0
+                const totalExposure = Object.values(openPos).reduce((s, p) => s + p.size, 0);
+                if (totalExposure + posSize <= maxLev) {
+                    openPos[key] = {
+                        direction: sg.direction,
+                        entryPrice: sg.price,
+                        entryTime: t,
+                        size: posSize
+                    };
+                }
+            }
+
+            // Record positions
+            const posCount = Object.keys(openPos).length;
+            positions.push({ time: t, count: posCount, exposure: Object.values(openPos).reduce((s, p) => s + p.size, 0) });
+
+            equity.push(equity[equity.length - 1] * (1 + dailyPnL));
+        }
+
+        // Close remaining
+        for (const key of Object.keys(openPos)) {
+            const pos = openPos[key];
+            const s = parseInt(key);
+            const lastPrice = prices[s][nPeriods - 1];
+            const totalRet = (lastPrice / pos.entryPrice - 1) * pos.direction;
+            trades.push({
+                entryTime: pos.entryTime,
+                exitTime: nPeriods - 1,
+                stock: s,
+                direction: pos.direction,
+                entryPrice: pos.entryPrice,
+                exitPrice: lastPrice,
+                pnl: totalRet * pos.size
+            });
+        }
+
+        // Drawdown
+        const drawdown = [];
+        let peak = equity[0];
+        for (let i = 0; i < equity.length; i++) {
+            if (equity[i] > peak) peak = equity[i];
+            drawdown.push((equity[i] - peak) / peak);
+        }
+
+        return { equity, trades, drawdown, positions };
+    }
+
+    // --- Performance Metrics ---
+    function computeMetrics(equity, trades) {
+        const totalReturn = (equity[equity.length - 1] / equity[0]) - 1;
+        // Daily returns
+        const dailyRets = [];
+        for (let i = 1; i < equity.length; i++) {
+            dailyRets.push(equity[i] / equity[i - 1] - 1);
+        }
+        const meanRet = dailyRets.reduce((a, b) => a + b, 0) / dailyRets.length;
+        const stdRet = Math.sqrt(dailyRets.reduce((a, b) => a + (b - meanRet) ** 2, 0) / dailyRets.length);
+        const sharpe = stdRet > 0 ? (meanRet / stdRet) * Math.sqrt(252) : 0;
+
+        let peak = equity[0], maxDD = 0;
+        for (let i = 0; i < equity.length; i++) {
+            if (equity[i] > peak) peak = equity[i];
+            const dd = (equity[i] - peak) / peak;
+            if (dd < maxDD) maxDD = dd;
+        }
+
+        const wins = trades.filter(t => t.pnl > 0).length;
+        const winRate = trades.length > 0 ? wins / trades.length : 0;
+
+        const totalWin = trades.filter(t => t.pnl > 0).reduce((s, t) => s + t.pnl, 0);
+        const totalLoss = Math.abs(trades.filter(t => t.pnl <= 0).reduce((s, t) => s + t.pnl, 0));
+        const profitFactor = totalLoss > 0 ? totalWin / totalLoss : (totalWin > 0 ? Infinity : 0);
+
+        return { totalReturn, sharpe, maxDD, winRate, tradeCount: trades.length, profitFactor };
+    }
+
+    // --- Monthly Returns ---
+    function computeMonthlyReturns(equity, nPeriods) {
+        // Simulate monthly = ~21 trading days
+        const monthly = {};
+        const periodsPerMonth = 21;
+        const nMonths = Math.floor(nPeriods / periodsPerMonth);
+
+        for (let m = 0; m < nMonths; m++) {
+            const startIdx = m * periodsPerMonth;
+            const endIdx = Math.min(startIdx + periodsPerMonth, equity.length - 1);
+            const ret = (equity[endIdx] / equity[startIdx]) - 1;
+            const year = Math.floor(m / 12);
+            const month = m % 12;
+            if (!monthly[year]) monthly[year] = {};
+            monthly[year][month] = ret;
+        }
+        return monthly;
+    }
+
+    // --- Get Strategy Params ---
+    function getStrategyParams() {
+        const type = getStr('strategyType');
+        const container = document.getElementById('strategyParams');
+        const inputs = container.querySelectorAll('input[type="range"]');
+        const params = {};
+        inputs.forEach(inp => {
+            params[inp.dataset.param] = parseFloat(inp.value);
+        });
+        return params;
+    }
+
+    // --- UI: Update Strategy Params Panel ---
+    function updateParamsUI() {
+        const type = getStr('strategyType');
+        const container = document.getElementById('strategyParams');
+        let html = '';
+
+        const configs = {
+            momentum: [
+                { param: 'lookback', label: '回望期', min: 5, max: 60, value: 20, step: 1 },
+                { param: 'holding', label: '持仓期', min: 3, max: 30, value: 10, step: 1 }
+            ],
+            meanreversion: [
+                { param: 'lookback', label: '回望期', min: 5, max: 60, value: 20, step: 1 },
+                { param: 'entryZ', label: '入场Z值', min: 0.5, max: 3.5, value: 2.0, step: 0.1 },
+                { param: 'exitZ', label: '出场Z值', min: 0.1, max: 2.0, value: 0.5, step: 0.1 }
+            ],
+            pairs: [
+                { param: 'hedgeRatio', label: '对冲比率', min: 0.5, max: 2.0, value: 1.0, step: 0.1 },
+                { param: 'entryThreshold', label: '入场阈值', min: 0.5, max: 3.5, value: 2.0, step: 0.1 },
+                { param: 'exitThreshold', label: '出场阈值', min: 0.1, max: 2.0, value: 0.5, step: 0.1 }
+            ],
+            custom: [
+                { param: 'lookback', label: '回望期', min: 5, max: 40, value: 15, step: 1 },
+                { param: 'threshold', label: '触发阈值', min: 0.01, max: 0.10, value: 0.03, step: 0.005 }
+            ]
+        };
+
+        (configs[type] || []).forEach(c => {
+            html += `<div class="config-group">
+                <label>${c.label} <span class="val-display" id="sp_${c.param}_val">${c.value}</span></label>
+                <input type="range" data-param="${c.param}" min="${c.min}" max="${c.max}" value="${c.value}" step="${c.step}"
+                    oninput="document.getElementById('sp_${c.param}_val').textContent=this.value">
+            </div>`;
+        });
+
+        container.innerHTML = html;
+    }
+
+    // --- Run Strategy ---
+    function getStrategy(type) {
+        switch (type) {
+            case 'momentum': return momentumStrategy;
+            case 'meanreversion': return meanReversionStrategy;
+            case 'pairs': return pairsStrategy;
+            case 'custom': return customStrategy;
+            default: return momentumStrategy;
+        }
+    }
+
+    function run() {
+        const nStocks = Math.round(getVal('numStocks'));
+        const nPeriods = Math.round(getVal('timePeriods'));
+        const vol = getVal('volatility');
+        const drift = getVal('drift');
+        const posSize = getVal('positionSize');
+        const stopLoss = getVal('stopLoss');
+        const maxLev = getVal('maxLeverage');
+        const type = getStr('strategyType');
+        const params = getStrategyParams();
+
+        state.prices = generatePrices(nStocks, nPeriods, vol, drift);
+        const stratFn = getStrategy(type);
+        state.signals = stratFn(state.prices, params);
+        const result = runBacktest(state.prices, state.signals, posSize, stopLoss, maxLev);
+        state.equity = result.equity;
+        state.trades = result.trades;
+        state.drawdown = result.drawdown;
+        state.positions = result.positions;
+
+        const metrics = computeMetrics(state.equity, state.trades);
+        updatePerformanceCards(metrics);
+        updateHeatmap(state.equity, nPeriods);
+        updateHistogram(state.trades);
+        updateTradeLog(state.trades);
+        drawChart();
+    }
+
+    // --- UI Updates ---
+    function updatePerformanceCards(m) {
+        const set = (id, val, cls) => {
+            const el = document.getElementById(id);
+            el.textContent = val;
+            el.className = 'perf-value ' + cls;
+        };
+        set('totalReturn', (m.totalReturn * 100).toFixed(2) + '%', m.totalReturn >= 0 ? 'positive' : 'negative');
+        set('sharpeRatio', m.sharpe.toFixed(2), m.sharpe >= 1 ? 'positive' : (m.sharpe >= 0 ? 'neutral' : 'negative'));
+        set('maxDrawdown', (m.maxDD * 100).toFixed(2) + '%', 'negative');
+        set('winRate', (m.winRate * 100).toFixed(1) + '%', m.winRate >= 0.5 ? 'positive' : 'negative');
+        set('tradeCount', m.tradeCount, 'neutral');
+        set('profitFactor', m.profitFactor === Infinity ? '∞' : m.profitFactor.toFixed(2), m.profitFactor >= 1 ? 'positive' : 'negative');
+    }
+
+    function updateHeatmap(equity, nPeriods) {
+        const monthly = computeMonthlyReturns(equity, nPeriods);
+        const grid = document.getElementById('heatmapGrid');
+        const monthNames = ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
+        let html = '<div class="heatmap-cell heatmap-header"></div>';
+        monthNames.forEach(m => { html += `<div class="heatmap-cell heatmap-header">${m}</div>`; });
+
+        Object.keys(monthly).sort((a, b) => a - b).forEach(year => {
+            html += `<div class="heatmap-cell heatmap-header">Y${parseInt(year) + 1}</div>`;
+            for (let m = 0; m < 12; m++) {
+                const val = monthly[year][m];
+                if (val !== undefined) {
+                    const intensity = Math.min(Math.abs(val) * 10, 1);
+                    const color = val >= 0
+                        ? `rgba(22, 199, 154, ${0.1 + intensity * 0.7})`
+                        : `rgba(255, 82, 82, ${0.1 + intensity * 0.7})`;
+                    html += `<div class="heatmap-cell" style="background:${color}" title="${(val * 100).toFixed(1)}%">${(val * 100).toFixed(0)}</div>`;
+                } else {
+                    html += `<div class="heatmap-cell" style="background:var(--bg-primary)"></div>`;
+                }
+            }
+        });
+        grid.innerHTML = html;
+    }
+
+    function updateHistogram(trades) {
+        const canvas = document.getElementById('histogramCanvas');
+        const ctx = canvas.getContext('2d');
+        const dpr = window.devicePixelRatio || 1;
+        const rect = canvas.getBoundingClientRect();
+        canvas.width = rect.width * dpr;
+        canvas.height = rect.height * dpr;
+        ctx.scale(dpr, dpr);
+        const W = rect.width, H = rect.height;
+        ctx.clearRect(0, 0, W, H);
+
+        if (trades.length === 0) return;
+
+        const pnls = trades.map(t => t.pnl);
+        const minPnl = Math.min(...pnls);
+        const maxPnl = Math.max(...pnls);
+        const nBins = 20;
+        const binWidth = (maxPnl - minPnl) / nBins || 0.01;
+        const bins = new Array(nBins).fill(0);
+
+        pnls.forEach(p => {
+            let idx = Math.floor((p - minPnl) / binWidth);
+            if (idx >= nBins) idx = nBins - 1;
+            if (idx < 0) idx = 0;
+            bins[idx]++;
+        });
+
+        const maxBin = Math.max(...bins);
+        const barW = (W - 20) / nBins;
+        const pad = 10;
+
+        bins.forEach((count, i) => {
+            const barH = maxBin > 0 ? (count / maxBin) * (H - 20) : 0;
+            const x = pad + i * barW;
+            const y = H - 10 - barH;
+            const val = minPnl + (i + 0.5) * binWidth;
+            ctx.fillStyle = val >= 0 ? 'rgba(22, 199, 154, 0.7)' : 'rgba(255, 82, 82, 0.7)';
+            ctx.fillRect(x, y, barW - 1, barH);
+        });
+
+        // Zero line
+        if (minPnl < 0 && maxPnl > 0) {
+            const zeroX = pad + ((-minPnl) / (maxPnl - minPnl)) * (W - 20);
+            ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([3, 3]);
+            ctx.beginPath();
+            ctx.moveTo(zeroX, 0);
+            ctx.lineTo(zeroX, H);
+            ctx.stroke();
+            ctx.setLineDash([]);
+        }
+    }
+
+    function updateTradeLog(trades) {
+        const tbody = document.getElementById('tradeLogBody');
+        const recent = trades.slice(-20).reverse();
+        if (recent.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;color:var(--text-muted)">无交易记录</td></tr>';
+            return;
+        }
+        tbody.innerHTML = recent.map(t => {
+            const dir = t.direction > 0 ? '买入' : '卖出';
+            const cls = t.direction > 0 ? 'trade-buy' : 'trade-sell';
+            const pnlCls = t.pnl >= 0 ? 'trade-buy' : 'trade-sell';
+            return `<tr>
+                <td>T+${t.exitTime}</td>
+                <td class="${cls}">${dir}</td>
+                <td>S${t.stock}</td>
+                <td>${t.exitPrice.toFixed(1)}</td>
+                <td class="${pnlCls}">${(t.pnl * 100).toFixed(2)}%</td>
+            </tr>`;
+        }).join('');
+    }
+
+    // --- Chart Drawing ---
+    function drawChart() {
+        const canvas = document.getElementById('mainChart');
+        const ctx = canvas.getContext('2d');
+        const dpr = window.devicePixelRatio || 1;
+        const rect = canvas.parentElement.getBoundingClientRect();
+        canvas.width = rect.width * dpr;
+        canvas.height = rect.height * dpr;
+        ctx.scale(dpr, dpr);
+        const W = rect.width, H = rect.height;
+        ctx.clearRect(0, 0, W, H);
+
+        const pad = { top: 30, right: 60, bottom: 30, left: 60 };
+        const chartW = W - pad.left - pad.right;
+        const chartH = H - pad.top - pad.bottom;
+
+        switch (state.currentView) {
+            case 'price': drawPriceChart(ctx, W, H, pad, chartW, chartH); break;
+            case 'equity': drawEquityChart(ctx, W, H, pad, chartW, chartH); break;
+            case 'drawdown': drawDrawdownChart(ctx, W, H, pad, chartW, chartH); break;
+            case 'positions': drawPositionsChart(ctx, W, H, pad, chartW, chartH); break;
+        }
+    }
+
+    const stockColors = [
+        '#4fc3f7','#16c79a','#b388ff','#ffab40','#ff80ab',
+        '#ffd740','#ff5252','#69f0ae','#40c4ff','#ea80fc',
+        '#ff6e40','#a7ffeb','#8c9eff','#ccff90','#80d8ff',
+        '#f4ff81','#ff9e80','#b9f6ca','#82b1ff','#ffe57f',
+        '#ff8a80','#b2ff59','#448aff','#ffff8d','#ff80ab',
+        '#64ffda','#536dfe','#ffd180','#ff5252','#69f0ae'
+    ];
+
+    function drawPriceChart(ctx, W, H, pad, chartW, chartH) {
+        if (state.prices.length === 0) {
+            drawEmptyState(ctx, W, H, '点击 "运行回测" 开始');
+            return;
+        }
+
+        const nPeriods = state.prices[0].length;
+        let minP = Infinity, maxP = -Infinity;
+        state.prices.forEach(p => {
+            p.forEach(v => {
+                if (v < minP) minP = v;
+                if (v > maxP) maxP = v;
+            });
+        });
+        const range = maxP - minP || 1;
+
+        // Grid
+        drawGrid(ctx, pad, chartW, chartH, minP, maxP, nPeriods);
+
+        // Price lines
+        const displayCount = state.animIdx > 0 ? state.animIdx : nPeriods;
+        state.prices.forEach((prices, s) => {
+            ctx.strokeStyle = stockColors[s % stockColors.length];
+            ctx.lineWidth = 1.2;
+            ctx.globalAlpha = 0.6;
+            ctx.beginPath();
+            for (let t = 0; t < displayCount && t < prices.length; t++) {
+                const x = pad.left + (t / (nPeriods - 1)) * chartW;
+                const y = pad.top + chartH - ((prices[t] - minP) / range) * chartH;
+                t === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+        });
+        ctx.globalAlpha = 1.0;
+
+        // Signals
+        const signalsToShow = state.signals.filter(sg => sg.time < displayCount);
+        signalsToShow.forEach(sg => {
+            const x = pad.left + (sg.time / (nPeriods - 1)) * chartW;
+            const y = pad.top + chartH - ((sg.price - minP) / range) * chartH;
+
+            ctx.fillStyle = sg.direction > 0 ? '#16c79a' : '#ff5252';
+            ctx.beginPath();
+            if (sg.direction > 0) {
+                // Up arrow (buy)
+                ctx.moveTo(x, y - 8);
+                ctx.lineTo(x - 4, y);
+                ctx.lineTo(x + 4, y);
+            } else {
+                // Down arrow (sell)
+                ctx.moveTo(x, y + 8);
+                ctx.lineTo(x - 4, y);
+                ctx.lineTo(x + 4, y);
+            }
+            ctx.closePath();
+            ctx.fill();
+        });
+
+        // Title
+        ctx.fillStyle = '#a8a8b8';
+        ctx.font = '12px Inter, sans-serif';
+        ctx.fillText('价格走势 + 交易信号', pad.left, 18);
+    }
+
+    function drawEquityChart(ctx, W, H, pad, chartW, chartH) {
+        if (state.equity.length === 0) {
+            drawEmptyState(ctx, W, H, '运行回测后查看权益曲线');
+            return;
+        }
+
+        const data = state.equity;
+        const displayCount = state.animIdx > 0 ? state.animIdx : data.length;
+        const slice = data.slice(0, displayCount);
+        const minV = Math.min(...slice) * 0.99;
+        const maxV = Math.max(...slice) * 1.01;
+        const range = maxV - minV || 1;
+
+        drawGrid(ctx, pad, chartW, chartH, minV, maxV, data.length);
+
+        // Fill area
+        ctx.beginPath();
+        ctx.moveTo(pad.left, pad.top + chartH);
+        for (let i = 0; i < slice.length; i++) {
+            const x = pad.left + (i / (data.length - 1)) * chartW;
+            const y = pad.top + chartH - ((slice[i] - minV) / range) * chartH;
+            ctx.lineTo(x, y);
+        }
+        ctx.lineTo(pad.left + ((slice.length - 1) / (data.length - 1)) * chartW, pad.top + chartH);
+        ctx.closePath();
+        const lastVal = slice[slice.length - 1];
+        const isPositive = lastVal >= 1.0;
+        const grad = ctx.createLinearGradient(0, pad.top, 0, pad.top + chartH);
+        if (isPositive) {
+            grad.addColorStop(0, 'rgba(22, 199, 154, 0.3)');
+            grad.addColorStop(1, 'rgba(22, 199, 154, 0.02)');
+        } else {
+            grad.addColorStop(0, 'rgba(255, 82, 82, 0.3)');
+            grad.addColorStop(1, 'rgba(255, 82, 82, 0.02)');
+        }
+        ctx.fillStyle = grad;
+        ctx.fill();
+
+        // Line
+        ctx.strokeStyle = isPositive ? '#16c79a' : '#ff5252';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        for (let i = 0; i < slice.length; i++) {
+            const x = pad.left + (i / (data.length - 1)) * chartW;
+            const y = pad.top + chartH - ((slice[i] - minV) / range) * chartH;
+            i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+
+        // Baseline 1.0
+        if (1.0 >= minV && 1.0 <= maxV) {
+            const baseY = pad.top + chartH - ((1.0 - minV) / range) * chartH;
+            ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([4, 4]);
+            ctx.beginPath();
+            ctx.moveTo(pad.left, baseY);
+            ctx.lineTo(pad.left + chartW, baseY);
+            ctx.stroke();
+            ctx.setLineDash([]);
+        }
+
+        ctx.fillStyle = '#a8a8b8';
+        ctx.font = '12px Inter, sans-serif';
+        ctx.fillText('权益曲线', pad.left, 18);
+    }
+
+    function drawDrawdownChart(ctx, W, H, pad, chartW, chartH) {
+        if (state.drawdown.length === 0) {
+            drawEmptyState(ctx, W, H, '运行回测后查看回撤');
+            return;
+        }
+
+        const data = state.drawdown;
+        const displayCount = state.animIdx > 0 ? state.animIdx : data.length;
+        const slice = data.slice(0, displayCount);
+        const minV = Math.min(...slice);
+        const maxV = 0;
+        const range = maxV - minV || 0.01;
+
+        drawGrid(ctx, pad, chartW, chartH, minV, maxV, data.length);
+
+        // Fill area
+        ctx.beginPath();
+        ctx.moveTo(pad.left, pad.top);
+        for (let i = 0; i < slice.length; i++) {
+            const x = pad.left + (i / (data.length - 1)) * chartW;
+            const y = pad.top + chartH - ((slice[i] - minV) / range) * chartH;
+            ctx.lineTo(x, y);
+        }
+        ctx.lineTo(pad.left + ((slice.length - 1) / (data.length - 1)) * chartW, pad.top);
+        ctx.closePath();
+        const grad = ctx.createLinearGradient(0, pad.top, 0, pad.top + chartH);
+        grad.addColorStop(0, 'rgba(255, 82, 82, 0.02)');
+        grad.addColorStop(1, 'rgba(255, 82, 82, 0.4)');
+        ctx.fillStyle = grad;
+        ctx.fill();
+
+        // Line
+        ctx.strokeStyle = '#ff5252';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        for (let i = 0; i < slice.length; i++) {
+            const x = pad.left + (i / (data.length - 1)) * chartW;
+            const y = pad.top + chartH - ((slice[i] - minV) / range) * chartH;
+            i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+
+        ctx.fillStyle = '#a8a8b8';
+        ctx.font = '12px Inter, sans-serif';
+        ctx.fillText('回撤曲线', pad.left, 18);
+    }
+
+    function drawPositionsChart(ctx, W, H, pad, chartW, chartH) {
+        if (state.positions.length === 0) {
+            drawEmptyState(ctx, W, H, '运行回测后查看持仓');
+            return;
+        }
+
+        const data = state.positions;
+        const displayCount = state.animIdx > 0 ? state.animIdx : data.length;
+        const slice = data.slice(0, displayCount);
+        const maxCount = Math.max(...slice.map(p => p.count), 1);
+        const maxExposure = Math.max(...slice.map(p => p.exposure), 0.01);
+
+        drawGrid(ctx, pad, chartW, chartH, 0, maxExposure, data.length);
+
+        // Exposure area
+        ctx.beginPath();
+        ctx.moveTo(pad.left, pad.top + chartH);
+        for (let i = 0; i < slice.length; i++) {
+            const x = pad.left + (i / (data.length - 1)) * chartW;
+            const y = pad.top + chartH - (slice[i].exposure / maxExposure) * chartH;
+            ctx.lineTo(x, y);
+        }
+        ctx.lineTo(pad.left + ((slice.length - 1) / (data.length - 1)) * chartW, pad.top + chartH);
+        ctx.closePath();
+        const grad = ctx.createLinearGradient(0, pad.top, 0, pad.top + chartH);
+        grad.addColorStop(0, 'rgba(79, 195, 247, 0.3)');
+        grad.addColorStop(1, 'rgba(79, 195, 247, 0.02)');
+        ctx.fillStyle = grad;
+        ctx.fill();
+
+        ctx.strokeStyle = '#4fc3f7';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        for (let i = 0; i < slice.length; i++) {
+            const x = pad.left + (i / (data.length - 1)) * chartW;
+            const y = pad.top + chartH - (slice[i].exposure / maxExposure) * chartH;
+            i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+
+        // Position count as bars
+        const barW = Math.max(chartW / data.length, 1);
+        ctx.fillStyle = 'rgba(179, 136, 255, 0.3)';
+        for (let i = 0; i < slice.length; i++) {
+            const x = pad.left + (i / (data.length - 1)) * chartW - barW / 2;
+            const barH = (slice[i].count / maxCount) * chartH * 0.4;
+            ctx.fillRect(x, pad.top + chartH - barH, barW, barH);
+        }
+
+        ctx.fillStyle = '#a8a8b8';
+        ctx.font = '12px Inter, sans-serif';
+        ctx.fillText('持仓变化 (线: 敞口, 柱: 持仓数)', pad.left, 18);
+    }
+
+    function drawGrid(ctx, pad, chartW, chartH, minV, maxV, nPoints) {
+        ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+        ctx.lineWidth = 1;
+        const nLines = 5;
+
+        for (let i = 0; i <= nLines; i++) {
+            const y = pad.top + (i / nLines) * chartH;
+            ctx.beginPath();
+            ctx.moveTo(pad.left, y);
+            ctx.lineTo(pad.left + chartW, y);
+            ctx.stroke();
+
+            const val = maxV - (i / nLines) * (maxV - minV);
+            ctx.fillStyle = '#6c6c7c';
+            ctx.font = '10px JetBrains Mono, monospace';
+            ctx.textAlign = 'right';
+            ctx.fillText(val.toFixed(2), pad.left - 6, y + 3);
+        }
+
+        // X axis labels
+        ctx.textAlign = 'center';
+        const xSteps = 6;
+        for (let i = 0; i <= xSteps; i++) {
+            const x = pad.left + (i / xSteps) * chartW;
+            const t = Math.round((i / xSteps) * (nPoints - 1));
+            ctx.fillText('T+' + t, x, pad.top + chartH + 18);
+        }
+    }
+
+    function drawEmptyState(ctx, W, H, msg) {
+        ctx.fillStyle = '#6c6c7c';
+        ctx.font = '14px Inter, Noto Sans SC, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(msg, W / 2, H / 2);
+        ctx.textAlign = 'left';
+    }
+
+    // --- Tooltip ---
+    function handleMouseMove(e) {
+        if (state.prices.length === 0 && state.equity.length === 0) return;
+        const canvas = document.getElementById('mainChart');
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        const W = rect.width, H = rect.height;
+        const pad = { top: 30, right: 60, bottom: 30, left: 60 };
+        const chartW = W - pad.left - pad.right;
+        const chartH = H - pad.top - pad.bottom;
+
+        if (x < pad.left || x > W - pad.right || y < pad.top || y > H - pad.bottom) {
+            document.getElementById('chartTooltip').style.display = 'none';
+            return;
+        }
+
+        const ratio = (x - pad.left) / chartW;
+        const tooltip = document.getElementById('chartTooltip');
+        let text = '';
+
+        if (state.currentView === 'price' && state.prices.length > 0) {
+            const t = Math.round(ratio * (state.prices[0].length - 1));
+            text = `T+${t}`;
+            const nShow = Math.min(state.prices.length, 5);
+            for (let s = 0; s < nShow; s++) {
+                text += ` | S${s}: ${state.prices[s][t].toFixed(1)}`;
+            }
+        } else if (state.currentView === 'equity' && state.equity.length > 0) {
+            const t = Math.round(ratio * (state.equity.length - 1));
+            text = `T+${t} | 权益: ${state.equity[t].toFixed(4)}`;
+        } else if (state.currentView === 'drawdown' && state.drawdown.length > 0) {
+            const t = Math.round(ratio * (state.drawdown.length - 1));
+            text = `T+${t} | 回撤: ${(state.drawdown[t] * 100).toFixed(2)}%`;
+        } else if (state.currentView === 'positions' && state.positions.length > 0) {
+            const t = Math.round(ratio * (state.positions.length - 1));
+            if (state.positions[t]) {
+                text = `T+${t + 1} | 持仓: ${state.positions[t].count} | 敞口: ${state.positions[t].exposure.toFixed(2)}`;
+            }
+        }
+
+        if (text) {
+            tooltip.textContent = text;
+            tooltip.style.display = 'block';
+            const tx = Math.min(x + 12, W - tooltip.offsetWidth - 10);
+            tooltip.style.left = tx + 'px';
+            tooltip.style.top = (y - 30) + 'px';
+        } else {
+            tooltip.style.display = 'none';
+        }
+    }
+
+    // --- Animation ---
+    let animTimer = null;
+
+    function startAnimation() {
+        if (state.prices.length === 0) return;
+        stopAnimation();
+        state.animIdx = 1;
+        const speed = parseInt(document.getElementById('animSpeed').value);
+        const step = Math.max(1, Math.round(speed / 2));
+        const maxIdx = state.prices[0].length;
+        document.getElementById('runningIndicator').style.display = 'inline-flex';
+        document.getElementById('btnAutoplay').textContent = '\u23F9 停止';
+
+        animTimer = setInterval(() => {
+            state.animIdx += step;
+            if (state.animIdx >= maxIdx) {
+                state.animIdx = 0;
+                stopAnimation();
+                return;
+            }
+            drawChart();
+        }, 50);
+    }
+
+    function stopAnimation() {
+        if (animTimer) {
+            clearInterval(animTimer);
+            animTimer = null;
+        }
+        state.animIdx = 0;
+        document.getElementById('runningIndicator').style.display = 'none';
+        document.getElementById('btnAutoplay').textContent = '\u23F1 动画回放';
+        drawChart();
+    }
+
+    // --- Compare Mode ---
+    function runCompare() {
+        const nStocks = Math.round(getVal('numStocks'));
+        const nPeriods = Math.round(getVal('timePeriods'));
+        const vol = getVal('volatility');
+        const drift = getVal('drift');
+        const posSize = getVal('positionSize');
+        const stopLoss = getVal('stopLoss');
+        const maxLev = getVal('maxLeverage');
+
+        const typeA = getStr('strategyType');
+        const typeB = document.getElementById('compareStrategy').value;
+        const paramsA = getStrategyParams();
+        // Use default params for strategy B
+        const defaultParams = {
+            momentum: { lookback: 20, holding: 10 },
+            meanreversion: { lookback: 20, entryZ: 2.0, exitZ: 0.5 },
+            pairs: { hedgeRatio: 1.0, entryThreshold: 2.0, exitThreshold: 0.5 },
+            custom: { lookback: 15, threshold: 0.03 }
+        };
+        const paramsB = defaultParams[typeB] || {};
+
+        // Use same price data for fair comparison
+        const prices = generatePrices(nStocks, nPeriods, vol, drift);
+
+        const signalsA = getStrategy(typeA)(prices, paramsA);
+        const resultA = runBacktest(prices, signalsA, posSize, stopLoss, maxLev);
+        const metricsA = computeMetrics(resultA.equity, resultA.trades);
+
+        const signalsB = getStrategy(typeB)(prices, paramsB);
+        const resultB = runBacktest(prices, signalsB, posSize, stopLoss, maxLev);
+        const metricsB = computeMetrics(resultB.equity, resultB.trades);
+
+        const nameMap = { momentum: '动量策略', meanreversion: '均值回归', pairs: '配对交易', custom: '自定义' };
+        document.getElementById('compareLabel1').textContent = nameMap[typeA] || typeA;
+        document.getElementById('compareLabel2').textContent = nameMap[typeB] || typeB;
+
+        drawCompareChart('compareChart1', resultA.equity, metricsA.totalReturn >= 0);
+        drawCompareChart('compareChart2', resultB.equity, metricsB.totalReturn >= 0);
+
+        fillCompareStats('compareStats1', metricsA);
+        fillCompareStats('compareStats2', metricsB);
+    }
+
+    function drawCompareChart(canvasId, equity, isPositive) {
+        const canvas = document.getElementById(canvasId);
+        const ctx = canvas.getContext('2d');
+        const dpr = window.devicePixelRatio || 1;
+        const rect = canvas.getBoundingClientRect();
+        canvas.width = rect.width * dpr;
+        canvas.height = rect.height * dpr;
+        ctx.scale(dpr, dpr);
+        const W = rect.width, H = rect.height;
+        ctx.clearRect(0, 0, W, H);
+
+        const pad = 15;
+        const minV = Math.min(...equity) * 0.99;
+        const maxV = Math.max(...equity) * 1.01;
+        const range = maxV - minV || 1;
+
+        const grad = ctx.createLinearGradient(0, pad, 0, H - pad);
+        if (isPositive) {
+            grad.addColorStop(0, 'rgba(22, 199, 154, 0.25)');
+            grad.addColorStop(1, 'rgba(22, 199, 154, 0.02)');
+        } else {
+            grad.addColorStop(0, 'rgba(255, 82, 82, 0.25)');
+            grad.addColorStop(1, 'rgba(255, 82, 82, 0.02)');
+        }
+
+        ctx.beginPath();
+        ctx.moveTo(pad, H - pad);
+        for (let i = 0; i < equity.length; i++) {
+            const x = pad + (i / (equity.length - 1)) * (W - 2 * pad);
+            const y = pad + (H - 2 * pad) - ((equity[i] - minV) / range) * (H - 2 * pad);
+            ctx.lineTo(x, y);
+        }
+        ctx.lineTo(pad + (W - 2 * pad), H - pad);
+        ctx.closePath();
+        ctx.fillStyle = grad;
+        ctx.fill();
+
+        ctx.strokeStyle = isPositive ? '#16c79a' : '#ff5252';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        for (let i = 0; i < equity.length; i++) {
+            const x = pad + (i / (equity.length - 1)) * (W - 2 * pad);
+            const y = pad + (H - 2 * pad) - ((equity[i] - minV) / range) * (H - 2 * pad);
+            i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+    }
+
+    function fillCompareStats(containerId, m) {
+        const el = document.getElementById(containerId);
+        el.innerHTML = `
+            <div class="compare-stat"><span class="cs-label">收益率</span><span class="cs-val">${(m.totalReturn * 100).toFixed(2)}%</span></div>
+            <div class="compare-stat"><span class="cs-label">夏普</span><span class="cs-val">${m.sharpe.toFixed(2)}</span></div>
+            <div class="compare-stat"><span class="cs-label">回撤</span><span class="cs-val">${(m.maxDD * 100).toFixed(2)}%</span></div>
+            <div class="compare-stat"><span class="cs-label">胜率</span><span class="cs-val">${(m.winRate * 100).toFixed(1)}%</span></div>
+            <div class="compare-stat"><span class="cs-label">交易数</span><span class="cs-val">${m.tradeCount}</span></div>
+            <div class="compare-stat"><span class="cs-label">盈亏比</span><span class="cs-val">${m.profitFactor === Infinity ? '∞' : m.profitFactor.toFixed(2)}</span></div>
+        `;
+    }
+
+    // --- localStorage ---
+    function saveSettings() {
+        const settings = {
+            strategyType: getStr('strategyType'),
+            numStocks: getVal('numStocks'),
+            timePeriods: getVal('timePeriods'),
+            volatility: getVal('volatility'),
+            drift: getVal('drift'),
+            positionSize: getVal('positionSize'),
+            stopLoss: getVal('stopLoss'),
+            maxLeverage: getVal('maxLeverage')
+        };
+        try {
+            localStorage.setItem('pg_settings', JSON.stringify(settings));
+        } catch (e) {}
+    }
+
+    function loadSettings() {
+        try {
+            const raw = localStorage.getItem('pg_settings');
+            if (!raw) return;
+            const s = JSON.parse(raw);
+            if (s.strategyType) document.getElementById('strategyType').value = s.strategyType;
+            ['numStocks','timePeriods','volatility','drift','positionSize','stopLoss','maxLeverage'].forEach(id => {
+                if (s[id] !== undefined) {
+                    const el = document.getElementById(id);
+                    el.value = s[id];
+                    const valEl = document.getElementById(id + 'Val');
+                    if (valEl) valEl.textContent = s[id];
+                }
+            });
+        } catch (e) {}
+    }
+
+    // --- Init ---
+    function init() {
+        loadSettings();
+        updateParamsUI();
+
+        // Slider value displays
+        ['numStocks','timePeriods','volatility','drift','positionSize','stopLoss','maxLeverage'].forEach(id => {
+            const el = document.getElementById(id);
+            el.addEventListener('input', () => {
+                document.getElementById(id + 'Val').textContent = el.value;
+                saveSettings();
+            });
+        });
+
+        document.getElementById('strategyType').addEventListener('change', () => {
+            updateParamsUI();
+            saveSettings();
+        });
+
+        // Run button
+        document.getElementById('btnRun').addEventListener('click', () => {
+            saveSettings();
+            run();
+        });
+
+        // Reset
+        document.getElementById('btnReset').addEventListener('click', () => {
+            state.prices = [];
+            state.signals = [];
+            state.trades = [];
+            state.equity = [];
+            state.drawdown = [];
+            state.positions = [];
+            stopAnimation();
+            drawChart();
+            ['totalReturn','sharpeRatio','maxDrawdown','winRate','tradeCount','profitFactor'].forEach(id => {
+                const el = document.getElementById(id);
+                el.textContent = '--';
+                el.className = 'perf-value neutral';
+            });
+            document.getElementById('heatmapGrid').innerHTML = '';
+            const hCtx = document.getElementById('histogramCanvas').getContext('2d');
+            const hRect = document.getElementById('histogramCanvas').getBoundingClientRect();
+            hCtx.clearRect(0, 0, hRect.width, hRect.height);
+            document.getElementById('tradeLogBody').innerHTML =
+                '<tr><td colspan="5" style="text-align:center;color:var(--text-muted)">运行回测查看交易记录</td></tr>';
+        });
+
+        // Autoplay
+        let isAnimating = false;
+        document.getElementById('btnAutoplay').addEventListener('click', () => {
+            if (animTimer) {
+                stopAnimation();
+            } else {
+                if (state.prices.length === 0) {
+                    run();
+                }
+                startAnimation();
+            }
+        });
+
+        // View tabs
+        document.querySelectorAll('.view-tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                document.querySelectorAll('.view-tab').forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                state.currentView = tab.dataset.view;
+                drawChart();
+            });
+        });
+
+        // Compare
+        document.getElementById('btnCompare').addEventListener('click', () => {
+            document.getElementById('compareOverlay').classList.add('show');
+        });
+
+        document.getElementById('btnCloseCompare').addEventListener('click', () => {
+            document.getElementById('compareOverlay').classList.remove('show');
+        });
+
+        document.getElementById('compareOverlay').addEventListener('click', (e) => {
+            if (e.target === document.getElementById('compareOverlay')) {
+                document.getElementById('compareOverlay').classList.remove('show');
+            }
+        });
+
+        document.getElementById('btnRunCompare').addEventListener('click', runCompare);
+
+        // Mouse move for tooltip
+        document.getElementById('mainChart').addEventListener('mousemove', handleMouseMove);
+        document.getElementById('mainChart').addEventListener('mouseleave', () => {
+            document.getElementById('chartTooltip').style.display = 'none';
+        });
+
+        // Resize
+        let resizeTimer;
+        window.addEventListener('resize', () => {
+            clearTimeout(resizeTimer);
+            resizeTimer = setTimeout(() => {
+                drawChart();
+                if (state.trades.length > 0) {
+                    updateHistogram(state.trades);
+                }
+            }, 150);
+        });
+
+        // Initial draw
+        drawChart();
+    }
+
+    return { init, run };
+})();
+
+document.addEventListener('DOMContentLoaded', () => {
+    PG.init();
+});
+</script>
+
+<!-- KaTeX auto-render -->
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    if (typeof renderMathInElement === 'function') {
+        renderMathInElement(document.body, {
+            delimiters: [
+                { left: '$$', right: '$$', display: true },
+                { left: '$', right: '$', display: false }
+            ]
+        });
+    }
+});
+</script>
+
+</body>
+</html>

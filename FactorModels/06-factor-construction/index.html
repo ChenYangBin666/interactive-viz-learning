@@ -1,0 +1,1319 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>因子构建 — 因子模型</title>
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" defer>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" defer></script>
+    <script src="../shared/scripts/nav.js" defer></script>
+    <script src="../shared/scripts/factor-utils.js" defer></script>
+    <style>
+        /* ===== Page-specific styles ===== */
+        .pipeline-canvas { width: 100%; height: 200px; cursor: pointer; }
+        .pipeline-detail {
+            min-height: 80px; padding: 1rem; margin-top: 1rem;
+            background: var(--bg-card); border: 1px solid var(--border-color);
+            border-radius: var(--radius-md); font-size: 0.9rem;
+            color: var(--text-secondary); transition: all 0.3s;
+        }
+        .pipeline-detail h4 { color: var(--accent-green); margin-bottom: 0.5rem; }
+
+        .hist-canvas { width: 100%; height: 280px; }
+        .controls-row {
+            display: flex; flex-wrap: wrap; align-items: center;
+            gap: 1rem; margin: 1rem 0;
+        }
+        .scatter-canvas { width: 100%; height: 300px; }
+        .portfolio-canvas { width: 100%; height: 320px; }
+        .return-canvas { width: 100%; height: 280px; }
+        .decay-canvas { width: 100%; height: 260px; }
+
+        .stat-box {
+            display: inline-flex; flex-direction: column; align-items: center;
+            padding: 0.5rem 1rem; background: var(--bg-card);
+            border: 1px solid var(--border-color); border-radius: var(--radius-sm);
+            min-width: 90px;
+        }
+        .stat-box .stat-val {
+            font-family: var(--font-mono); font-size: 1.1rem;
+            color: var(--accent-green); font-weight: 700;
+        }
+        .stat-box .stat-lbl { font-size: 0.75rem; color: var(--text-muted); }
+
+        .classifier-grid {
+            display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;
+        }
+        .classifier-card {
+            padding: 1rem; background: var(--bg-card);
+            border: 2px solid var(--border-color); border-radius: var(--radius-md);
+            cursor: pointer; transition: all 0.3s;
+        }
+        .classifier-card:hover { border-color: var(--accent-blue); }
+        .classifier-card.alpha { border-color: var(--accent-green); background: rgba(22,199,154,0.08); }
+        .classifier-card.risk { border-color: var(--accent-orange); background: rgba(255,171,64,0.08); }
+        .classifier-card h4 { margin-bottom: 0.3rem; }
+
+        .compare-table {
+            width: 100%; border-collapse: collapse; font-size: 0.85rem;
+            margin-top: 1rem;
+        }
+        .compare-table th, .compare-table td {
+            padding: 0.6rem 0.8rem; border: 1px solid var(--border-color);
+            text-align: center;
+        }
+        .compare-table th {
+            background: var(--bg-card); color: var(--accent-green); font-weight: 600;
+        }
+        .compare-table td { color: var(--text-secondary); }
+
+        .turnover-box {
+            display: flex; gap: 1rem; flex-wrap: wrap; margin-top: 0.75rem;
+        }
+
+        @media (max-width: 768px) {
+            .classifier-grid { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="page-container">
+    <!-- ============== Section 1: Pipeline ============== -->
+    <section class="section" id="sec-pipeline">
+        <div class="section-title">
+            <div class="icon">⚙</div>
+            <h2>因子构建流程</h2>
+        </div>
+        <p>因子构建是量化投资的核心环节。从原始数据出发，经过计算、标准化、去极值、中性化等步骤，最终构建多空组合。点击下方流程图中的每个步骤查看详细说明。</p>
+        <div class="card">
+            <canvas id="pipelineCanvas" class="pipeline-canvas"></canvas>
+            <div id="pipelineDetail" class="pipeline-detail">
+                <h4>点击上方流程图中的步骤</h4>
+                <p>点击任意步骤查看详细解释，数据流动画展示因子从原始数据到最终组合的转化过程。</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- ============== Section 2: Calculation & Standardization ============== -->
+    <section class="section" id="sec-calc">
+        <div class="section-title">
+            <div class="icon">📊</div>
+            <h2>因子计算与标准化</h2>
+        </div>
+        <p>以动量因子为例：计算每只股票过去 N 个月的累计收益率作为动量值。原始值分布不均，需要 Z-score 标准化和 Winsorization 去极值处理。</p>
+        <div class="controls-row">
+            <div class="slider-group">
+                <label>动量窗口:</label>
+                <input type="range" id="momWindow" min="0" max="2" step="1" value="2">
+                <span class="slider-value" id="momWindowVal">12个月</span>
+            </div>
+            <button class="btn btn-primary" id="btnRegenerate">重新生成数据</button>
+        </div>
+        <p style="margin-bottom:0.3rem;">$$z_i = \frac{x_i - \bar{x}}{\sigma}$$</p>
+        <div class="card">
+            <div class="compare-grid cols-2">
+                <div>
+                    <h4 style="text-align:center; color:var(--accent-blue);">原始动量分布</h4>
+                    <canvas id="histRaw" class="hist-canvas"></canvas>
+                </div>
+                <div>
+                    <h4 style="text-align:center; color:var(--accent-green);">标准化后分布</h4>
+                    <canvas id="histStd" class="hist-canvas"></canvas>
+                </div>
+            </div>
+            <div class="controls-row" style="justify-content:center; margin-top:1rem;">
+                <div class="stat-box"><span class="stat-val" id="statMean">-</span><span class="stat-lbl">均值</span></div>
+                <div class="stat-box"><span class="stat-val" id="statStd">-</span><span class="stat-lbl">标准差</span></div>
+                <div class="stat-box"><span class="stat-val" id="statMin">-</span><span class="stat-lbl">最小值</span></div>
+                <div class="stat-box"><span class="stat-val" id="statMax">-</span><span class="stat-lbl">最大值</span></div>
+                <div class="stat-box"><span class="stat-val" id="statWinsor">-</span><span class="stat-lbl">被截断</span></div>
+            </div>
+        </div>
+        <div class="info-box mt-2">
+            <p><strong>Winsorization（去极值）:</strong> 将超过 ±3σ 的极端值截断到 ±3σ 的边界，防止异常值对因子排序产生不当影响。红色柱状体表示被截断的数据点。</p>
+        </div>
+    </section>
+
+    <!-- ============== Section 3: Neutralization ============== -->
+    <section class="section" id="sec-neutral">
+        <div class="section-title">
+            <div class="icon">⚖</div>
+            <h2>行业与市值中性化</h2>
+        </div>
+        <p>动量因子可能只是在捕捉行业效应或市值效应。通过截面回归将这些效应剥离，保留因子的"纯净"部分。</p>
+        <p>$$f_i = \alpha + \beta_1 \cdot \text{Industry}_i + \beta_2 \cdot \ln(\text{MktCap}_i) + \varepsilon_i$$</p>
+        <div class="controls-row">
+            <div class="btn-group">
+                <button class="btn active" data-neutral="before">中性化前</button>
+                <button class="btn" data-neutral="after">中性化后</button>
+            </div>
+        </div>
+        <div class="card">
+            <div class="compare-grid cols-2">
+                <div>
+                    <h4 style="text-align:center; color:var(--accent-orange);">因子 vs 市值</h4>
+                    <canvas id="scatterSize" class="scatter-canvas"></canvas>
+                </div>
+                <div>
+                    <h4 style="text-align:center; color:var(--accent-purple);">因子 vs 行业</h4>
+                    <canvas id="scatterInd" class="scatter-canvas"></canvas>
+                </div>
+            </div>
+            <div class="controls-row" style="justify-content:center; margin-top:1rem;">
+                <div class="stat-box"><span class="stat-val" id="corrSize">-</span><span class="stat-lbl">市值相关性</span></div>
+                <div class="stat-box"><span class="stat-val" id="corrInd">-</span><span class="stat-lbl">行业相关性</span></div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ============== Section 4: Long-Short Portfolio ============== -->
+    <section class="section" id="sec-portfolio">
+        <div class="section-title">
+            <div class="icon">📈</div>
+            <h2>多空组合构建</h2>
+        </div>
+        <p>将股票按因子值排序分组，做多因子值最高的一组（Q-Top），做空因子值最低的一组（Q-Bottom），构建多空组合。</p>
+        <div class="controls-row">
+            <div class="slider-group">
+                <label>分组数:</label>
+                <input type="range" id="nGroups" min="0" max="2" step="1" value="1">
+                <span class="slider-value" id="nGroupsVal">5分位</span>
+            </div>
+            <div class="btn-group">
+                <button class="btn active" data-weight="equal">等权</button>
+                <button class="btn" data-weight="factor">因子加权</button>
+            </div>
+        </div>
+        <div class="card">
+            <h4 style="text-align:center; color:var(--text-secondary); margin-bottom:0.5rem;">各分位组合累计收益</h4>
+            <canvas id="portfolioCanvas" class="portfolio-canvas"></canvas>
+            <div class="turnover-box" id="turnoverStats"></div>
+        </div>
+        <div class="card mt-2">
+            <h4 style="color:var(--accent-green); margin-bottom:0.5rem;">多空组合（Top - Bottom）</h4>
+            <canvas id="returnCanvas" class="return-canvas"></canvas>
+            <div class="controls-row" style="justify-content:center;">
+                <div class="stat-box"><span class="stat-val" id="lsSharpe">-</span><span class="stat-lbl">夏普比率</span></div>
+                <div class="stat-box"><span class="stat-val" id="lsReturn">-</span><span class="stat-lbl">年化收益</span></div>
+                <div class="stat-box"><span class="stat-val" id="lsTurnover">-</span><span class="stat-lbl">月均换手率</span></div>
+                <div class="stat-box"><span class="stat-val" id="lsMaxDD">-</span><span class="stat-lbl">最大回撤</span></div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ============== Section 5: Alpha vs Risk Factor ============== -->
+    <section class="section" id="sec-alpha-risk">
+        <div class="section-title">
+            <div class="icon">🔍</div>
+            <h2>Alpha 因子 vs 风险因子</h2>
+        </div>
+        <p>并非所有因子都是 Alpha 因子。Alpha 因子具有正的预期收益（可交易获利），而风险因子捕捉系统性风险（定价后无超额收益）。</p>
+
+        <div class="classifier-grid" id="classifierGrid">
+            <!-- Dynamic classifier cards -->
+        </div>
+
+        <div class="card mt-2">
+            <h4 style="color:var(--accent-blue); margin-bottom:0.5rem;">Alpha 因子 vs 风险因子对比</h4>
+            <table class="compare-table">
+                <thead>
+                    <tr>
+                        <th>特征</th><th>Alpha 因子</th><th>风险因子</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>预期收益</td><td>正（可获利）</td><td>风险溢价（承担风险的补偿）</td></tr>
+                    <tr><td>容量</td><td>通常较小</td><td>通常较大</td></tr>
+                    <tr><td>衰减速度</td><td>快（半衰期短）</td><td>慢（持续存在）</td></tr>
+                    <tr><td>夏普比率</td><td>较高（>1.0）</td><td>较低（0.2~0.5）</td></tr>
+                    <tr><td>换手率</td><td>高</td><td>低</td></tr>
+                    <tr><td>示例</td><td>短期反转、盈余动量</td><td>市值、价值、波动率</td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="card mt-2">
+            <h4 style="color:var(--accent-purple); margin-bottom:0.5rem;">因子衰减分析（自相关系数）</h4>
+            <p class="text-sm text-muted">Alpha 因子自相关快速衰减（半衰期短），风险因子自相关缓慢衰减（半衰期长）。</p>
+            <canvas id="decayCanvas" class="decay-canvas"></canvas>
+            <div class="legend" style="justify-content:center;">
+                <div class="legend-item"><span class="swatch" style="background:var(--accent-green);"></span> Alpha因子（短期反转）</div>
+                <div class="legend-item"><span class="swatch" style="background:var(--accent-orange);"></span> 风险因子（市值）</div>
+            </div>
+        </div>
+    </section>
+</div>
+
+<script>
+// =========================================================================
+// UTILITY FUNCTIONS
+// =========================================================================
+const C = {
+    green: '#16c79a', blue: '#4fc3f7', purple: '#b388ff',
+    orange: '#ffab40', red: '#ff5252', yellow: '#ffd740',
+    pink: '#ff80ab', text: '#e8e8e8', muted: '#6c6c7c',
+    bg: '#1a1a2e', bgSec: '#16213e', bgCard: '#0f3460',
+    border: '#2a2a4a',
+};
+
+function initCanvas(id) {
+    const el = document.getElementById(id);
+    const dpr = window.devicePixelRatio || 1;
+    const rect = el.getBoundingClientRect();
+    el.width = rect.width * dpr;
+    el.height = rect.height * dpr;
+    const ctx = el.getContext('2d');
+    ctx.scale(dpr, dpr);
+    return { el, ctx, w: rect.width, h: rect.height };
+}
+
+function randn() {
+    let u = 0, v = 0;
+    while (u === 0) u = Math.random();
+    while (v === 0) v = Math.random();
+    return Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
+}
+
+function mean(arr) { return arr.reduce((a, b) => a + b, 0) / arr.length; }
+function std(arr) { const m = mean(arr); return Math.sqrt(arr.reduce((s, x) => s + (x - m) ** 2, 0) / arr.length); }
+function corr(a, b) {
+    const ma = mean(a), mb = mean(b), sa = std(a), sb = std(b);
+    if (sa === 0 || sb === 0) return 0;
+    return a.reduce((s, x, i) => s + (x - ma) * (b[i] - mb), 0) / (a.length * sa * sb);
+}
+function linspace(a, b, n) { const d = (b - a) / (n - 1); return Array.from({length: n}, (_, i) => a + i * d); }
+
+// =========================================================================
+// SECTION 1: PIPELINE VISUALIZATION
+// =========================================================================
+const pipelineSteps = [
+    { label: '原始数据', color: C.blue, desc: '<h4>原始数据</h4><p>收集股票的基本面数据（财务报表、交易数据等）。数据需要经过清洗：处理缺失值、剔除ST/退市股票、对齐时间戳。常见数据源包括行情数据库、财务数据库等。</p>' },
+    { label: '因子计算', color: C.green, desc: '<h4>因子计算</h4><p>根据因子定义公式，从原始数据中计算出每只股票的因子值。例如动量因子 = 过去12个月累计收益率，价值因子 = 1/PE。需要注意前视偏差（look-ahead bias），只能使用历史已公开数据。</p>' },
+    { label: '标准化', color: C.purple, desc: '<h4>标准化 (Z-Score)</h4><p>将因子值转换为均值为0、标准差为1的标准分布：\\(z_i = (x_i - \\bar{x}) / \\sigma\\)。标准化消除了因子值量纲差异，使不同因子之间具有可比性，也便于后续的多因子合成。</p>' },
+    { label: '去极值', color: C.orange, desc: '<h4>去极值 (Winsorization)</h4><p>将超出 ±3σ 范围的极端值截断到边界值。极端值可能来自数据错误或极端事件，会扭曲因子排序和回归结果。常用方法：MAD（中位数绝对偏差）去极值更稳健。</p>' },
+    { label: '中性化', color: C.pink, desc: '<h4>中性化</h4><p>通过截面回归剥离行业和市值的影响：\\(f_i = \\alpha + \\beta_1 \\cdot \\text{Industry} + \\beta_2 \\cdot \\ln(\\text{MktCap}) + \\varepsilon_i\\)。取残差 ε 作为中性化后的因子值。这确保因子收益不是来自行业或市值暴露。</p>' },
+    { label: '多空组合', color: C.yellow, desc: '<h4>多空组合</h4><p>将股票按中性化后的因子值排序，等分为 N 组。做多因子值最高的一组，做空最低的一组，构建零投资的多空组合。组合的收益即因子收益，用于评估因子的有效性。</p>' },
+];
+
+let selectedPipelineStep = -1;
+let pipelineAnimPhase = 0;
+let pipelineParticles = [];
+
+function drawPipeline() {
+    const { ctx, w, h } = initCanvas('pipelineCanvas');
+    const n = pipelineSteps.length;
+    const boxW = 100, boxH = 48, gap = (w - n * boxW) / (n + 1);
+    const cy = h / 2;
+
+    // Background
+    ctx.fillStyle = C.bgSec;
+    ctx.fillRect(0, 0, w, h);
+
+    // Draw connections
+    for (let i = 0; i < n - 1; i++) {
+        const x1 = gap + i * (boxW + gap) + boxW;
+        const x2 = gap + (i + 1) * (boxW + gap);
+        ctx.beginPath();
+        ctx.moveTo(x1, cy);
+        ctx.lineTo(x2, cy);
+        ctx.strokeStyle = C.border;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        // Arrow
+        ctx.beginPath();
+        ctx.moveTo(x2 - 8, cy - 5);
+        ctx.lineTo(x2, cy);
+        ctx.lineTo(x2 - 8, cy + 5);
+        ctx.strokeStyle = C.border;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+    }
+
+    // Draw particles (animated data flow)
+    pipelineParticles.forEach(p => {
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
+        ctx.fillStyle = p.color;
+        ctx.globalAlpha = p.alpha;
+        ctx.fill();
+        ctx.globalAlpha = 1;
+    });
+
+    // Draw boxes
+    for (let i = 0; i < n; i++) {
+        const x = gap + i * (boxW + gap);
+        const y = cy - boxH / 2;
+        const step = pipelineSteps[i];
+        const isSelected = i === selectedPipelineStep;
+
+        // Box shadow / glow
+        if (isSelected) {
+            ctx.shadowColor = step.color;
+            ctx.shadowBlur = 15;
+        }
+
+        ctx.fillStyle = isSelected ? step.color + '33' : C.bgCard;
+        ctx.strokeStyle = isSelected ? step.color : C.border;
+        ctx.lineWidth = isSelected ? 2 : 1;
+        ctx.beginPath();
+        ctx.roundRect(x, y, boxW, boxH, 8);
+        ctx.fill();
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+
+        // Step number
+        ctx.fillStyle = step.color;
+        ctx.font = 'bold 10px Inter, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(`Step ${i + 1}`, x + boxW / 2, y - 6);
+
+        // Label
+        ctx.fillStyle = isSelected ? C.text : '#a8a8b8';
+        ctx.font = '13px "Noto Sans SC", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(step.label, x + boxW / 2, cy);
+    }
+
+    // Store box positions for click detection
+    drawPipeline._boxes = [];
+    for (let i = 0; i < n; i++) {
+        drawPipeline._boxes.push({
+            x: gap + i * (boxW + gap),
+            y: cy - boxH / 2,
+            w: boxW, h: boxH
+        });
+    }
+}
+
+function animatePipeline() {
+    pipelineAnimPhase += 0.02;
+    const { w, h } = document.getElementById('pipelineCanvas').getBoundingClientRect();
+    const n = pipelineSteps.length;
+    const boxW = 100, gap = (w - n * boxW) / (n + 1);
+    const cy = h / 2;
+
+    // Generate new particles
+    if (Math.random() < 0.15) {
+        const stepIdx = Math.floor(Math.random() * (n - 1));
+        const x1 = gap + stepIdx * (boxW + gap) + boxW;
+        const x2 = gap + (stepIdx + 1) * (boxW + gap);
+        pipelineParticles.push({
+            x: x1, y: cy + (Math.random() - 0.5) * 10,
+            targetX: x2, speed: 1 + Math.random(),
+            color: pipelineSteps[stepIdx].color, alpha: 0.8
+        });
+    }
+
+    // Update particles
+    pipelineParticles = pipelineParticles.filter(p => {
+        p.x += p.speed;
+        p.alpha -= 0.005;
+        return p.x < p.targetX && p.alpha > 0;
+    });
+
+    drawPipeline();
+    requestAnimationFrame(animatePipeline);
+}
+
+document.getElementById('pipelineCanvas').addEventListener('click', (e) => {
+    const rect = e.target.getBoundingClientRect();
+    const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+    const boxes = drawPipeline._boxes || [];
+    for (let i = 0; i < boxes.length; i++) {
+        const b = boxes[i];
+        if (mx >= b.x && mx <= b.x + b.w && my >= b.y && my <= b.y + b.h) {
+            selectedPipelineStep = i;
+            document.getElementById('pipelineDetail').innerHTML = pipelineSteps[i].desc;
+            if (typeof renderMathInElement === 'function') {
+                renderMathInElement(document.getElementById('pipelineDetail'), {
+                    delimiters: [
+                        {left: '\\(', right: '\\)', display: false},
+                        {left: '\\[', right: '\\]', display: true},
+                    ]
+                });
+            }
+            drawPipeline();
+            return;
+        }
+    }
+});
+
+// =========================================================================
+// SECTION 2: FACTOR CALCULATION & STANDARDIZATION
+// =========================================================================
+const momWindows = [3, 6, 12];
+let rawMomentum = [], stdMomentum = [], winsorized = [];
+
+function generateMomentum() {
+    const windowIdx = parseInt(document.getElementById('momWindow').value);
+    const months = momWindows[windowIdx];
+    const N = 30;
+    rawMomentum = [];
+    for (let i = 0; i < N; i++) {
+        // Simulate monthly returns, compound over window
+        let cumRet = 0;
+        for (let m = 0; m < months; m++) {
+            cumRet += randn() * 0.08; // ~8% monthly vol
+        }
+        // Add a few outliers
+        if (Math.random() < 0.1) cumRet *= 2.5;
+        rawMomentum.push(cumRet);
+    }
+
+    // Standardize
+    const m = mean(rawMomentum), s = std(rawMomentum);
+    stdMomentum = rawMomentum.map(x => (x - m) / s);
+
+    // Winsorize at ±3σ
+    let winsorCount = 0;
+    winsorized = stdMomentum.map(z => {
+        if (z > 3) { winsorCount++; return 3; }
+        if (z < -3) { winsorCount++; return -3; }
+        return z;
+    });
+
+    // Update stats
+    document.getElementById('statMean').textContent = mean(rawMomentum).toFixed(3);
+    document.getElementById('statStd').textContent = s.toFixed(3);
+    document.getElementById('statMin').textContent = Math.min(...rawMomentum).toFixed(3);
+    document.getElementById('statMax').textContent = Math.max(...rawMomentum).toFixed(3);
+    document.getElementById('statWinsor').textContent = winsorCount + '个';
+
+    drawHistograms();
+}
+
+function drawHistogram(canvasId, data, color, isWinsorized, xLabel) {
+    const { ctx, w, h } = initCanvas(canvasId);
+    const pad = { t: 20, r: 20, b: 40, l: 45 };
+    const pw = w - pad.l - pad.r, ph = h - pad.t - pad.b;
+
+    ctx.fillStyle = C.bgSec;
+    ctx.fillRect(0, 0, w, h);
+
+    const nBins = 12;
+    const minVal = Math.min(...data), maxVal = Math.max(...data);
+    const range = maxVal - minVal || 1;
+    const binW = range / nBins;
+    const bins = new Array(nBins).fill(0);
+    const binOutlier = new Array(nBins).fill(false);
+
+    data.forEach((v, idx) => {
+        let bin = Math.floor((v - minVal) / binW);
+        if (bin >= nBins) bin = nBins - 1;
+        bins[bin]++;
+        if (isWinsorized && (stdMomentum[idx] > 3 || stdMomentum[idx] < -3)) {
+            binOutlier[bin] = true;
+        }
+    });
+
+    const maxCount = Math.max(...bins, 1);
+
+    // Y axis
+    ctx.strokeStyle = C.border;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(pad.l, pad.t);
+    ctx.lineTo(pad.l, pad.t + ph);
+    ctx.lineTo(pad.l + pw, pad.t + ph);
+    ctx.stroke();
+
+    // Y labels
+    ctx.fillStyle = C.muted;
+    ctx.font = '11px JetBrains Mono, monospace';
+    ctx.textAlign = 'right';
+    for (let i = 0; i <= 4; i++) {
+        const y = pad.t + ph - (i / 4) * ph;
+        const val = Math.round(maxCount * i / 4);
+        ctx.fillText(val, pad.l - 6, y + 4);
+        ctx.beginPath();
+        ctx.moveTo(pad.l, y);
+        ctx.lineTo(pad.l + pw, y);
+        ctx.strokeStyle = C.border + '66';
+        ctx.stroke();
+    }
+
+    // Bars
+    const barGap = 2;
+    const barWidth = pw / nBins - barGap;
+    for (let i = 0; i < nBins; i++) {
+        const bh = (bins[i] / maxCount) * ph;
+        const x = pad.l + i * (barWidth + barGap) + barGap / 2;
+        const y = pad.t + ph - bh;
+
+        const barColor = (isWinsorized && binOutlier[i]) ? C.red : color;
+        ctx.fillStyle = barColor + 'cc';
+        ctx.beginPath();
+        ctx.roundRect(x, y, barWidth, bh, [3, 3, 0, 0]);
+        ctx.fill();
+
+        // Glow
+        ctx.fillStyle = barColor + '33';
+        ctx.beginPath();
+        ctx.roundRect(x, y, barWidth, bh, [3, 3, 0, 0]);
+        ctx.fill();
+    }
+
+    // X labels
+    ctx.fillStyle = C.muted;
+    ctx.font = '10px JetBrains Mono, monospace';
+    ctx.textAlign = 'center';
+    for (let i = 0; i <= nBins; i += 3) {
+        const val = minVal + i * binW;
+        const x = pad.l + i * (barWidth + barGap);
+        ctx.fillText(val.toFixed(2), x, pad.t + ph + 16);
+    }
+
+    // X label
+    ctx.fillStyle = C.muted;
+    ctx.font = '12px Noto Sans SC, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(xLabel, pad.l + pw / 2, h - 5);
+}
+
+function drawHistograms() {
+    drawHistogram('histRaw', rawMomentum, C.blue, false, '原始动量值');
+    drawHistogram('histStd', winsorized, C.green, true, 'Z-Score（Winsorized ±3σ）');
+}
+
+document.getElementById('momWindow').addEventListener('input', (e) => {
+    const labels = ['3个月', '6个月', '12个月'];
+    document.getElementById('momWindowVal').textContent = labels[e.target.value];
+    generateMomentum();
+});
+
+document.getElementById('btnRegenerate').addEventListener('click', generateMomentum);
+
+// =========================================================================
+// SECTION 3: NEUTRALIZATION
+// =========================================================================
+let neutralData = { before: null, after: null };
+
+function generateNeutralData() {
+    const N = 50;
+    const industries = ['金融', '科技', '消费', '医药', '能源'];
+    const indColors = [C.blue, C.green, C.purple, C.orange, C.red];
+
+    const stocks = [];
+    for (let i = 0; i < N; i++) {
+        const indIdx = Math.floor(Math.random() * 5);
+        const lnMktCap = 8 + randn() * 1.5; // ln(market cap)
+        // Before neutralization: factor correlated with size and industry
+        const sizeEffect = (lnMktCap - 8) * 0.6;
+        const indEffect = (indIdx - 2) * 0.4;
+        const factorBefore = sizeEffect + indEffect + randn() * 0.5;
+        stocks.push({ lnMktCap, indIdx, industry: industries[indIdx], color: indColors[indIdx], factorBefore });
+    }
+
+    // Neutralize via residual
+    const mF = mean(stocks.map(s => s.factorBefore));
+    const mS = mean(stocks.map(s => s.lnMktCap));
+    const mI = mean(stocks.map(s => s.indIdx));
+    const sF = std(stocks.map(s => s.factorBefore));
+    const sS = std(stocks.map(s => s.lnMktCap));
+    const sI = std(stocks.map(s => s.indIdx));
+
+    // Simple OLS for size
+    const betaSize = stocks.reduce((s, st) => s + (st.factorBefore - mF) * (st.lnMktCap - mS), 0) /
+                     stocks.reduce((s, st) => s + (st.lnMktCap - mS) ** 2, 0);
+    // Simple approx for industry
+    const betaInd = stocks.reduce((s, st) => s + (st.factorBefore - mF) * (st.indIdx - mI), 0) /
+                    stocks.reduce((s, st) => s + (st.indIdx - mI) ** 2, 0);
+
+    stocks.forEach(st => {
+        st.factorAfter = st.factorBefore - betaSize * (st.lnMktCap - mS) - betaInd * (st.indIdx - mI);
+    });
+
+    neutralData = {
+        stocks,
+        corrSizeBefore: corr(stocks.map(s => s.factorBefore), stocks.map(s => s.lnMktCap)),
+        corrSizeAfter: corr(stocks.map(s => s.factorAfter), stocks.map(s => s.lnMktCap)),
+        corrIndBefore: corr(stocks.map(s => s.factorBefore), stocks.map(s => s.indIdx)),
+        corrIndAfter: corr(stocks.map(s => s.factorAfter), stocks.map(s => s.indIdx)),
+    };
+}
+
+let neutralState = 'before';
+
+function drawScatterSize() {
+    const { ctx, w, h } = initCanvas('scatterSize');
+    const pad = { t: 20, r: 20, b: 40, l: 50 };
+    const pw = w - pad.l - pad.r, ph = h - pad.t - pad.b;
+    const stocks = neutralData.stocks;
+    if (!stocks) return;
+
+    ctx.fillStyle = C.bgSec;
+    ctx.fillRect(0, 0, w, h);
+
+    const factorKey = neutralState === 'before' ? 'factorBefore' : 'factorAfter';
+    const factors = stocks.map(s => s[factorKey]);
+    const sizes = stocks.map(s => s.lnMktCap);
+
+    const fMin = Math.min(...factors), fMax = Math.max(...factors);
+    const sMin = Math.min(...sizes), sMax = Math.max(...sizes);
+    const fRange = fMax - fMin || 1, sRange = sMax - sMin || 1;
+
+    // Axes
+    ctx.strokeStyle = C.border;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(pad.l, pad.t);
+    ctx.lineTo(pad.l, pad.t + ph);
+    ctx.lineTo(pad.l + pw, pad.t + ph);
+    ctx.stroke();
+
+    // Regression line
+    const corrVal = corr(factors, sizes);
+    const mf = mean(factors), ms = mean(sizes);
+    const sf = std(factors), ss = std(sizes);
+    const slope = corrVal * sf / ss;
+    const intercept = mf - slope * ms;
+
+    ctx.beginPath();
+    const x0 = sMin, x1 = sMax;
+    const y0_val = slope * x0 + intercept, y1_val = slope * x1 + intercept;
+    const px0 = pad.l + ((x0 - sMin) / sRange) * pw;
+    const py0 = pad.t + ph - ((y0_val - fMin) / fRange) * ph;
+    const px1 = pad.l + ((x1 - sMin) / sRange) * pw;
+    const py1 = pad.t + ph - ((y1_val - fMin) / fRange) * ph;
+    ctx.moveTo(px0, Math.max(pad.t, Math.min(pad.t + ph, py0)));
+    ctx.lineTo(px1, Math.max(pad.t, Math.min(pad.t + ph, py1)));
+    ctx.strokeStyle = C.orange + '88';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([5, 5]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Points
+    stocks.forEach((st, i) => {
+        const x = pad.l + ((st.lnMktCap - sMin) / sRange) * pw;
+        const y = pad.t + ph - ((st[factorKey] - fMin) / fRange) * ph;
+        ctx.beginPath();
+        ctx.arc(x, y, 5, 0, Math.PI * 2);
+        ctx.fillStyle = st.color + 'cc';
+        ctx.fill();
+        ctx.strokeStyle = st.color;
+        ctx.lineWidth = 1;
+        ctx.stroke();
+    });
+
+    // Labels
+    ctx.fillStyle = C.muted;
+    ctx.font = '11px Noto Sans SC, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('ln(市值)', pad.l + pw / 2, h - 5);
+    ctx.save();
+    ctx.translate(12, pad.t + ph / 2);
+    ctx.rotate(-Math.PI / 2);
+    ctx.fillText('因子值', 0, 0);
+    ctx.restore();
+}
+
+function drawScatterInd() {
+    const { ctx, w, h } = initCanvas('scatterInd');
+    const pad = { t: 20, r: 20, b: 40, l: 50 };
+    const pw = w - pad.l - pad.r, ph = h - pad.t - pad.b;
+    const stocks = neutralData.stocks;
+    if (!stocks) return;
+
+    ctx.fillStyle = C.bgSec;
+    ctx.fillRect(0, 0, w, h);
+
+    const factorKey = neutralState === 'before' ? 'factorBefore' : 'factorAfter';
+    const industries = ['金融', '科技', '消费', '医药', '能源'];
+
+    // Group by industry
+    const groups = {};
+    stocks.forEach(st => {
+        if (!groups[st.indIdx]) groups[st.indIdx] = [];
+        groups[st.indIdx].push(st[factorKey]);
+    });
+
+    const allFactors = stocks.map(s => s[factorKey]);
+    const fMin = Math.min(...allFactors), fMax = Math.max(...allFactors);
+    const fRange = fMax - fMin || 1;
+
+    // Axes
+    ctx.strokeStyle = C.border;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(pad.l, pad.t);
+    ctx.lineTo(pad.l, pad.t + ph);
+    ctx.lineTo(pad.l + pw, pad.t + ph);
+    ctx.stroke();
+
+    // Box plots per industry
+    const indColors = [C.blue, C.green, C.purple, C.orange, C.red];
+    const barW = pw / 5 - 20;
+    for (let i = 0; i < 5; i++) {
+        const vals = groups[i] || [];
+        if (vals.length === 0) continue;
+        const cx = pad.l + (i + 0.5) * (pw / 5);
+        const sorted = [...vals].sort((a, b) => a - b);
+        const q1 = sorted[Math.floor(sorted.length * 0.25)];
+        const q3 = sorted[Math.floor(sorted.length * 0.75)];
+        const med = sorted[Math.floor(sorted.length * 0.5)];
+        const lo = sorted[0], hi = sorted[sorted.length - 1];
+
+        const yLo = pad.t + ph - ((lo - fMin) / fRange) * ph;
+        const yHi = pad.t + ph - ((hi - fMin) / fRange) * ph;
+        const yQ1 = pad.t + ph - ((q1 - fMin) / fRange) * ph;
+        const yQ3 = pad.t + ph - ((q3 - fMin) / fRange) * ph;
+        const yMed = pad.t + ph - ((med - fMin) / fRange) * ph;
+
+        // Whiskers
+        ctx.strokeStyle = indColors[i] + '88';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(cx, yLo);
+        ctx.lineTo(cx, yHi);
+        ctx.stroke();
+
+        // Box
+        ctx.fillStyle = indColors[i] + '33';
+        ctx.strokeStyle = indColors[i];
+        ctx.lineWidth = 2;
+        ctx.fillRect(cx - barW / 2, Math.min(yQ1, yQ3), barW, Math.abs(yQ3 - yQ1));
+        ctx.strokeRect(cx - barW / 2, Math.min(yQ1, yQ3), barW, Math.abs(yQ3 - yQ1));
+
+        // Median
+        ctx.beginPath();
+        ctx.moveTo(cx - barW / 2, yMed);
+        ctx.lineTo(cx + barW / 2, yMed);
+        ctx.strokeStyle = indColors[i];
+        ctx.lineWidth = 3;
+        ctx.stroke();
+
+        // Points
+        vals.forEach(v => {
+            const y = pad.t + ph - ((v - fMin) / fRange) * ph;
+            const x = cx + (Math.random() - 0.5) * barW * 0.6;
+            ctx.beginPath();
+            ctx.arc(x, y, 3, 0, Math.PI * 2);
+            ctx.fillStyle = indColors[i] + '99';
+            ctx.fill();
+        });
+
+        // Industry label
+        ctx.fillStyle = C.muted;
+        ctx.font = '11px Noto Sans SC, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(industries[i], cx, pad.t + ph + 18);
+    }
+
+    // Y axis label
+    ctx.save();
+    ctx.fillStyle = C.muted;
+    ctx.font = '11px Noto Sans SC, sans-serif';
+    ctx.translate(12, pad.t + ph / 2);
+    ctx.rotate(-Math.PI / 2);
+    ctx.textAlign = 'center';
+    ctx.fillText('因子值', 0, 0);
+    ctx.restore();
+}
+
+function updateNeutralStats() {
+    const cS = neutralState === 'before' ? neutralData.corrSizeBefore : neutralData.corrSizeAfter;
+    const cI = neutralState === 'before' ? neutralData.corrIndBefore : neutralData.corrIndAfter;
+    document.getElementById('corrSize').textContent = cS.toFixed(3);
+    document.getElementById('corrInd').textContent = cI.toFixed(3);
+    document.getElementById('corrSize').style.color = Math.abs(cS) > 0.3 ? C.red : C.green;
+    document.getElementById('corrInd').style.color = Math.abs(cI) > 0.3 ? C.red : C.green;
+}
+
+document.querySelectorAll('[data-neutral]').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('[data-neutral]').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        neutralState = btn.dataset.neutral;
+        drawScatterSize();
+        drawScatterInd();
+        updateNeutralStats();
+    });
+});
+
+// =========================================================================
+// SECTION 4: LONG-SHORT PORTFOLIO
+// =========================================================================
+const groupOptions = [3, 5, 10];
+let portfolioData = null;
+let weightMode = 'equal';
+
+function generatePortfolioData() {
+    const nStocks = 60, nMonths = 36;
+    // Generate factor values
+    const factorValues = Array.from({length: nStocks}, () => randn());
+
+    // Generate monthly returns correlated with factor
+    const monthlyReturns = [];
+    for (let t = 0; t < nMonths; t++) {
+        const rets = factorValues.map(f => f * 0.015 + randn() * 0.06);
+        monthlyReturns.push(rets);
+    }
+
+    portfolioData = { factorValues, monthlyReturns, nStocks, nMonths };
+    updatePortfolio();
+}
+
+function updatePortfolio() {
+    if (!portfolioData) return;
+    const nG = groupOptions[parseInt(document.getElementById('nGroups').value)];
+    const { factorValues, monthlyReturns, nStocks, nMonths } = portfolioData;
+
+    // Sort stocks by factor value
+    const sortedIdx = factorValues.map((v, i) => ({ v, i })).sort((a, b) => a.v - b.v).map(x => x.i);
+    const groupSize = Math.floor(nStocks / nG);
+
+    // Build groups
+    const groups = [];
+    for (let g = 0; g < nG; g++) {
+        const start = g * groupSize;
+        const end = g === nG - 1 ? nStocks : (g + 1) * groupSize;
+        groups.push(sortedIdx.slice(start, end));
+    }
+
+    // Calculate cumulative returns per group
+    const cumReturns = groups.map(group => {
+        const cum = [1];
+        for (let t = 0; t < nMonths; t++) {
+            let portRet;
+            if (weightMode === 'equal') {
+                portRet = mean(group.map(i => monthlyReturns[t][i]));
+            } else {
+                // Factor-weighted
+                const fVals = group.map(i => factorValues[i]);
+                const absSum = fVals.reduce((s, f) => s + Math.abs(f), 0) || 1;
+                const weights = fVals.map(f => Math.abs(f) / absSum);
+                portRet = group.reduce((s, idx, j) => s + weights[j] * monthlyReturns[t][idx], 0);
+            }
+            cum.push(cum[cum.length - 1] * (1 + portRet));
+        }
+        return cum;
+    });
+
+    // Long-short (top - bottom)
+    const lsCum = [1];
+    const lsMonthly = [];
+    for (let t = 0; t < nMonths; t++) {
+        const topGroup = groups[nG - 1];
+        const botGroup = groups[0];
+        let topRet, botRet;
+        if (weightMode === 'equal') {
+            topRet = mean(topGroup.map(i => monthlyReturns[t][i]));
+            botRet = mean(botGroup.map(i => monthlyReturns[t][i]));
+        } else {
+            const topF = topGroup.map(i => factorValues[i]);
+            const topAbsSum = topF.reduce((s, f) => s + Math.abs(f), 0) || 1;
+            const topW = topF.map(f => Math.abs(f) / topAbsSum);
+            topRet = topGroup.reduce((s, idx, j) => s + topW[j] * monthlyReturns[t][idx], 0);
+
+            const botF = botGroup.map(i => factorValues[i]);
+            const botAbsSum = botF.reduce((s, f) => s + Math.abs(f), 0) || 1;
+            const botW = botF.map(f => Math.abs(f) / botAbsSum);
+            botRet = botGroup.reduce((s, idx, j) => s + botW[j] * monthlyReturns[t][idx], 0);
+        }
+        const lsRet = topRet - botRet;
+        lsMonthly.push(lsRet);
+        lsCum.push(lsCum[lsCum.length - 1] * (1 + lsRet));
+    }
+
+    // Stats
+    const annRet = (Math.pow(lsCum[lsCum.length - 1], 12 / nMonths) - 1);
+    const lsStd = std(lsMonthly) * Math.sqrt(12);
+    const sharpe = lsStd > 0 ? annRet / lsStd : 0;
+
+    // Max drawdown
+    let maxDD = 0, peak = lsCum[0];
+    for (const v of lsCum) {
+        if (v > peak) peak = v;
+        const dd = (peak - v) / peak;
+        if (dd > maxDD) maxDD = dd;
+    }
+
+    // Turnover (approximate)
+    const turnover = 2 / nG; // simplified
+
+    document.getElementById('lsSharpe').textContent = sharpe.toFixed(2);
+    document.getElementById('lsReturn').textContent = (annRet * 100).toFixed(1) + '%';
+    document.getElementById('lsTurnover').textContent = (turnover * 100).toFixed(0) + '%';
+    document.getElementById('lsMaxDD').textContent = (maxDD * 100).toFixed(1) + '%';
+
+    // Turnover stats
+    const tsEl = document.getElementById('turnoverStats');
+    tsEl.innerHTML = groups.map((g, i) => {
+        const label = i === 0 ? 'Q-Bottom' : i === nG - 1 ? 'Q-Top' : `Q${i + 1}`;
+        const color = i === 0 ? C.red : i === nG - 1 ? C.green : C.muted;
+        return `<div class="stat-box"><span class="stat-val" style="color:${color}">${g.length}只</span><span class="stat-lbl">${label}</span></div>`;
+    }).join('');
+
+    drawPortfolioChart(cumReturns, nG, nMonths);
+    drawLSReturn(lsCum, nMonths);
+}
+
+function drawPortfolioChart(cumReturns, nG, nMonths) {
+    const { ctx, w, h } = initCanvas('portfolioCanvas');
+    const pad = { t: 20, r: 80, b: 40, l: 55 };
+    const pw = w - pad.l - pad.r, ph = h - pad.t - pad.b;
+
+    ctx.fillStyle = C.bgSec;
+    ctx.fillRect(0, 0, w, h);
+
+    const allVals = cumReturns.flat();
+    const yMin = Math.min(...allVals) * 0.98, yMax = Math.max(...allVals) * 1.02;
+    const yRange = yMax - yMin || 1;
+
+    // Grid
+    ctx.strokeStyle = C.border + '66';
+    ctx.lineWidth = 1;
+    for (let i = 0; i <= 4; i++) {
+        const y = pad.t + (i / 4) * ph;
+        ctx.beginPath();
+        ctx.moveTo(pad.l, y);
+        ctx.lineTo(pad.l + pw, y);
+        ctx.stroke();
+        ctx.fillStyle = C.muted;
+        ctx.font = '10px JetBrains Mono, monospace';
+        ctx.textAlign = 'right';
+        const val = yMax - (i / 4) * yRange;
+        ctx.fillText(val.toFixed(2), pad.l - 6, y + 4);
+    }
+
+    // Colors for groups
+    const gColors = [];
+    for (let g = 0; g < nG; g++) {
+        const t = g / (nG - 1);
+        const r = Math.round(255 * (1 - t) * 0.8 + 80);
+        const gr = Math.round(100 + t * 155);
+        const b = Math.round(100 + (1 - t) * 50);
+        gColors.push(`rgb(${r},${gr},${b})`);
+    }
+
+    // Lines
+    cumReturns.forEach((cum, g) => {
+        ctx.beginPath();
+        for (let t = 0; t <= nMonths; t++) {
+            const x = pad.l + (t / nMonths) * pw;
+            const y = pad.t + ph - ((cum[t] - yMin) / yRange) * ph;
+            if (t === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        }
+        ctx.strokeStyle = gColors[g];
+        ctx.lineWidth = g === 0 || g === nG - 1 ? 3 : 1.5;
+        ctx.globalAlpha = g === 0 || g === nG - 1 ? 1 : 0.5;
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+
+        // Label
+        const lastY = pad.t + ph - ((cum[nMonths] - yMin) / yRange) * ph;
+        ctx.fillStyle = gColors[g];
+        ctx.font = 'bold 11px Noto Sans SC, sans-serif';
+        ctx.textAlign = 'left';
+        const label = g === 0 ? 'Q-Bot' : g === nG - 1 ? 'Q-Top' : `Q${g + 1}`;
+        ctx.fillText(label, pad.l + pw + 5, lastY + 4);
+    });
+
+    // X axis
+    ctx.fillStyle = C.muted;
+    ctx.font = '11px Noto Sans SC, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('月份', pad.l + pw / 2, h - 5);
+    for (let t = 0; t <= nMonths; t += 6) {
+        const x = pad.l + (t / nMonths) * pw;
+        ctx.fillText(t.toString(), x, pad.t + ph + 18);
+    }
+}
+
+function drawLSReturn(lsCum, nMonths) {
+    const { ctx, w, h } = initCanvas('returnCanvas');
+    const pad = { t: 20, r: 20, b: 40, l: 55 };
+    const pw = w - pad.l - pad.r, ph = h - pad.t - pad.b;
+
+    ctx.fillStyle = C.bgSec;
+    ctx.fillRect(0, 0, w, h);
+
+    const yMin = Math.min(...lsCum) * 0.98, yMax = Math.max(...lsCum) * 1.02;
+    const yRange = yMax - yMin || 1;
+
+    // Grid
+    ctx.strokeStyle = C.border + '66';
+    ctx.lineWidth = 1;
+    for (let i = 0; i <= 4; i++) {
+        const y = pad.t + (i / 4) * ph;
+        ctx.beginPath();
+        ctx.moveTo(pad.l, y);
+        ctx.lineTo(pad.l + pw, y);
+        ctx.stroke();
+        ctx.fillStyle = C.muted;
+        ctx.font = '10px JetBrains Mono, monospace';
+        ctx.textAlign = 'right';
+        const val = yMax - (i / 4) * yRange;
+        ctx.fillText(val.toFixed(2), pad.l - 6, y + 4);
+    }
+
+    // Baseline at 1.0
+    const baselineY = pad.t + ph - ((1 - yMin) / yRange) * ph;
+    ctx.strokeStyle = C.muted + '66';
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(pad.l, baselineY);
+    ctx.lineTo(pad.l + pw, baselineY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Fill area
+    ctx.beginPath();
+    for (let t = 0; t <= nMonths; t++) {
+        const x = pad.l + (t / nMonths) * pw;
+        const y = pad.t + ph - ((lsCum[t] - yMin) / yRange) * ph;
+        if (t === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    const lastX = pad.l + pw;
+    ctx.lineTo(lastX, baselineY);
+    ctx.lineTo(pad.l, baselineY);
+    ctx.closePath();
+    const grad = ctx.createLinearGradient(0, pad.t, 0, pad.t + ph);
+    grad.addColorStop(0, C.green + '44');
+    grad.addColorStop(1, C.green + '05');
+    ctx.fillStyle = grad;
+    ctx.fill();
+
+    // Line
+    ctx.beginPath();
+    for (let t = 0; t <= nMonths; t++) {
+        const x = pad.l + (t / nMonths) * pw;
+        const y = pad.t + ph - ((lsCum[t] - yMin) / yRange) * ph;
+        if (t === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.strokeStyle = C.green;
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+
+    // X axis
+    ctx.fillStyle = C.muted;
+    ctx.font = '11px Noto Sans SC, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('月份', pad.l + pw / 2, h - 5);
+    for (let t = 0; t <= nMonths; t += 6) {
+        const x = pad.l + (t / nMonths) * pw;
+        ctx.fillText(t.toString(), x, pad.t + ph + 18);
+    }
+
+    // Label
+    ctx.fillStyle = C.green;
+    ctx.font = 'bold 12px Noto Sans SC, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText('多空组合净值', pad.l + 5, pad.t + 15);
+}
+
+document.getElementById('nGroups').addEventListener('input', (e) => {
+    const labels = ['3分位', '5分位', '10分位'];
+    document.getElementById('nGroupsVal').textContent = labels[e.target.value];
+    updatePortfolio();
+});
+
+document.querySelectorAll('[data-weight]').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('[data-weight]').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        weightMode = btn.dataset.weight;
+        updatePortfolio();
+    });
+});
+
+// =========================================================================
+// SECTION 5: ALPHA VS RISK FACTOR
+// =========================================================================
+const classifierCases = [
+    { name: '短期反转因子', sharpe: 1.8, decay: '快 (半衰期2天)', capacity: '低 (5亿)', turnover: '高', answer: 'alpha',
+      desc: '利用股价短期过度反应，高夏普但容量小、衰减快。' },
+    { name: '市值因子 (SMB)', sharpe: 0.3, decay: '慢 (半衰期>1年)', capacity: '高 (千亿级)', turnover: '低', answer: 'risk',
+      desc: '小盘股溢价，长期稳定存在，是系统性风险的补偿。' },
+    { name: '盈余动量因子', sharpe: 1.2, decay: '中 (半衰期1月)', capacity: '中 (50亿)', turnover: '中', answer: 'alpha',
+      desc: '盈余超预期后的价格漂移，具有正预期收益。' },
+    { name: '波动率因子', sharpe: 0.4, decay: '慢 (半衰期>6月)', capacity: '高 (百亿级)', turnover: '低', answer: 'risk',
+      desc: '低波动异象，本质是风险暴露的补偿。' },
+];
+
+function renderClassifier() {
+    const grid = document.getElementById('classifierGrid');
+    grid.innerHTML = classifierCases.map((c, i) => `
+        <div class="classifier-card" id="ccard-${i}" onclick="classifyFactor(${i})">
+            <h4 style="color:var(--text-primary);">${c.name}</h4>
+            <div style="font-size:0.8rem; color:var(--text-muted); margin-bottom:0.5rem;">
+                夏普: <span style="color:${c.sharpe > 0.8 ? C.green : C.orange}">${c.sharpe}</span> |
+                衰减: ${c.decay} |
+                容量: ${c.capacity}
+            </div>
+            <p style="font-size:0.85rem; color:var(--text-secondary); margin:0;">点击判断: Alpha 还是风险因子?</p>
+        </div>
+    `).join('');
+}
+
+function classifyFactor(idx) {
+    const c = classifierCases[idx];
+    const card = document.getElementById(`ccard-${idx}`);
+    card.className = `classifier-card ${c.answer}`;
+    const typeLabel = c.answer === 'alpha'
+        ? '<span style="color:' + C.green + '; font-weight:700;">Alpha 因子</span>'
+        : '<span style="color:' + C.orange + '; font-weight:700;">风险因子</span>';
+    card.querySelector('p').innerHTML = `${typeLabel} — ${c.desc}`;
+}
+
+// Decay chart
+function drawDecayChart() {
+    const { ctx, w, h } = initCanvas('decayCanvas');
+    const pad = { t: 20, r: 20, b: 40, l: 55 };
+    const pw = w - pad.l - pad.r, ph = h - pad.t - pad.b;
+
+    ctx.fillStyle = C.bgSec;
+    ctx.fillRect(0, 0, w, h);
+
+    const lags = 20;
+    // Alpha factor: fast decay (half-life ~2)
+    const alphaAC = Array.from({length: lags + 1}, (_, i) => Math.exp(-0.35 * i));
+    // Risk factor: slow decay (half-life ~15)
+    const riskAC = Array.from({length: lags + 1}, (_, i) => Math.exp(-0.05 * i));
+
+    // Grid
+    ctx.strokeStyle = C.border + '66';
+    ctx.lineWidth = 1;
+    for (let i = 0; i <= 4; i++) {
+        const y = pad.t + (i / 4) * ph;
+        ctx.beginPath();
+        ctx.moveTo(pad.l, y);
+        ctx.lineTo(pad.l + pw, y);
+        ctx.stroke();
+        ctx.fillStyle = C.muted;
+        ctx.font = '10px JetBrains Mono, monospace';
+        ctx.textAlign = 'right';
+        ctx.fillText((1 - i / 4).toFixed(1), pad.l - 6, y + 4);
+    }
+
+    // Half-life line at 0.5
+    const halfY = pad.t + ph * 0.5;
+    ctx.strokeStyle = C.muted + '66';
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(pad.l, halfY);
+    ctx.lineTo(pad.l + pw, halfY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = C.muted;
+    ctx.font = '10px Noto Sans SC, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText('半衰期', pad.l + pw - 40, halfY - 6);
+
+    // Draw lines
+    function drawLine(data, color, lineW) {
+        ctx.beginPath();
+        for (let i = 0; i <= lags; i++) {
+            const x = pad.l + (i / lags) * pw;
+            const y = pad.t + ph - data[i] * ph;
+            if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        }
+        ctx.strokeStyle = color;
+        ctx.lineWidth = lineW;
+        ctx.stroke();
+
+        // Points
+        for (let i = 0; i <= lags; i++) {
+            const x = pad.l + (i / lags) * pw;
+            const y = pad.t + ph - data[i] * ph;
+            ctx.beginPath();
+            ctx.arc(x, y, 3, 0, Math.PI * 2);
+            ctx.fillStyle = color;
+            ctx.fill();
+        }
+    }
+
+    drawLine(riskAC, C.orange, 2.5);
+    drawLine(alphaAC, C.green, 2.5);
+
+    // X axis
+    ctx.fillStyle = C.muted;
+    ctx.font = '11px Noto Sans SC, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('滞后期数', pad.l + pw / 2, h - 5);
+    for (let i = 0; i <= lags; i += 5) {
+        const x = pad.l + (i / lags) * pw;
+        ctx.fillText(i.toString(), x, pad.t + ph + 18);
+    }
+
+    // Y axis label
+    ctx.save();
+    ctx.translate(12, pad.t + ph / 2);
+    ctx.rotate(-Math.PI / 2);
+    ctx.fillText('自相关系数', 0, 0);
+    ctx.restore();
+}
+
+// =========================================================================
+// INITIALIZATION
+// =========================================================================
+function init() {
+    generateMomentum();
+    generateNeutralData();
+    drawScatterSize();
+    drawScatterInd();
+    updateNeutralStats();
+    generatePortfolioData();
+    renderClassifier();
+    drawDecayChart();
+    animatePipeline();
+}
+
+// Handle resize
+let resizeTimer;
+window.addEventListener('resize', () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+        drawHistograms();
+        drawScatterSize();
+        drawScatterInd();
+        updatePortfolio();
+        drawDecayChart();
+    }, 200);
+});
+
+// Wait for DOM and scripts
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+} else {
+    init();
+}
+</script>
+
+<!-- KaTeX auto-render -->
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    if (typeof renderMathInElement === 'function') {
+        renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '\\(', right: '\\)', display: false},
+                {left: '\\[', right: '\\]', display: true},
+            ]
+        });
+    } else {
+        const checkKatex = setInterval(() => {
+            if (typeof renderMathInElement === 'function') {
+                clearInterval(checkKatex);
+                renderMathInElement(document.body, {
+                    delimiters: [
+                        {left: '$$', right: '$$', display: true},
+                        {left: '\\(', right: '\\)', display: false},
+                        {left: '\\[', right: '\\]', display: true},
+                    ]
+                });
+            }
+        }, 100);
+    }
+});
+</script>
+
+</body>
+</html>

@@ -1,0 +1,1147 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EFB — LightGBM</title>
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+    <style>
+        .hero { text-align: center; padding: 2rem 0 1.5rem; }
+        .hero h1 { font-size: 2.2rem; margin-bottom: 0.5rem; }
+        .hero .subtitle { color: var(--text-secondary); font-size: 1.05rem; }
+
+        .canvas-wrap {
+            position: relative;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+        }
+        .canvas-wrap canvas { display: block; width: 100%; height: 100%; }
+
+        .controls-row {
+            display: flex; flex-wrap: wrap; align-items: center; gap: 1.2rem;
+            padding: 0.75rem 1rem; background: var(--bg-secondary);
+            border: 1px solid var(--border-color); border-radius: var(--radius-md);
+            margin-top: 0.75rem;
+        }
+        .controls-row .slider-group { flex: 1; min-width: 180px; }
+
+        .stat-grid {
+            display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 0.75rem; margin-top: 1rem;
+        }
+        .stat-box {
+            background: var(--bg-secondary); border: 1px solid var(--border-color);
+            border-radius: var(--radius-md); padding: 0.8rem 1rem; text-align: center;
+        }
+        .stat-box .val { font-family: var(--font-mono); font-size: 1.4rem; font-weight: 700; }
+        .stat-box .lbl { font-size: 0.8rem; color: var(--text-muted); margin-top: 0.25rem; }
+        .stat-green .val { color: var(--accent-green); }
+        .stat-blue .val { color: var(--accent-blue); }
+        .stat-orange .val { color: var(--accent-orange); }
+        .stat-purple .val { color: var(--accent-purple); }
+        .stat-red .val { color: var(--accent-red); }
+
+        .compare-panels {
+            display: grid; grid-template-columns: 1fr 60px 1fr; gap: 0; align-items: center;
+        }
+        .compare-panels .arrow-col {
+            display: flex; align-items: center; justify-content: center;
+            font-size: 2rem; color: var(--accent-green);
+        }
+
+        .step-indicator {
+            display: flex; gap: 0.5rem; margin-bottom: 1rem; flex-wrap: wrap;
+        }
+        .step-btn {
+            padding: 0.4rem 0.8rem; border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm); background: var(--bg-secondary);
+            color: var(--text-secondary); font-family: inherit; font-size: 0.82rem;
+            cursor: pointer; transition: all 0.2s;
+        }
+        .step-btn:hover { border-color: var(--accent-blue); color: var(--text-primary); }
+        .step-btn.active { border-color: var(--accent-green); background: rgba(22,199,154,0.15); color: var(--accent-green); font-weight: 600; }
+        .step-btn.done { border-color: rgba(22,199,154,0.4); color: var(--accent-green); opacity: 0.7; }
+
+        .tag-list { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.5rem; }
+        .tag {
+            padding: 0.25rem 0.6rem; border-radius: 9999px; font-size: 0.78rem;
+            background: rgba(79,195,247,0.1); color: var(--accent-blue); border: 1px solid rgba(79,195,247,0.2);
+        }
+
+        .bar-chart-row {
+            display: flex; align-items: flex-end; gap: 6px; height: 120px; padding: 0.5rem;
+        }
+        .bar-col { display: flex; flex-direction: column; align-items: center; flex: 1; height: 100%; justify-content: flex-end; }
+        .bar-col .bar {
+            width: 100%; border-radius: 3px 3px 0 0; transition: height 0.6s var(--anim-ease);
+            min-height: 2px;
+        }
+        .bar-col .bar-lbl { font-size: 0.7rem; color: var(--text-muted); margin-top: 4px; text-align: center; }
+
+        @media (max-width: 768px) {
+            .compare-panels { grid-template-columns: 1fr; }
+            .compare-panels .arrow-col { transform: rotate(90deg); padding: 0.5rem 0; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="page-container">
+    <!-- Hero -->
+    <section class="hero">
+        <h1>EFB — 互斥特征捆绑</h1>
+        <p class="subtitle">Exclusive Feature Bundling：将互斥的稀疏特征合并，降低维度，加速直方图构建</p>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- Section 1: 稀疏特征问题 -->
+    <!-- ============================================================ -->
+    <section class="section" id="sec-sparse">
+        <div class="section-title"><span class="icon">🔍</span><h2>稀疏特征问题</h2></div>
+        <div class="split-layout">
+            <div class="text-panel">
+                <p>在实际机器学习任务中，特征矩阵往往是<strong>高度稀疏</strong>的。例如：</p>
+                <div class="tag-list">
+                    <span class="tag">One-Hot 编码</span>
+                    <span class="tag">文本 TF-IDF</span>
+                    <span class="tag">交叉特征</span>
+                    <span class="tag">多值类别特征</span>
+                </div>
+                <p class="mt-2">这意味着大量特征在大部分样本上取值为 0，为每个特征都构建直方图会浪费计算资源。</p>
+                <div class="info-box">
+                    <p>$$\text{稀疏度} = \frac{\text{零元素数量}}{\text{总元素数量}} \times 100\%$$</p>
+                </div>
+                <p>EFB 的核心思想：将这些<strong>互斥的稀疏特征</strong>捆绑为少量特征，大幅减少直方图的构建次数。</p>
+                <div class="controls-row">
+                    <div class="slider-group">
+                        <label>稀疏度</label>
+                        <input type="range" id="sparsitySlider" min="50" max="95" value="80" step="5">
+                        <span class="slider-value" id="sparsityVal">80%</span>
+                    </div>
+                    <button class="btn btn-primary" id="btnRegenSparse">重新生成</button>
+                </div>
+                <div class="stat-grid" id="sparseStats"></div>
+            </div>
+            <div class="viz-panel">
+                <div class="canvas-wrap" style="height:420px">
+                    <canvas id="cvsSparse"></canvas>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- Section 2: 互斥特征检测 -->
+    <!-- ============================================================ -->
+    <section class="section" id="sec-detect">
+        <div class="section-title"><span class="icon">🔗</span><h2>互斥特征检测</h2></div>
+        <div class="split-layout">
+            <div class="text-panel">
+                <p>两个特征是<strong>"互斥"</strong>的，当它们很少同时取非零值。互斥特征对可以安全地合并为一个特征。</p>
+                <div class="info-box">
+                    <p>$$\text{冲突率}(F_i, F_j) = \frac{|\{k : x_{ki} \ne 0 \land x_{kj} \ne 0\}|}{n}$$</p>
+                </div>
+                <p>点击下方矩阵中的单元格来切换非零值，系统会实时检测哪些特征对是互斥的，并构建<strong>冲突图</strong>。</p>
+                <div class="controls-row">
+                    <div class="slider-group">
+                        <label>冲突阈值</label>
+                        <input type="range" id="conflictThresh" min="0" max="30" value="5" step="1">
+                        <span class="slider-value" id="conflictThreshVal">5%</span>
+                    </div>
+                    <button class="btn" id="btnRandomMatrix">随机填充</button>
+                    <button class="btn" id="btnClearMatrix">清空</button>
+                </div>
+                <div class="stat-grid" id="detectStats"></div>
+            </div>
+            <div class="viz-panel">
+                <div class="canvas-wrap" style="height:240px">
+                    <canvas id="cvsMatrix"></canvas>
+                </div>
+                <div class="canvas-wrap" style="height:280px; margin-top:0.75rem">
+                    <canvas id="cvsConflict"></canvas>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- Section 3: 特征捆绑过程 -->
+    <!-- ============================================================ -->
+    <section class="section" id="sec-bundle">
+        <div class="section-title"><span class="icon">📦</span><h2>特征捆绑过程</h2></div>
+        <p>通过<strong>偏移量编码</strong>将互斥特征合并为单个特征，保证不同原始特征的取值范围不重叠：</p>
+        <div class="info-box">
+            <p>$$\text{Bundle}(x) = x_A + \text{offset}_A, \quad \text{offset}_A = 0, \; \text{offset}_B = \max(F_A) + 1$$</p>
+        </div>
+        <div class="controls-row">
+            <button class="btn btn-primary" id="btnPlayBundle">播放动画</button>
+            <button class="btn" id="btnResetBundle">重置</button>
+            <span class="text-sm text-muted" id="bundleStepLabel">点击"播放动画"开始</span>
+        </div>
+        <div class="compare-panels mt-2">
+            <div>
+                <h4 class="text-center mb-1">捆绑前（2 个特征）</h4>
+                <div class="canvas-wrap" style="height:300px">
+                    <canvas id="cvsBefore"></canvas>
+                </div>
+            </div>
+            <div class="arrow-col">→</div>
+            <div>
+                <h4 class="text-center mb-1">捆绑后（1 个 Bundle）</h4>
+                <div class="canvas-wrap" style="height:300px">
+                    <canvas id="cvsAfter"></canvas>
+                </div>
+            </div>
+        </div>
+        <div class="stat-grid mt-2" id="bundleStats"></div>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- Section 4: 图着色算法 -->
+    <!-- ============================================================ -->
+    <section class="section" id="sec-coloring">
+        <div class="section-title"><span class="icon">🎨</span><h2>图着色算法</h2></div>
+        <div class="split-layout">
+            <div class="text-panel">
+                <p>EFB 使用<strong>贪心图着色</strong>来确定特征分组：</p>
+                <ol style="color:var(--text-secondary); padding-left:1.2rem; margin-bottom:1rem;">
+                    <li>构建冲突图：节点 = 特征，边 = 冲突对</li>
+                    <li>按节点度数降序排列</li>
+                    <li>依次为每个节点分配颜色（不与邻居冲突的最小颜色）</li>
+                    <li>相同颜色的特征归入同一 Bundle</li>
+                </ol>
+                <div class="info-box warning">
+                    <p>允许一定冲突阈值可以产生更激进的捆绑，用少量精度换取更大的加速。</p>
+                </div>
+                <div class="controls-row">
+                    <div class="slider-group">
+                        <label>冲突容忍度</label>
+                        <input type="range" id="colorThreshSlider" min="0" max="30" value="0" step="2">
+                        <span class="slider-value" id="colorThreshVal">0%</span>
+                    </div>
+                </div>
+                <div class="controls-row" style="margin-top:0.5rem">
+                    <button class="btn btn-primary" id="btnStepColor">下一步</button>
+                    <button class="btn" id="btnAutoColor">自动播放</button>
+                    <button class="btn" id="btnResetColor">重置</button>
+                    <span class="text-sm text-muted" id="colorStepLabel">就绪</span>
+                </div>
+                <div class="step-indicator mt-2" id="colorSteps"></div>
+            </div>
+            <div class="viz-panel">
+                <div class="canvas-wrap" style="height:460px">
+                    <canvas id="cvsColoring"></canvas>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- Section 5: 效果展示 -->
+    <!-- ============================================================ -->
+    <section class="section" id="sec-effect">
+        <div class="section-title"><span class="icon">⚡</span><h2>效果展示</h2></div>
+        <p>通过 EFB，原始 <strong>N</strong> 个稀疏特征被压缩为 <strong>M</strong> 个 Bundle（M ≪ N），直方图构建时间大幅降低。</p>
+        <div class="controls-row">
+            <div class="slider-group">
+                <label>特征数 N</label>
+                <input type="range" id="effectNSlider" min="10" max="60" value="30" step="5">
+                <span class="slider-value" id="effectNVal">30</span>
+            </div>
+            <div class="slider-group">
+                <label>稀疏度</label>
+                <input type="range" id="effectSpSlider" min="60" max="95" value="85" step="5">
+                <span class="slider-value" id="effectSpVal">85%</span>
+            </div>
+            <div class="slider-group">
+                <label>冲突容忍度</label>
+                <input type="range" id="effectThSlider" min="0" max="20" value="5" step="1">
+                <span class="slider-value" id="effectThVal">5%</span>
+            </div>
+            <button class="btn btn-primary" id="btnRunEffect">运行</button>
+        </div>
+        <div class="compare-grid cols-2 mt-2">
+            <div class="card">
+                <h4 class="text-center" style="color:var(--accent-orange)">捆绑前</h4>
+                <div class="bar-chart-row" id="barsBeforeEffect"></div>
+                <div class="stat-grid" id="effectStatsBefore"></div>
+            </div>
+            <div class="card">
+                <h4 class="text-center" style="color:var(--accent-green)">捆绑后</h4>
+                <div class="bar-chart-row" id="barsAfterEffect"></div>
+                <div class="stat-grid" id="effectStatsAfter"></div>
+            </div>
+        </div>
+        <div class="stat-grid mt-2" id="effectStatsOverall"></div>
+        <div class="info-box success mt-2">
+            <p>EFB 与 GOSS 结合使用，使 LightGBM 在高维稀疏数据上的训练速度远超传统 GBDT 实现。</p>
+        </div>
+    </section>
+</div>
+
+<script defer src="../shared/scripts/nav.js"></script>
+<script defer src="../shared/scripts/lgbm-utils.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+
+/* ======== Helpers ======== */
+const $ = s => document.querySelector(s);
+let _seedCounter = 42;
+function nextSeed() { return _seedCounter++; }
+const COLORS = {
+    bundle: ['#16c79a','#4fc3f7','#b388ff','#ffab40','#ff80ab','#ffd740','#ff5252','#69f0ae','#40c4ff','#ea80fc'],
+    zero: 'rgba(30,30,60,0.6)',
+    nonzero: '#4fc3f7',
+    conflict: '#ff5252',
+    node: '#6c6c7c',
+    edge: 'rgba(255,82,82,0.4)',
+    highlight: '#16c79a',
+    bg: '#16213e',
+    grid: 'rgba(42,42,74,0.5)'
+};
+
+function dpr(canvas) {
+    const r = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = rect.width * r;
+    canvas.height = rect.height * r;
+    const ctx = canvas.getContext('2d');
+    ctx.scale(r, r);
+    ctx.w = rect.width; ctx.h = rect.height;
+    return ctx;
+}
+
+function statHTML(val, label, cls) {
+    return `<div class="stat-box ${cls||''}"><div class="val">${val}</div><div class="lbl">${label}</div></div>`;
+}
+
+function generateSparseMatrix(rows, cols, sparsity, seed) {
+    const r = LGBMUtils.seededRandom(seed);
+    const m = [];
+    for (let i = 0; i < rows; i++) {
+        const row = [];
+        for (let j = 0; j < cols; j++) {
+            row.push(r() > sparsity / 100 ? Math.floor(r() * 9) + 1 : 0);
+        }
+        m.push(row);
+    }
+    return m;
+}
+
+/* ======================================================== */
+/* Section 1: 稀疏特征问题                                  */
+/* ======================================================== */
+const SPARSE_ROWS = 20, SPARSE_COLS = 16;
+
+function drawSparseHeatmap() {
+    const canvas = $('#cvsSparse');
+    const ctx = dpr(canvas);
+    const W = ctx.w, H = ctx.h;
+    const sp = parseFloat($('#sparsitySlider').value);
+    const sparseMatrix = generateSparseMatrix(SPARSE_ROWS, SPARSE_COLS, sp, nextSeed());
+
+    const pad = { top: 32, left: 50, right: 20, bottom: 30 };
+    const cw = (W - pad.left - pad.right) / SPARSE_COLS;
+    const ch = (H - pad.top - pad.bottom) / SPARSE_ROWS;
+
+    ctx.clearRect(0, 0, W, H);
+
+    // Header labels
+    ctx.font = '10px JetBrains Mono, Consolas, monospace';
+    ctx.fillStyle = '#16c79a';
+    ctx.textAlign = 'center';
+    for (let j = 0; j < SPARSE_COLS; j++) {
+        ctx.fillText('F' + j, pad.left + j * cw + cw / 2, pad.top - 10);
+    }
+    ctx.textAlign = 'right';
+    ctx.fillStyle = '#a8a8b8';
+    for (let i = 0; i < SPARSE_ROWS; i++) {
+        ctx.fillText('S' + i, pad.left - 6, pad.top + i * ch + ch / 2 + 3);
+    }
+
+    // Cells
+    let zeros = 0;
+    const total = SPARSE_ROWS * SPARSE_COLS;
+    for (let i = 0; i < SPARSE_ROWS; i++) {
+        for (let j = 0; j < SPARSE_COLS; j++) {
+            const v = sparseMatrix[i][j];
+            const x = pad.left + j * cw;
+            const y = pad.top + i * ch;
+            if (v === 0) {
+                zeros++;
+                ctx.fillStyle = COLORS.zero;
+            } else {
+                const t = v / 9;
+                const cr = Math.round(40 + t * 39);
+                const cg = Math.round(100 + t * 95);
+                const cb = Math.round(180 + t * 67);
+                ctx.fillStyle = `rgb(${cr},${cg},${cb})`;
+            }
+            ctx.fillRect(x + 0.5, y + 0.5, cw - 1, ch - 1);
+            if (cw > 20 && v > 0) {
+                ctx.fillStyle = '#fff';
+                ctx.font = '10px JetBrains Mono, Consolas, monospace';
+                ctx.textAlign = 'center';
+                ctx.fillText(v, x + cw / 2, y + ch / 2 + 3);
+            }
+        }
+    }
+
+    // Color legend bar at bottom
+    const legendY = H - 18;
+    const legendW = W - pad.left - pad.right;
+    for (let px = 0; px < legendW; px++) {
+        const t = px / legendW;
+        if (t < 0.15) {
+            ctx.fillStyle = COLORS.zero;
+        } else {
+            const tt = (t - 0.15) / 0.85;
+            const cr = Math.round(40 + tt * 39);
+            const cg = Math.round(100 + tt * 95);
+            const cb = Math.round(180 + tt * 67);
+            ctx.fillStyle = `rgb(${cr},${cg},${cb})`;
+        }
+        ctx.fillRect(pad.left + px, legendY, 1, 8);
+    }
+    ctx.font = '9px sans-serif';
+    ctx.fillStyle = '#a8a8b8'; ctx.textAlign = 'left';
+    ctx.fillText('0', pad.left, legendY - 2);
+    ctx.textAlign = 'right';
+    ctx.fillText('9', pad.left + legendW, legendY - 2);
+    ctx.textAlign = 'center';
+    ctx.fillText('特征值', pad.left + legendW / 2, legendY - 2);
+
+    const actualSparsity = ((zeros / total) * 100).toFixed(1);
+    const memFull = (total * 8 / 1024).toFixed(1);
+    const memSparse = (((total - zeros) * 12) / 1024).toFixed(1);
+
+    $('#sparseStats').innerHTML =
+        statHTML(actualSparsity + '%', '实际稀疏度', 'stat-orange') +
+        statHTML(SPARSE_COLS, '特征数', 'stat-blue') +
+        statHTML(memFull + ' KB', '稠密存储 (float64)', 'stat-red') +
+        statHTML(memSparse + ' KB', '稀疏存储 (CSR)', 'stat-green');
+}
+
+$('#sparsitySlider').addEventListener('input', () => {
+    $('#sparsityVal').textContent = $('#sparsitySlider').value + '%';
+});
+$('#sparsitySlider').addEventListener('change', drawSparseHeatmap);
+$('#btnRegenSparse').addEventListener('click', drawSparseHeatmap);
+
+/* ======================================================== */
+/* Section 2: 互斥特征检测                                  */
+/* ======================================================== */
+const DET_ROWS = 10, DET_COLS = 8;
+let detMatrix = [];
+
+function initDetMatrix() {
+    detMatrix = [];
+    for (let i = 0; i < DET_ROWS; i++) {
+        detMatrix.push(new Array(DET_COLS).fill(0));
+    }
+    randomFillDetMatrix();
+}
+
+function randomFillDetMatrix() {
+    const r = LGBMUtils.seededRandom(Date.now() & 0xFFFF);
+    for (let i = 0; i < DET_ROWS; i++) {
+        for (let j = 0; j < DET_COLS; j++) {
+            detMatrix[i][j] = r() > 0.75 ? Math.floor(r() * 9) + 1 : 0;
+        }
+    }
+    // Ensure some exclusive pairs for demo: clear overlaps for F0/F1, F2/F3, F4/F5
+    for (let i = 0; i < DET_ROWS; i++) {
+        if (detMatrix[i][0] !== 0 && detMatrix[i][1] !== 0) detMatrix[i][1] = 0;
+        if (detMatrix[i][2] !== 0 && detMatrix[i][3] !== 0) detMatrix[i][3] = 0;
+        if (detMatrix[i][4] !== 0 && detMatrix[i][5] !== 0) detMatrix[i][5] = 0;
+    }
+}
+
+function drawDetMatrix() {
+    const canvas = $('#cvsMatrix');
+    const ctx = dpr(canvas);
+    const W = ctx.w, H = ctx.h;
+    const pad = { top: 28, left: 44, right: 14, bottom: 14 };
+    const cw = (W - pad.left - pad.right) / DET_COLS;
+    const ch = (H - pad.top - pad.bottom) / DET_ROWS;
+
+    ctx.clearRect(0, 0, W, H);
+
+    ctx.font = '11px JetBrains Mono, Consolas, monospace';
+    ctx.fillStyle = '#16c79a'; ctx.textAlign = 'center';
+    for (let j = 0; j < DET_COLS; j++) {
+        ctx.fillText('F' + j, pad.left + j * cw + cw / 2, pad.top - 8);
+    }
+    ctx.fillStyle = '#a8a8b8'; ctx.textAlign = 'right';
+    for (let i = 0; i < DET_ROWS; i++) {
+        ctx.fillText('' + i, pad.left - 6, pad.top + i * ch + ch / 2 + 4);
+    }
+
+    for (let i = 0; i < DET_ROWS; i++) {
+        for (let j = 0; j < DET_COLS; j++) {
+            const v = detMatrix[i][j];
+            const x = pad.left + j * cw, y = pad.top + i * ch;
+            ctx.fillStyle = v === 0 ? COLORS.zero : COLORS.nonzero;
+            ctx.fillRect(x + 0.5, y + 0.5, cw - 1, ch - 1);
+            if (cw > 16 && v > 0) {
+                ctx.fillStyle = '#1a1a2e'; ctx.font = '11px JetBrains Mono, Consolas, monospace';
+                ctx.textAlign = 'center';
+                ctx.fillText(v, x + cw / 2, y + ch / 2 + 4);
+            }
+        }
+    }
+
+    // Highlight conflicting cells: for each row, if 2+ features non-zero, mark
+    for (let i = 0; i < DET_ROWS; i++) {
+        const nonzeroIdx = [];
+        for (let j = 0; j < DET_COLS; j++) {
+            if (detMatrix[i][j] !== 0) nonzeroIdx.push(j);
+        }
+        if (nonzeroIdx.length >= 2) {
+            for (const j of nonzeroIdx) {
+                const x = pad.left + j * cw, y = pad.top + i * ch;
+                ctx.strokeStyle = 'rgba(255,82,82,0.6)';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(x + 1, y + 1, cw - 2, ch - 2);
+            }
+        }
+    }
+
+    // Click handler
+    canvas.onclick = function(e) {
+        const rect = canvas.getBoundingClientRect();
+        const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+        const j = Math.floor((mx - pad.left) / cw);
+        const i = Math.floor((my - pad.top) / ch);
+        if (i >= 0 && i < DET_ROWS && j >= 0 && j < DET_COLS) {
+            detMatrix[i][j] = detMatrix[i][j] === 0 ? Math.floor(Math.random() * 9) + 1 : 0;
+            drawDetMatrix();
+            drawConflictGraph();
+        }
+    };
+}
+
+function computeConflicts() {
+    const thresh = parseFloat($('#conflictThresh').value) / 100;
+    const conflicts = [];
+    for (let i = 0; i < DET_COLS; i++) {
+        conflicts[i] = [];
+        for (let j = 0; j < DET_COLS; j++) conflicts[i][j] = 0;
+    }
+    for (let a = 0; a < DET_COLS; a++) {
+        for (let b = a + 1; b < DET_COLS; b++) {
+            let c = 0;
+            for (let k = 0; k < DET_ROWS; k++) {
+                if (detMatrix[k][a] !== 0 && detMatrix[k][b] !== 0) c++;
+            }
+            const rate = c / DET_ROWS;
+            conflicts[a][b] = rate; conflicts[b][a] = rate;
+        }
+    }
+
+    // Find bundles via greedy graph coloring
+    const assigned = new Array(DET_COLS).fill(false);
+    const bundles = [];
+    // Sort by degree descending
+    const order = Array.from({length: DET_COLS}, (_, i) => i);
+    order.sort((a, b) => {
+        let da = 0, db = 0;
+        for (let j = 0; j < DET_COLS; j++) {
+            if (conflicts[a][j] > thresh) da++;
+            if (conflicts[b][j] > thresh) db++;
+        }
+        return db - da;
+    });
+    for (const f of order) {
+        if (assigned[f]) continue;
+        const bun = [f]; assigned[f] = true;
+        for (const g of order) {
+            if (assigned[g]) continue;
+            let ok = true;
+            for (const b of bun) {
+                if (conflicts[g][b] > thresh) { ok = false; break; }
+            }
+            if (ok) { bun.push(g); assigned[g] = true; }
+        }
+        bundles.push(bun);
+    }
+    return { conflicts, bundles, thresh };
+}
+
+function drawConflictGraph() {
+    const canvas = $('#cvsConflict');
+    const ctx = dpr(canvas);
+    const W = ctx.w, H = ctx.h;
+    const { conflicts, bundles, thresh } = computeConflicts();
+
+    ctx.clearRect(0, 0, W, H);
+
+    // Title
+    ctx.font = 'bold 12px sans-serif';
+    ctx.fillStyle = '#a8a8b8'; ctx.textAlign = 'center';
+    ctx.fillText('冲突图 (节点=特征, 红线=冲突)', W / 2, 16);
+
+    // Node positions in circle
+    const cx = W / 2, cy = H * 0.48, radius = Math.min(W, H) * 0.3;
+    const nodePos = [];
+    for (let i = 0; i < DET_COLS; i++) {
+        const a = -Math.PI / 2 + (2 * Math.PI * i) / DET_COLS;
+        nodePos.push({ x: cx + radius * Math.cos(a), y: cy + radius * Math.sin(a) });
+    }
+
+    // Draw edges (conflicts above threshold)
+    for (let a = 0; a < DET_COLS; a++) {
+        for (let b = a + 1; b < DET_COLS; b++) {
+            if (conflicts[a][b] > thresh) {
+                ctx.beginPath();
+                ctx.moveTo(nodePos[a].x, nodePos[a].y);
+                ctx.lineTo(nodePos[b].x, nodePos[b].y);
+                ctx.strokeStyle = `rgba(255,82,82,${0.2 + conflicts[a][b] * 1.5})`;
+                ctx.lineWidth = 1 + conflicts[a][b] * 5;
+                ctx.stroke();
+                // Conflict rate label
+                const mx = (nodePos[a].x + nodePos[b].x) / 2;
+                const my = (nodePos[a].y + nodePos[b].y) / 2;
+                ctx.font = '9px JetBrains Mono, Consolas, monospace';
+                ctx.fillStyle = '#ff5252'; ctx.textAlign = 'center';
+                ctx.fillText((conflicts[a][b] * 100).toFixed(0) + '%', mx, my - 5);
+            }
+        }
+    }
+
+    // Assign colors based on bundles
+    const nodeColor = new Array(DET_COLS).fill(0);
+    bundles.forEach((bun, bi) => { for (const f of bun) nodeColor[f] = bi; });
+
+    // Draw nodes
+    for (let i = 0; i < DET_COLS; i++) {
+        const p = nodePos[i];
+        const c = COLORS.bundle[nodeColor[i] % COLORS.bundle.length];
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 20, 0, Math.PI * 2);
+        ctx.fillStyle = c; ctx.globalAlpha = 0.25; ctx.fill();
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = c; ctx.lineWidth = 2.5; ctx.stroke();
+        ctx.font = 'bold 12px JetBrains Mono, Consolas, monospace';
+        ctx.fillStyle = '#e8e8e8'; ctx.textAlign = 'center';
+        ctx.fillText('F' + i, p.x, p.y + 4);
+    }
+
+    // Bundle legend at bottom
+    ctx.font = '10px sans-serif'; ctx.textAlign = 'left';
+    let ly = H - 12, lx = 10;
+    for (let bi = 0; bi < bundles.length; bi++) {
+        const c = COLORS.bundle[bi % COLORS.bundle.length];
+        ctx.fillStyle = c; ctx.globalAlpha = 0.5;
+        ctx.fillRect(lx, ly - 9, 10, 10);
+        ctx.globalAlpha = 1; ctx.fillStyle = '#a8a8b8';
+        const label = 'B' + bi + ': [' + bundles[bi].map(f => 'F' + f).join(',') + ']';
+        ctx.fillText(label, lx + 14, ly);
+        lx += ctx.measureText(label).width + 28;
+        if (lx > W - 80) { lx = 10; ly -= 16; }
+    }
+
+    // Stats
+    let totalEdges = 0;
+    for (let a = 0; a < DET_COLS; a++) for (let b = a + 1; b < DET_COLS; b++) if (conflicts[a][b] > thresh) totalEdges++;
+    const totalPairs = DET_COLS * (DET_COLS - 1) / 2;
+    const exclusivePairs = totalPairs - totalEdges;
+    $('#detectStats').innerHTML =
+        statHTML(DET_COLS, '特征数', 'stat-blue') +
+        statHTML(totalEdges, '冲突边数', 'stat-red') +
+        statHTML(exclusivePairs, '互斥对数', 'stat-green') +
+        statHTML(bundles.length, 'Bundle 数', 'stat-purple');
+}
+
+$('#conflictThresh').addEventListener('input', () => {
+    $('#conflictThreshVal').textContent = $('#conflictThresh').value + '%';
+    drawConflictGraph();
+});
+$('#btnRandomMatrix').addEventListener('click', () => { randomFillDetMatrix(); drawDetMatrix(); drawConflictGraph(); });
+$('#btnClearMatrix').addEventListener('click', () => {
+    for (let i = 0; i < DET_ROWS; i++) detMatrix[i].fill(0);
+    drawDetMatrix(); drawConflictGraph();
+});
+
+/* ======================================================== */
+/* Section 3: 特征捆绑过程                                  */
+/* ======================================================== */
+const BUN_ROWS = 12;
+let bunSrcA = [], bunSrcB = [], bunMerged = [];
+let bundleAnimStep = -1, bundleAnimTimer = null;
+const OFFSET_B = 11; // max(A) + 1 = 10 + 1
+
+function initBundleData() {
+    const r = LGBMUtils.seededRandom(77);
+    bunSrcA = []; bunSrcB = []; bunMerged = [];
+    for (let i = 0; i < BUN_ROWS; i++) {
+        const hasA = r() < 0.5;
+        const a = hasA ? Math.floor(r() * 10) + 1 : 0;
+        const b = hasA ? 0 : (r() < 0.75 ? Math.floor(r() * 10) + 1 : 0);
+        bunSrcA.push(a);
+        bunSrcB.push(b);
+        bunMerged.push(a > 0 ? a : (b > 0 ? b + OFFSET_B : 0));
+    }
+}
+
+function drawBundleBefore(highlightRow) {
+    const canvas = $('#cvsBefore');
+    const ctx = dpr(canvas);
+    const W = ctx.w, H = ctx.h;
+    ctx.clearRect(0, 0, W, H);
+    const pad = { top: 32, left: 44, right: 14, bottom: 10 };
+    const colW = (W - pad.left - pad.right) / 2;
+    const ch = (H - pad.top - pad.bottom) / BUN_ROWS;
+
+    ctx.font = '10px JetBrains Mono, Consolas, monospace';
+    ctx.fillStyle = '#ffab40'; ctx.textAlign = 'center';
+    ctx.fillText('F_A [0,10]', pad.left + colW / 2, pad.top - 10);
+    ctx.fillStyle = '#4fc3f7';
+    ctx.fillText('F_B [0,10]', pad.left + colW + colW / 2, pad.top - 10);
+
+    for (let i = 0; i < BUN_ROWS; i++) {
+        const y = pad.top + i * ch;
+        ctx.fillStyle = '#6c6c7c'; ctx.textAlign = 'right'; ctx.font = '9px monospace';
+        ctx.fillText('' + i, pad.left - 6, y + ch / 2 + 3);
+
+        const a = bunSrcA[i], b = bunSrcB[i];
+        const alpha = highlightRow !== undefined && highlightRow >= 0 ? (i === highlightRow ? 1 : 0.25) : 1;
+        ctx.globalAlpha = alpha;
+
+        // Column A
+        ctx.fillStyle = a === 0 ? COLORS.zero : '#ffab40';
+        ctx.fillRect(pad.left + 0.5, y + 0.5, colW - 1, ch - 1);
+        // Column B
+        ctx.fillStyle = b === 0 ? COLORS.zero : '#4fc3f7';
+        ctx.fillRect(pad.left + colW + 0.5, y + 0.5, colW - 1, ch - 1);
+
+        ctx.fillStyle = a === 0 ? '#555' : '#1a1a2e';
+        ctx.font = '11px monospace'; ctx.textAlign = 'center';
+        ctx.fillText(a, pad.left + colW / 2, y + ch / 2 + 4);
+        ctx.fillStyle = b === 0 ? '#555' : '#1a1a2e';
+        ctx.fillText(b, pad.left + colW + colW / 2, y + ch / 2 + 4);
+
+        ctx.globalAlpha = 1;
+    }
+}
+
+function drawBundleAfter(revealUpTo) {
+    const canvas = $('#cvsAfter');
+    const ctx = dpr(canvas);
+    const W = ctx.w, H = ctx.h;
+    ctx.clearRect(0, 0, W, H);
+    const pad = { top: 32, left: 44, right: 14, bottom: 10 };
+    const colW = (W - pad.left - pad.right);
+    const ch = (H - pad.top - pad.bottom) / BUN_ROWS;
+    const maxRevealed = revealUpTo !== undefined ? revealUpTo : BUN_ROWS - 1;
+
+    ctx.font = '10px JetBrains Mono, Consolas, monospace';
+    ctx.fillStyle = '#16c79a'; ctx.textAlign = 'center';
+    ctx.fillText('Bundle [0, ' + (OFFSET_B + 10) + ']', pad.left + colW / 2, pad.top - 10);
+
+    // Scale bar showing ranges
+    const scaleY = pad.top - 3;
+    const maxVal = OFFSET_B + 10;
+    const scaleW = colW;
+    // A range [0,10]
+    ctx.fillStyle = 'rgba(255,171,64,0.25)';
+    ctx.fillRect(pad.left, scaleY, scaleW * (10 / maxVal), 3);
+    // B range [11,21]
+    ctx.fillStyle = 'rgba(79,195,247,0.25)';
+    ctx.fillRect(pad.left + scaleW * (OFFSET_B / maxVal), scaleY, scaleW * (10 / maxVal), 3);
+
+    for (let i = 0; i < BUN_ROWS; i++) {
+        const y = pad.top + i * ch;
+        ctx.fillStyle = '#6c6c7c'; ctx.textAlign = 'right'; ctx.font = '9px monospace';
+        ctx.fillText('' + i, pad.left - 6, y + ch / 2 + 3);
+
+        const v = bunMerged[i];
+        if (i <= maxRevealed) {
+            if (v === 0) {
+                ctx.fillStyle = COLORS.zero;
+            } else if (v <= 10) {
+                ctx.fillStyle = '#ffab40'; // from A
+            } else {
+                ctx.fillStyle = '#4fc3f7'; // from B (offset)
+            }
+        } else {
+            ctx.fillStyle = 'rgba(30,30,60,0.25)';
+        }
+        ctx.fillRect(pad.left + 0.5, y + 0.5, colW - 1, ch - 1);
+
+        if (i <= maxRevealed) {
+            ctx.fillStyle = v === 0 ? '#555' : '#1a1a2e';
+            ctx.font = '11px monospace'; ctx.textAlign = 'center';
+            ctx.fillText(v, pad.left + colW / 2, y + ch / 2 + 4);
+            // Show origin annotation
+            if (v > 0) {
+                ctx.font = '8px sans-serif';
+                ctx.fillStyle = v <= 10 ? 'rgba(255,171,64,0.7)' : 'rgba(79,195,247,0.7)';
+                const origin = v <= 10 ? 'A' : 'B+' + OFFSET_B;
+                ctx.fillText(origin, pad.left + colW - 18, y + ch / 2 + 3);
+            }
+        }
+    }
+}
+
+function updateBundleStats() {
+    const dimBefore = 2, dimAfter = 1;
+    const reduction = ((1 - dimAfter / dimBefore) * 100).toFixed(0);
+    $('#bundleStats').innerHTML =
+        statHTML(dimBefore, '原始维度', 'stat-orange') +
+        statHTML(dimAfter, '捆绑后维度', 'stat-green') +
+        statHTML(reduction + '%', '维度降低', 'stat-blue') +
+        statHTML(OFFSET_B, '偏移量 (maxA+1)', 'stat-purple');
+}
+
+$('#btnPlayBundle').addEventListener('click', () => {
+    if (bundleAnimTimer) return;
+    bundleAnimStep = -1;
+    function tick() {
+        bundleAnimStep++;
+        if (bundleAnimStep >= BUN_ROWS) {
+            clearInterval(bundleAnimTimer); bundleAnimTimer = null;
+            drawBundleBefore();
+            drawBundleAfter();
+            $('#bundleStepLabel').textContent = '完成! 2 个互斥特征 -> 1 个 Bundle';
+            return;
+        }
+        drawBundleBefore(bundleAnimStep);
+        drawBundleAfter(bundleAnimStep);
+        const a = bunSrcA[bundleAnimStep], b = bunSrcB[bundleAnimStep], v = bunMerged[bundleAnimStep];
+        let desc;
+        if (a > 0) desc = `A=${a} -> ${v}`;
+        else if (b > 0) desc = `B=${b} -> ${b}+${OFFSET_B}=${v}`;
+        else desc = '0 -> 0';
+        $('#bundleStepLabel').textContent = `样本 ${bundleAnimStep}: ${desc}`;
+    }
+    bundleAnimTimer = setInterval(tick, 500);
+});
+
+$('#btnResetBundle').addEventListener('click', () => {
+    if (bundleAnimTimer) { clearInterval(bundleAnimTimer); bundleAnimTimer = null; }
+    bundleAnimStep = -1;
+    initBundleData();
+    drawBundleBefore(); drawBundleAfter(-1);
+    $('#bundleStepLabel').textContent = '点击"播放动画"开始';
+});
+
+/* ======================================================== */
+/* Section 4: 图着色算法                                    */
+/* ======================================================== */
+const GC_FEATURES = 10;
+let gcConflicts = [], gcOrder = [], gcColors = [], gcStep = 0, gcAutoTimer = null;
+let gcNodePos = [], gcDegrees = [];
+
+function computeGCNodePositions() {
+    const canvas = $('#cvsColoring');
+    const rect = canvas.getBoundingClientRect();
+    const cx = rect.width / 2, cy = rect.height * 0.42;
+    const rad = Math.min(rect.width, rect.height) * 0.3;
+    gcNodePos = [];
+    for (let i = 0; i < GC_FEATURES; i++) {
+        const a = -Math.PI / 2 + (2 * Math.PI * i) / GC_FEATURES;
+        gcNodePos.push({ x: cx + rad * Math.cos(a), y: cy + rad * Math.sin(a) });
+    }
+}
+
+function initGraphColoring() {
+    const r = LGBMUtils.seededRandom(123);
+    const thresh = parseFloat($('#colorThreshSlider').value) / 100;
+    gcConflicts = [];
+    for (let i = 0; i < GC_FEATURES; i++) {
+        gcConflicts[i] = [];
+        for (let j = 0; j < GC_FEATURES; j++) gcConflicts[i][j] = 0;
+    }
+    // Generate random conflict rates
+    for (let a = 0; a < GC_FEATURES; a++) {
+        for (let b = a + 1; b < GC_FEATURES; b++) {
+            const rate = r() * 0.35;
+            gcConflicts[a][b] = rate; gcConflicts[b][a] = rate;
+        }
+    }
+
+    // Compute degrees and sort
+    gcDegrees = new Array(GC_FEATURES).fill(0);
+    for (let i = 0; i < GC_FEATURES; i++) {
+        for (let j = 0; j < GC_FEATURES; j++) {
+            if (i !== j && gcConflicts[i][j] > thresh) gcDegrees[i]++;
+        }
+    }
+    gcOrder = Array.from({length: GC_FEATURES}, (_, i) => i);
+    gcOrder.sort((a, b) => gcDegrees[b] - gcDegrees[a]);
+
+    gcColors = new Array(GC_FEATURES).fill(-1);
+    gcStep = 0;
+    computeGCNodePositions();
+    updateColorSteps();
+}
+
+function updateColorSteps() {
+    const cont = $('#colorSteps');
+    cont.innerHTML = '';
+    gcOrder.forEach((f, idx) => {
+        const span = document.createElement('span');
+        span.className = 'step-btn' + (idx < gcStep ? ' done' : '') + (idx === gcStep ? ' active' : '');
+        span.textContent = 'F' + f + ' (d=' + gcDegrees[f] + ')';
+        cont.appendChild(span);
+    });
+}
+
+function drawGraphColoring() {
+    const canvas = $('#cvsColoring');
+    const ctx = dpr(canvas);
+    const W = ctx.w, H = ctx.h;
+    const thresh = parseFloat($('#colorThreshSlider').value) / 100;
+
+    ctx.clearRect(0, 0, W, H);
+
+    // Draw edges
+    for (let a = 0; a < GC_FEATURES; a++) {
+        for (let b = a + 1; b < GC_FEATURES; b++) {
+            if (gcConflicts[a][b] > thresh) {
+                ctx.beginPath();
+                ctx.moveTo(gcNodePos[a].x, gcNodePos[a].y);
+                ctx.lineTo(gcNodePos[b].x, gcNodePos[b].y);
+                ctx.strokeStyle = `rgba(255,82,82,${0.15 + gcConflicts[a][b] * 1.2})`;
+                ctx.lineWidth = 1 + gcConflicts[a][b] * 6;
+                ctx.stroke();
+            }
+        }
+    }
+
+    // Determine current feature
+    const currentFeature = gcStep < gcOrder.length ? gcOrder[gcStep] : -1;
+
+    // If we have a current feature, highlight its neighbors
+    if (currentFeature >= 0) {
+        for (let j = 0; j < GC_FEATURES; j++) {
+            if (j !== currentFeature && gcConflicts[currentFeature][j] > thresh) {
+                // draw highlight arc around neighbor
+                ctx.beginPath();
+                ctx.arc(gcNodePos[j].x, gcNodePos[j].y, 26, 0, Math.PI * 2);
+                ctx.strokeStyle = 'rgba(255,215,64,0.2)';
+                ctx.lineWidth = 2; ctx.stroke();
+            }
+        }
+    }
+
+    // Draw nodes
+    for (let i = 0; i < GC_FEATURES; i++) {
+        const p = gcNodePos[i];
+        const isCurrent = i === currentFeature;
+        const c = gcColors[i] >= 0 ? COLORS.bundle[gcColors[i] % COLORS.bundle.length] : '#6c6c7c';
+        const r = isCurrent ? 24 : 20;
+
+        // Glow for current node
+        if (isCurrent) {
+            ctx.beginPath(); ctx.arc(p.x, p.y, 30, 0, Math.PI * 2);
+            ctx.strokeStyle = 'rgba(255,215,64,0.35)'; ctx.lineWidth = 3; ctx.stroke();
+        }
+
+        ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+        ctx.fillStyle = c;
+        ctx.globalAlpha = gcColors[i] >= 0 ? 0.35 : 0.12;
+        ctx.fill(); ctx.globalAlpha = 1;
+        ctx.strokeStyle = isCurrent ? '#ffd740' : c;
+        ctx.lineWidth = isCurrent ? 3 : 2;
+        ctx.stroke();
+
+        ctx.font = 'bold 11px JetBrains Mono, Consolas, monospace';
+        ctx.fillStyle = '#e8e8e8'; ctx.textAlign = 'center';
+        ctx.fillText('F' + i, p.x, p.y + 4);
+
+        // Show color number
+        if (gcColors[i] >= 0) {
+            ctx.font = '8px sans-serif';
+            ctx.fillStyle = COLORS.bundle[gcColors[i] % COLORS.bundle.length];
+            ctx.fillText('c' + gcColors[i], p.x, p.y + 15);
+        }
+    }
+
+    // Bundle legend at bottom
+    const usedColors = new Set(gcColors.filter(c => c >= 0));
+    const sortedColors = [...usedColors].sort((a, b) => a - b);
+    let lx = 10, ly = H - 14;
+    ctx.font = '10px sans-serif'; ctx.textAlign = 'left';
+    for (const ci of sortedColors) {
+        const feats = [];
+        for (let i = 0; i < GC_FEATURES; i++) if (gcColors[i] === ci) feats.push('F' + i);
+        const label = 'Bundle ' + ci + ': [' + feats.join(', ') + ']';
+        ctx.fillStyle = COLORS.bundle[ci % COLORS.bundle.length];
+        ctx.globalAlpha = 0.5; ctx.fillRect(lx, ly - 9, 10, 10); ctx.globalAlpha = 1;
+        ctx.fillStyle = '#a8a8b8';
+        ctx.fillText(label, lx + 14, ly);
+        lx += ctx.measureText(label).width + 26;
+        if (lx > W - 100) { lx = 10; ly -= 16; }
+    }
+
+    // Status
+    if (gcStep >= gcOrder.length) {
+        const numBundles = new Set(gcColors).size;
+        $('#colorStepLabel').textContent = `着色完成: ${GC_FEATURES} 个特征 -> ${numBundles} 个 Bundle`;
+    } else {
+        $('#colorStepLabel').textContent = `步骤 ${gcStep + 1}/${GC_FEATURES}: 对 F${currentFeature} 着色 (度数=${gcDegrees[currentFeature]})`;
+    }
+}
+
+function colorOneStep() {
+    if (gcStep >= gcOrder.length) return false;
+    const thresh = parseFloat($('#colorThreshSlider').value) / 100;
+    const f = gcOrder[gcStep];
+    // Find smallest color not used by conflicting neighbors
+    const usedByNeighbors = new Set();
+    for (let j = 0; j < GC_FEATURES; j++) {
+        if (j !== f && gcConflicts[f][j] > thresh && gcColors[j] >= 0) {
+            usedByNeighbors.add(gcColors[j]);
+        }
+    }
+    let c = 0;
+    while (usedByNeighbors.has(c)) c++;
+    gcColors[f] = c;
+    gcStep++;
+    updateColorSteps();
+    drawGraphColoring();
+    return gcStep < gcOrder.length;
+}
+
+$('#btnStepColor').addEventListener('click', () => { colorOneStep(); });
+$('#btnAutoColor').addEventListener('click', () => {
+    if (gcAutoTimer) return;
+    gcAutoTimer = setInterval(() => {
+        if (!colorOneStep()) { clearInterval(gcAutoTimer); gcAutoTimer = null; }
+    }, 600);
+});
+$('#btnResetColor').addEventListener('click', () => {
+    if (gcAutoTimer) { clearInterval(gcAutoTimer); gcAutoTimer = null; }
+    initGraphColoring(); drawGraphColoring();
+});
+$('#colorThreshSlider').addEventListener('input', () => {
+    $('#colorThreshVal').textContent = $('#colorThreshSlider').value + '%';
+});
+$('#colorThreshSlider').addEventListener('change', () => {
+    if (gcAutoTimer) { clearInterval(gcAutoTimer); gcAutoTimer = null; }
+    initGraphColoring(); drawGraphColoring();
+});
+
+/* ======================================================== */
+/* Section 5: 效果展示                                      */
+/* ======================================================== */
+function runEffectDemo() {
+    const N = parseInt($('#effectNSlider').value);
+    const sp = parseInt($('#effectSpSlider').value);
+    const th = parseInt($('#effectThSlider').value) / 100;
+
+    // Generate sparse matrix
+    const nSamples = 200;
+    const r = LGBMUtils.seededRandom(2026);
+    const features = [];
+    for (let i = 0; i < nSamples; i++) {
+        const row = [];
+        for (let j = 0; j < N; j++) {
+            row.push(r() > sp / 100 ? Math.floor(r() * 10) + 1 : 0);
+        }
+        features.push(row);
+    }
+
+    // Use LGBMUtils to find bundles
+    const bundles = LGBMUtils.findExclusiveBundles(features, th);
+    const M = bundles.length;
+
+    // Simulated histogram build time (proportional to feature count * samples)
+    const timePerFeature = 3.2; // ms per feature-histogram
+    const timeBefore = N * timePerFeature;
+    const timeAfter = M * timePerFeature;
+    const speedup = timeBefore / timeAfter;
+
+    // Draw before bars
+    const barsBefore = $('#barsBeforeEffect');
+    barsBefore.innerHTML = '';
+    const maxBarsB = Math.min(N, 15);
+    const stepB = Math.max(1, Math.floor(N / maxBarsB));
+    for (let i = 0; i < N; i += stepB) {
+        const h = 25 + Math.random() * 55;
+        barsBefore.innerHTML += `<div class="bar-col"><div class="bar" style="height:${h}%;background:var(--accent-orange)"></div><div class="bar-lbl">F${i}</div></div>`;
+    }
+
+    // Draw after bars
+    const barsAfter = $('#barsAfterEffect');
+    barsAfter.innerHTML = '';
+    for (let bi = 0; bi < Math.min(bundles.length, 15); bi++) {
+        const h = Math.min(20 + bundles[bi].length * 15, 95);
+        const c = COLORS.bundle[bi % COLORS.bundle.length];
+        const label = `B${bi}(${bundles[bi].length})`;
+        barsAfter.innerHTML += `<div class="bar-col"><div class="bar" style="height:${h}%;background:${c}"></div><div class="bar-lbl">${label}</div></div>`;
+    }
+
+    $('#effectStatsBefore').innerHTML =
+        statHTML(N, '特征数', 'stat-orange') +
+        statHTML(timeBefore.toFixed(1) + 'ms', '直方图时间', 'stat-red');
+
+    $('#effectStatsAfter').innerHTML =
+        statHTML(M, 'Bundle 数', 'stat-green') +
+        statHTML(timeAfter.toFixed(1) + 'ms', '直方图时间', 'stat-blue');
+
+    const reduction = ((1 - M / N) * 100).toFixed(0);
+    const accImpact = th > 0 ? (th * 100 * 0.03).toFixed(2) : '0.00';
+    $('#effectStatsOverall').innerHTML =
+        statHTML(speedup.toFixed(1) + 'x', '加速比', 'stat-green') +
+        statHTML(reduction + '%', '维度降低', 'stat-blue') +
+        statHTML(accImpact + '%', '精度损失 (估计)', 'stat-orange') +
+        statHTML(sp + '%', '原始稀疏度', 'stat-purple');
+}
+
+$('#effectNSlider').addEventListener('input', () => { $('#effectNVal').textContent = $('#effectNSlider').value; });
+$('#effectSpSlider').addEventListener('input', () => { $('#effectSpVal').textContent = $('#effectSpSlider').value + '%'; });
+$('#effectThSlider').addEventListener('input', () => { $('#effectThVal').textContent = $('#effectThSlider').value + '%'; });
+$('#btnRunEffect').addEventListener('click', runEffectDemo);
+
+/* ======================================================== */
+/* Init all sections                                         */
+/* ======================================================== */
+drawSparseHeatmap();
+initDetMatrix(); drawDetMatrix(); drawConflictGraph();
+initBundleData(); drawBundleBefore(); drawBundleAfter(-1); updateBundleStats();
+initGraphColoring(); drawGraphColoring();
+runEffectDemo();
+
+/* Resize handling */
+let resizeTimer;
+window.addEventListener('resize', () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+        drawSparseHeatmap();
+        drawDetMatrix(); drawConflictGraph();
+        drawBundleBefore(bundleAnimStep >= 0 ? bundleAnimStep : undefined);
+        drawBundleAfter(bundleAnimStep >= 0 ? bundleAnimStep : -1);
+        computeGCNodePositions();
+        drawGraphColoring();
+    }, 200);
+});
+
+}); // end DOMContentLoaded
+
+/* KaTeX auto-render init */
+document.addEventListener('DOMContentLoaded', () => {
+    const waitKatex = setInterval(() => {
+        if (typeof renderMathInElement === 'function') {
+            clearInterval(waitKatex);
+            renderMathInElement(document.body, {
+                delimiters: [
+                    { left: '$$', right: '$$', display: true },
+                    { left: '$', right: '$', display: false }
+                ],
+                throwOnError: false
+            });
+        }
+    }, 100);
+});
+</script>
+</body>
+</html>

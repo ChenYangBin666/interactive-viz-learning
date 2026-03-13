@@ -1,0 +1,1410 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>感受野 — Receptive Field | CNN 卷积神经网络</title>
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+    <script src="../shared/scripts/nav.js"></script>
+    <script src="../shared/scripts/cnn-utils.js"></script>
+    <style>
+        /* ========== Page-specific styles ========== */
+        .page-header {
+            text-align: center;
+            padding: 2rem 0 1rem;
+        }
+        .page-header h1 {
+            font-size: 2.2rem;
+            background: linear-gradient(135deg, var(--accent-green), var(--accent-blue));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .page-header .subtitle {
+            color: var(--text-muted);
+            font-size: 1rem;
+            margin-top: 0.3rem;
+        }
+
+        /* Grid visualization */
+        .grid-wrap {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .grid-label {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            font-family: var(--font-mono);
+        }
+        .pixel-grid {
+            display: inline-grid;
+            gap: 1px;
+            background: var(--border-color);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .pixel-grid .cell {
+            width: 28px;
+            height: 28px;
+            background: var(--bg-primary);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.6rem;
+            font-family: var(--font-mono);
+            color: var(--text-muted);
+            transition: background 0.3s, transform 0.2s;
+            cursor: pointer;
+            position: relative;
+        }
+        .pixel-grid .cell.highlighted {
+            background: rgba(22, 199, 154, 0.35);
+            color: var(--accent-green);
+            z-index: 1;
+        }
+        .pixel-grid .cell.selected {
+            background: var(--accent-green);
+            color: var(--bg-primary);
+            font-weight: 700;
+            z-index: 2;
+            transform: scale(1.1);
+        }
+        .pixel-grid .cell.rf-highlight {
+            background: rgba(79, 195, 247, 0.3);
+            color: var(--accent-blue);
+        }
+        .pixel-grid .cell.kernel-highlight {
+            background: rgba(255, 171, 64, 0.35);
+            color: var(--accent-orange);
+        }
+
+        /* Multi-layer visualization */
+        .layer-viz {
+            display: flex;
+            align-items: center;
+            gap: 2rem;
+            justify-content: center;
+            flex-wrap: wrap;
+            padding: 1.5rem;
+        }
+        .layer-arrow {
+            font-size: 1.5rem;
+            color: var(--text-muted);
+        }
+
+        /* Controls area */
+        .controls-row {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            flex-wrap: wrap;
+            margin: 1rem 0;
+        }
+        .control-label {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+        }
+        select.ctrl-select {
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            padding: 0.35rem 0.6rem;
+            font-family: inherit;
+            font-size: 0.85rem;
+            cursor: pointer;
+            outline: none;
+        }
+        select.ctrl-select:focus {
+            border-color: var(--accent-green);
+        }
+
+        /* Layer stack for section 2 */
+        .layer-stack-display {
+            display: flex;
+            align-items: flex-start;
+            gap: 1rem;
+            overflow-x: auto;
+            padding: 1rem 0.5rem;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        .layer-card-mini {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            padding: 0.5rem 0.75rem;
+            text-align: center;
+            min-width: 80px;
+        }
+        .layer-card-mini .layer-name {
+            font-size: 0.75rem;
+            color: var(--accent-blue);
+            font-weight: 600;
+        }
+        .layer-card-mini .layer-info {
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            font-family: var(--font-mono);
+        }
+        .layer-card-mini .layer-rf {
+            font-size: 0.8rem;
+            color: var(--accent-green);
+            font-weight: 600;
+            margin-top: 0.25rem;
+        }
+        .arrow-between {
+            display: flex;
+            align-items: center;
+            color: var(--text-muted);
+            font-size: 1.2rem;
+            padding-top: 0.75rem;
+        }
+
+        /* Heatmap canvas */
+        .heatmap-container {
+            position: relative;
+            display: inline-block;
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            overflow: hidden;
+        }
+        .heatmap-container canvas {
+            display: block;
+        }
+
+        /* Comparison cards */
+        .compare-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1.5rem;
+            text-align: center;
+        }
+        .compare-card h4 {
+            color: var(--accent-blue);
+            margin-bottom: 1rem;
+        }
+        .compare-card.winner {
+            border-color: var(--accent-green);
+            box-shadow: 0 0 12px rgba(22, 199, 154, 0.15);
+        }
+        .compare-card .metric {
+            display: flex;
+            justify-content: space-between;
+            padding: 0.5rem 0;
+            border-bottom: 1px solid rgba(42, 42, 74, 0.5);
+            font-size: 0.9rem;
+        }
+        .compare-card .metric:last-child {
+            border-bottom: none;
+        }
+        .compare-card .metric .label {
+            color: var(--text-secondary);
+        }
+        .compare-card .metric .value {
+            color: var(--accent-green);
+            font-family: var(--font-mono);
+            font-weight: 600;
+        }
+        .compare-card .metric .value.worse {
+            color: var(--accent-orange);
+        }
+
+        /* RF size indicator */
+        .rf-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.3rem;
+            padding: 0.25rem 0.6rem;
+            background: rgba(22, 199, 154, 0.1);
+            border: 1px solid rgba(22, 199, 154, 0.3);
+            border-radius: 20px;
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            color: var(--accent-green);
+            font-weight: 600;
+        }
+
+        /* Section viz containers */
+        .viz-box {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1.5rem;
+            margin: 1rem 0;
+        }
+        .viz-box-title {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            margin-bottom: 1rem;
+            text-align: center;
+        }
+
+        /* Formula box */
+        .formula-box {
+            background: rgba(22, 199, 154, 0.05);
+            border: 1px solid rgba(22, 199, 154, 0.15);
+            border-radius: var(--radius-md);
+            padding: 1rem 1.5rem;
+            margin: 1rem 0;
+            text-align: center;
+        }
+
+        /* Layer config form */
+        .layer-config {
+            display: flex;
+            gap: 0.75rem;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        /* Effective RF explanation */
+        .erf-compare {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5rem;
+            margin: 1rem 0;
+        }
+        @media (max-width: 768px) {
+            .erf-compare { grid-template-columns: 1fr; }
+        }
+        .erf-item {
+            text-align: center;
+        }
+        .erf-label {
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+            margin-bottom: 0.5rem;
+        }
+
+        /* Animation keyframes */
+        @keyframes pulseHighlight {
+            0%, 100% { opacity: 0.3; }
+            50% { opacity: 0.7; }
+        }
+        .cell.animating {
+            animation: pulseHighlight 0.8s ease-in-out;
+        }
+
+        /* Design comparison canvas */
+        .design-viz {
+            display: flex;
+            justify-content: center;
+            gap: 3rem;
+            flex-wrap: wrap;
+            margin: 1rem 0;
+        }
+
+        .katex-display { margin: 0.75rem 0; }
+    </style>
+</head>
+<body>
+    <div class="page-container">
+        <header class="page-header">
+            <h1>感受野 — Receptive Field</h1>
+            <p class="subtitle">理解卷积神经网络中神经元"看到"输入的范围</p>
+        </header>
+
+        <!-- ==================== Section 1 ==================== -->
+        <section class="section" id="sec-what-is-rf">
+            <div class="section-title">
+                <div class="icon">1</div>
+                <h2>什么是感受野</h2>
+            </div>
+
+            <div class="split-layout">
+                <div class="text-panel">
+                    <p>
+                        <strong>感受野（Receptive Field）</strong>是指卷积神经网络中某一层的一个神经元，
+                        在<em>输入图像</em>上所能"看到"的区域大小。
+                    </p>
+                    <p>
+                        浅层神经元的感受野较小，只能捕捉局部纹理（如边缘、角点）；
+                        深层神经元的感受野更大，能感知更高层次的语义信息（如物体轮廓、场景）。
+                    </p>
+
+                    <div class="info-box">
+                        <p><strong>操作：</strong>点击输出层（最右侧）的任意神经元，观察它在输入层上对应的感受野区域。</p>
+                    </div>
+
+                    <div class="formula-box">
+                        <p style="font-size:0.85rem; color:var(--text-secondary); margin-bottom:0.5rem;">感受野递推公式：</p>
+                        <div id="rf-formula"></div>
+                    </div>
+
+                    <div class="info-box success mt-2">
+                        <p id="rf-result-text">点击右侧输出层的神经元查看结果</p>
+                    </div>
+                </div>
+
+                <div class="viz-panel">
+                    <div class="viz-box">
+                        <div class="viz-box-title">多层卷积网络 — 点击输出层神经元</div>
+                        <div class="controls-row">
+                            <span class="control-label">网络层数：</span>
+                            <div class="btn-group">
+                                <button class="btn btn-sm" data-layers="2" onclick="S1.setLayers(2)">2层</button>
+                                <button class="btn btn-sm active" data-layers="3" onclick="S1.setLayers(3)">3层</button>
+                                <button class="btn btn-sm" data-layers="4" onclick="S1.setLayers(4)">4层</button>
+                            </div>
+                            <span class="control-label" style="margin-left:1rem;">步长：</span>
+                            <div class="btn-group">
+                                <button class="btn btn-sm active" data-stride="1" onclick="S1.setStride(1)">S=1</button>
+                                <button class="btn btn-sm" data-stride="2" onclick="S1.setStride(2)">S=2</button>
+                            </div>
+                        </div>
+                        <div id="s1-layer-viz" class="layer-viz"></div>
+                        <div class="legend" style="justify-content: center; margin-top: 0.5rem;">
+                            <div class="legend-item"><div class="swatch" style="background: var(--accent-green);"></div> 选中神经元</div>
+                            <div class="legend-item"><div class="swatch" style="background: rgba(22,199,154,0.35);"></div> 中间层贡献区域</div>
+                            <div class="legend-item"><div class="swatch" style="background: rgba(79,195,247,0.3);"></div> 输入层感受野</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ==================== Section 2 ==================== -->
+        <section class="section" id="sec-rf-growth">
+            <div class="section-title">
+                <div class="icon">2</div>
+                <h2>逐层感受野扩大</h2>
+            </div>
+
+            <div class="split-layout">
+                <div class="text-panel">
+                    <p>
+                        每添加一层卷积，感受野都会增大。增大的幅度取决于新层的<strong>卷积核大小</strong>和前面所有层的<strong>步长乘积</strong>。
+                    </p>
+                    <p>
+                        通过堆叠多层小卷积核，可以用更少的参数获得与大卷积核相同的感受野。
+                    </p>
+
+                    <div class="info-box">
+                        <p><strong>操作：</strong>点击"添加卷积层"按钮，选择卷积核大小和步长，观察感受野如何逐层扩大。</p>
+                    </div>
+
+                    <div class="controls-row">
+                        <span class="control-label">卷积核：</span>
+                        <select id="s2-kernel" class="ctrl-select">
+                            <option value="3" selected>3x3</option>
+                            <option value="5">5x5</option>
+                            <option value="7">7x7</option>
+                        </select>
+                        <span class="control-label">步长：</span>
+                        <select id="s2-stride" class="ctrl-select">
+                            <option value="1" selected>1</option>
+                            <option value="2">2</option>
+                        </select>
+                    </div>
+                    <div class="controls-row">
+                        <button class="btn btn-primary" onclick="S2.addLayer()">+ 添加卷积层</button>
+                        <button class="btn" onclick="S2.removeLayer()">- 移除一层</button>
+                        <button class="btn" onclick="S2.reset()">重置</button>
+                    </div>
+
+                    <div id="s2-layer-list" style="margin-top:1rem;"></div>
+
+                    <div class="formula-box mt-2">
+                        <p style="font-size:0.85rem; color:var(--text-secondary); margin-bottom:0.5rem;">当前感受野大小：</p>
+                        <div id="s2-rf-display" class="rf-badge" style="font-size:1.2rem;">RF = 1</div>
+                    </div>
+                </div>
+
+                <div class="viz-panel">
+                    <div class="viz-box">
+                        <div class="viz-box-title">输入层上的感受野区域（绿色高亮）</div>
+                        <div id="s2-grid-container" style="display:flex; justify-content:center; padding:1rem;"></div>
+                        <div id="s2-layer-cards" class="layer-stack-display"></div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ==================== Section 3 ==================== -->
+        <section class="section" id="sec-effective-rf">
+            <div class="section-title">
+                <div class="icon">3</div>
+                <h2>有效感受野</h2>
+            </div>
+
+            <div class="split-layout">
+                <div class="text-panel">
+                    <p>
+                        理论感受野定义了一个神经元<em>可能</em>受到影响的输入区域，但实际上并非所有像素的贡献都相同。
+                    </p>
+                    <p>
+                        研究表明，<strong>有效感受野（Effective Receptive Field）</strong>呈高斯分布——
+                        中心像素的贡献远大于边缘像素。实际的有效感受野面积通常只占理论感受野的一小部分。
+                    </p>
+
+                    <div class="info-box warning">
+                        <p><strong>关键洞察：</strong>即使理论感受野覆盖了整个输入图像，边缘区域的像素对输出的实际影响可能微乎其微。</p>
+                    </div>
+
+                    <div class="controls-row">
+                        <span class="control-label">网络深度：</span>
+                        <input type="range" id="s3-depth" min="2" max="8" value="4" style="width:150px;">
+                        <span class="slider-value" id="s3-depth-val">4</span>
+                        <span class="control-label">层</span>
+                    </div>
+                    <div class="controls-row">
+                        <span class="control-label">高斯衰减 (sigma)：</span>
+                        <input type="range" id="s3-sigma" min="10" max="90" value="40" style="width:150px;">
+                        <span class="slider-value" id="s3-sigma-val">0.40</span>
+                    </div>
+                </div>
+
+                <div class="viz-panel">
+                    <div class="viz-box">
+                        <div class="viz-box-title">理论感受野 vs 有效感受野</div>
+                        <div class="erf-compare">
+                            <div class="erf-item">
+                                <div class="erf-label">理论感受野</div>
+                                <div class="heatmap-container">
+                                    <canvas id="s3-theoretical" width="240" height="240"></canvas>
+                                </div>
+                                <div class="rf-badge mt-1" id="s3-theo-size">RF = 9</div>
+                            </div>
+                            <div class="erf-item">
+                                <div class="erf-label">有效感受野（贡献热力图）</div>
+                                <div class="heatmap-container">
+                                    <canvas id="s3-effective" width="240" height="240"></canvas>
+                                </div>
+                                <div class="rf-badge mt-1" id="s3-eff-size" style="background:rgba(255,171,64,0.1); border-color:rgba(255,171,64,0.3); color:var(--accent-orange);">有效 RF ~5</div>
+                            </div>
+                        </div>
+                        <div class="info-box success mt-2">
+                            <p id="s3-explanation">调整参数观察理论与有效感受野的差异。</p>
+                        </div>
+
+                        <div style="margin-top:1.5rem;">
+                            <div class="viz-box-title">横截面贡献分布（通过 RF 中心行）</div>
+                            <canvas id="s3-profile" width="480" height="180" style="width:100%; max-width:480px; display:block; margin:0 auto; border:1px solid var(--border-color); border-radius:var(--radius-sm);"></canvas>
+                            <div class="legend" style="justify-content:center; margin-top:0.5rem;">
+                                <div class="legend-item"><div class="swatch" style="background:var(--accent-blue);"></div> 理论（均匀）</div>
+                                <div class="legend-item"><div class="swatch" style="background:var(--accent-orange);"></div> 有效（高斯）</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ==================== Section 4 ==================== -->
+        <section class="section" id="sec-design">
+            <div class="section-title">
+                <div class="icon">4</div>
+                <h2>感受野与网络设计</h2>
+            </div>
+
+            <p>
+                一个经典的设计问题：使用一个 <code>5x5</code> 卷积核，还是堆叠两个 <code>3x3</code> 卷积核？
+                它们拥有相同的感受野，但参数量和计算量差异显著。
+            </p>
+
+            <div class="controls-row">
+                <span class="control-label">输入通道数 C：</span>
+                <select id="s4-channels" class="ctrl-select" onchange="S4.update()">
+                    <option value="32">32</option>
+                    <option value="64" selected>64</option>
+                    <option value="128">128</option>
+                    <option value="256">256</option>
+                </select>
+                <span class="control-label" style="margin-left:1rem;">特征图尺寸 H=W：</span>
+                <select id="s4-fmap" class="ctrl-select" onchange="S4.update()">
+                    <option value="16">16</option>
+                    <option value="32" selected>32</option>
+                    <option value="56">56</option>
+                    <option value="112">112</option>
+                </select>
+            </div>
+
+            <div class="compare-grid cols-2 mt-2">
+                <div class="compare-card winner" id="s4-card-stacked">
+                    <h4>两个 3x3 卷积（推荐）</h4>
+                    <div class="design-viz">
+                        <canvas id="s4-canvas-stacked" width="220" height="160"></canvas>
+                    </div>
+                    <div id="s4-metrics-stacked"></div>
+                </div>
+                <div class="compare-card" id="s4-card-single">
+                    <h4>一个 5x5 卷积</h4>
+                    <div class="design-viz">
+                        <canvas id="s4-canvas-single" width="220" height="160"></canvas>
+                    </div>
+                    <div id="s4-metrics-single"></div>
+                </div>
+            </div>
+
+            <div class="info-box success mt-2">
+                <p><strong>结论：</strong>堆叠小卷积核是现代 CNN（如 VGGNet）的核心设计理念。</p>
+            </div>
+
+            <div class="viz-box mt-2">
+                <div class="viz-box-title">推广：三个 3x3 = 一个 7x7</div>
+                <div class="compare-grid cols-2">
+                    <div class="compare-card winner" id="s4-card-3stack">
+                        <h4>三个 3x3 卷积</h4>
+                        <div id="s4-metrics-3stack"></div>
+                    </div>
+                    <div class="compare-card" id="s4-card-7x7">
+                        <h4>一个 7x7 卷积</h4>
+                        <div id="s4-metrics-7x7"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="formula-box mt-2">
+                <p style="font-size:0.85rem; color:var(--text-secondary); margin-bottom:0.5rem;">n 个 3x3 卷积的等效感受野：</p>
+                <div id="s4-formula"></div>
+            </div>
+
+            <div class="viz-box mt-2">
+                <div class="viz-box-title">快速参考：常见配置的感受野与参数量</div>
+                <div class="matrix-container" style="max-height:320px;">
+                    <table class="matrix-table" style="width:100%;">
+                        <thead>
+                            <tr>
+                                <th style="width:auto; text-align:left; padding:0.5rem 1rem;">配置</th>
+                                <th>感受野</th>
+                                <th>参数量 (C=64)</th>
+                                <th>非线性次数</th>
+                                <th>参数比例</th>
+                            </tr>
+                        </thead>
+                        <tbody id="s4-ref-table"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="info-box mt-2">
+                <p>
+                    <strong>设计启示：</strong>现代网络（如 VGGNet、ResNet）几乎全部使用 3x3 卷积核堆叠。
+                    这不仅减少了参数量，还因为多层非线性激活增强了网络的表达能力。
+                    唯一的例外是首层有时使用较大的卷积核（如 ResNet 的 7x7）来快速降采样。
+                </p>
+            </div>
+        </section>
+    </div>
+
+    <script>
+    /* ================================================================
+       Section 1: 什么是感受野 — Multi-layer grid with click interaction
+       ================================================================ */
+    const S1 = (() => {
+        let numLayers = 3;
+        let stride = 1;
+        const kernelSize = 3;
+        const inputSize = 11;
+
+        function computeLayerSizes() {
+            const sizes = [inputSize];
+            for (let l = 0; l < numLayers; l++) {
+                const prev = sizes[sizes.length - 1];
+                const out = Math.floor((prev - kernelSize) / stride) + 1;
+                if (out < 1) break;
+                sizes.push(out);
+            }
+            return sizes;
+        }
+
+        function computeRF() {
+            let rf = 1;
+            for (let l = 0; l < numLayers; l++) {
+                rf = rf + (kernelSize - 1) * Math.pow(stride, l);
+            }
+            return rf;
+        }
+
+        // Which input pixels does output neuron (oy, ox) depend on?
+        function traceBack(oy, ox, layerSizes) {
+            // For each layer, compute the range of cells that contribute
+            const ranges = [];
+            // Start from output layer
+            let rowMin = oy, rowMax = oy, colMin = ox, colMax = ox;
+
+            for (let l = layerSizes.length - 1; l >= 1; l--) {
+                ranges.unshift({ rowMin, rowMax, colMin, colMax, layer: l });
+                // Map back through conv
+                const newRowMin = rowMin * stride;
+                const newRowMax = rowMax * stride + (kernelSize - 1);
+                const newColMin = colMin * stride;
+                const newColMax = colMax * stride + (kernelSize - 1);
+                rowMin = Math.max(0, newRowMin);
+                rowMax = Math.min(layerSizes[l - 1] - 1, newRowMax);
+                colMin = Math.max(0, newColMin);
+                colMax = Math.min(layerSizes[l - 1] - 1, newColMax);
+            }
+            ranges.unshift({ rowMin, rowMax, colMin, colMax, layer: 0 });
+            return ranges;
+        }
+
+        function createGrid(size, layerIndex, totalLayers) {
+            const wrap = document.createElement('div');
+            wrap.className = 'grid-wrap';
+
+            const label = document.createElement('div');
+            label.className = 'grid-label';
+            if (layerIndex === 0) label.textContent = `输入层 (${size}x${size})`;
+            else if (layerIndex === totalLayers - 1) label.textContent = `输出层 (${size}x${size})`;
+            else label.textContent = `隐藏层${layerIndex} (${size}x${size})`;
+            wrap.appendChild(label);
+
+            const grid = document.createElement('div');
+            grid.className = 'pixel-grid';
+            grid.style.gridTemplateColumns = `repeat(${size}, 28px)`;
+            grid.dataset.layer = layerIndex;
+
+            const cellSize = size > 9 ? 22 : 28;
+            grid.style.gridTemplateColumns = `repeat(${size}, ${cellSize}px)`;
+
+            for (let r = 0; r < size; r++) {
+                for (let c = 0; c < size; c++) {
+                    const cell = document.createElement('div');
+                    cell.className = 'cell';
+                    cell.style.width = cellSize + 'px';
+                    cell.style.height = cellSize + 'px';
+                    cell.dataset.row = r;
+                    cell.dataset.col = c;
+
+                    if (layerIndex === totalLayers - 1) {
+                        cell.addEventListener('click', () => handleOutputClick(r, c));
+                        cell.style.cursor = 'pointer';
+                    }
+                    grid.appendChild(cell);
+                }
+            }
+            wrap.appendChild(grid);
+            return wrap;
+        }
+
+        function handleOutputClick(row, col) {
+            const container = document.getElementById('s1-layer-viz');
+            const layerSizes = computeLayerSizes();
+            const ranges = traceBack(row, col, layerSizes);
+
+            // Clear all highlights
+            container.querySelectorAll('.cell').forEach(c => {
+                c.classList.remove('highlighted', 'selected', 'rf-highlight');
+            });
+
+            // Apply highlights
+            const grids = container.querySelectorAll('.pixel-grid');
+            ranges.forEach((range, idx) => {
+                const grid = grids[idx];
+                if (!grid) return;
+                const size = layerSizes[idx];
+                for (let r = range.rowMin; r <= range.rowMax; r++) {
+                    for (let c = range.colMin; c <= range.colMax; c++) {
+                        const cellIdx = r * size + c;
+                        const cell = grid.children[cellIdx];
+                        if (cell) {
+                            if (idx === 0) cell.classList.add('rf-highlight');
+                            else if (idx === ranges.length - 1) cell.classList.add('selected');
+                            else cell.classList.add('highlighted');
+                        }
+                    }
+                }
+            });
+
+            const rf = computeRF();
+            const inputRF = ranges[0];
+            const actualW = inputRF.colMax - inputRF.colMin + 1;
+            const actualH = inputRF.rowMax - inputRF.rowMin + 1;
+            document.getElementById('rf-result-text').innerHTML =
+                `输出层 (${row}, ${col}) 的感受野：<strong>${actualW}x${actualH}</strong> 像素` +
+                `<br>理论 RF = <strong>${rf}</strong>（K=${kernelSize}, S=${stride}, ${numLayers}层）`;
+        }
+
+        function render() {
+            const container = document.getElementById('s1-layer-viz');
+            container.innerHTML = '';
+            const layerSizes = computeLayerSizes();
+
+            for (let i = 0; i < layerSizes.length; i++) {
+                if (i > 0) {
+                    const arrow = document.createElement('div');
+                    arrow.className = 'layer-arrow';
+                    arrow.textContent = '\u2192';
+                    container.appendChild(arrow);
+                }
+                container.appendChild(createGrid(layerSizes[i], i, layerSizes.length));
+            }
+
+            // Update button states
+            document.querySelectorAll('#sec-what-is-rf [data-layers]').forEach(b => {
+                b.classList.toggle('active', parseInt(b.dataset.layers) === numLayers);
+            });
+            document.querySelectorAll('#sec-what-is-rf [data-stride]').forEach(b => {
+                b.classList.toggle('active', parseInt(b.dataset.stride) === stride);
+            });
+
+            document.getElementById('rf-result-text').textContent = '点击右侧输出层的神经元查看结果';
+        }
+
+        function setLayers(n) { numLayers = n; render(); }
+        function setStride(s) { stride = s; render(); }
+
+        return { render, setLayers, setStride };
+    })();
+
+    /* ================================================================
+       Section 2: 逐层感受野扩大 — Add layers interactively
+       ================================================================ */
+    const S2 = (() => {
+        let layers = []; // { kernel, stride }
+        const maxInputDisplay = 21;
+
+        function computeRF() {
+            let rf = 1;
+            for (let l = 0; l < layers.length; l++) {
+                let strideProduct = 1;
+                for (let i = 0; i < l; i++) {
+                    strideProduct *= layers[i].stride;
+                }
+                rf += (layers[l].kernel - 1) * strideProduct;
+            }
+            return rf;
+        }
+
+        function addLayer() {
+            const k = parseInt(document.getElementById('s2-kernel').value);
+            const s = parseInt(document.getElementById('s2-stride').value);
+            if (layers.length >= 8) return;
+            layers.push({ kernel: k, stride: s });
+            render();
+        }
+
+        function removeLayer() {
+            if (layers.length === 0) return;
+            layers.pop();
+            render();
+        }
+
+        function reset() {
+            layers = [];
+            render();
+        }
+
+        function renderGrid(rf) {
+            const container = document.getElementById('s2-grid-container');
+            container.innerHTML = '';
+
+            const gridSize = Math.max(rf + 4, 9);
+            const displaySize = Math.min(gridSize, maxInputDisplay);
+            const cellPx = displaySize > 15 ? 18 : displaySize > 11 ? 22 : 28;
+
+            const wrap = document.createElement('div');
+            wrap.className = 'grid-wrap';
+
+            const label = document.createElement('div');
+            label.className = 'grid-label';
+            label.textContent = `输入层 (${displaySize}x${displaySize})`;
+            wrap.appendChild(label);
+
+            const grid = document.createElement('div');
+            grid.className = 'pixel-grid';
+            grid.style.gridTemplateColumns = `repeat(${displaySize}, ${cellPx}px)`;
+
+            const offset = Math.floor((displaySize - rf) / 2);
+
+            for (let r = 0; r < displaySize; r++) {
+                for (let c = 0; c < displaySize; c++) {
+                    const cell = document.createElement('div');
+                    cell.className = 'cell';
+                    cell.style.width = cellPx + 'px';
+                    cell.style.height = cellPx + 'px';
+
+                    if (rf > 0 && r >= offset && r < offset + rf && c >= offset && c < offset + rf) {
+                        cell.classList.add('rf-highlight');
+                        // Gaussian-like intensity for visual appeal
+                        const dr = r - (offset + rf / 2);
+                        const dc = c - (offset + rf / 2);
+                        const dist = Math.sqrt(dr * dr + dc * dc) / (rf / 2);
+                        const alpha = 0.15 + 0.4 * Math.exp(-dist * dist);
+                        cell.style.background = `rgba(79, 195, 247, ${alpha})`;
+                    }
+                    grid.appendChild(cell);
+                }
+            }
+            wrap.appendChild(grid);
+            container.appendChild(wrap);
+        }
+
+        function renderLayerCards() {
+            const container = document.getElementById('s2-layer-cards');
+            container.innerHTML = '';
+
+            // Input card
+            const inputCard = document.createElement('div');
+            inputCard.className = 'layer-card-mini';
+            inputCard.innerHTML = `<div class="layer-name">输入</div><div class="layer-info">RF=1</div>`;
+            container.appendChild(inputCard);
+
+            let rf = 1;
+            for (let l = 0; l < layers.length; l++) {
+                const arrow = document.createElement('div');
+                arrow.className = 'arrow-between';
+                arrow.textContent = '\u2192';
+                container.appendChild(arrow);
+
+                let strideProduct = 1;
+                for (let i = 0; i < l; i++) strideProduct *= layers[i].stride;
+                rf += (layers[l].kernel - 1) * strideProduct;
+
+                const card = document.createElement('div');
+                card.className = 'layer-card-mini';
+                card.innerHTML = `
+                    <div class="layer-name">Conv ${l + 1}</div>
+                    <div class="layer-info">K=${layers[l].kernel} S=${layers[l].stride}</div>
+                    <div class="layer-rf">RF=${rf}</div>
+                `;
+                container.appendChild(card);
+            }
+        }
+
+        function renderLayerList() {
+            const container = document.getElementById('s2-layer-list');
+            if (layers.length === 0) {
+                container.innerHTML = '<p class="text-sm text-muted">尚未添加任何卷积层</p>';
+                return;
+            }
+            let html = '<div style="display:flex; flex-direction:column; gap:0.3rem;">';
+            let rf = 1;
+            for (let l = 0; l < layers.length; l++) {
+                let strideProduct = 1;
+                for (let i = 0; i < l; i++) strideProduct *= layers[i].stride;
+                const delta = (layers[l].kernel - 1) * strideProduct;
+                rf += delta;
+                html += `<div class="text-sm" style="color:var(--text-secondary);">
+                    <code>Layer ${l + 1}</code>: K=${layers[l].kernel}, S=${layers[l].stride}
+                    &rarr; RF += ${delta} = <strong style="color:var(--accent-green)">${rf}</strong>
+                </div>`;
+            }
+            html += '</div>';
+            container.innerHTML = html;
+        }
+
+        function render() {
+            const rf = computeRF();
+            document.getElementById('s2-rf-display').textContent = `RF = ${rf}`;
+            renderGrid(rf);
+            renderLayerCards();
+            renderLayerList();
+        }
+
+        return { addLayer, removeLayer, reset, render };
+    })();
+
+    /* ================================================================
+       Section 3: 有效感受野 — Theoretical vs Effective RF heatmaps
+       ================================================================ */
+    const S3 = (() => {
+        function computeTheoreticalRF(depth) {
+            // Stack of 3x3 conv, stride 1
+            return 1 + 2 * depth;
+        }
+
+        function drawHeatmap(canvasId, size, weights) {
+            const canvas = document.getElementById(canvasId);
+            const ctx = canvas.getContext('2d');
+            const w = canvas.width;
+            const h = canvas.height;
+            ctx.clearRect(0, 0, w, h);
+
+            const cellW = w / size;
+            const cellH = h / size;
+
+            let maxW = 0;
+            for (let r = 0; r < size; r++)
+                for (let c = 0; c < size; c++)
+                    if (weights[r][c] > maxW) maxW = weights[r][c];
+            if (maxW === 0) maxW = 1;
+
+            for (let r = 0; r < size; r++) {
+                for (let c = 0; c < size; c++) {
+                    const t = weights[r][c] / maxW;
+                    // Color: dark blue -> cyan -> green -> yellow -> red
+                    let red, green, blue;
+                    if (t < 0.25) {
+                        const s = t / 0.25;
+                        red = 0; green = Math.round(100 * s); blue = Math.round(80 + 100 * s);
+                    } else if (t < 0.5) {
+                        const s = (t - 0.25) / 0.25;
+                        red = 0; green = Math.round(100 + 155 * s); blue = Math.round(180 * (1 - s));
+                    } else if (t < 0.75) {
+                        const s = (t - 0.5) / 0.25;
+                        red = Math.round(255 * s); green = 255; blue = 0;
+                    } else {
+                        const s = (t - 0.75) / 0.25;
+                        red = 255; green = Math.round(255 * (1 - s)); blue = 0;
+                    }
+                    ctx.fillStyle = `rgb(${red}, ${green}, ${blue})`;
+                    ctx.fillRect(c * cellW, r * cellH, cellW, cellH);
+
+                    // Grid lines
+                    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+                    ctx.lineWidth = 0.5;
+                    ctx.strokeRect(c * cellW, r * cellH, cellW, cellH);
+                }
+            }
+
+            // Border
+            ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(0, 0, w, h);
+        }
+
+        function render() {
+            const depth = parseInt(document.getElementById('s3-depth').value);
+            const sigmaRatio = parseInt(document.getElementById('s3-sigma').value) / 100;
+
+            document.getElementById('s3-depth-val').textContent = depth;
+            document.getElementById('s3-sigma-val').textContent = sigmaRatio.toFixed(2);
+
+            const rf = computeTheoreticalRF(depth);
+            const displaySize = rf;
+
+            // Theoretical: uniform weight
+            const theoWeights = [];
+            for (let r = 0; r < displaySize; r++) {
+                const row = [];
+                for (let c = 0; c < displaySize; c++) {
+                    row.push(1);
+                }
+                theoWeights.push(row);
+            }
+
+            // Effective: Gaussian weights
+            const center = (displaySize - 1) / 2;
+            const sigma = sigmaRatio * (displaySize / 2);
+            const effWeights = [];
+            for (let r = 0; r < displaySize; r++) {
+                const row = [];
+                for (let c = 0; c < displaySize; c++) {
+                    const dx = r - center;
+                    const dy = c - center;
+                    const w = Math.exp(-(dx * dx + dy * dy) / (2 * sigma * sigma));
+                    row.push(w);
+                }
+                effWeights.push(row);
+            }
+
+            // Compute effective RF size (where weight > 0.05 of max)
+            const threshold = 0.05;
+            let minR = displaySize, maxR = 0, minC = displaySize, maxC = 0;
+            for (let r = 0; r < displaySize; r++) {
+                for (let c = 0; c < displaySize; c++) {
+                    if (effWeights[r][c] > threshold) {
+                        minR = Math.min(minR, r);
+                        maxR = Math.max(maxR, r);
+                        minC = Math.min(minC, c);
+                        maxC = Math.max(maxC, c);
+                    }
+                }
+            }
+            const effSize = Math.max(maxR - minR + 1, maxC - minC + 1);
+
+            drawHeatmap('s3-theoretical', displaySize, theoWeights);
+            drawHeatmap('s3-effective', displaySize, effWeights);
+
+            document.getElementById('s3-theo-size').textContent = `RF = ${rf}`;
+            document.getElementById('s3-eff-size').textContent = `有效 RF ~${effSize}`;
+
+            const ratio = ((effSize / rf) * 100).toFixed(0);
+            document.getElementById('s3-explanation').innerHTML =
+                `${depth} 层 3x3 卷积 (stride=1)：理论 RF = <strong>${rf}</strong>，` +
+                `有效 RF ≈ <strong>${effSize}</strong>（约占理论 RF 的 ${ratio}%）。` +
+                `<br>sigma = ${sigmaRatio.toFixed(2)} &times; RF/2，中心贡献远高于边缘。`;
+
+            // Draw cross-section profile chart
+            drawProfile(displaySize, sigma, center);
+        }
+
+        function drawProfile(size, sigma, center) {
+            const canvas = document.getElementById('s3-profile');
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d');
+            const w = canvas.width;
+            const h = canvas.height;
+            ctx.clearRect(0, 0, w, h);
+
+            const pad = { top: 15, bottom: 25, left: 40, right: 15 };
+            const plotW = w - pad.left - pad.right;
+            const plotH = h - pad.top - pad.bottom;
+
+            // Background
+            ctx.fillStyle = 'rgba(22, 33, 62, 0.6)';
+            ctx.fillRect(0, 0, w, h);
+
+            // Axes
+            ctx.strokeStyle = 'rgba(168, 168, 184, 0.3)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(pad.left, pad.top);
+            ctx.lineTo(pad.left, pad.top + plotH);
+            ctx.lineTo(pad.left + plotW, pad.top + plotH);
+            ctx.stroke();
+
+            // Y-axis labels
+            ctx.fillStyle = 'rgba(168, 168, 184, 0.6)';
+            ctx.font = '10px "JetBrains Mono", monospace';
+            ctx.textAlign = 'right';
+            ctx.fillText('1.0', pad.left - 5, pad.top + 4);
+            ctx.fillText('0.5', pad.left - 5, pad.top + plotH / 2 + 4);
+            ctx.fillText('0', pad.left - 5, pad.top + plotH + 4);
+
+            // X-axis label
+            ctx.textAlign = 'center';
+            ctx.fillText('像素位置', pad.left + plotW / 2, h - 3);
+
+            // Grid lines
+            ctx.strokeStyle = 'rgba(168, 168, 184, 0.1)';
+            ctx.setLineDash([3, 3]);
+            for (let i = 1; i <= 4; i++) {
+                const y = pad.top + (plotH * i) / 5;
+                ctx.beginPath();
+                ctx.moveTo(pad.left, y);
+                ctx.lineTo(pad.left + plotW, y);
+                ctx.stroke();
+            }
+            ctx.setLineDash([]);
+
+            // Theoretical (uniform) line
+            ctx.strokeStyle = '#4fc3f7';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            for (let i = 0; i < size; i++) {
+                const x = pad.left + (i / (size - 1)) * plotW;
+                const y = pad.top + plotH * (1 - 1);
+                if (i === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+
+            // Fill under theoretical
+            ctx.fillStyle = 'rgba(79, 195, 247, 0.08)';
+            ctx.beginPath();
+            ctx.moveTo(pad.left, pad.top);
+            ctx.lineTo(pad.left + plotW, pad.top);
+            ctx.lineTo(pad.left + plotW, pad.top + plotH);
+            ctx.lineTo(pad.left, pad.top + plotH);
+            ctx.closePath();
+            ctx.fill();
+
+            // Effective (Gaussian) curve
+            ctx.strokeStyle = '#ffab40';
+            ctx.lineWidth = 2.5;
+            ctx.beginPath();
+            const gaussPoints = [];
+            for (let i = 0; i < size; i++) {
+                const dx = i - center;
+                const gVal = Math.exp(-(dx * dx) / (2 * sigma * sigma));
+                gaussPoints.push(gVal);
+                const x = pad.left + (i / (size - 1)) * plotW;
+                const y = pad.top + plotH * (1 - gVal);
+                if (i === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+
+            // Fill under Gaussian
+            ctx.fillStyle = 'rgba(255, 171, 64, 0.1)';
+            ctx.beginPath();
+            ctx.moveTo(pad.left, pad.top + plotH);
+            for (let i = 0; i < size; i++) {
+                const x = pad.left + (i / (size - 1)) * plotW;
+                const y = pad.top + plotH * (1 - gaussPoints[i]);
+                ctx.lineTo(x, y);
+            }
+            ctx.lineTo(pad.left + plotW, pad.top + plotH);
+            ctx.closePath();
+            ctx.fill();
+        }
+
+        return { render };
+    })();
+
+    /* ================================================================
+       Section 4: 感受野与网络设计 — Stacked 3x3 vs single 5x5/7x7
+       ================================================================ */
+    const S4 = (() => {
+        function drawStackedConv(canvasId, numLayers, kernelSize) {
+            const canvas = document.getElementById(canvasId);
+            const ctx = canvas.getContext('2d');
+            const w = canvas.width;
+            const h = canvas.height;
+            ctx.clearRect(0, 0, w, h);
+
+            if (numLayers === 1) {
+                // Single large kernel
+                const kPx = 80;
+                const x = (w - kPx) / 2;
+                const y = (h - kPx) / 2;
+                ctx.strokeStyle = '#ffab40';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(x, y, kPx, kPx);
+                ctx.fillStyle = 'rgba(255, 171, 64, 0.1)';
+                ctx.fillRect(x, y, kPx, kPx);
+
+                ctx.fillStyle = '#ffab40';
+                ctx.font = '14px "JetBrains Mono", monospace';
+                ctx.textAlign = 'center';
+                ctx.fillText(`${kernelSize}x${kernelSize}`, w / 2, h / 2 + 5);
+            } else {
+                // Stacked small kernels
+                const kPx = 50;
+                const gap = 20;
+                const totalW = numLayers * kPx + (numLayers - 1) * gap;
+                const startX = (w - totalW) / 2;
+                const y = (h - kPx) / 2;
+
+                for (let i = 0; i < numLayers; i++) {
+                    const x = startX + i * (kPx + gap);
+                    const color = i % 2 === 0 ? '#4fc3f7' : '#16c79a';
+                    ctx.strokeStyle = color;
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(x, y, kPx, kPx);
+                    ctx.fillStyle = color.replace(')', ', 0.1)').replace('rgb', 'rgba');
+                    if (color.startsWith('#')) {
+                        ctx.fillStyle = `rgba(${parseInt(color.slice(1,3),16)}, ${parseInt(color.slice(3,5),16)}, ${parseInt(color.slice(5,7),16)}, 0.1)`;
+                    }
+                    ctx.fillRect(x, y, kPx, kPx);
+
+                    ctx.fillStyle = color;
+                    ctx.font = '12px "JetBrains Mono", monospace';
+                    ctx.textAlign = 'center';
+                    ctx.fillText(`3x3`, x + kPx / 2, y + kPx / 2 + 4);
+
+                    // Arrow between
+                    if (i < numLayers - 1) {
+                        const ax = x + kPx + 4;
+                        const ay = h / 2;
+                        ctx.beginPath();
+                        ctx.moveTo(ax, ay);
+                        ctx.lineTo(ax + gap - 8, ay);
+                        ctx.strokeStyle = 'rgba(168,168,184,0.5)';
+                        ctx.lineWidth = 1.5;
+                        ctx.stroke();
+                        // Arrowhead
+                        ctx.beginPath();
+                        ctx.moveTo(ax + gap - 8, ay - 4);
+                        ctx.lineTo(ax + gap - 2, ay);
+                        ctx.lineTo(ax + gap - 8, ay + 4);
+                        ctx.fillStyle = 'rgba(168,168,184,0.5)';
+                        ctx.fill();
+                    }
+                }
+            }
+        }
+
+        function formatNumber(n) {
+            if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+            if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+            return n.toString();
+        }
+
+        function renderMetrics(containerId, metrics, isWinner) {
+            const container = document.getElementById(containerId);
+            let html = '';
+            metrics.forEach(m => {
+                const valClass = m.worse ? 'value worse' : 'value';
+                html += `<div class="metric">
+                    <span class="label">${m.label}</span>
+                    <span class="${valClass}">${m.value}</span>
+                </div>`;
+            });
+            container.innerHTML = html;
+        }
+
+        function update() {
+            const C = parseInt(document.getElementById('s4-channels').value);
+            const H = parseInt(document.getElementById('s4-fmap').value);
+
+            // 2x 3x3 vs 1x 5x5
+            const params2x3 = 2 * (3 * 3 * C * C);
+            const params5 = 5 * 5 * C * C;
+            const flops2x3 = 2 * (3 * 3 * C * C * H * H);
+            const flops5 = 5 * 5 * C * C * H * H;
+            const rf2x3 = 5;
+            const rf5 = 5;
+
+            drawStackedConv('s4-canvas-stacked', 2, 3);
+            drawStackedConv('s4-canvas-single', 1, 5);
+
+            renderMetrics('s4-metrics-stacked', [
+                { label: '感受野', value: `${rf2x3}x${rf2x3}` },
+                { label: '参数量', value: formatNumber(params2x3) },
+                { label: '计算量 (FLOPs)', value: formatNumber(flops2x3) },
+                { label: '非线性层数', value: '2' },
+                { label: '参数节省', value: `${((1 - params2x3 / params5) * 100).toFixed(0)}%` },
+            ]);
+
+            renderMetrics('s4-metrics-single', [
+                { label: '感受野', value: `${rf5}x${rf5}` },
+                { label: '参数量', value: formatNumber(params5), worse: params5 > params2x3 },
+                { label: '计算量 (FLOPs)', value: formatNumber(flops5), worse: flops5 > flops2x3 },
+                { label: '非线性层数', value: '1', worse: true },
+                { label: '参数节省', value: '基准' },
+            ]);
+
+            // 3x 3x3 vs 1x 7x7
+            const params3x3 = 3 * (3 * 3 * C * C);
+            const params7 = 7 * 7 * C * C;
+            const flops3x3 = 3 * (3 * 3 * C * C * H * H);
+            const flops7 = 7 * 7 * C * C * H * H;
+
+            renderMetrics('s4-metrics-3stack', [
+                { label: '感受野', value: '7x7' },
+                { label: '参数量', value: formatNumber(params3x3) },
+                { label: '计算量 (FLOPs)', value: formatNumber(flops3x3) },
+                { label: '非线性层数', value: '3' },
+                { label: '参数节省', value: `${((1 - params3x3 / params7) * 100).toFixed(0)}%` },
+            ]);
+
+            renderMetrics('s4-metrics-7x7', [
+                { label: '感受野', value: '7x7' },
+                { label: '参数量', value: formatNumber(params7), worse: true },
+                { label: '计算量 (FLOPs)', value: formatNumber(flops7), worse: true },
+                { label: '非线性层数', value: '1', worse: true },
+                { label: '参数节省', value: '基准' },
+            ]);
+
+            // Reference table
+            renderRefTable(C);
+        }
+
+        function renderRefTable(C) {
+            const tbody = document.getElementById('s4-ref-table');
+            if (!tbody) return;
+
+            const configs = [
+                { name: '1x 3x3', n: 1, k: 3, rf: 3 },
+                { name: '2x 3x3', n: 2, k: 3, rf: 5 },
+                { name: '1x 5x5', n: 1, k: 5, rf: 5 },
+                { name: '3x 3x3', n: 3, k: 3, rf: 7 },
+                { name: '1x 7x7', n: 1, k: 7, rf: 7 },
+                { name: '4x 3x3', n: 4, k: 3, rf: 9 },
+                { name: '1x 9x9', n: 1, k: 9, rf: 9 },
+                { name: '5x 3x3', n: 5, k: 3, rf: 11 },
+                { name: '1x 11x11', n: 1, k: 11, rf: 11 },
+            ];
+
+            let html = '';
+            const baseParams = {};
+
+            // Group by RF for ratio comparison
+            configs.forEach(cfg => {
+                const params = cfg.n * (cfg.k * cfg.k * C * C);
+                if (!baseParams[cfg.rf] || cfg.k > 3) {
+                    if (cfg.k > 3 || !baseParams[cfg.rf]) baseParams[cfg.rf] = params;
+                }
+            });
+
+            configs.forEach(cfg => {
+                const params = cfg.n * (cfg.k * cfg.k * C * C);
+                const singleKernelParams = cfg.rf * cfg.rf * C * C;
+                const ratioVsSingle = cfg.k === 3 && cfg.n > 1
+                    ? ((1 - params / singleKernelParams) * 100).toFixed(0) + '% 节省'
+                    : (cfg.k > 3 ? '基准' : '-');
+                const rowStyle = cfg.k === 3 ? 'background:rgba(22,199,154,0.05);' : '';
+
+                html += `<tr style="${rowStyle}">
+                    <td style="text-align:left; padding:0.4rem 1rem; font-size:0.85rem;">
+                        <span style="color:${cfg.k === 3 ? 'var(--accent-green)' : 'var(--accent-orange)'}; font-weight:600;">${cfg.name}</span>
+                    </td>
+                    <td style="text-align:center; font-family:var(--font-mono); font-size:0.8rem;">${cfg.rf}x${cfg.rf}</td>
+                    <td style="text-align:center; font-family:var(--font-mono); font-size:0.8rem;">${formatNumber(params)}</td>
+                    <td style="text-align:center; font-family:var(--font-mono); font-size:0.8rem;">${cfg.n}</td>
+                    <td style="text-align:center; font-size:0.8rem; color:${cfg.k === 3 && cfg.n > 1 ? 'var(--accent-green)' : 'var(--text-muted)'};">${ratioVsSingle}</td>
+                </tr>`;
+            });
+
+            tbody.innerHTML = html;
+        }
+
+        return { update };
+    })();
+
+    /* ================================================================
+       Initialization
+       ================================================================ */
+    document.addEventListener('DOMContentLoaded', () => {
+        // Render KaTeX formulas
+        if (typeof renderMathInElement === 'function') {
+            renderMathInElement(document.body, {
+                delimiters: [
+                    { left: '$$', right: '$$', display: true },
+                    { left: '$', right: '$', display: false },
+                ],
+            });
+        }
+
+        // Section 1 formula
+        const formulaEl = document.getElementById('rf-formula');
+        if (formulaEl && typeof katex !== 'undefined') {
+            katex.render(
+                'RF_l = RF_{l-1} + (K_l - 1) \\times \\prod_{i=1}^{l-1} S_i',
+                formulaEl,
+                { displayMode: true, throwOnError: false }
+            );
+        }
+
+        // Section 4 formula
+        const s4FormulaEl = document.getElementById('s4-formula');
+        if (s4FormulaEl && typeof katex !== 'undefined') {
+            katex.render(
+                'RF = 1 + 2n \\quad (n \\text{ 个 } 3{\\times}3 \\text{ 卷积, stride}=1)',
+                s4FormulaEl,
+                { displayMode: true, throwOnError: false }
+            );
+        }
+
+        // Initialize all sections
+        S1.render();
+        S2.render();
+        S3.render();
+        S4.update();
+
+        // Section 3 event listeners
+        document.getElementById('s3-depth').addEventListener('input', S3.render);
+        document.getElementById('s3-sigma').addEventListener('input', S3.render);
+    });
+
+    // Fallback: if KaTeX loads after DOMContentLoaded
+    document.addEventListener('DOMContentLoaded', () => {
+        const checkKatex = setInterval(() => {
+            if (typeof katex !== 'undefined') {
+                clearInterval(checkKatex);
+                const formulaEl = document.getElementById('rf-formula');
+                if (formulaEl && formulaEl.children.length === 0) {
+                    katex.render(
+                        'RF_l = RF_{l-1} + (K_l - 1) \\times \\prod_{i=1}^{l-1} S_i',
+                        formulaEl,
+                        { displayMode: true, throwOnError: false }
+                    );
+                }
+                const s4FormulaEl = document.getElementById('s4-formula');
+                if (s4FormulaEl && s4FormulaEl.children.length === 0) {
+                    katex.render(
+                        'RF = 1 + 2n \\quad (n \\text{ 个 } 3{\\times}3 \\text{ 卷积, stride}=1)',
+                        s4FormulaEl,
+                        { displayMode: true, throwOnError: false }
+                    );
+                }
+            }
+        }, 200);
+        setTimeout(() => clearInterval(checkKatex), 5000);
+    });
+    </script>
+</body>
+</html>

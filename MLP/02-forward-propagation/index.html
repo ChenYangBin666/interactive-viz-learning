@@ -1,0 +1,1404 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>前向传播 — Forward Propagation | MLP</title>
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+    <style>
+        /* ===== Page-specific styles ===== */
+        .page-intro {
+            margin-bottom: 2rem;
+        }
+        .page-intro p {
+            max-width: 720px;
+        }
+
+        /* Canvas containers */
+        canvas {
+            display: block;
+            border-radius: var(--radius-md);
+        }
+        .canvas-wrap {
+            position: relative;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+        }
+        .canvas-wrap canvas {
+            width: 100%;
+            height: 100%;
+        }
+
+        /* Controls bar */
+        .controls-bar {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+            margin-top: 0.75rem;
+        }
+
+        /* Matrix display */
+        .matrix-box {
+            display: inline-flex;
+            flex-direction: column;
+            align-items: center;
+            margin: 0.25rem;
+            vertical-align: middle;
+        }
+        .matrix-box .label {
+            font-size: 0.72rem;
+            color: var(--text-muted);
+            margin-bottom: 0.2rem;
+            font-family: var(--font-mono);
+        }
+        .matrix-grid {
+            display: inline-grid;
+            gap: 1px;
+            background: var(--border-color);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .matrix-grid .cell {
+            min-width: 50px;
+            padding: 4px 6px;
+            text-align: center;
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            transition: background 0.3s, color 0.3s;
+        }
+        .matrix-grid .cell.hl-row {
+            background: rgba(79, 195, 247, 0.15);
+        }
+        .matrix-grid .cell.hl-col {
+            background: rgba(255, 171, 64, 0.15);
+        }
+        .matrix-grid .cell.hl-both {
+            background: rgba(22, 199, 154, 0.25);
+            color: var(--accent-green);
+        }
+        .matrix-grid .cell.hl-result {
+            background: rgba(22, 199, 154, 0.3);
+            color: #fff;
+            font-weight: 700;
+        }
+
+        .matrix-eq {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+            justify-content: center;
+            padding: 1rem 0;
+            overflow-x: auto;
+        }
+        .matrix-eq .op {
+            font-size: 1.2rem;
+            color: var(--text-muted);
+            font-family: var(--font-mono);
+            padding: 0 0.25rem;
+        }
+
+        /* Section 3 — layer compute */
+        .layer-panel {
+            display: flex;
+            gap: 1rem;
+            flex-wrap: wrap;
+            margin-top: 1rem;
+        }
+        .layer-card {
+            flex: 1;
+            min-width: 180px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1rem;
+        }
+        .layer-card h4 {
+            margin-bottom: 0.5rem;
+            font-size: 0.9rem;
+        }
+        .layer-card .values {
+            display: flex;
+            flex-direction: column;
+            gap: 0.3rem;
+        }
+        .layer-card .val-row {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+        }
+        .layer-card .val-row .vname {
+            color: var(--text-muted);
+            min-width: 24px;
+        }
+        .layer-card .val-row .vbox {
+            flex: 1;
+            padding: 3px 6px;
+            border-radius: 4px;
+            text-align: center;
+            transition: background 0.3s;
+        }
+        .editable-weight {
+            cursor: pointer;
+            border: 1px dashed transparent;
+            border-radius: 3px;
+            padding: 1px 4px;
+            transition: border-color 0.2s;
+        }
+        .editable-weight:hover {
+            border-color: var(--accent-orange);
+        }
+        .weight-input {
+            width: 60px;
+            background: var(--bg-primary);
+            border: 1px solid var(--accent-green);
+            color: var(--accent-green);
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            padding: 1px 4px;
+            border-radius: 3px;
+            text-align: center;
+        }
+
+        /* Section 4 — batch */
+        .batch-streams {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 0.5rem;
+            margin-top: 0.75rem;
+        }
+        .stream-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            padding: 0.75rem;
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            transition: border-color 0.3s;
+        }
+        .stream-card.active-stream {
+            border-color: var(--accent-green);
+        }
+        .stream-card .stream-label {
+            font-size: 0.7rem;
+            color: var(--accent-blue);
+            margin-bottom: 0.3rem;
+            font-weight: 600;
+        }
+        .stream-val {
+            color: var(--text-secondary);
+            margin: 2px 0;
+        }
+        .stream-val span {
+            color: var(--accent-green);
+        }
+
+        /* Formula highlight */
+        .formula-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1rem 1.5rem;
+            margin: 1rem 0;
+            text-align: center;
+        }
+
+        /* Info annotation */
+        .step-info {
+            margin-top: 0.5rem;
+            padding: 0.6rem 1rem;
+            background: rgba(79, 195, 247, 0.06);
+            border-left: 3px solid var(--accent-blue);
+            border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+        }
+        .step-info strong {
+            color: var(--accent-green);
+        }
+
+        /* Activation selector */
+        .act-selector {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.85rem;
+        }
+        .act-selector select {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 0.3rem 0.6rem;
+            border-radius: var(--radius-sm);
+            font-family: inherit;
+            font-size: 0.85rem;
+            cursor: pointer;
+        }
+
+        /* Batch matrix display */
+        .batch-matrix-row {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+            justify-content: center;
+            margin: 0.75rem 0;
+        }
+
+        @media (max-width: 768px) {
+            .batch-streams {
+                grid-template-columns: 1fr 1fr;
+            }
+            .matrix-eq {
+                font-size: 0.85rem;
+            }
+            .layer-panel {
+                flex-direction: column;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="page-container">
+        <!-- ===== Intro ===== -->
+        <div class="page-intro">
+            <h1>前向传播 — Forward Propagation</h1>
+            <p>前向传播是神经网络推理的核心过程：输入信号逐层流经网络，在每一层经过线性变换和非线性激活，最终产生输出。理解这一过程是掌握反向传播与梯度下降的基础。</p>
+        </div>
+
+        <!-- ===== Section 1: 信号的流动 ===== -->
+        <div class="section" id="sec-signal">
+            <div class="section-title">
+                <div class="icon">1</div>
+                <h2>信号的流动</h2>
+                <span class="badge badge-green">动画演示</span>
+            </div>
+            <p>观察输入值如何以「粒子」的形式在 2-3-2-1 网络中逐层流动。每个神经元接收加权输入、求和、加偏置后通过激活函数输出。正值粒子为绿色，负值粒子为红色，线条粗细反映权重大小。</p>
+            <div class="canvas-wrap" style="height:440px;">
+                <canvas id="cvSignal"></canvas>
+            </div>
+            <div class="controls-bar">
+                <button class="btn btn-sm" id="btnReset1" title="重置">&#x27F2; 重置</button>
+                <button class="btn btn-primary btn-sm" id="btnPlay1">&#x25B6; 播放</button>
+                <button class="btn btn-sm" id="btnStep1">&#x23ED; 单步</button>
+                <div class="slider-group" style="flex:1; max-width:200px;">
+                    <label>速度</label>
+                    <input type="range" id="speedRange" min="1" max="5" value="3">
+                </div>
+                <span class="step-label" id="stepLabel1">步骤 0/0</span>
+            </div>
+            <div class="step-info" id="signalInfo">
+                点击「播放」或「单步」开始观察信号在网络中的流动过程。
+            </div>
+        </div>
+
+        <!-- ===== Section 2: 矩阵视角 ===== -->
+        <div class="section" id="sec-matrix">
+            <div class="section-title">
+                <div class="icon">2</div>
+                <h2>矩阵视角</h2>
+                <span class="badge badge-blue">矩阵运算</span>
+            </div>
+            <p>同样的前向传播用矩阵表示更简洁高效。点击「下一层」逐层查看矩阵乘法过程，点击「动画点积」观察行列对应相乘的细节。</p>
+            <div class="formula-card" id="matFormula">
+                $$ \mathbf{a}^{(l)} = \sigma\!\big(\mathbf{W}^{(l)}\,\mathbf{a}^{(l-1)} + \mathbf{b}^{(l)}\big) $$
+            </div>
+            <div id="matVizArea" style="min-height:160px;"></div>
+            <div class="controls-bar">
+                <button class="btn btn-sm" id="btnResetMat">&#x27F2; 重置</button>
+                <button class="btn btn-primary btn-sm" id="btnNextLayer">下一层 &#x2192;</button>
+                <button class="btn btn-sm" id="btnAnimDot">动画点积</button>
+                <span class="step-label" id="matStepLabel">第 0 层</span>
+            </div>
+            <div class="step-info" id="matInfo">
+                矩阵乘法将上一层所有激活值同时进行线性组合，然后加偏置、过激活函数。
+            </div>
+        </div>
+
+        <!-- ===== Section 3: 逐层计算 ===== -->
+        <div class="section" id="sec-layerwise">
+            <div class="section-title">
+                <div class="icon">3</div>
+                <h2>逐层计算</h2>
+                <span class="badge badge-purple">交互式</span>
+            </div>
+            <p>自己调整输入值，网络实时逐层计算。每层显示预激活值 <code>z</code>（加权和）和激活后的值 <code>a</code>（经过 $\sigma$）。点击权重值可以直接编辑，观察权重变化对输出的影响。颜色深浅表示数值大小。</p>
+            <div class="controls-bar" style="margin-bottom:0.75rem;">
+                <label class="text-sm" style="color:var(--text-secondary);">输入 x&#x2081;:</label>
+                <input type="range" id="inputX1" min="-2" max="2" step="0.1" value="0.5" style="width:120px;">
+                <span class="slider-value" id="valX1">0.50</span>
+                <label class="text-sm" style="color:var(--text-secondary); margin-left:0.75rem;">x&#x2082;:</label>
+                <input type="range" id="inputX2" min="-2" max="2" step="0.1" value="-0.3" style="width:120px;">
+                <span class="slider-value" id="valX2">-0.30</span>
+                <div class="act-selector" style="margin-left:0.75rem;">
+                    <label>激活:</label>
+                    <select id="actSelect3">
+                        <option value="sigmoid" selected>Sigmoid</option>
+                        <option value="relu">ReLU</option>
+                        <option value="tanh">Tanh</option>
+                    </select>
+                </div>
+                <button class="btn btn-sm" id="btnCompute3">计算</button>
+                <button class="btn btn-sm" id="btnResetW3">重置权重</button>
+            </div>
+            <div id="layerwiseArea"></div>
+            <div class="step-info" id="layerInfo" style="margin-top:0.75rem;">
+                拖动滑块改变输入值，观察各层数值的实时变化。点击权重数字可以手动修改。
+            </div>
+        </div>
+
+        <!-- ===== Section 4: 批量前向传播 ===== -->
+        <div class="section" id="sec-batch">
+            <div class="section-title">
+                <div class="icon">4</div>
+                <h2>批量前向传播</h2>
+                <span class="badge badge-orange">批处理</span>
+            </div>
+            <p>真实训练中，我们同时处理多个样本（mini-batch）。4 个输入并行通过网络，权重矩阵在批次中共享。每种颜色代表一个样本的数据流。</p>
+            <div class="formula-card">
+                $$ \mathbf{A}^{(l)} = \sigma\!\big(\mathbf{W}^{(l)}\,\mathbf{A}^{(l-1)} + \mathbf{b}^{(l)}\big) $$
+                <p class="text-sm text-muted" style="margin-top:0.5rem; margin-bottom:0;">其中 $\mathbf{A}$ 的每一列是一个样本，批处理等价于矩阵乘以矩阵。</p>
+            </div>
+            <div class="canvas-wrap" style="height:360px;">
+                <canvas id="cvBatch"></canvas>
+            </div>
+            <div class="controls-bar">
+                <button class="btn btn-sm" id="btnResetBatch">&#x27F2; 重置</button>
+                <button class="btn btn-primary btn-sm" id="btnPlayBatch">&#x25B6; 播放</button>
+                <button class="btn btn-sm" id="btnStepBatch">&#x23ED; 单步</button>
+                <span class="step-label" id="batchStepLabel">步骤 0/0</span>
+            </div>
+            <div id="batchDetail"></div>
+            <div class="step-info" id="batchInfo">
+                批处理利用矩阵并行计算，大幅提升 GPU 利用率。观察 4 个样本如何同时穿过每一层。
+            </div>
+        </div>
+    </div>
+
+    <script src="../shared/scripts/nav.js"></script>
+    <script src="../shared/scripts/mlp-utils.js"></script>
+    <script>
+    /* ================================================================
+       Forward Propagation — Interactive Visualization
+       ================================================================ */
+    document.addEventListener('DOMContentLoaded', () => {
+        /* KaTeX auto-render */
+        renderMathInElement(document.body, {
+            delimiters: [
+                { left: '$$', right: '$$', display: true },
+                { left: '$', right: '$', display: false }
+            ]
+        });
+
+        const { sigmoid, relu, tanh: tanhFn, vecAdd, matVecMul, dot, valueToColor } = MLPUtils;
+        const fmt = (v, d = 2) => (typeof v === 'number') ? v.toFixed(d) : '—';
+
+        /* ── Network definition (2-3-2-1) ── */
+        const ARCH = [2, 3, 2, 1];
+        const LAYER_NAMES = ['输入层', '隐藏层 1', '隐藏层 2', '输出层'];
+
+        function buildNetwork() {
+            const net = MLPUtils.createNetwork(ARCH, 42);
+            net.weights[0] = [
+                [ 0.40, -0.30],
+                [ 0.60,  0.20],
+                [-0.50,  0.70]
+            ];
+            net.biases[0] = [0.10, -0.10, 0.05];
+            net.weights[1] = [
+                [ 0.50, -0.40,  0.30],
+                [-0.60,  0.80,  0.10]
+            ];
+            net.biases[1] = [0.00, 0.10];
+            net.weights[2] = [[0.70, -0.50]];
+            net.biases[2] = [0.05];
+            return net;
+        }
+
+        let NET = buildNetwork();
+
+        /* Activation helpers */
+        function getActFn(name) {
+            switch (name) {
+                case 'sigmoid': return sigmoid;
+                case 'relu':    return relu;
+                case 'tanh':    return tanhFn;
+                default:        return sigmoid;
+            }
+        }
+
+        function forwardDetailed(net, input, actName) {
+            const actFn = getActFn(actName || 'sigmoid');
+            const layers = [{ a: input.slice(), z: null }];
+            let cur = input.slice();
+            for (let l = 0; l < net.weights.length; l++) {
+                const z = vecAdd(matVecMul(net.weights[l], cur), net.biases[l]);
+                const a = z.map(v => actFn(v));
+                layers.push({ z: z.slice(), a: a.slice() });
+                cur = a;
+            }
+            return layers;
+        }
+
+        /* Step descriptions for section 1 */
+        const STEP_DESCS = [
+            '准备就绪 — 输入值 [0.80, 0.60] 已加载到输入层。',
+            '<strong>输入 &#x2192; 隐藏层1</strong>：每个隐藏神经元接收所有输入的加权和 + 偏置，再过激活函数。',
+            '<strong>隐藏层1 &#x2192; 隐藏层2</strong>：3 个神经元的输出作为下一层 2 个神经元的输入。',
+            '<strong>隐藏层2 &#x2192; 输出层</strong>：最终汇聚为单个输出值，前向传播完成！'
+        ];
+
+        /* ================================================================
+           SECTION 1 — 信号的流动 (Animated network)
+           ================================================================ */
+        (() => {
+            const canvas = document.getElementById('cvSignal');
+            const ctx = canvas.getContext('2d');
+            const infoEl = document.getElementById('signalInfo');
+            let cW, cH;
+
+            function resize() {
+                const r = canvas.parentElement.getBoundingClientRect();
+                cW = canvas.width = r.width * devicePixelRatio;
+                cH = canvas.height = r.height * devicePixelRatio;
+                ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+            }
+            resize();
+            window.addEventListener('resize', () => { resize(); draw(); });
+
+            const INPUT = [0.8, 0.6];
+            let layers = forwardDetailed(NET, INPUT, 'sigmoid');
+
+            /* Node positions */
+            function nodePositions() {
+                const w = cW / devicePixelRatio;
+                const h = cH / devicePixelRatio;
+                const px = 90, py = 50;
+                const cols = ARCH.length;
+                const gapX = (w - 2 * px) / (cols - 1);
+                const positions = [];
+                for (let l = 0; l < cols; l++) {
+                    const n = ARCH[l];
+                    const totalH = h - 2 * py;
+                    const gapY = totalH / Math.max(n, 1);
+                    const arr = [];
+                    for (let i = 0; i < n; i++) {
+                        arr.push({
+                            x: px + l * gapX,
+                            y: py + gapY * (i + 0.5)
+                        });
+                    }
+                    positions.push(arr);
+                }
+                return positions;
+            }
+
+            /* Animation state */
+            let animStep = 0;
+            const TOTAL_STEPS = ARCH.length - 1;
+            let playing = false;
+            let particles = [];
+            let animTimer = null;
+
+            function getSpeed() {
+                return parseInt(document.getElementById('speedRange').value);
+            }
+
+            /* Particle spawning */
+            function spawnParticles(fromLayer) {
+                const pos = nodePositions();
+                const src = pos[fromLayer];
+                const dst = pos[fromLayer + 1];
+                const ps = [];
+                for (let j = 0; j < dst.length; j++) {
+                    for (let i = 0; i < src.length; i++) {
+                        const w = NET.weights[fromLayer][j][i];
+                        const val = layers[fromLayer].a[i] * w;
+                        ps.push({
+                            sx: src[i].x, sy: src[i].y,
+                            dx: dst[j].x, dy: dst[j].y,
+                            t: 0,
+                            val: val,
+                            w: w,
+                            positive: val >= 0
+                        });
+                    }
+                }
+                return ps;
+            }
+
+            function updateLabel() {
+                document.getElementById('stepLabel1').textContent =
+                    `步骤 ${animStep}/${TOTAL_STEPS}`;
+            }
+
+            function updateInfo() {
+                const idx = Math.min(animStep, STEP_DESCS.length - 1);
+                infoEl.innerHTML = STEP_DESCS[idx];
+            }
+
+            function draw() {
+                const w = cW / devicePixelRatio;
+                const h = cH / devicePixelRatio;
+                ctx.clearRect(0, 0, w, h);
+                const pos = nodePositions();
+
+                /* Draw all edges */
+                for (let l = 0; l < ARCH.length - 1; l++) {
+                    for (let j = 0; j < ARCH[l + 1]; j++) {
+                        for (let i = 0; i < ARCH[l]; i++) {
+                            const s = pos[l][i];
+                            const d = pos[l + 1][j];
+                            const wt = NET.weights[l][j][i];
+                            ctx.beginPath();
+                            ctx.moveTo(s.x, s.y);
+                            ctx.lineTo(d.x, d.y);
+                            const alpha = l < animStep ? 0.5 : 0.12;
+                            ctx.strokeStyle = wt >= 0
+                                ? `rgba(22,199,154,${alpha})`
+                                : `rgba(255,82,82,${alpha})`;
+                            ctx.lineWidth = Math.min(3.5, Math.abs(wt) * 3 + 0.5);
+                            ctx.stroke();
+
+                            /* Weight label on completed layers */
+                            if (l < animStep) {
+                                const mx = (s.x + d.x) / 2;
+                                const my = (s.y + d.y) / 2;
+                                ctx.font = '10px JetBrains Mono, monospace';
+                                ctx.fillStyle = 'rgba(168,168,184,0.65)';
+                                ctx.textAlign = 'center';
+                                ctx.textBaseline = 'middle';
+                                ctx.fillText(fmt(wt), mx + 4, my - 5);
+                            }
+                        }
+                    }
+                }
+
+                /* Draw particles */
+                for (const p of particles) {
+                    const x = p.sx + (p.dx - p.sx) * p.t;
+                    const y = p.sy + (p.dy - p.sy) * p.t;
+                    const alpha = Math.min(1, (1 - Math.abs(p.t - 0.5) * 2) * 1.8);
+                    const radius = 3 + Math.abs(p.val) * 2;
+                    ctx.beginPath();
+                    ctx.arc(x, y, Math.min(radius, 6), 0, Math.PI * 2);
+                    if (p.positive) {
+                        ctx.fillStyle = `rgba(22,199,154,${alpha.toFixed(2)})`;
+                    } else {
+                        ctx.fillStyle = `rgba(255,82,82,${alpha.toFixed(2)})`;
+                    }
+                    ctx.fill();
+                    /* Trail */
+                    if (p.t > 0.05 && p.t < 0.95) {
+                        const tx = p.sx + (p.dx - p.sx) * (p.t - 0.04);
+                        const ty = p.sy + (p.dy - p.sy) * (p.t - 0.04);
+                        ctx.beginPath();
+                        ctx.arc(tx, ty, 2, 0, Math.PI * 2);
+                        ctx.fillStyle = p.positive
+                            ? `rgba(22,199,154,${(alpha * 0.3).toFixed(2)})`
+                            : `rgba(255,82,82,${(alpha * 0.3).toFixed(2)})`;
+                        ctx.fill();
+                    }
+                }
+
+                /* Draw nodes */
+                for (let l = 0; l < pos.length; l++) {
+                    for (let i = 0; i < pos[l].length; i++) {
+                        const { x, y } = pos[l][i];
+                        const active = l <= animStep;
+                        const r = 22;
+
+                        /* Glow for active nodes */
+                        if (active && l > 0) {
+                            ctx.beginPath();
+                            ctx.arc(x, y, r + 8, 0, Math.PI * 2);
+                            const grad = ctx.createRadialGradient(x, y, r, x, y, r + 8);
+                            grad.addColorStop(0, 'rgba(22,199,154,0.15)');
+                            grad.addColorStop(1, 'rgba(22,199,154,0)');
+                            ctx.fillStyle = grad;
+                            ctx.fill();
+                        }
+
+                        /* Node circle */
+                        ctx.beginPath();
+                        ctx.arc(x, y, r, 0, Math.PI * 2);
+                        ctx.fillStyle = active ? '#16213e' : '#0d1530';
+                        ctx.strokeStyle = active ? '#16c79a' : '#2a2a4a';
+                        ctx.lineWidth = 2;
+                        ctx.fill();
+                        ctx.stroke();
+
+                        /* Value inside node */
+                        if (active && layers[l]) {
+                            const v = layers[l].a[i];
+                            ctx.font = '700 11px JetBrains Mono, monospace';
+                            ctx.fillStyle = '#e8e8e8';
+                            ctx.textAlign = 'center';
+                            ctx.textBaseline = 'middle';
+                            ctx.fillText(fmt(v), x, y);
+                        }
+
+                        /* Layer label at top */
+                        if (i === 0) {
+                            ctx.font = '12px "Noto Sans SC", sans-serif';
+                            ctx.fillStyle = '#6c6c7c';
+                            ctx.textAlign = 'center';
+                            ctx.textBaseline = 'bottom';
+                            ctx.fillText(LAYER_NAMES[l], x, pos[l][0].y - 36);
+                        }
+                    }
+                }
+
+                /* z/a annotations beside active nodes */
+                for (let l = 1; l < pos.length; l++) {
+                    if (l > animStep) break;
+                    for (let i = 0; i < pos[l].length; i++) {
+                        const { x, y } = pos[l][i];
+                        if (layers[l] && layers[l].z) {
+                            ctx.font = '10px JetBrains Mono, monospace';
+                            ctx.textAlign = 'left';
+                            ctx.textBaseline = 'middle';
+                            ctx.fillStyle = '#ffab40';
+                            ctx.fillText('z=' + fmt(layers[l].z[i]), x + 28, y - 7);
+                            ctx.fillStyle = '#4fc3f7';
+                            ctx.fillText('a=' + fmt(layers[l].a[i]), x + 28, y + 9);
+                        }
+                    }
+                }
+
+                /* Legend in bottom-left */
+                const lx = 16, ly = h - 40;
+                ctx.font = '10px "Noto Sans SC", sans-serif';
+                ctx.textAlign = 'left';
+                ctx.textBaseline = 'middle';
+                ctx.fillStyle = 'rgba(22,199,154,0.8)';
+                ctx.fillRect(lx, ly, 10, 10);
+                ctx.fillStyle = '#a8a8b8';
+                ctx.fillText('正值信号', lx + 14, ly + 5);
+                ctx.fillStyle = 'rgba(255,82,82,0.8)';
+                ctx.fillRect(lx + 90, ly, 10, 10);
+                ctx.fillStyle = '#a8a8b8';
+                ctx.fillText('负值信号', lx + 104, ly + 5);
+            }
+
+            /* Particle animation loop */
+            let particleRAF = null;
+            function animateParticles() {
+                const speed = getSpeed() * 0.015;
+                let allDone = true;
+                for (const p of particles) {
+                    if (p.t < 1) {
+                        p.t = Math.min(1, p.t + speed);
+                        allDone = false;
+                    }
+                }
+                draw();
+                if (!allDone) {
+                    particleRAF = requestAnimationFrame(animateParticles);
+                } else {
+                    particles = [];
+                    draw();
+                    if (playing && animStep < TOTAL_STEPS) {
+                        animTimer = setTimeout(doStep, 400 / getSpeed());
+                    } else if (animStep >= TOTAL_STEPS) {
+                        stopPlay();
+                    }
+                }
+            }
+
+            function doStep() {
+                if (animStep >= TOTAL_STEPS) {
+                    stopPlay();
+                    return;
+                }
+                particles = spawnParticles(animStep);
+                animStep++;
+                updateLabel();
+                updateInfo();
+                if (particleRAF) cancelAnimationFrame(particleRAF);
+                animateParticles();
+            }
+
+            function stopPlay() {
+                playing = false;
+                document.getElementById('btnPlay1').innerHTML = '&#x25B6; 播放';
+                if (animTimer) clearTimeout(animTimer);
+            }
+
+            document.getElementById('btnPlay1').addEventListener('click', () => {
+                if (playing) { stopPlay(); return; }
+                if (animStep >= TOTAL_STEPS) resetAnim();
+                playing = true;
+                document.getElementById('btnPlay1').innerHTML = '&#x23F8; 暂停';
+                doStep();
+            });
+
+            document.getElementById('btnStep1').addEventListener('click', () => {
+                stopPlay();
+                if (animStep >= TOTAL_STEPS) return;
+                doStep();
+            });
+
+            function resetAnim() {
+                stopPlay();
+                animStep = 0;
+                particles = [];
+                if (particleRAF) cancelAnimationFrame(particleRAF);
+                layers = forwardDetailed(NET, INPUT, 'sigmoid');
+                updateLabel();
+                updateInfo();
+                draw();
+            }
+
+            document.getElementById('btnReset1').addEventListener('click', resetAnim);
+
+            updateLabel();
+            updateInfo();
+            draw();
+        })();
+
+        /* ================================================================
+           SECTION 2 — 矩阵视角
+           ================================================================ */
+        (() => {
+            const area = document.getElementById('matVizArea');
+            const matInfoEl = document.getElementById('matInfo');
+            let currentLayer = -1;
+            const INPUT = [0.8, 0.6];
+            let layers = forwardDetailed(NET, INPUT, 'sigmoid');
+            let dotAnimInterval = null;
+
+            const MAT_DESCS = [
+                '第 1 层：3&#xD7;2 权重矩阵将 2 维输入映射到 3 维隐藏空间。',
+                '第 2 层：2&#xD7;3 权重矩阵将 3 维表示压缩为 2 维。',
+                '第 3 层：1&#xD7;2 权重矩阵将 2 维汇聚为最终标量输出。'
+            ];
+
+            function renderMatrixEq(layerIdx) {
+                if (layerIdx >= NET.weights.length) {
+                    area.innerHTML = '<div class="info-box success"><p>前向传播完成！三层矩阵运算依次将 [0.80, 0.60] 变换为最终输出。</p></div>';
+                    matInfoEl.innerHTML = '所有层计算完毕。点击「重置」可以重新开始。';
+                    return;
+                }
+
+                const W = NET.weights[layerIdx];
+                const b = NET.biases[layerIdx];
+                const aIn = layers[layerIdx].a;
+                const z = layers[layerIdx + 1].z;
+                const aOut = layers[layerIdx + 1].a;
+                const rows = W.length;
+                const cols = W[0].length;
+
+                let html = '<div class="matrix-eq">';
+
+                /* W matrix */
+                html += `<div class="matrix-box">`;
+                html += `<div class="label">W<sup>(${layerIdx + 1})</sup> [${rows}&#xD7;${cols}]</div>`;
+                html += `<div class="matrix-grid" style="grid-template-columns:repeat(${cols},1fr);" id="matW">`;
+                for (let i = 0; i < rows; i++) {
+                    for (let j = 0; j < cols; j++) {
+                        html += `<div class="cell" data-r="${i}" data-c="${j}">${fmt(W[i][j])}</div>`;
+                    }
+                }
+                html += '</div></div>';
+
+                html += '<span class="op">&#xD7;</span>';
+
+                /* a(l-1) vector */
+                html += `<div class="matrix-box">`;
+                html += `<div class="label">a<sup>(${layerIdx})</sup> [${aIn.length}&#xD7;1]</div>`;
+                html += `<div class="matrix-grid" style="grid-template-columns:1fr;" id="matA">`;
+                for (let i = 0; i < aIn.length; i++) {
+                    html += `<div class="cell" data-r="${i}">${fmt(aIn[i])}</div>`;
+                }
+                html += '</div></div>';
+
+                html += '<span class="op">+</span>';
+
+                /* b vector */
+                html += `<div class="matrix-box">`;
+                html += `<div class="label">b<sup>(${layerIdx + 1})</sup> [${b.length}&#xD7;1]</div>`;
+                html += `<div class="matrix-grid" style="grid-template-columns:1fr;">`;
+                for (let i = 0; i < b.length; i++) {
+                    html += `<div class="cell">${fmt(b[i])}</div>`;
+                }
+                html += '</div></div>';
+
+                html += '<span class="op">=</span>';
+
+                /* z vector */
+                html += `<div class="matrix-box">`;
+                html += `<div class="label">z<sup>(${layerIdx + 1})</sup></div>`;
+                html += `<div class="matrix-grid" style="grid-template-columns:1fr;" id="matZ">`;
+                for (let i = 0; i < z.length; i++) {
+                    html += `<div class="cell" data-r="${i}">${fmt(z[i])}</div>`;
+                }
+                html += '</div></div>';
+
+                html += '<span class="op">&#x2192; &#x3C3; &#x2192;</span>';
+
+                /* a(l) output vector */
+                html += `<div class="matrix-box">`;
+                html += `<div class="label">a<sup>(${layerIdx + 1})</sup></div>`;
+                html += `<div class="matrix-grid" style="grid-template-columns:1fr;">`;
+                for (let i = 0; i < aOut.length; i++) {
+                    html += `<div class="cell">${fmt(aOut[i])}</div>`;
+                }
+                html += '</div></div>';
+
+                html += '</div>';
+
+                /* Numerical breakdown */
+                html += '<div class="formula-card" id="dotFormulaCard" style="font-size:0.85rem; text-align:left; padding:0.75rem 1rem;">';
+                html += `<div style="margin-bottom:6px; color:var(--text-muted); font-size:0.78rem;">逐元素计算过程:</div>`;
+                for (let i = 0; i < rows; i++) {
+                    const terms = W[i].map((w, j) =>
+                        `<span style="color:var(--accent-blue);">${fmt(w)}</span>&#xD7;<span style="color:var(--accent-purple);">${fmt(aIn[j])}</span>`
+                    ).join(' + ');
+                    html += `<div style="margin:3px 0; color:var(--text-secondary); line-height:1.6;">`;
+                    html += `z<sub>${i + 1}</sub> = ${terms} + ${fmt(b[i])}`;
+                    html += ` = <span style="color:var(--accent-orange); font-weight:600;">${fmt(z[i])}</span>`;
+                    html += ` &nbsp;&#x2192;&nbsp; a<sub>${i + 1}</sub> = &#x3C3;(${fmt(z[i])})`;
+                    html += ` = <span style="color:var(--accent-green); font-weight:600;">${fmt(aOut[i])}</span>`;
+                    html += '</div>';
+                }
+                html += '</div>';
+
+                area.innerHTML = html;
+                matInfoEl.innerHTML = MAT_DESCS[layerIdx] || '';
+            }
+
+            function animateDotProduct() {
+                if (currentLayer < 0 || currentLayer >= NET.weights.length) return;
+                const W = NET.weights[currentLayer];
+                const rows = W.length;
+                const cols = W[0].length;
+                const matWEl = document.getElementById('matW');
+                const matAEl = document.getElementById('matA');
+                const matZEl = document.getElementById('matZ');
+                if (!matWEl || !matAEl || !matZEl) return;
+
+                let step = 0;
+                const total = rows * cols;
+                if (dotAnimInterval) clearInterval(dotAnimInterval);
+
+                dotAnimInterval = setInterval(() => {
+                    /* Clear all highlights */
+                    matWEl.querySelectorAll('.cell').forEach(c => c.className = 'cell');
+                    matAEl.querySelectorAll('.cell').forEach(c => c.className = 'cell');
+                    matZEl.querySelectorAll('.cell').forEach(c => c.className = 'cell');
+
+                    if (step >= total) {
+                        clearInterval(dotAnimInterval);
+                        dotAnimInterval = null;
+                        return;
+                    }
+
+                    const r = Math.floor(step / cols);
+                    const c = step % cols;
+
+                    /* Highlight entire row in W */
+                    matWEl.querySelectorAll(`.cell[data-r="${r}"]`).forEach(el =>
+                        el.classList.add('hl-row')
+                    );
+                    /* Highlight corresponding element in a */
+                    const aCell = matAEl.querySelector(`.cell[data-r="${c}"]`);
+                    if (aCell) aCell.classList.add('hl-col');
+                    /* Highlight the specific W cell being multiplied */
+                    const wCell = matWEl.querySelector(`.cell[data-r="${r}"][data-c="${c}"]`);
+                    if (wCell) wCell.classList.add('hl-both');
+                    /* Mark result when row is complete */
+                    if (c === cols - 1) {
+                        const zCell = matZEl.querySelector(`.cell[data-r="${r}"]`);
+                        if (zCell) zCell.classList.add('hl-result');
+                    }
+
+                    step++;
+                }, 500);
+            }
+
+            document.getElementById('btnNextLayer').addEventListener('click', () => {
+                if (dotAnimInterval) {
+                    clearInterval(dotAnimInterval);
+                    dotAnimInterval = null;
+                }
+                currentLayer++;
+                if (currentLayer > NET.weights.length) currentLayer = 0;
+                renderMatrixEq(currentLayer);
+                const label = currentLayer < NET.weights.length
+                    ? `第 ${currentLayer + 1}/${NET.weights.length} 层`
+                    : '完成';
+                document.getElementById('matStepLabel').textContent = label;
+            });
+
+            document.getElementById('btnResetMat').addEventListener('click', () => {
+                if (dotAnimInterval) {
+                    clearInterval(dotAnimInterval);
+                    dotAnimInterval = null;
+                }
+                currentLayer = -1;
+                layers = forwardDetailed(NET, INPUT, 'sigmoid');
+                area.innerHTML = '<p class="text-muted text-sm" style="padding:1rem;">点击「下一层」开始逐层查看矩阵运算。</p>';
+                document.getElementById('matStepLabel').textContent = '第 0 层';
+                matInfoEl.innerHTML = '矩阵乘法将上一层所有激活值同时进行线性组合，然后加偏置、过激活函数。';
+            });
+
+            document.getElementById('btnAnimDot').addEventListener('click', animateDotProduct);
+
+            area.innerHTML = '<p class="text-muted text-sm" style="padding:1rem;">点击「下一层」开始逐层查看矩阵运算。</p>';
+        })();
+
+        /* ================================================================
+           SECTION 3 — 逐层计算 (Interactive layer-by-layer)
+           ================================================================ */
+        (() => {
+            const area = document.getElementById('layerwiseArea');
+            const layerInfoEl = document.getElementById('layerInfo');
+            let localNet = buildNetwork();
+
+            function heatColor(v) {
+                const t = Math.max(-2, Math.min(2, v));
+                if (t < -1) return 'rgba(50,80,255,0.35)';
+                if (t < -0.3) return `rgba(50,80,255,${0.12 + 0.1 * Math.abs(t)})`;
+                if (t < 0.3) return 'rgba(100,100,140,0.08)';
+                if (t < 1) return `rgba(255,120,50,${0.12 + 0.1 * t})`;
+                return 'rgba(255,120,50,0.35)';
+            }
+
+            function getActName() {
+                return document.getElementById('actSelect3').value;
+            }
+
+            function render() {
+                const x1 = parseFloat(document.getElementById('inputX1').value);
+                const x2 = parseFloat(document.getElementById('inputX2').value);
+                document.getElementById('valX1').textContent = fmt(x1);
+                document.getElementById('valX2').textContent = fmt(x2);
+
+                const actName = getActName();
+                const layers = forwardDetailed(localNet, [x1, x2], actName);
+                const output = layers[layers.length - 1].a[0];
+
+                let html = '<div class="layer-panel">';
+                for (let l = 0; l < layers.length; l++) {
+                    const layer = layers[l];
+                    const isInput = (l === 0);
+                    const isOutput = (l === layers.length - 1);
+                    const borderColor = isInput ? 'var(--accent-blue)'
+                        : isOutput ? 'var(--accent-green)' : 'var(--accent-orange)';
+
+                    html += `<div class="layer-card" style="border-top: 3px solid ${borderColor};">`;
+                    html += `<h4>${LAYER_NAMES[l]}</h4>`;
+
+                    if (isInput) {
+                        html += `<div style="font-size:0.7rem; color:var(--text-muted); margin-bottom:4px;">节点数: ${ARCH[l]}</div>`;
+                    }
+
+                    html += '<div class="values">';
+
+                    /* Show weights for non-input layers */
+                    if (!isInput && layer.z) {
+                        html += `<div style="font-size:0.7rem; color:var(--text-muted); margin-bottom:4px;">`;
+                        html += `权重 W<sup>(${l})</sup> [${localNet.weights[l-1].length}&#xD7;${localNet.weights[l-1][0].length}]:</div>`;
+                        const W = localNet.weights[l - 1];
+                        for (let i = 0; i < W.length; i++) {
+                            html += '<div class="val-row" style="flex-wrap:wrap;">';
+                            html += `<span class="vname" style="font-size:0.7rem;">n${i + 1}:</span>`;
+                            for (let j = 0; j < W[i].length; j++) {
+                                html += `<span class="editable-weight" data-l="${l - 1}" data-i="${i}" data-j="${j}" title="点击编辑">${fmt(W[i][j])}</span>`;
+                            }
+                            html += '</div>';
+                        }
+
+                        /* Biases */
+                        html += `<div style="font-size:0.7rem; color:var(--text-muted); margin:4px 0 2px;">偏置 b<sup>(${l})</sup>:</div>`;
+                        const b = localNet.biases[l - 1];
+                        html += '<div class="val-row">';
+                        for (let i = 0; i < b.length; i++) {
+                            html += `<span style="color:var(--accent-purple); font-family:var(--font-mono); font-size:0.78rem; padding:0 3px;">${fmt(b[i])}</span>`;
+                        }
+                        html += '</div>';
+
+                        html += '<div style="height:8px;"></div>';
+
+                        /* z values (pre-activation) */
+                        html += `<div style="font-size:0.7rem; color:var(--accent-orange); margin-bottom:2px;">预激活 z:</div>`;
+                        for (let i = 0; i < layer.z.length; i++) {
+                            html += `<div class="val-row">
+                                <span class="vname">z<sub>${i + 1}</sub></span>
+                                <span class="vbox" style="background:${heatColor(layer.z[i])}">${fmt(layer.z[i], 4)}</span>
+                            </div>`;
+                        }
+                        html += '<div style="height:4px;"></div>';
+
+                        /* a values (post-activation) */
+                        html += `<div style="font-size:0.7rem; color:var(--accent-green); margin-bottom:2px;">激活后 a (${actName}):</div>`;
+                    }
+
+                    for (let i = 0; i < layer.a.length; i++) {
+                        html += `<div class="val-row">
+                            <span class="vname">a<sub>${i + 1}</sub></span>
+                            <span class="vbox" style="background:${heatColor(layer.a[i])}">${fmt(layer.a[i], 4)}</span>
+                        </div>`;
+                    }
+
+                    html += '</div></div>';
+                }
+                html += '</div>';
+                area.innerHTML = html;
+
+                /* Update info */
+                layerInfoEl.innerHTML = `最终输出: <strong>${fmt(output, 4)}</strong>。改变输入或权重观察数值如何变化。激活函数: ${actName}。`;
+
+                /* Attach click-to-edit on weights */
+                area.querySelectorAll('.editable-weight').forEach(el => {
+                    el.addEventListener('click', function () {
+                        const lIdx = +this.dataset.l;
+                        const i = +this.dataset.i;
+                        const j = +this.dataset.j;
+                        const cur = localNet.weights[lIdx][i][j];
+                        const inp = document.createElement('input');
+                        inp.type = 'number';
+                        inp.step = '0.1';
+                        inp.className = 'weight-input';
+                        inp.value = fmt(cur);
+                        this.replaceWith(inp);
+                        inp.focus();
+                        inp.select();
+                        const commit = () => {
+                            const v = parseFloat(inp.value);
+                            if (!isNaN(v)) localNet.weights[lIdx][i][j] = v;
+                            render();
+                        };
+                        inp.addEventListener('blur', commit);
+                        inp.addEventListener('keydown', e => {
+                            if (e.key === 'Enter') commit();
+                        });
+                    });
+                });
+            }
+
+            document.getElementById('inputX1').addEventListener('input', render);
+            document.getElementById('inputX2').addEventListener('input', render);
+            document.getElementById('actSelect3').addEventListener('change', render);
+            document.getElementById('btnCompute3').addEventListener('click', render);
+            document.getElementById('btnResetW3').addEventListener('click', () => {
+                localNet = buildNetwork();
+                render();
+            });
+
+            render();
+        })();
+
+        /* ================================================================
+           SECTION 4 — 批量前向传播 (Batch processing)
+           ================================================================ */
+        (() => {
+            const canvas = document.getElementById('cvBatch');
+            const ctx = canvas.getContext('2d');
+            const detail = document.getElementById('batchDetail');
+            const batchInfoEl = document.getElementById('batchInfo');
+            let cW, cH;
+
+            function resize() {
+                const r = canvas.parentElement.getBoundingClientRect();
+                cW = canvas.width = r.width * devicePixelRatio;
+                cH = canvas.height = r.height * devicePixelRatio;
+                ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+            }
+            resize();
+            window.addEventListener('resize', () => { resize(); drawBatch(); });
+
+            const BATCH = [
+                [0.80,  0.60],
+                [-0.30, 0.90],
+                [0.50, -0.70],
+                [-0.60, -0.40]
+            ];
+            const COLORS = ['#4fc3f7', '#ff80ab', '#ffd740', '#b388ff'];
+            const COLOR_NAMES = ['蓝', '粉', '黄', '紫'];
+
+            let batchLayers = BATCH.map(inp => forwardDetailed(NET, inp, 'sigmoid'));
+            let batchStep = 0;
+            const BATCH_TOTAL = ARCH.length - 1;
+            let batchPlaying = false;
+            let batchTimer = null;
+            let batchParticles = [];
+
+            function batchNodePos() {
+                const w = cW / devicePixelRatio;
+                const h = cH / devicePixelRatio;
+                const px = 80, py = 35;
+                const cols = ARCH.length;
+                const gapX = (w - 2 * px) / (cols - 1);
+                const positions = [];
+                for (let l = 0; l < cols; l++) {
+                    const n = ARCH[l];
+                    const totalH = h - 2 * py;
+                    const gapY = totalH / Math.max(n, 1);
+                    const arr = [];
+                    for (let i = 0; i < n; i++) {
+                        arr.push({ x: px + l * gapX, y: py + gapY * (i + 0.5) });
+                    }
+                    positions.push(arr);
+                }
+                return positions;
+            }
+
+            function spawnBatchParticles(fromLayer) {
+                const pos = batchNodePos();
+                const src = pos[fromLayer];
+                const dst = pos[fromLayer + 1];
+                const ps = [];
+                for (let b = 0; b < BATCH.length; b++) {
+                    const offset = (b - 1.5) * 3.5;
+                    for (let j = 0; j < dst.length; j++) {
+                        for (let i = 0; i < src.length; i++) {
+                            ps.push({
+                                sx: src[i].x,
+                                sy: src[i].y + offset,
+                                dx: dst[j].x,
+                                dy: dst[j].y + offset,
+                                t: Math.random() * -0.1, // slight stagger
+                                batchIdx: b,
+                                color: COLORS[b]
+                            });
+                        }
+                    }
+                }
+                return ps;
+            }
+
+            function drawBatch() {
+                const w = cW / devicePixelRatio;
+                const h = cH / devicePixelRatio;
+                ctx.clearRect(0, 0, w, h);
+                const pos = batchNodePos();
+
+                /* Edges */
+                for (let l = 0; l < ARCH.length - 1; l++) {
+                    for (let j = 0; j < ARCH[l + 1]; j++) {
+                        for (let i = 0; i < ARCH[l]; i++) {
+                            const s = pos[l][i];
+                            const d = pos[l + 1][j];
+                            ctx.beginPath();
+                            ctx.moveTo(s.x, s.y);
+                            ctx.lineTo(d.x, d.y);
+                            ctx.strokeStyle = l < batchStep
+                                ? 'rgba(22,199,154,0.25)'
+                                : 'rgba(42,42,74,0.35)';
+                            ctx.lineWidth = 1;
+                            ctx.stroke();
+                        }
+                    }
+                }
+
+                /* Particles */
+                for (const p of batchParticles) {
+                    if (p.t < 0) continue;
+                    const x = p.sx + (p.dx - p.sx) * p.t;
+                    const y = p.sy + (p.dy - p.sy) * p.t;
+                    ctx.beginPath();
+                    ctx.arc(x, y, 3.5, 0, Math.PI * 2);
+                    ctx.fillStyle = p.color;
+                    ctx.globalAlpha = 0.85;
+                    ctx.fill();
+                    ctx.globalAlpha = 1;
+                }
+
+                /* Nodes */
+                for (let l = 0; l < pos.length; l++) {
+                    for (let i = 0; i < pos[l].length; i++) {
+                        const { x, y } = pos[l][i];
+                        const r = 18;
+
+                        /* Node circle */
+                        ctx.beginPath();
+                        ctx.arc(x, y, r, 0, Math.PI * 2);
+                        ctx.fillStyle = l <= batchStep ? '#16213e' : '#0d1530';
+                        ctx.strokeStyle = l <= batchStep ? '#16c79a' : '#2a2a4a';
+                        ctx.lineWidth = 2;
+                        ctx.fill();
+                        ctx.stroke();
+
+                        /* Batch values scattered around node */
+                        if (l <= batchStep) {
+                            for (let b = 0; b < BATCH.length; b++) {
+                                const val = batchLayers[b][l].a[i];
+                                const angle = (b / BATCH.length) * Math.PI * 2 - Math.PI / 2;
+                                const dx = Math.cos(angle) * (r + 14);
+                                const dy = Math.sin(angle) * (r + 14);
+                                ctx.font = '9px JetBrains Mono, monospace';
+                                ctx.fillStyle = COLORS[b];
+                                ctx.textAlign = 'center';
+                                ctx.textBaseline = 'middle';
+                                ctx.fillText(fmt(val, 1), x + dx, y + dy);
+                            }
+                        }
+                    }
+
+                    /* Layer label */
+                    if (pos[l][0]) {
+                        ctx.font = '11px "Noto Sans SC", sans-serif';
+                        ctx.fillStyle = '#6c6c7c';
+                        ctx.textAlign = 'center';
+                        ctx.textBaseline = 'bottom';
+                        ctx.fillText(LAYER_NAMES[l], pos[l][0].x, 22);
+                    }
+                }
+
+                /* Legend in top-right */
+                for (let b = 0; b < BATCH.length; b++) {
+                    const lx = w - 140;
+                    const ly = 28 + b * 20;
+                    ctx.fillStyle = COLORS[b];
+                    ctx.fillRect(lx, ly - 5, 10, 10);
+                    ctx.font = '10px JetBrains Mono, monospace';
+                    ctx.textAlign = 'left';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText(
+                        `${COLOR_NAMES[b]} [${BATCH[b].map(v => fmt(v, 1)).join(', ')}]`,
+                        lx + 14, ly
+                    );
+                }
+            }
+
+            function updateBatchLabel() {
+                document.getElementById('batchStepLabel').textContent =
+                    `步骤 ${batchStep}/${BATCH_TOTAL}`;
+            }
+
+            function renderBatchDetail() {
+                let html = '<div class="batch-streams">';
+                for (let b = 0; b < BATCH.length; b++) {
+                    html += `<div class="stream-card active-stream" style="border-color:${COLORS[b]}40;">`;
+                    html += `<div class="stream-label" style="color:${COLORS[b]}">样本 ${b + 1} (${COLOR_NAMES[b]})</div>`;
+                    html += `<div class="stream-val">输入: [${BATCH[b].map(v => fmt(v)).join(', ')}]</div>`;
+                    for (let l = 1; l <= Math.min(batchStep, ARCH.length - 1); l++) {
+                        const a = batchLayers[b][l].a;
+                        const z = batchLayers[b][l].z;
+                        html += `<div class="stream-val">${LAYER_NAMES[l]}:</div>`;
+                        html += `<div class="stream-val" style="padding-left:8px;">z=[${z.map(v => fmt(v)).join(', ')}]</div>`;
+                        html += `<div class="stream-val" style="padding-left:8px;">a=<span>[${a.map(v => fmt(v)).join(', ')}]</span></div>`;
+                    }
+                    html += '</div>';
+                }
+                html += '</div>';
+
+                /* Batch matrix representation */
+                if (batchStep > 0) {
+                    html += '<div class="formula-card" style="margin-top:0.75rem; text-align:left; font-size:0.82rem;">';
+                    html += '<div style="color:var(--text-muted); margin-bottom:6px;">批量矩阵表示（每列为一个样本）:</div>';
+                    const lastComplete = Math.min(batchStep, ARCH.length - 1);
+                    html += `<div style="color:var(--text-secondary);">A<sup>(${lastComplete})</sup> = [`;
+                    const vals = [];
+                    for (let b = 0; b < BATCH.length; b++) {
+                        const a = batchLayers[b][lastComplete].a;
+                        vals.push(`<span style="color:${COLORS[b]};">[${a.map(v => fmt(v)).join(', ')}]</span>`);
+                    }
+                    html += vals.join('<sup>T</sup>, ') + '<sup>T</sup>';
+                    html += ']</div>';
+                    html += '</div>';
+                }
+
+                detail.innerHTML = html;
+            }
+
+            const BATCH_STEP_DESCS = [
+                '4 个样本同时准备输入。它们共享同一组权重。',
+                '输入层 &#x2192; 隐藏层1：每个样本独立进行 W&#xB9;a + b&#xB9; 计算。',
+                '隐藏层1 &#x2192; 隐藏层2：中间表示继续前传。',
+                '隐藏层2 &#x2192; 输出层：4 个样本同时得到各自的输出值。'
+            ];
+
+            /* Animation */
+            let batchRAF = null;
+            function animateBatchParticles() {
+                let allDone = true;
+                for (const p of batchParticles) {
+                    if (p.t < 1) {
+                        p.t = Math.min(1, p.t + 0.018);
+                        allDone = false;
+                    }
+                }
+                drawBatch();
+                if (!allDone) {
+                    batchRAF = requestAnimationFrame(animateBatchParticles);
+                } else {
+                    batchParticles = [];
+                    renderBatchDetail();
+                    drawBatch();
+                    if (batchPlaying && batchStep < BATCH_TOTAL) {
+                        batchTimer = setTimeout(doBatchStep, 500);
+                    } else if (batchStep >= BATCH_TOTAL) {
+                        stopBatchPlay();
+                    }
+                }
+            }
+
+            function doBatchStep() {
+                if (batchStep >= BATCH_TOTAL) {
+                    stopBatchPlay();
+                    return;
+                }
+                batchParticles = spawnBatchParticles(batchStep);
+                batchStep++;
+                updateBatchLabel();
+                batchInfoEl.innerHTML = BATCH_STEP_DESCS[batchStep] || '';
+                if (batchRAF) cancelAnimationFrame(batchRAF);
+                animateBatchParticles();
+            }
+
+            function stopBatchPlay() {
+                batchPlaying = false;
+                document.getElementById('btnPlayBatch').innerHTML = '&#x25B6; 播放';
+                if (batchTimer) clearTimeout(batchTimer);
+            }
+
+            document.getElementById('btnPlayBatch').addEventListener('click', () => {
+                if (batchPlaying) { stopBatchPlay(); return; }
+                if (batchStep >= BATCH_TOTAL) resetBatch();
+                batchPlaying = true;
+                document.getElementById('btnPlayBatch').innerHTML = '&#x23F8; 暂停';
+                doBatchStep();
+            });
+
+            document.getElementById('btnStepBatch').addEventListener('click', () => {
+                stopBatchPlay();
+                if (batchStep >= BATCH_TOTAL) return;
+                doBatchStep();
+            });
+
+            function resetBatch() {
+                stopBatchPlay();
+                batchStep = 0;
+                batchParticles = [];
+                if (batchRAF) cancelAnimationFrame(batchRAF);
+                batchLayers = BATCH.map(inp => forwardDetailed(NET, inp, 'sigmoid'));
+                updateBatchLabel();
+                drawBatch();
+                detail.innerHTML = '';
+                batchInfoEl.innerHTML = '批处理利用矩阵并行计算，大幅提升 GPU 利用率。观察 4 个样本如何同时穿过每一层。';
+            }
+
+            document.getElementById('btnResetBatch').addEventListener('click', resetBatch);
+
+            updateBatchLabel();
+            drawBatch();
+        })();
+    });
+    </script>
+</body>
+</html>

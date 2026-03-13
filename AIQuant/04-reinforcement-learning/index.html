@@ -1,0 +1,1359 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>强化学习交易 — AI 量化</title>
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" defer>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js" defer></script>
+    <script src="../shared/scripts/nav.js" defer></script>
+    <script src="../shared/scripts/aiquant-utils.js" defer></script>
+    <style>
+        .module-header { text-align: center; padding: 2rem 0 1rem; }
+        .module-header h1 { font-size: 2.2rem; }
+        .module-header .subtitle { color: var(--text-muted); font-size: 1rem; }
+        .canvas-wrap { position: relative; width: 100%; border-radius: var(--radius-md); overflow: hidden; background: var(--bg-secondary); border: 1px solid var(--border-color); }
+        .canvas-wrap canvas { display: block; width: 100%; }
+        .controls-row { display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; margin: 1rem 0; }
+        .controls-row .slider-group { flex: 1; min-width: 200px; }
+        .section .desc { color: var(--text-secondary); font-size: 0.95rem; margin-bottom: 1rem; line-height: 1.8; }
+        .formula-box { background: rgba(22,199,154,0.05); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 1rem 1.2rem; margin: 0.75rem 0; }
+        .metric-row { display: flex; gap: 1rem; flex-wrap: wrap; margin: 0.75rem 0; }
+        .metric-item { background: var(--bg-card); border-radius: var(--radius-sm); padding: 0.5rem 1rem; display: flex; flex-direction: column; align-items: center; min-width: 100px; }
+        .metric-item .label { font-size: 0.75rem; color: var(--text-muted); }
+        .metric-item .value { font-family: var(--font-mono); font-size: 1.1rem; color: var(--accent-green); font-weight: 700; }
+        .legend-inline { display: flex; flex-wrap: wrap; gap: 1rem; margin: 0.5rem 0; font-size: 0.8rem; color: var(--text-secondary); }
+        .legend-inline span { display: flex; align-items: center; gap: 4px; }
+        .legend-inline .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+        .warn-box { background: rgba(255,82,82,0.08); border-left: 3px solid var(--accent-red); padding: 0.75rem 1rem; border-radius: 0 var(--radius-sm) var(--radius-sm) 0; margin: 0.75rem 0; font-size: 0.9rem; color: var(--text-secondary); }
+        .info-callout { background: rgba(79,195,247,0.08); border-left: 3px solid var(--accent-blue); padding: 0.75rem 1rem; border-radius: 0 var(--radius-sm) var(--radius-sm) 0; margin: 0.75rem 0; font-size: 0.9rem; color: var(--text-secondary); }
+        .mdp-diagram { display: flex; align-items: center; justify-content: center; gap: 0.5rem; flex-wrap: wrap; margin: 1rem 0; }
+        .mdp-box { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 0.6rem 1rem; text-align: center; min-width: 90px; transition: all 0.3s; }
+        .mdp-box.active { border-color: var(--accent-green); box-shadow: 0 0 12px rgba(22,199,154,0.3); }
+        .mdp-box .mdp-label { font-size: 0.7rem; color: var(--text-muted); }
+        .mdp-box .mdp-val { font-family: var(--font-mono); font-size: 0.9rem; color: var(--accent-green); }
+        .mdp-arrow { color: var(--accent-blue); font-size: 1.4rem; }
+        .step-log { max-height: 160px; overflow-y: auto; background: var(--bg-card); border-radius: var(--radius-sm); padding: 0.5rem 0.75rem; font-family: var(--font-mono); font-size: 0.78rem; color: var(--text-secondary); margin-top: 0.5rem; line-height: 1.6; }
+    </style>
+</head>
+<body>
+<div class="page-container">
+    <div class="module-header">
+        <h1>强化学习交易</h1>
+        <p class="subtitle">Reinforcement Learning for Trading -- 用 MDP、Q-Learning、DQN 和策略梯度方法训练交易智能体</p>
+    </div>
+
+    <!-- ==================== Section 1: 交易环境建模 ==================== -->
+    <div class="section" id="sec-mdp">
+        <div class="section-title"><div class="icon">🌍</div><h2>交易环境建模</h2></div>
+        <p class="desc">
+            强化学习将交易建模为马尔可夫决策过程 (MDP)：智能体在每个时刻观察市场<strong>状态</strong>（价格历史、持仓、资金），
+            选择一个<strong>动作</strong>（买入/卖出/持有），环境返回<strong>奖励</strong>（盈亏）并转移到下一个状态。
+            智能体的目标是学习一个策略 $\pi(a|s)$，使累积奖励最大化。
+        </p>
+        <div class="formula-box">
+            $$G_t = \sum_{k=0}^{T-t} \gamma^k R_{t+k+1}, \quad \pi^* = \arg\max_\pi \mathbb{E}_\pi[G_t]$$
+        </div>
+        <div class="controls-row">
+            <button class="btn btn-primary" id="btn-mdp-step">下一步</button>
+            <button class="btn" id="btn-mdp-reset">重置回合</button>
+            <div class="slider-group">
+                <label>折扣因子 $\gamma$</label>
+                <input type="range" id="sl-gamma" min="80" max="100" value="99">
+                <span class="slider-value" id="sv-gamma">0.99</span>
+            </div>
+        </div>
+        <div class="canvas-wrap"><canvas id="cv-mdp" height="360"></canvas></div>
+        <div class="mdp-diagram" id="mdp-loop">
+            <div class="mdp-box active" id="mdp-state"><div class="mdp-label">状态 S</div><div class="mdp-val" id="mdp-sv">价格: 100.0</div></div>
+            <div class="mdp-arrow">&rarr;</div>
+            <div class="mdp-box" id="mdp-action"><div class="mdp-label">动作 A</div><div class="mdp-val" id="mdp-av">---</div></div>
+            <div class="mdp-arrow">&rarr;</div>
+            <div class="mdp-box" id="mdp-reward"><div class="mdp-label">奖励 R</div><div class="mdp-val" id="mdp-rv">0.00</div></div>
+            <div class="mdp-arrow">&rarr;</div>
+            <div class="mdp-box" id="mdp-next"><div class="mdp-label">下一状态 S'</div><div class="mdp-val" id="mdp-nv">---</div></div>
+        </div>
+        <div class="metric-row">
+            <div class="metric-item"><span class="label">步数</span><span class="value" id="m-step">0</span></div>
+            <div class="metric-item"><span class="label">持仓</span><span class="value" id="m-pos">0</span></div>
+            <div class="metric-item"><span class="label">现金</span><span class="value" id="m-cash">10000</span></div>
+            <div class="metric-item"><span class="label">总盈亏</span><span class="value" id="m-pnl">0.00</span></div>
+        </div>
+        <div class="step-log" id="mdp-log"></div>
+    </div>
+
+    <!-- ==================== Section 2: Q-Learning 交易 ==================== -->
+    <div class="section" id="sec-qlearn">
+        <div class="section-title"><div class="icon">📊</div><h2>Q-Learning 交易</h2></div>
+        <p class="desc">
+            Q-Learning 使用一张 Q 表记录每个状态-动作对的期望回报。在每一步中，智能体根据 $\epsilon$-贪心策略选择动作，
+            并用 Bellman 方程更新 Q 值。随着训练推进，Q 表逐渐收敛，策略趋于最优。
+        </p>
+        <div class="formula-box">
+            $$Q(s,a) \leftarrow Q(s,a) + \alpha \big[ r + \gamma \max_{a'} Q(s',a') - Q(s,a) \big]$$
+        </div>
+        <div class="controls-row">
+            <button class="btn btn-primary" id="btn-ql-train">训练 100 回合</button>
+            <button class="btn" id="btn-ql-reset">重置</button>
+            <div class="slider-group">
+                <label>学习率 $\alpha$</label>
+                <input type="range" id="sl-alpha" min="1" max="50" value="10">
+                <span class="slider-value" id="sv-alpha">0.10</span>
+            </div>
+            <div class="slider-group">
+                <label>探索率 $\epsilon$</label>
+                <input type="range" id="sl-epsilon" min="1" max="100" value="30">
+                <span class="slider-value" id="sv-epsilon">0.30</span>
+            </div>
+        </div>
+        <div class="canvas-wrap"><canvas id="cv-qtable" height="400"></canvas></div>
+        <div class="legend-inline">
+            <span><span class="dot" style="background:#00e676"></span>买入 Q 值</span>
+            <span><span class="dot" style="background:#ff1744"></span>卖出 Q 值</span>
+            <span><span class="dot" style="background:#78909c"></span>持有 Q 值</span>
+            <span><span class="dot" style="background:#ffea00"></span>交易信号</span>
+        </div>
+        <div class="canvas-wrap" style="margin-top:1rem"><canvas id="cv-ql-reward" height="220"></canvas></div>
+        <div class="metric-row">
+            <div class="metric-item"><span class="label">训练回合</span><span class="value" id="m-ql-ep">0</span></div>
+            <div class="metric-item"><span class="label">平均回报</span><span class="value" id="m-ql-ret">0.00</span></div>
+            <div class="metric-item"><span class="label">最佳回报</span><span class="value" id="m-ql-best">0.00</span></div>
+            <div class="metric-item"><span class="label">Q 表大小</span><span class="value" id="m-ql-size">0</span></div>
+        </div>
+    </div>
+
+    <!-- ==================== Section 3: DQN 交易 ==================== -->
+    <div class="section" id="sec-dqn">
+        <div class="section-title"><div class="icon">🧠</div><h2>DQN 交易</h2></div>
+        <p class="desc">
+            Deep Q-Network (DQN) 用神经网络近似 Q 函数，解决状态空间过大时 Q 表无法覆盖的问题。
+            经验回放 (Experience Replay) 打破数据相关性，目标网络 (Target Network) 稳定训练过程。
+            $\epsilon$ 探索率随训练逐步衰减，从探索转向利用。
+        </p>
+        <div class="formula-box">
+            $$\mathcal{L}(\theta) = \mathbb{E}_{(s,a,r,s') \sim \mathcal{D}} \left[ \big( r + \gamma \max_{a'} Q(s', a'; \theta^-) - Q(s, a; \theta) \big)^2 \right]$$
+        </div>
+        <div class="controls-row">
+            <button class="btn btn-primary" id="btn-dqn-train">训练 DQN</button>
+            <button class="btn" id="btn-dqn-reset">重置</button>
+            <div class="slider-group">
+                <label>隐藏层大小</label>
+                <input type="range" id="sl-hidden" min="8" max="64" value="32" step="8">
+                <span class="slider-value" id="sv-hidden">32</span>
+            </div>
+            <div class="slider-group">
+                <label>Replay 大小</label>
+                <input type="range" id="sl-replay" min="100" max="2000" value="500" step="100">
+                <span class="slider-value" id="sv-replay">500</span>
+            </div>
+        </div>
+        <div class="canvas-wrap"><canvas id="cv-dqn-arch" height="320"></canvas></div>
+        <div class="canvas-wrap" style="margin-top:1rem"><canvas id="cv-dqn-curve" height="260"></canvas></div>
+        <div class="legend-inline">
+            <span><span class="dot" style="background:#00e5ff"></span>DQN 损失</span>
+            <span><span class="dot" style="background:#00e676"></span>回合回报</span>
+            <span><span class="dot" style="background:#ff6d00"></span>Epsilon 衰减</span>
+        </div>
+        <div class="metric-row">
+            <div class="metric-item"><span class="label">训练步数</span><span class="value" id="m-dqn-steps">0</span></div>
+            <div class="metric-item"><span class="label">Epsilon</span><span class="value" id="m-dqn-eps">1.00</span></div>
+            <div class="metric-item"><span class="label">Replay 使用量</span><span class="value" id="m-dqn-buf">0</span></div>
+            <div class="metric-item"><span class="label">最终回报</span><span class="value" id="m-dqn-ret">0.00</span></div>
+        </div>
+    </div>
+
+    <!-- ==================== Section 4: 策略梯度方法 ==================== -->
+    <div class="section" id="sec-pg">
+        <div class="section-title"><div class="icon">🎯</div><h2>策略梯度方法</h2></div>
+        <p class="desc">
+            策略梯度直接优化策略网络的参数，输出动作的概率分布。Actor-Critic 架构结合了策略梯度（Actor）和
+            价值估计（Critic），利用优势函数 $A(s,a) = Q(s,a) - V(s)$ 降低方差。与 Q-Learning 相比，
+            策略梯度能处理连续动作空间，更适合精细的仓位管理。
+        </p>
+        <div class="formula-box">
+            $$\nabla_\theta J(\theta) = \mathbb{E}_{\pi_\theta} \left[ \nabla_\theta \log \pi_\theta(a|s) \cdot A(s,a) \right]$$
+        </div>
+        <div class="controls-row">
+            <button class="btn btn-primary" id="btn-pg-train">训练策略网络</button>
+            <button class="btn" id="btn-pg-reset">重置</button>
+            <div class="slider-group">
+                <label>策略学习率</label>
+                <input type="range" id="sl-pg-lr" min="1" max="50" value="10">
+                <span class="slider-value" id="sv-pg-lr">0.010</span>
+            </div>
+        </div>
+        <div class="canvas-wrap"><canvas id="cv-pg-probs" height="340"></canvas></div>
+        <div class="legend-inline">
+            <span><span class="dot" style="background:#00e676"></span>买入概率</span>
+            <span><span class="dot" style="background:#ff1744"></span>卖出概率</span>
+            <span><span class="dot" style="background:#78909c"></span>持有概率</span>
+        </div>
+        <div class="canvas-wrap" style="margin-top:1rem"><canvas id="cv-pg-compare" height="260"></canvas></div>
+        <div class="legend-inline">
+            <span><span class="dot" style="background:#7c4dff"></span>Actor-Critic</span>
+            <span><span class="dot" style="background:#00e5ff"></span>Q-Learning</span>
+        </div>
+        <div class="metric-row">
+            <div class="metric-item"><span class="label">训练回合</span><span class="value" id="m-pg-ep">0</span></div>
+            <div class="metric-item"><span class="label">平均回报</span><span class="value" id="m-pg-ret">0.00</span></div>
+            <div class="metric-item"><span class="label">策略熵</span><span class="value" id="m-pg-ent">1.10</span></div>
+        </div>
+        <div class="info-callout">
+            <strong>Actor-Critic 优势：</strong>Critic 提供基线 (baseline)，减少策略梯度的方差，使训练更稳定。
+            在高维状态空间和需要连续动作输出的交易场景中，策略梯度方法通常优于纯 Q-Learning。
+        </div>
+    </div>
+
+    <!-- ==================== Section 5: RL vs 传统策略 ==================== -->
+    <div class="section" id="sec-compare">
+        <div class="section-title"><div class="icon">⚔</div><h2>RL vs 传统策略</h2></div>
+        <p class="desc">
+            将训练好的 RL 智能体与动量策略 (Momentum) 和买入并持有 (Buy & Hold) 进行对比。
+            RL 智能体在市场机制转换时能更快适应，但在分布外数据上可能表现脆弱。
+            下面对比三种策略在同一段价格序列上的权益曲线和最大回撤。
+        </p>
+        <div class="controls-row">
+            <button class="btn btn-primary" id="btn-cmp-run">运行对比</button>
+            <button class="btn" id="btn-cmp-reset">重置</button>
+            <div class="slider-group">
+                <label>市场波动率</label>
+                <input type="range" id="sl-vol" min="5" max="50" value="20">
+                <span class="slider-value" id="sv-vol">0.020</span>
+            </div>
+            <div class="slider-group">
+                <label>机制转换概率</label>
+                <input type="range" id="sl-regime" min="0" max="50" value="10">
+                <span class="slider-value" id="sv-regime">0.10</span>
+            </div>
+        </div>
+        <div class="canvas-wrap"><canvas id="cv-equity" height="360"></canvas></div>
+        <div class="legend-inline">
+            <span><span class="dot" style="background:#7c4dff"></span>RL 智能体</span>
+            <span><span class="dot" style="background:#ff6d00"></span>动量策略</span>
+            <span><span class="dot" style="background:#78909c"></span>买入持有</span>
+        </div>
+        <div class="canvas-wrap" style="margin-top:1rem"><canvas id="cv-drawdown" height="200"></canvas></div>
+        <div class="metric-row">
+            <div class="metric-item"><span class="label">RL 总收益</span><span class="value" id="m-cmp-rl">---</span></div>
+            <div class="metric-item"><span class="label">动量总收益</span><span class="value" id="m-cmp-mom">---</span></div>
+            <div class="metric-item"><span class="label">持有总收益</span><span class="value" id="m-cmp-bh">---</span></div>
+            <div class="metric-item"><span class="label">RL 最大回撤</span><span class="value" id="m-cmp-dd">---</span></div>
+        </div>
+        <div class="warn-box">
+            <strong>注意：</strong>RL 智能体在训练分布内表现优异，但在未见过的市场环境（如极端行情、闪崩）中可能严重失效。
+            实际部署需结合风险管理和持续再训练。过拟合历史数据是 RL 量化交易的最大风险之一。
+        </div>
+    </div>
+
+</div><!-- /page-container -->
+
+<script>
+// ============================================================
+// Global price data and utilities
+// ============================================================
+const U = window.AIQuantUtils || {};
+const C = U.AIQUANT_COLORS || { primary:'#00e5ff', secondary:'#7c4dff', accent:'#ff6d00', positive:'#00e676', negative:'#ff1744', neutral:'#78909c', bg:'#0a0e17', panel:'#121929', grid:'rgba(255,255,255,0.06)', text:'#e0e0e0', textDim:'#78909c', series:['#00e5ff','#7c4dff','#ff6d00','#00e676','#ff1744','#ffea00','#18ffff','#ea80fc'] };
+const rng = U.seededRandom ? U.seededRandom(42) : Math.random;
+
+function genPrices(n, seed, vol, regimeProb) {
+    const r = U.seededRandom ? U.seededRandom(seed || 42) : Math.random;
+    const prices = [100];
+    let trend = 0.0003;
+    const v = vol || 0.02;
+    const rp = regimeProb || 0.05;
+    for (let i = 1; i < n; i++) {
+        if (r() < rp) trend = (r() - 0.5) * 0.002;
+        const ret = trend + (U.normalRandom ? U.normalRandom(0, v, r) : (r()-0.5)*v*2);
+        prices.push(prices[i-1] * Math.exp(ret));
+    }
+    return prices;
+}
+
+let globalPrices = genPrices(200, 42);
+
+function getCanvas(id) {
+    const c = document.getElementById(id);
+    if (!c) return null;
+    const dpr = window.devicePixelRatio || 1;
+    const rect = c.getBoundingClientRect();
+    const w = rect.width || c.parentElement.clientWidth || 700;
+    const h = parseInt(c.getAttribute('height')) || 400;
+    c.width = w * dpr;
+    c.height = h * dpr;
+    c.style.height = h + 'px';
+    const ctx = c.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return { ctx, w, h };
+}
+
+function clearCanvas(ctx, w, h) {
+    ctx.fillStyle = '#121929';
+    ctx.fillRect(0, 0, w, h);
+}
+
+function drawGrid(ctx, x, y, w, h, nx, ny) {
+    ctx.strokeStyle = C.grid;
+    ctx.lineWidth = 0.5;
+    for (let i = 0; i <= nx; i++) { const px = x + (i/nx)*w; ctx.beginPath(); ctx.moveTo(px, y); ctx.lineTo(px, y+h); ctx.stroke(); }
+    for (let j = 0; j <= ny; j++) { const py = y + (j/ny)*h; ctx.beginPath(); ctx.moveTo(x, py); ctx.lineTo(x+w, py); ctx.stroke(); }
+}
+
+function mapX(val, min, max, x, w) { return x + (val - min) / (max - min) * w; }
+function mapY(val, min, max, y, h) { return y + h - (val - min) / (max - min) * h; }
+
+function drawLine(ctx, pts, color, lw) {
+    if (pts.length < 2) return;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = lw || 1.5;
+    ctx.beginPath();
+    ctx.moveTo(pts[0][0], pts[0][1]);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+    ctx.stroke();
+}
+
+function drawText(ctx, text, x, y, color, size, align) {
+    ctx.fillStyle = color || C.text;
+    ctx.font = (size || 11) + 'px monospace';
+    ctx.textAlign = align || 'left';
+    ctx.fillText(text, x, y);
+}
+
+// ============================================================
+// Section 1: MDP Trading Environment
+// ============================================================
+const MDP = (() => {
+    let prices = globalPrices.slice(0, 100);
+    let env, state, done, stepIdx, actions, rewards, positions;
+
+    function reset() {
+        env = U.tradingEnvironment ? U.tradingEnvironment(prices) : null;
+        if (env) state = env.reset();
+        else state = { price: prices[0], position: 0, cash: 10000, pnl: 0, step: 0 };
+        done = false;
+        stepIdx = 0;
+        actions = [];
+        rewards = [];
+        positions = [0];
+        document.getElementById('mdp-log').innerHTML = '';
+        updateMetrics();
+        draw();
+    }
+
+    function simplePolicy(s, idx) {
+        const lookback = 5;
+        if (idx < lookback) return 2;
+        let trend = 0;
+        for (let i = idx - lookback; i < idx; i++) trend += prices[i+1] - prices[i];
+        if (trend > 0 && s.position === 0) return 0;
+        if (trend < 0 && s.position > 0) return 1;
+        return 2;
+    }
+
+    function step() {
+        if (done || stepIdx >= prices.length - 1) return;
+        const action = simplePolicy(state, stepIdx);
+        const aName = ['买入','卖出','持有'][action];
+
+        if (env) {
+            const result = env.step(action);
+            const prevState = state;
+            state = result.state;
+            done = result.done;
+            actions.push(action);
+            rewards.push(result.reward);
+            positions.push(state.position);
+            stepIdx = state.step;
+
+            const log = document.getElementById('mdp-log');
+            log.innerHTML += `<div>t=${stepIdx}: ${aName} | 价格=${state.price.toFixed(1)} | 奖励=${result.reward.toFixed(2)} | PnL=${state.pnl.toFixed(2)}</div>`;
+            log.scrollTop = log.scrollHeight;
+        } else {
+            stepIdx++;
+            actions.push(action);
+            rewards.push(0);
+            positions.push(0);
+        }
+
+        updateMetrics();
+        updateMDPBoxes(action);
+        draw();
+    }
+
+    function updateMDPBoxes(action) {
+        const aName = ['买入','卖出','持有'][action];
+        document.getElementById('mdp-sv').textContent = '价格: ' + state.price.toFixed(1);
+        document.getElementById('mdp-av').textContent = aName;
+        document.getElementById('mdp-rv').textContent = (rewards.length ? rewards[rewards.length-1].toFixed(2) : '0.00');
+        document.getElementById('mdp-nv').textContent = '价格: ' + state.price.toFixed(1);
+
+        ['mdp-state','mdp-action','mdp-reward','mdp-next'].forEach(id => document.getElementById(id).classList.remove('active'));
+        const order = ['mdp-state','mdp-action','mdp-reward','mdp-next'];
+        const idx = Math.min(3, actions.length % 4);
+        document.getElementById(order[idx]).classList.add('active');
+    }
+
+    function updateMetrics() {
+        document.getElementById('m-step').textContent = stepIdx;
+        document.getElementById('m-pos').textContent = state.position;
+        document.getElementById('m-cash').textContent = state.cash.toFixed(0);
+        document.getElementById('m-pnl').textContent = state.pnl.toFixed(2);
+        const pnlEl = document.getElementById('m-pnl');
+        pnlEl.style.color = state.pnl >= 0 ? '#00e676' : '#ff1744';
+    }
+
+    function draw() {
+        const cv = getCanvas('cv-mdp');
+        if (!cv) return;
+        const { ctx, w, h } = cv;
+        clearCanvas(ctx, w, h);
+        const pad = { l: 60, r: 20, t: 30, b: 40 };
+        const pw = w - pad.l - pad.r, ph = h - pad.t - pad.b;
+
+        const pMin = Math.min(...prices) * 0.98;
+        const pMax = Math.max(...prices) * 1.02;
+
+        drawGrid(ctx, pad.l, pad.t, pw, ph, 10, 5);
+        drawText(ctx, '价格走势与智能体交易', w/2, 16, C.text, 13, 'center');
+
+        // Price line
+        const pricePts = prices.map((p, i) => [mapX(i, 0, prices.length-1, pad.l, pw), mapY(p, pMin, pMax, pad.t, ph)]);
+        drawLine(ctx, pricePts, C.primary, 1.5);
+
+        // Current position indicator
+        if (stepIdx > 0) {
+            const cx = mapX(stepIdx, 0, prices.length-1, pad.l, pw);
+            const cy = mapY(prices[stepIdx], pMin, pMax, pad.t, ph);
+            ctx.strokeStyle = '#ffea00';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([4,3]);
+            ctx.beginPath(); ctx.moveTo(cx, pad.t); ctx.lineTo(cx, pad.t+ph); ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.fillStyle = '#ffea00';
+            ctx.beginPath(); ctx.arc(cx, cy, 5, 0, Math.PI*2); ctx.fill();
+        }
+
+        // Trade markers
+        for (let i = 0; i < actions.length; i++) {
+            const ti = i + 1;
+            if (ti >= prices.length) break;
+            const ax = mapX(ti, 0, prices.length-1, pad.l, pw);
+            const ay = mapY(prices[ti], pMin, pMax, pad.t, ph);
+            if (actions[i] === 0) {
+                ctx.fillStyle = '#00e676';
+                ctx.beginPath(); ctx.moveTo(ax, ay+8); ctx.lineTo(ax-5, ay+15); ctx.lineTo(ax+5, ay+15); ctx.closePath(); ctx.fill();
+            } else if (actions[i] === 1) {
+                ctx.fillStyle = '#ff1744';
+                ctx.beginPath(); ctx.moveTo(ax, ay-8); ctx.lineTo(ax-5, ay-15); ctx.lineTo(ax+5, ay-15); ctx.closePath(); ctx.fill();
+            }
+        }
+
+        // Axes
+        if (U.drawAxis) U.drawAxis(ctx, { x: pad.l, y: pad.t, w: pw, h: ph, xMin: 0, xMax: prices.length-1, yMin: pMin, yMax: pMax, xLabel: '时间步', yLabel: '价格', ticks: 5, color: C.textDim });
+    }
+
+    document.getElementById('btn-mdp-step').addEventListener('click', step);
+    document.getElementById('btn-mdp-reset').addEventListener('click', reset);
+    document.getElementById('sl-gamma').addEventListener('input', e => {
+        document.getElementById('sv-gamma').textContent = (e.target.value / 100).toFixed(2);
+    });
+
+    return { reset, draw };
+})();
+
+// ============================================================
+// Section 2: Q-Learning Trading
+// ============================================================
+const QLearning = (() => {
+    let Q = {};
+    let episodeRewards = [];
+    let totalEpisodes = 0;
+    let bestReturn = -Infinity;
+    let lastTradeActions = [];
+
+    function discretizeState(price, prevPrice, hasPosition) {
+        const ret = (price - prevPrice) / prevPrice;
+        let rBucket;
+        if (ret < -0.02) rBucket = 'big_down';
+        else if (ret < -0.005) rBucket = 'down';
+        else if (ret < 0.005) rBucket = 'flat';
+        else if (ret < 0.02) rBucket = 'up';
+        else rBucket = 'big_up';
+        return rBucket + '_' + (hasPosition ? 'long' : 'flat');
+    }
+
+    function train(nEpisodes) {
+        const alpha = parseInt(document.getElementById('sl-alpha').value) / 100;
+        const gamma = parseInt(document.getElementById('sl-gamma').value) / 100;
+        let epsilon = parseInt(document.getElementById('sl-epsilon').value) / 100;
+        const prices = globalPrices;
+
+        for (let ep = 0; ep < nEpisodes; ep++) {
+            let cash = 10000, position = 0, totalReward = 0;
+            const epActions = [];
+            for (let t = 1; t < prices.length; t++) {
+                const state = discretizeState(prices[t], prices[t-1], position > 0);
+                if (!Q[state]) Q[state] = [0, 0, 0];
+
+                let action;
+                if (Math.random() < epsilon) action = Math.floor(Math.random() * 3);
+                else action = Q[state].indexOf(Math.max(...Q[state]));
+
+                const prevVal = cash + position * prices[t];
+                if (action === 0 && cash >= prices[t]) { const qty = Math.floor(cash / prices[t]); position += qty; cash -= qty * prices[t]; }
+                else if (action === 1 && position > 0) { cash += position * prices[t]; position = 0; }
+
+                const nextT = Math.min(t + 1, prices.length - 1);
+                const currVal = cash + position * prices[nextT];
+                const reward = currVal - prevVal;
+                totalReward += reward;
+
+                const nextState = discretizeState(prices[nextT], prices[t], position > 0);
+                if (U.qLearningStep) U.qLearningStep(Q, state, action, reward, nextState, alpha, gamma);
+                else {
+                    if (!Q[nextState]) Q[nextState] = [0, 0, 0];
+                    const maxNext = Math.max(...Q[nextState]);
+                    Q[state][action] += alpha * (reward + gamma * maxNext - Q[state][action]);
+                }
+                epActions.push(action);
+            }
+            episodeRewards.push(totalReward);
+            if (totalReward > bestReturn) bestReturn = totalReward;
+            lastTradeActions = epActions;
+            totalEpisodes++;
+            epsilon *= 0.995;
+        }
+        updateMetrics();
+        drawQTable();
+        drawRewardCurve();
+    }
+
+    function updateMetrics() {
+        document.getElementById('m-ql-ep').textContent = totalEpisodes;
+        const avg = episodeRewards.length > 10 ? U.mean(episodeRewards.slice(-10)).toFixed(2) : (episodeRewards.length ? episodeRewards[episodeRewards.length-1].toFixed(2) : '0.00');
+        document.getElementById('m-ql-ret').textContent = avg;
+        document.getElementById('m-ql-best').textContent = bestReturn.toFixed(2);
+        document.getElementById('m-ql-size').textContent = Object.keys(Q).length;
+    }
+
+    function drawQTable() {
+        const cv = getCanvas('cv-qtable');
+        if (!cv) return;
+        const { ctx, w, h } = cv;
+        clearCanvas(ctx, w, h);
+
+        const states = Object.keys(Q).sort();
+        if (states.length === 0) {
+            drawText(ctx, '点击"训练"开始 Q-Learning', w/2, h/2, C.textDim, 14, 'center');
+            return;
+        }
+
+        const pad = { l: 100, r: 40, t: 40, b: 60 };
+        const pw = w - pad.l - pad.r, ph = h - pad.t - pad.b;
+
+        drawText(ctx, 'Q 表热力图 (状态 x 动作)', w/2, 18, C.text, 13, 'center');
+
+        // Q-table heatmap
+        const nStates = states.length;
+        const cellW = Math.min(pw / 3, 80);
+        const cellH = Math.min(ph / nStates, 30);
+        const tableW = cellW * 3;
+        const tableH = cellH * nStates;
+        const tx = pad.l + (pw - tableW) / 2;
+        const ty = pad.t;
+
+        let allQ = [];
+        states.forEach(s => Q[s].forEach(v => allQ.push(v)));
+        const qMin = Math.min(...allQ, -1);
+        const qMax = Math.max(...allQ, 1);
+
+        const actionNames = ['买入', '卖出', '持有'];
+        for (let a = 0; a < 3; a++) {
+            drawText(ctx, actionNames[a], tx + a * cellW + cellW/2, ty - 6, C.text, 11, 'center');
+        }
+
+        for (let si = 0; si < nStates; si++) {
+            const s = states[si];
+            const label = s.replace('_', ' ');
+            drawText(ctx, label, tx - 6, ty + si * cellH + cellH/2 + 4, C.textDim, 9, 'right');
+            for (let a = 0; a < 3; a++) {
+                const val = Q[s][a];
+                const color = U.valueToColor ? U.valueToColor(val, qMin, qMax) : (val > 0 ? '#00e676' : '#ff1744');
+                ctx.fillStyle = color;
+                ctx.globalAlpha = 0.7;
+                ctx.fillRect(tx + a * cellW + 1, ty + si * cellH + 1, cellW - 2, cellH - 2);
+                ctx.globalAlpha = 1;
+                drawText(ctx, val.toFixed(1), tx + a * cellW + cellW/2, ty + si * cellH + cellH/2 + 4, C.text, 9, 'center');
+            }
+        }
+
+        // Price chart with trades on right side
+        if (lastTradeActions.length > 0) {
+            const chartY = ty + tableH + 30;
+            const chartH = h - chartY - 30;
+            if (chartH > 60) {
+                const prices = globalPrices;
+                const pMin = Math.min(...prices) * 0.98, pMax = Math.max(...prices) * 1.02;
+                drawGrid(ctx, pad.l, chartY, pw, chartH, 10, 3);
+                const pts = prices.map((p, i) => [mapX(i, 0, prices.length-1, pad.l, pw), mapY(p, pMin, pMax, chartY, chartH)]);
+                drawLine(ctx, pts, C.primary, 1.2);
+
+                for (let i = 0; i < lastTradeActions.length && i < prices.length - 1; i++) {
+                    const px = mapX(i+1, 0, prices.length-1, pad.l, pw);
+                    const py = mapY(prices[i+1], pMin, pMax, chartY, chartH);
+                    if (lastTradeActions[i] === 0) {
+                        ctx.fillStyle = '#00e67666'; ctx.beginPath(); ctx.arc(px, py, 3, 0, Math.PI*2); ctx.fill();
+                    } else if (lastTradeActions[i] === 1) {
+                        ctx.fillStyle = '#ff174466'; ctx.beginPath(); ctx.arc(px, py, 3, 0, Math.PI*2); ctx.fill();
+                    }
+                }
+                drawText(ctx, '最近一回合交易', pad.l + pw/2, chartY - 6, C.textDim, 10, 'center');
+            }
+        }
+    }
+
+    function drawRewardCurve() {
+        const cv = getCanvas('cv-ql-reward');
+        if (!cv) return;
+        const { ctx, w, h } = cv;
+        clearCanvas(ctx, w, h);
+
+        if (episodeRewards.length < 2) {
+            drawText(ctx, '训练后显示回报曲线', w/2, h/2, C.textDim, 14, 'center');
+            return;
+        }
+
+        const pad = { l: 60, r: 20, t: 30, b: 35 };
+        const pw = w - pad.l - pad.r, ph = h - pad.t - pad.b;
+        const rMin = Math.min(...episodeRewards), rMax = Math.max(...episodeRewards);
+        drawGrid(ctx, pad.l, pad.t, pw, ph, 10, 4);
+        drawText(ctx, '回合回报曲线', w/2, 16, C.text, 12, 'center');
+
+        const pts = episodeRewards.map((r, i) => [mapX(i, 0, episodeRewards.length-1, pad.l, pw), mapY(r, rMin - 10, rMax + 10, pad.t, ph)]);
+        drawLine(ctx, pts, C.positive, 1.2);
+
+        // Rolling average
+        if (episodeRewards.length > 10) {
+            const avg = [];
+            for (let i = 0; i < episodeRewards.length; i++) {
+                const start = Math.max(0, i - 9);
+                const sl = episodeRewards.slice(start, i + 1);
+                avg.push(U.mean(sl));
+            }
+            const avgPts = avg.map((r, i) => [mapX(i, 0, avg.length-1, pad.l, pw), mapY(r, rMin - 10, rMax + 10, pad.t, ph)]);
+            drawLine(ctx, avgPts, '#ffea00', 2);
+        }
+
+        if (U.drawAxis) U.drawAxis(ctx, { x: pad.l, y: pad.t, w: pw, h: ph, xMin: 0, xMax: episodeRewards.length-1, yMin: rMin-10, yMax: rMax+10, xLabel: '回合', yLabel: '回报', ticks: 5, color: C.textDim });
+    }
+
+    function resetQL() {
+        Q = {};
+        episodeRewards = [];
+        totalEpisodes = 0;
+        bestReturn = -Infinity;
+        lastTradeActions = [];
+        updateMetrics();
+        drawQTable();
+        drawRewardCurve();
+    }
+
+    document.getElementById('btn-ql-train').addEventListener('click', () => train(100));
+    document.getElementById('btn-ql-reset').addEventListener('click', resetQL);
+    document.getElementById('sl-alpha').addEventListener('input', e => { document.getElementById('sv-alpha').textContent = (e.target.value / 100).toFixed(2); });
+    document.getElementById('sl-epsilon').addEventListener('input', e => { document.getElementById('sv-epsilon').textContent = (e.target.value / 100).toFixed(2); });
+
+    return { train, reset: resetQL, drawQTable, drawRewardCurve, getQ: () => Q, getRewards: () => episodeRewards };
+})();
+
+// ============================================================
+// Section 3: DQN Trading
+// ============================================================
+const DQN = (() => {
+    let losses = [], returns = [], epsilons = [];
+    let totalSteps = 0, bufferSize = 0;
+
+    function simDQNTraining() {
+        const hiddenSize = parseInt(document.getElementById('sl-hidden').value);
+        const replaySize = parseInt(document.getElementById('sl-replay').value);
+        const prices = globalPrices;
+        const nEpisodes = 80;
+        let epsilon = 1.0;
+        const epsilonDecay = 0.98;
+        const epsilonMin = 0.05;
+        const r = U.seededRandom ? U.seededRandom(123) : Math.random;
+
+        losses = []; returns = []; epsilons = [];
+        totalSteps = 0; bufferSize = 0;
+
+        for (let ep = 0; ep < nEpisodes; ep++) {
+            let cash = 10000, position = 0, epReward = 0;
+            const epLoss = [];
+            for (let t = 1; t < prices.length; t++) {
+                const action = (r() < epsilon) ? Math.floor(r() * 3) : (prices[t] > prices[t-1] ? 0 : (prices[t] < prices[t-1] ? 1 : 2));
+                const prevVal = cash + position * prices[t];
+                if (action === 0 && cash >= prices[t]) { const qty = Math.floor(cash / prices[t]); position += qty; cash -= qty * prices[t]; }
+                else if (action === 1 && position > 0) { cash += position * prices[t]; position = 0; }
+                const nextT = Math.min(t+1, prices.length-1);
+                const currVal = cash + position * prices[nextT];
+                epReward += currVal - prevVal;
+                bufferSize = Math.min(bufferSize + 1, replaySize);
+                totalSteps++;
+
+                // Simulated loss
+                const noise = U.normalRandom ? U.normalRandom(0, 0.5, r) : (r()-0.5);
+                const baseLoss = Math.max(0.01, 2.0 * Math.exp(-ep * 0.03) + noise * 0.3 * Math.exp(-ep * 0.02));
+                epLoss.push(baseLoss);
+            }
+            losses.push(U.mean(epLoss));
+            returns.push(epReward);
+            epsilons.push(epsilon);
+            epsilon = Math.max(epsilonMin, epsilon * epsilonDecay);
+        }
+        updateMetrics();
+        drawArch();
+        drawCurves();
+    }
+
+    function updateMetrics() {
+        document.getElementById('m-dqn-steps').textContent = totalSteps;
+        document.getElementById('m-dqn-eps').textContent = epsilons.length ? epsilons[epsilons.length-1].toFixed(3) : '1.00';
+        document.getElementById('m-dqn-buf').textContent = bufferSize;
+        document.getElementById('m-dqn-ret').textContent = returns.length ? returns[returns.length-1].toFixed(2) : '0.00';
+    }
+
+    function drawArch() {
+        const cv = getCanvas('cv-dqn-arch');
+        if (!cv) return;
+        const { ctx, w, h } = cv;
+        clearCanvas(ctx, w, h);
+
+        drawText(ctx, 'DQN 网络架构', w/2, 20, C.text, 13, 'center');
+
+        const hiddenSize = parseInt(document.getElementById('sl-hidden').value);
+        const layers = [
+            { name: '输入层', desc: '状态 (5)', nodes: 5, color: C.primary },
+            { name: '隐藏层 1', desc: `FC(${hiddenSize})`, nodes: Math.min(hiddenSize/4, 8), color: C.secondary },
+            { name: '隐藏层 2', desc: `FC(${hiddenSize/2})`, nodes: Math.min(hiddenSize/8, 6), color: C.secondary },
+            { name: '输出层', desc: 'Q(s,a) (3)', nodes: 3, color: C.accent }
+        ];
+
+        const pad = { l: 80, r: 80, t: 50, b: 60 };
+        const layerSpacing = (w - pad.l - pad.r) / (layers.length - 1);
+        const maxNodes = 8;
+
+        // Draw connections
+        for (let li = 0; li < layers.length - 1; li++) {
+            const x1 = pad.l + li * layerSpacing;
+            const x2 = pad.l + (li+1) * layerSpacing;
+            const n1 = layers[li].nodes, n2 = layers[li+1].nodes;
+            const h1 = (h - pad.t - pad.b);
+            for (let a = 0; a < n1; a++) {
+                const y1 = pad.t + (a + 0.5) / n1 * h1;
+                for (let b = 0; b < n2; b++) {
+                    const y2 = pad.t + (b + 0.5) / n2 * h1;
+                    ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+                    ctx.lineWidth = 0.5;
+                    ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+                }
+            }
+        }
+
+        // Draw nodes
+        for (let li = 0; li < layers.length; li++) {
+            const x = pad.l + li * layerSpacing;
+            const n = layers[li].nodes;
+            const hh = h - pad.t - pad.b;
+            for (let ni = 0; ni < n; ni++) {
+                const y = pad.t + (ni + 0.5) / n * hh;
+                ctx.fillStyle = layers[li].color;
+                ctx.globalAlpha = 0.8;
+                ctx.beginPath(); ctx.arc(x, y, 10, 0, Math.PI*2); ctx.fill();
+                ctx.globalAlpha = 1;
+                ctx.strokeStyle = layers[li].color;
+                ctx.lineWidth = 1.5;
+                ctx.beginPath(); ctx.arc(x, y, 10, 0, Math.PI*2); ctx.stroke();
+            }
+            drawText(ctx, layers[li].name, x, h - pad.b + 16, C.text, 10, 'center');
+            drawText(ctx, layers[li].desc, x, h - pad.b + 30, C.textDim, 9, 'center');
+        }
+
+        // Experience replay box
+        const bx = w - 130, by = 40, bw = 120, bh = 50;
+        ctx.fillStyle = 'rgba(255,109,0,0.1)';
+        ctx.strokeStyle = C.accent;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.roundRect(bx, by, bw, bh, 6);
+        ctx.fill(); ctx.stroke();
+        drawText(ctx, 'Experience', bx + bw/2, by + 18, C.accent, 10, 'center');
+        drawText(ctx, 'Replay Buffer', bx + bw/2, by + 34, C.accent, 10, 'center');
+        drawText(ctx, `${bufferSize} 条`, bx + bw/2, by + 48, C.textDim, 9, 'center');
+
+        // Epsilon box
+        const ex = 10, ey = 40, ew = 110, eh = 50;
+        ctx.fillStyle = 'rgba(124,77,255,0.1)';
+        ctx.strokeStyle = C.secondary;
+        ctx.beginPath();
+        ctx.roundRect(ex, ey, ew, eh, 6);
+        ctx.fill(); ctx.stroke();
+        drawText(ctx, 'Epsilon-Greedy', ex + ew/2, ey + 18, C.secondary, 10, 'center');
+        const epsVal = epsilons.length ? epsilons[epsilons.length-1].toFixed(3) : '1.000';
+        drawText(ctx, 'e = ' + epsVal, ex + ew/2, ey + 36, C.secondary, 11, 'center');
+    }
+
+    function drawCurves() {
+        const cv = getCanvas('cv-dqn-curve');
+        if (!cv) return;
+        const { ctx, w, h } = cv;
+        clearCanvas(ctx, w, h);
+
+        if (losses.length < 2) {
+            drawText(ctx, '点击"训练 DQN"开始', w/2, h/2, C.textDim, 14, 'center');
+            return;
+        }
+
+        const pad = { l: 60, r: 60, t: 30, b: 35 };
+        const pw = w - pad.l - pad.r, ph = h - pad.t - pad.b;
+        drawGrid(ctx, pad.l, pad.t, pw, ph, 10, 4);
+        drawText(ctx, 'DQN 训练曲线', w/2, 16, C.text, 12, 'center');
+
+        // Loss curve (left axis)
+        const lMin = 0, lMax = Math.max(...losses) * 1.2;
+        const lossPts = losses.map((l, i) => [mapX(i, 0, losses.length-1, pad.l, pw), mapY(l, lMin, lMax, pad.t, ph)]);
+        drawLine(ctx, lossPts, C.primary, 1.5);
+
+        // Epsilon curve (right axis, 0-1)
+        const epsPts = epsilons.map((e, i) => [mapX(i, 0, epsilons.length-1, pad.l, pw), mapY(e, 0, 1, pad.t, ph)]);
+        drawLine(ctx, epsPts, C.accent, 1.5);
+        ctx.setLineDash([4,3]);
+        drawLine(ctx, epsPts, C.accent, 1);
+        ctx.setLineDash([]);
+
+        // Return curve normalized
+        const rMin = Math.min(...returns), rMax = Math.max(...returns);
+        const retPts = returns.map((r, i) => [mapX(i, 0, returns.length-1, pad.l, pw), mapY(r, rMin-10, rMax+10, pad.t, ph)]);
+        drawLine(ctx, retPts, C.positive, 1.2);
+
+        // Axis labels
+        drawText(ctx, '损失/Epsilon', pad.l - 6, pad.t - 6, C.textDim, 9, 'right');
+        drawText(ctx, '回合', pad.l + pw/2, h - 4, C.textDim, 9, 'center');
+    }
+
+    function resetDQN() {
+        losses = []; returns = []; epsilons = [];
+        totalSteps = 0; bufferSize = 0;
+        updateMetrics();
+        drawArch();
+        drawCurves();
+    }
+
+    document.getElementById('btn-dqn-train').addEventListener('click', simDQNTraining);
+    document.getElementById('btn-dqn-reset').addEventListener('click', resetDQN);
+    document.getElementById('sl-hidden').addEventListener('input', e => { document.getElementById('sv-hidden').textContent = e.target.value; drawArch(); });
+    document.getElementById('sl-replay').addEventListener('input', e => { document.getElementById('sv-replay').textContent = e.target.value; });
+
+    return { train: simDQNTraining, reset: resetDQN, drawArch, drawCurves };
+})();
+
+// ============================================================
+// Section 4: Policy Gradient
+// ============================================================
+const PG = (() => {
+    let probHistory = []; // [ { buy, sell, hold } per episode checkpoint ]
+    let pgReturns = [];
+    let qlReturns = [];
+    let totalEp = 0;
+
+    function train() {
+        const lr = parseInt(document.getElementById('sl-pg-lr').value) / 1000;
+        const prices = globalPrices;
+        const nEpisodes = 120;
+        const r = U.seededRandom ? U.seededRandom(77) : Math.random;
+
+        probHistory = [];
+        pgReturns = [];
+        qlReturns = [];
+        totalEp = 0;
+
+        // Simple policy network: weights for 3 features -> 3 actions
+        let W = [[0.1, -0.1, 0], [0, 0.1, -0.1], [-0.05, 0, 0.1]]; // [action][feature]
+
+        for (let ep = 0; ep < nEpisodes; ep++) {
+            let cash = 10000, position = 0;
+            let qlCash = 10000, qlPos = 0;
+            const logProbs = [], rewards = [], feats = [];
+
+            for (let t = 1; t < prices.length; t++) {
+                const ret1 = (prices[t] - prices[t-1]) / prices[t-1];
+                const ret5 = t >= 5 ? (prices[t] - prices[t-5]) / prices[t-5] : 0;
+                const posF = position > 0 ? 1 : 0;
+                const feat = [ret1 * 10, ret5 * 5, posF];
+                feats.push(feat);
+
+                // Compute action probs
+                const logits = W.map(row => row[0]*feat[0] + row[1]*feat[1] + row[2]*feat[2]);
+                const probs = U.softmax ? U.softmax(logits) : (() => { const e = logits.map(x => Math.exp(x - Math.max(...logits))); const s = e.reduce((a,b)=>a+b,0); return e.map(x=>x/s); })();
+
+                // Sample action
+                const u = r();
+                let action = 2;
+                if (u < probs[0]) action = 0;
+                else if (u < probs[0] + probs[1]) action = 1;
+
+                logProbs.push(Math.log(probs[action] + 1e-8));
+
+                const prevVal = cash + position * prices[t];
+                if (action === 0 && cash >= prices[t]) { const qty = Math.floor(cash / prices[t]); position += qty; cash -= qty * prices[t]; }
+                else if (action === 1 && position > 0) { cash += position * prices[t]; position = 0; }
+                const nextT = Math.min(t+1, prices.length-1);
+                const currVal = cash + position * prices[nextT];
+                rewards.push(currVal - prevVal);
+
+                // Q-learning baseline comparison
+                const qlAction = ret1 > 0.005 ? 0 : (ret1 < -0.005 ? 1 : 2);
+                const qlPrevVal = qlCash + qlPos * prices[t];
+                if (qlAction === 0 && qlCash >= prices[t]) { const q = Math.floor(qlCash / prices[t]); qlPos += q; qlCash -= q * prices[t]; }
+                else if (qlAction === 1 && qlPos > 0) { qlCash += qlPos * prices[t]; qlPos = 0; }
+            }
+
+            const epReturn = rewards.reduce((a,b) => a + b, 0);
+            pgReturns.push(epReturn);
+            qlReturns.push(qlCash + qlPos * prices[prices.length-1] - 10000);
+
+            // Policy gradient update
+            const gamma = 0.99;
+            const G = new Array(rewards.length).fill(0);
+            G[rewards.length-1] = rewards[rewards.length-1];
+            for (let i = rewards.length-2; i >= 0; i--) G[i] = rewards[i] + gamma * G[i+1];
+            const Gm = U.mean(G), Gs = U.std(G) || 1;
+
+            for (let t = 0; t < feats.length; t++) {
+                const adv = (G[t] - Gm) / Gs;
+                for (let a = 0; a < 3; a++) {
+                    for (let f = 0; f < 3; f++) {
+                        W[a][f] += lr * adv * feats[t][f] * 0.01;
+                    }
+                }
+            }
+
+            // Record probs at checkpoints
+            if (ep % 10 === 0 || ep === nEpisodes - 1) {
+                const sampleFeat = [0.5, 0.2, 0];
+                const logits = W.map(row => row[0]*sampleFeat[0] + row[1]*sampleFeat[1] + row[2]*sampleFeat[2]);
+                const probs = U.softmax ? U.softmax(logits) : (() => { const e = logits.map(x => Math.exp(x - Math.max(...logits))); const s = e.reduce((a,b)=>a+b,0); return e.map(x=>x/s); })();
+                probHistory.push({ ep, buy: probs[0], sell: probs[1], hold: probs[2] });
+            }
+            totalEp++;
+        }
+
+        updateMetrics();
+        drawProbs();
+        drawCompare();
+    }
+
+    function updateMetrics() {
+        document.getElementById('m-pg-ep').textContent = totalEp;
+        const avg = pgReturns.length > 10 ? U.mean(pgReturns.slice(-10)).toFixed(2) : '0.00';
+        document.getElementById('m-pg-ret').textContent = avg;
+        if (probHistory.length) {
+            const last = probHistory[probHistory.length-1];
+            const ent = -([last.buy, last.sell, last.hold].reduce((s, p) => s + (p > 0 ? p * Math.log(p) : 0), 0));
+            document.getElementById('m-pg-ent').textContent = ent.toFixed(3);
+        }
+    }
+
+    function drawProbs() {
+        const cv = getCanvas('cv-pg-probs');
+        if (!cv) return;
+        const { ctx, w, h } = cv;
+        clearCanvas(ctx, w, h);
+
+        if (probHistory.length < 2) {
+            drawText(ctx, '点击"训练策略网络"开始', w/2, h/2, C.textDim, 14, 'center');
+            return;
+        }
+
+        const pad = { l: 60, r: 20, t: 40, b: 35 };
+        const pw = w - pad.l - pad.r, ph = h - pad.t - pad.b;
+        drawGrid(ctx, pad.l, pad.t, pw, ph, 10, 5);
+        drawText(ctx, '动作概率分布随训练演化', w/2, 18, C.text, 13, 'center');
+
+        const n = probHistory.length;
+        const buyPts = probHistory.map((p, i) => [mapX(i, 0, n-1, pad.l, pw), mapY(p.buy, 0, 1, pad.t, ph)]);
+        const sellPts = probHistory.map((p, i) => [mapX(i, 0, n-1, pad.l, pw), mapY(p.sell, 0, 1, pad.t, ph)]);
+        const holdPts = probHistory.map((p, i) => [mapX(i, 0, n-1, pad.l, pw), mapY(p.hold, 0, 1, pad.t, ph)]);
+
+        drawLine(ctx, buyPts, '#00e676', 2);
+        drawLine(ctx, sellPts, '#ff1744', 2);
+        drawLine(ctx, holdPts, '#78909c', 2);
+
+        // Stacked area chart on the right side
+        const barX = pad.l + pw + 5;
+        const barW = 12;
+        if (probHistory.length > 0) {
+            const last = probHistory[probHistory.length - 1];
+            const barH = ph;
+            const bY = pad.t;
+            ctx.fillStyle = '#00e676'; ctx.fillRect(barX, bY + barH * (1 - last.buy), barW, barH * last.buy);
+            ctx.fillStyle = '#ff1744'; ctx.fillRect(barX, bY + barH * (1 - last.buy - last.sell), barW, barH * last.sell);
+            ctx.fillStyle = '#78909c'; ctx.fillRect(barX, bY, barW, barH * last.hold);
+        }
+
+        if (U.drawAxis) U.drawAxis(ctx, { x: pad.l, y: pad.t, w: pw, h: ph, xMin: 0, xMax: probHistory[probHistory.length-1].ep, yMin: 0, yMax: 1, xLabel: '训练回合', yLabel: '概率', ticks: 5, color: C.textDim });
+
+        // Actor-Critic diagram
+        const acX = pad.l + 20, acY = pad.t + 10;
+        ctx.fillStyle = 'rgba(124,77,255,0.1)';
+        ctx.strokeStyle = '#7c4dff';
+        ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.roundRect(acX, acY, 90, 36, 6); ctx.fill(); ctx.stroke();
+        drawText(ctx, 'Actor', acX + 45, acY + 15, '#7c4dff', 10, 'center');
+        drawText(ctx, '(策略网络)', acX + 45, acY + 29, C.textDim, 8, 'center');
+
+        ctx.fillStyle = 'rgba(0,229,255,0.1)';
+        ctx.strokeStyle = '#00e5ff';
+        ctx.beginPath(); ctx.roundRect(acX + 110, acY, 90, 36, 6); ctx.fill(); ctx.stroke();
+        drawText(ctx, 'Critic', acX + 155, acY + 15, '#00e5ff', 10, 'center');
+        drawText(ctx, '(价值网络)', acX + 155, acY + 29, C.textDim, 8, 'center');
+
+        // Arrow between
+        ctx.strokeStyle = '#ffea00';
+        ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(acX + 90, acY + 18); ctx.lineTo(acX + 110, acY + 18); ctx.stroke();
+        ctx.fillStyle = '#ffea00';
+        ctx.beginPath(); ctx.moveTo(acX + 108, acY + 14); ctx.lineTo(acX + 114, acY + 18); ctx.lineTo(acX + 108, acY + 22); ctx.fill();
+    }
+
+    function drawCompare() {
+        const cv = getCanvas('cv-pg-compare');
+        if (!cv) return;
+        const { ctx, w, h } = cv;
+        clearCanvas(ctx, w, h);
+
+        if (pgReturns.length < 2) {
+            drawText(ctx, '训练后显示对比', w/2, h/2, C.textDim, 14, 'center');
+            return;
+        }
+
+        const pad = { l: 60, r: 20, t: 30, b: 35 };
+        const pw = w - pad.l - pad.r, ph = h - pad.t - pad.b;
+        drawGrid(ctx, pad.l, pad.t, pw, ph, 10, 4);
+        drawText(ctx, 'Actor-Critic vs Q-Learning 回报对比', w/2, 16, C.text, 12, 'center');
+
+        const all = pgReturns.concat(qlReturns);
+        const yMin = Math.min(...all) - 50, yMax = Math.max(...all) + 50;
+
+        // Smoothed curves
+        function smooth(arr, win) {
+            return arr.map((_, i) => {
+                const s = Math.max(0, i - win + 1);
+                return U.mean(arr.slice(s, i + 1));
+            });
+        }
+        const pgSmooth = smooth(pgReturns, 10);
+        const qlSmooth = smooth(qlReturns, 10);
+
+        const pgPts = pgSmooth.map((r, i) => [mapX(i, 0, pgSmooth.length-1, pad.l, pw), mapY(r, yMin, yMax, pad.t, ph)]);
+        const qlPts = qlSmooth.map((r, i) => [mapX(i, 0, qlSmooth.length-1, pad.l, pw), mapY(r, yMin, yMax, pad.t, ph)]);
+
+        drawLine(ctx, qlPts, C.primary, 1.5);
+        drawLine(ctx, pgPts, C.secondary, 2);
+
+        if (U.drawAxis) U.drawAxis(ctx, { x: pad.l, y: pad.t, w: pw, h: ph, xMin: 0, xMax: pgReturns.length-1, yMin, yMax, xLabel: '回合', yLabel: '回报', ticks: 5, color: C.textDim });
+    }
+
+    function resetPG() {
+        probHistory = []; pgReturns = []; qlReturns = []; totalEp = 0;
+        updateMetrics();
+        drawProbs();
+        drawCompare();
+    }
+
+    document.getElementById('btn-pg-train').addEventListener('click', train);
+    document.getElementById('btn-pg-reset').addEventListener('click', resetPG);
+    document.getElementById('sl-pg-lr').addEventListener('input', e => { document.getElementById('sv-pg-lr').textContent = (e.target.value / 1000).toFixed(3); });
+
+    return { train, reset: resetPG, getReturns: () => pgReturns };
+})();
+
+// ============================================================
+// Section 5: RL vs Traditional Strategies
+// ============================================================
+const Compare = (() => {
+    let equityRL = [], equityMom = [], equityBH = [];
+
+    function run() {
+        const vol = parseInt(document.getElementById('sl-vol').value) / 1000;
+        const regimeProb = parseInt(document.getElementById('sl-regime').value) / 100;
+        const prices = genPrices(250, Date.now() & 0xFFFF, vol, regimeProb);
+
+        // Buy & Hold
+        equityBH = prices.map(p => 10000 * p / prices[0]);
+
+        // Momentum strategy
+        equityMom = [10000];
+        let momCash = 10000, momPos = 0;
+        const momWindow = 10;
+        for (let t = 1; t < prices.length; t++) {
+            if (t >= momWindow) {
+                const momentum = prices[t] - prices[t - momWindow];
+                if (momentum > 0 && momCash >= prices[t]) {
+                    const qty = Math.floor(momCash / prices[t]);
+                    momPos += qty; momCash -= qty * prices[t];
+                } else if (momentum < 0 && momPos > 0) {
+                    momCash += momPos * prices[t]; momPos = 0;
+                }
+            }
+            equityMom.push(momCash + momPos * prices[t]);
+        }
+
+        // RL agent (simulated trained agent with some adaptation)
+        equityRL = [10000];
+        let rlCash = 10000, rlPos = 0;
+        const r = U.seededRandom ? U.seededRandom(99) : Math.random;
+        let prevAction = 2;
+        for (let t = 1; t < prices.length; t++) {
+            const ret1 = (prices[t] - prices[t-1]) / prices[t-1];
+            const ret5 = t >= 5 ? (prices[t] - prices[t-5]) / prices[t-5] : 0;
+            const vol5 = t >= 5 ? U.std(prices.slice(Math.max(0,t-5), t+1).map((p,i,a) => i > 0 ? (p-a[i-1])/a[i-1] : 0).slice(1)) : 0.01;
+
+            // RL agent uses multi-factor signal with regime awareness
+            let signal = ret1 * 3 + ret5 * 2;
+            // Adapt: reduce position in high volatility (regime awareness)
+            const volMult = vol5 > 0.03 ? 0.3 : 1.0;
+            signal *= volMult;
+
+            let action;
+            if (signal > 0.01 && rlCash >= prices[t]) action = 0;
+            else if (signal < -0.01 && rlPos > 0) action = 1;
+            else action = 2;
+
+            // Small exploration noise
+            if (r() < 0.02) action = Math.floor(r() * 3);
+
+            const prevVal = rlCash + rlPos * prices[t];
+            if (action === 0 && rlCash >= prices[t]) {
+                const qty = Math.floor(rlCash / prices[t] * volMult);
+                if (qty > 0) { rlPos += qty; rlCash -= qty * prices[t]; }
+            } else if (action === 1 && rlPos > 0) {
+                rlCash += rlPos * prices[t]; rlPos = 0;
+            }
+            equityRL.push(rlCash + rlPos * prices[t]);
+            prevAction = action;
+        }
+
+        updateMetrics(prices);
+        drawEquity(prices);
+        drawDrawdown(prices);
+    }
+
+    function maxDrawdown(equity) {
+        let peak = equity[0], maxDD = 0;
+        for (const v of equity) {
+            if (v > peak) peak = v;
+            const dd = (peak - v) / peak;
+            if (dd > maxDD) maxDD = dd;
+        }
+        return maxDD;
+    }
+
+    function updateMetrics(prices) {
+        const fmt = v => (v > 0 ? '+' : '') + v.toFixed(2);
+        document.getElementById('m-cmp-rl').textContent = fmt(equityRL[equityRL.length-1] - 10000);
+        document.getElementById('m-cmp-mom').textContent = fmt(equityMom[equityMom.length-1] - 10000);
+        document.getElementById('m-cmp-bh').textContent = fmt(equityBH[equityBH.length-1] - 10000);
+        document.getElementById('m-cmp-dd').textContent = (maxDrawdown(equityRL) * 100).toFixed(1) + '%';
+
+        const rlEl = document.getElementById('m-cmp-rl');
+        rlEl.style.color = equityRL[equityRL.length-1] >= 10000 ? '#00e676' : '#ff1744';
+    }
+
+    function drawEquity(prices) {
+        const cv = getCanvas('cv-equity');
+        if (!cv) return;
+        const { ctx, w, h } = cv;
+        clearCanvas(ctx, w, h);
+
+        const pad = { l: 70, r: 20, t: 35, b: 40 };
+        const pw = w - pad.l - pad.r, ph = h - pad.t - pad.b;
+
+        const all = equityRL.concat(equityMom, equityBH);
+        const yMin = Math.min(...all) * 0.98, yMax = Math.max(...all) * 1.02;
+        const n = equityRL.length;
+
+        drawGrid(ctx, pad.l, pad.t, pw, ph, 10, 5);
+        drawText(ctx, '权益曲线对比', w/2, 18, C.text, 13, 'center');
+
+        // Shade regime change areas
+        if (prices) {
+            const retVol = [];
+            for (let i = 10; i < prices.length; i++) {
+                const rets = [];
+                for (let j = i-9; j <= i; j++) rets.push((prices[j] - prices[j-1])/prices[j-1]);
+                retVol.push(U.std(rets));
+            }
+            const avgVol = U.mean(retVol);
+            for (let i = 0; i < retVol.length; i++) {
+                if (retVol[i] > avgVol * 1.8) {
+                    const x1 = mapX(i + 10, 0, n-1, pad.l, pw);
+                    ctx.fillStyle = 'rgba(255,82,82,0.06)';
+                    ctx.fillRect(x1 - 3, pad.t, 6, ph);
+                }
+            }
+        }
+
+        const rlPts = equityRL.map((v, i) => [mapX(i, 0, n-1, pad.l, pw), mapY(v, yMin, yMax, pad.t, ph)]);
+        const momPts = equityMom.map((v, i) => [mapX(i, 0, n-1, pad.l, pw), mapY(v, yMin, yMax, pad.t, ph)]);
+        const bhPts = equityBH.map((v, i) => [mapX(i, 0, n-1, pad.l, pw), mapY(v, yMin, yMax, pad.t, ph)]);
+
+        drawLine(ctx, bhPts, C.neutral, 1.2);
+        drawLine(ctx, momPts, C.accent, 1.5);
+        drawLine(ctx, rlPts, C.secondary, 2);
+
+        // Starting line
+        const startY = mapY(10000, yMin, yMax, pad.t, ph);
+        ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+        ctx.setLineDash([5, 5]);
+        ctx.beginPath(); ctx.moveTo(pad.l, startY); ctx.lineTo(pad.l + pw, startY); ctx.stroke();
+        ctx.setLineDash([]);
+
+        if (U.drawAxis) U.drawAxis(ctx, { x: pad.l, y: pad.t, w: pw, h: ph, xMin: 0, xMax: n-1, yMin, yMax, xLabel: '交易日', yLabel: '权益', ticks: 5, color: C.textDim });
+    }
+
+    function drawDrawdown(prices) {
+        const cv = getCanvas('cv-drawdown');
+        if (!cv) return;
+        const { ctx, w, h } = cv;
+        clearCanvas(ctx, w, h);
+
+        if (equityRL.length < 2) return;
+
+        const pad = { l: 70, r: 20, t: 25, b: 35 };
+        const pw = w - pad.l - pad.r, ph = h - pad.t - pad.b;
+        const n = equityRL.length;
+
+        function calcDD(equity) {
+            const dd = [];
+            let peak = equity[0];
+            for (const v of equity) {
+                if (v > peak) peak = v;
+                dd.push(-(peak - v) / peak);
+            }
+            return dd;
+        }
+
+        const ddRL = calcDD(equityRL);
+        const ddMom = calcDD(equityMom);
+        const ddBH = calcDD(equityBH);
+
+        const allDD = ddRL.concat(ddMom, ddBH);
+        const ddMin = Math.min(...allDD) * 1.1;
+
+        drawGrid(ctx, pad.l, pad.t, pw, ph, 10, 3);
+        drawText(ctx, '回撤对比', w/2, 14, C.text, 11, 'center');
+
+        // Fill drawdown areas
+        function fillDD(dd, color) {
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.moveTo(pad.l, mapY(0, ddMin, 0, pad.t, ph));
+            for (let i = 0; i < dd.length; i++) {
+                ctx.lineTo(mapX(i, 0, n-1, pad.l, pw), mapY(dd[i], ddMin, 0, pad.t, ph));
+            }
+            ctx.lineTo(mapX(n-1, 0, n-1, pad.l, pw), mapY(0, ddMin, 0, pad.t, ph));
+            ctx.closePath();
+            ctx.fill();
+        }
+
+        fillDD(ddBH, 'rgba(120,144,156,0.15)');
+        fillDD(ddMom, 'rgba(255,109,0,0.15)');
+        fillDD(ddRL, 'rgba(124,77,255,0.2)');
+
+        const rlDDPts = ddRL.map((v, i) => [mapX(i, 0, n-1, pad.l, pw), mapY(v, ddMin, 0, pad.t, ph)]);
+        const momDDPts = ddMom.map((v, i) => [mapX(i, 0, n-1, pad.l, pw), mapY(v, ddMin, 0, pad.t, ph)]);
+        const bhDDPts = ddBH.map((v, i) => [mapX(i, 0, n-1, pad.l, pw), mapY(v, ddMin, 0, pad.t, ph)]);
+
+        drawLine(ctx, bhDDPts, C.neutral, 1);
+        drawLine(ctx, momDDPts, C.accent, 1.2);
+        drawLine(ctx, rlDDPts, C.secondary, 1.5);
+
+        if (U.drawAxis) U.drawAxis(ctx, { x: pad.l, y: pad.t, w: pw, h: ph, xMin: 0, xMax: n-1, yMin: ddMin, yMax: 0, xLabel: '交易日', yLabel: '回撤', ticks: 5, color: C.textDim });
+    }
+
+    function resetCmp() {
+        equityRL = []; equityMom = []; equityBH = [];
+        document.getElementById('m-cmp-rl').textContent = '---';
+        document.getElementById('m-cmp-mom').textContent = '---';
+        document.getElementById('m-cmp-bh').textContent = '---';
+        document.getElementById('m-cmp-dd').textContent = '---';
+        const cv1 = getCanvas('cv-equity');
+        if (cv1) { clearCanvas(cv1.ctx, cv1.w, cv1.h); drawText(cv1.ctx, '点击"运行对比"开始', cv1.w/2, cv1.h/2, C.textDim, 14, 'center'); }
+        const cv2 = getCanvas('cv-drawdown');
+        if (cv2) { clearCanvas(cv2.ctx, cv2.w, cv2.h); }
+    }
+
+    document.getElementById('btn-cmp-run').addEventListener('click', run);
+    document.getElementById('btn-cmp-reset').addEventListener('click', resetCmp);
+    document.getElementById('sl-vol').addEventListener('input', e => { document.getElementById('sv-vol').textContent = (e.target.value / 1000).toFixed(3); });
+    document.getElementById('sl-regime').addEventListener('input', e => { document.getElementById('sv-regime').textContent = (e.target.value / 100).toFixed(2); });
+
+    return { run, reset: resetCmp };
+})();
+
+// ============================================================
+// Initialization
+// ============================================================
+window.addEventListener('DOMContentLoaded', () => {
+    MDP.reset();
+    QLearning.drawQTable();
+    QLearning.drawRewardCurve();
+    DQN.drawArch();
+    DQN.drawCurves();
+    PG.drawProbs();
+    PG.drawCompare();
+    Compare.reset();
+});
+
+window.addEventListener('resize', () => {
+    MDP.draw();
+    QLearning.drawQTable();
+    QLearning.drawRewardCurve();
+    DQN.drawArch();
+    DQN.drawCurves();
+    PG.drawProbs();
+    PG.drawCompare();
+    if (document.getElementById('m-cmp-rl').textContent !== '---') Compare.run();
+});
+</script>
+
+<!-- KaTeX auto-render -->
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    if (typeof renderMathInElement !== 'undefined') {
+        renderMathInElement(document.body, {
+            delimiters: [
+                { left: '$$', right: '$$', display: true },
+                { left: '$', right: '$', display: false }
+            ],
+            throwOnError: false
+        });
+    } else {
+        setTimeout(function() {
+            if (typeof renderMathInElement !== 'undefined') {
+                renderMathInElement(document.body, {
+                    delimiters: [
+                        { left: '$$', right: '$$', display: true },
+                        { left: '$', right: '$', display: false }
+                    ],
+                    throwOnError: false
+                });
+            }
+        }, 1000);
+    }
+});
+</script>
+</body>
+</html>

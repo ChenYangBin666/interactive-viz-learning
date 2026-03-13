@@ -1,0 +1,1392 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>均值回归 — 量化交易策略</title>
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" defer>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" defer></script>
+    <script src="../shared/scripts/nav.js" defer></script>
+    <script src="../shared/scripts/quant-utils.js" defer></script>
+    <style>
+        /* ===== Page-specific styles ===== */
+        .module-header {
+            text-align: center;
+            padding: 2rem 0 1rem;
+        }
+        .module-header h1 {
+            font-size: 2.2rem;
+            background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .module-header p {
+            font-size: 1.05rem;
+            max-width: 700px;
+            margin: 0.5rem auto 0;
+        }
+
+        .viz-section {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            padding: 1.5rem;
+            margin-bottom: 2.5rem;
+        }
+        .viz-section h2 {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            margin-bottom: 0.5rem;
+        }
+        .viz-section h2 .badge {
+            font-size: 0.7rem;
+            background: rgba(79, 195, 247, 0.15);
+            color: var(--accent-blue);
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-weight: 600;
+        }
+        .viz-section .desc {
+            color: var(--text-secondary);
+            margin-bottom: 1rem;
+            font-size: 0.95rem;
+            line-height: 1.7;
+        }
+        .viz-section .formula {
+            background: rgba(0,0,0,0.25);
+            border-radius: var(--radius-sm);
+            padding: 0.6rem 1rem;
+            margin-bottom: 1rem;
+            overflow-x: auto;
+        }
+
+        .canvas-wrap {
+            position: relative;
+            background: rgba(0,0,0,0.2);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+            margin-bottom: 1rem;
+        }
+        .canvas-wrap canvas {
+            display: block;
+            width: 100%;
+            height: 380px;
+        }
+
+        .controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1rem 1.5rem;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.2rem;
+        }
+        .control-group label {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+        .control-group .ctrl-row {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .control-group input[type="range"] {
+            width: 140px;
+            accent-color: var(--accent-green);
+        }
+        .control-group .val {
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            color: var(--accent-green);
+            min-width: 36px;
+            text-align: right;
+        }
+
+        .btn {
+            padding: 0.4rem 1rem;
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            background: rgba(22, 199, 154, 0.1);
+            color: var(--accent-green);
+            cursor: pointer;
+            font-size: 0.85rem;
+            font-family: inherit;
+            transition: all 0.2s;
+        }
+        .btn:hover {
+            background: rgba(22, 199, 154, 0.25);
+            border-color: var(--accent-green);
+        }
+
+        .metrics {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+            gap: 0.75rem;
+            margin-top: 0.75rem;
+        }
+        .metric-card {
+            background: rgba(0,0,0,0.2);
+            border-radius: var(--radius-sm);
+            padding: 0.6rem 0.8rem;
+            text-align: center;
+        }
+        .metric-card .metric-val {
+            font-family: var(--font-mono);
+            font-size: 1.2rem;
+            font-weight: 700;
+        }
+        .metric-card .metric-label {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+        }
+        .metric-green { color: var(--accent-green); }
+        .metric-red { color: var(--accent-red); }
+        .metric-blue { color: var(--accent-blue); }
+        .metric-orange { color: var(--accent-orange); }
+        .metric-purple { color: var(--accent-purple); }
+
+        .legend {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+            margin-bottom: 0.5rem;
+            font-size: 0.8rem;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 0.35rem;
+            color: var(--text-secondary);
+        }
+        .legend-item .dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+        }
+        .legend-item .line-swatch {
+            width: 18px;
+            height: 3px;
+            border-radius: 2px;
+        }
+
+        .stationarity-result {
+            margin-top: 0.75rem;
+            padding: 0.8rem 1rem;
+            border-radius: var(--radius-sm);
+            font-size: 0.95rem;
+            font-weight: 600;
+            text-align: center;
+        }
+        .stationarity-result.stationary {
+            background: rgba(22, 199, 154, 0.15);
+            color: var(--accent-green);
+            border: 1px solid rgba(22, 199, 154, 0.3);
+        }
+        .stationarity-result.nonstationary {
+            background: rgba(255, 82, 82, 0.15);
+            color: var(--accent-red);
+            border: 1px solid rgba(255, 82, 82, 0.3);
+        }
+
+        .dual-canvas .canvas-wrap {
+            margin-bottom: 0.5rem;
+        }
+        .dual-canvas .canvas-wrap canvas {
+            height: 200px;
+        }
+        .dual-canvas .canvas-wrap.short canvas {
+            height: 160px;
+        }
+    </style>
+</head>
+<body>
+
+<div class="page-container">
+    <!-- Header -->
+    <div class="module-header">
+        <h1>🔄 均值回归</h1>
+        <p>价格偏离均值后倾向于回归——理解这一核心思想，掌握布林带、RSI、Z-Score 等经典策略，并学会检验序列的平稳性。</p>
+    </div>
+
+    <!-- ===== Section 1: 均值回归概念 ===== -->
+    <div class="viz-section" id="sec-concept">
+        <h2>① 均值回归概念 <span class="badge">Ornstein-Uhlenbeck</span></h2>
+        <div class="desc">
+            均值回归假设：价格围绕一个长期均值上下波动，当价格偏离均值太远时，有内在趋势将其拉回。
+            经典的 Ornstein-Uhlenbeck 过程描述了这种行为：
+        </div>
+        <div class="formula">
+            $$dX_t = \kappa(\mu - X_t)\,dt + \sigma\,dW_t$$
+            其中 \(\kappa\) 为回归速度，\(\mu\) 为长期均值，\(\sigma\) 为波动率。
+        </div>
+        <div class="controls">
+            <div class="control-group">
+                <label>回归速度 κ</label>
+                <div class="ctrl-row">
+                    <input type="range" id="ou-kappa" min="0.01" max="2" step="0.01" value="0.5">
+                    <span class="val" id="ou-kappa-val">0.50</span>
+                </div>
+            </div>
+            <div class="control-group">
+                <label>波动率 σ</label>
+                <div class="ctrl-row">
+                    <input type="range" id="ou-sigma" min="0.1" max="3" step="0.1" value="1.0">
+                    <span class="val" id="ou-sigma-val">1.0</span>
+                </div>
+            </div>
+            <button class="btn" id="ou-regen">重新生成</button>
+            <button class="btn" id="ou-animate">▶ 动画</button>
+        </div>
+        <div class="legend">
+            <div class="legend-item"><div class="line-swatch" style="background:var(--accent-blue)"></div>价格路径</div>
+            <div class="legend-item"><div class="line-swatch" style="background:var(--accent-yellow)"></div>均值 μ</div>
+            <div class="legend-item"><div class="line-swatch" style="background:rgba(255,171,64,0.3)"></div>±1σ 区间</div>
+            <div class="legend-item"><div class="line-swatch" style="background:rgba(255,82,82,0.2)"></div>±2σ 区间</div>
+        </div>
+        <div class="canvas-wrap"><canvas id="canvas-ou"></canvas></div>
+    </div>
+
+    <!-- ===== Section 2: 布林带策略 ===== -->
+    <div class="viz-section" id="sec-bollinger">
+        <h2>② 布林带策略 <span class="badge">Bollinger Bands</span></h2>
+        <div class="desc">
+            布林带由移动平均线及其上下各 N 倍标准差构成。当价格触及下轨时视为超卖（买入），触及上轨时视为超买（卖出）。
+        </div>
+        <div class="formula">
+            $$\text{上轨} = MA_n + k \cdot \sigma_n, \quad \text{下轨} = MA_n - k \cdot \sigma_n$$
+        </div>
+        <div class="controls">
+            <div class="control-group">
+                <label>MA 周期</label>
+                <div class="ctrl-row">
+                    <input type="range" id="bb-period" min="10" max="50" step="1" value="20">
+                    <span class="val" id="bb-period-val">20</span>
+                </div>
+            </div>
+            <div class="control-group">
+                <label>带宽 (σ 倍数)</label>
+                <div class="ctrl-row">
+                    <input type="range" id="bb-width" min="1" max="3" step="0.1" value="2.0">
+                    <span class="val" id="bb-width-val">2.0</span>
+                </div>
+            </div>
+            <button class="btn" id="bb-regen">重新生成</button>
+        </div>
+        <div class="legend">
+            <div class="legend-item"><div class="line-swatch" style="background:var(--accent-blue)"></div>价格</div>
+            <div class="legend-item"><div class="line-swatch" style="background:var(--accent-orange)"></div>MA</div>
+            <div class="legend-item"><div class="line-swatch" style="background:rgba(179,136,255,0.5)"></div>布林带</div>
+            <div class="legend-item"><div class="dot" style="background:var(--accent-green)"></div>买入</div>
+            <div class="legend-item"><div class="dot" style="background:var(--accent-red)"></div>卖出</div>
+        </div>
+        <div class="canvas-wrap"><canvas id="canvas-bb"></canvas></div>
+        <div class="metrics" id="bb-metrics"></div>
+    </div>
+
+    <!-- ===== Section 3: RSI 策略 ===== -->
+    <div class="viz-section" id="sec-rsi">
+        <h2>③ RSI 策略 <span class="badge">Relative Strength Index</span></h2>
+        <div class="desc">
+            相对强弱指标(RSI)衡量近期涨跌幅度。RSI &lt; 30 表示超卖（买入信号），RSI &gt; 70 表示超买（卖出信号）。
+        </div>
+        <div class="formula">
+            $$RSI = 100 - \frac{100}{1 + \frac{\text{平均涨幅}}{\text{平均跌幅}}}$$
+        </div>
+        <div class="controls">
+            <div class="control-group">
+                <label>RSI 周期</label>
+                <div class="ctrl-row">
+                    <input type="range" id="rsi-period" min="5" max="30" step="1" value="14">
+                    <span class="val" id="rsi-period-val">14</span>
+                </div>
+            </div>
+            <div class="control-group">
+                <label>超卖阈值</label>
+                <div class="ctrl-row">
+                    <input type="range" id="rsi-oversold" min="15" max="40" step="1" value="30">
+                    <span class="val" id="rsi-oversold-val">30</span>
+                </div>
+            </div>
+            <div class="control-group">
+                <label>超买阈值</label>
+                <div class="ctrl-row">
+                    <input type="range" id="rsi-overbought" min="60" max="85" step="1" value="70">
+                    <span class="val" id="rsi-overbought-val">70</span>
+                </div>
+            </div>
+            <button class="btn" id="rsi-regen">重新生成</button>
+        </div>
+        <div class="legend">
+            <div class="legend-item"><div class="line-swatch" style="background:var(--accent-blue)"></div>价格</div>
+            <div class="legend-item"><div class="line-swatch" style="background:var(--accent-purple)"></div>RSI</div>
+            <div class="legend-item"><div class="dot" style="background:var(--accent-green)"></div>买入</div>
+            <div class="legend-item"><div class="dot" style="background:var(--accent-red)"></div>卖出</div>
+            <div class="legend-item"><div class="line-swatch" style="background:var(--accent-yellow)"></div>权益曲线</div>
+        </div>
+        <div class="dual-canvas">
+            <div class="canvas-wrap"><canvas id="canvas-rsi-price"></canvas></div>
+            <div class="canvas-wrap short"><canvas id="canvas-rsi-indicator"></canvas></div>
+        </div>
+        <div class="metrics" id="rsi-metrics"></div>
+    </div>
+
+    <!-- ===== Section 4: Z-Score 均值回归 ===== -->
+    <div class="viz-section" id="sec-zscore">
+        <h2>④ Z-Score 均值回归 <span class="badge">Z-Score</span></h2>
+        <div class="desc">
+            计算价格的滚动 Z-Score，当 |Z| 超过阈值时开仓，Z 回穿零轴时平仓。这种标准化方法使信号在不同价格水平上具有可比性。
+        </div>
+        <div class="formula">
+            $$Z_t = \frac{P_t - MA_n(P)}{Std_n(P)}$$
+        </div>
+        <div class="controls">
+            <div class="control-group">
+                <label>回看窗口</label>
+                <div class="ctrl-row">
+                    <input type="range" id="zs-window" min="10" max="60" step="1" value="20">
+                    <span class="val" id="zs-window-val">20</span>
+                </div>
+            </div>
+            <div class="control-group">
+                <label>入场阈值 |Z|</label>
+                <div class="ctrl-row">
+                    <input type="range" id="zs-entry" min="0.5" max="3" step="0.1" value="1.5">
+                    <span class="val" id="zs-entry-val">1.5</span>
+                </div>
+            </div>
+            <div class="control-group">
+                <label>出场阈值 |Z|</label>
+                <div class="ctrl-row">
+                    <input type="range" id="zs-exit" min="0" max="1" step="0.1" value="0.3">
+                    <span class="val" id="zs-exit-val">0.3</span>
+                </div>
+            </div>
+            <button class="btn" id="zs-regen">重新生成</button>
+        </div>
+        <div class="legend">
+            <div class="legend-item"><div class="line-swatch" style="background:var(--accent-blue)"></div>价格</div>
+            <div class="legend-item"><div class="line-swatch" style="background:var(--accent-purple)"></div>Z-Score</div>
+            <div class="legend-item"><div class="dot" style="background:rgba(22,199,154,0.25)"></div>做多区间</div>
+            <div class="legend-item"><div class="dot" style="background:rgba(255,82,82,0.25)"></div>做空区间</div>
+        </div>
+        <div class="dual-canvas">
+            <div class="canvas-wrap"><canvas id="canvas-zs-price"></canvas></div>
+            <div class="canvas-wrap short"><canvas id="canvas-zs-zscore"></canvas></div>
+        </div>
+        <div class="metrics" id="zs-metrics"></div>
+    </div>
+
+    <!-- ===== Section 5: 平稳性检验 ===== -->
+    <div class="viz-section" id="sec-adf">
+        <h2>⑤ 平稳性检验 <span class="badge">ADF Test</span></h2>
+        <div class="desc">
+            ADF (Augmented Dickey-Fuller) 检验判断序列是否平稳。平稳序列具有均值回归特性，适合均值回归策略。
+            纯随机游走（无回归力）是不平稳的，而 OU 过程是平稳的。
+        </div>
+        <div class="formula">
+            $$\Delta X_t = \alpha + \beta X_{t-1} + \varepsilon_t, \quad H_0: \beta = 0 \;(\text{单位根/不平稳})$$
+        </div>
+        <div class="controls">
+            <div class="control-group">
+                <label>均值回归强度</label>
+                <div class="ctrl-row">
+                    <input type="range" id="adf-strength" min="0" max="1" step="0.01" value="0.3">
+                    <span class="val" id="adf-strength-val">0.30</span>
+                </div>
+            </div>
+            <div class="control-group">
+                <label>样本数量</label>
+                <div class="ctrl-row">
+                    <input type="range" id="adf-n" min="100" max="500" step="10" value="250">
+                    <span class="val" id="adf-n-val">250</span>
+                </div>
+            </div>
+            <button class="btn" id="adf-regen">重新生成</button>
+        </div>
+        <div class="legend">
+            <div class="legend-item"><div class="line-swatch" style="background:var(--accent-blue)"></div>时间序列</div>
+            <div class="legend-item"><div class="line-swatch" style="background:var(--accent-yellow)"></div>均值</div>
+        </div>
+        <div class="canvas-wrap"><canvas id="canvas-adf"></canvas></div>
+        <div class="metrics" id="adf-metrics"></div>
+        <div class="stationarity-result" id="adf-result"></div>
+    </div>
+
+</div><!-- end page-container -->
+
+<script>
+// ============================================================
+//  UTILITY FUNCTIONS
+// ============================================================
+function randn() {
+    let u = 0, v = 0;
+    while (u === 0) u = Math.random();
+    while (v === 0) v = Math.random();
+    return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+}
+
+function initCanvas(canvas) {
+    const rect = canvas.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    const ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+    return { ctx, w: rect.width, h: rect.height };
+}
+
+function getCSS(name) {
+    return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+const COLORS = {
+    blue: '#4fc3f7', green: '#16c79a', red: '#ff5252',
+    orange: '#ffab40', yellow: '#ffd740', purple: '#b388ff',
+    pink: '#ff80ab', text: '#a8a8b8', muted: '#6c6c7c',
+    grid: 'rgba(255,255,255,0.06)', bg: '#1a1a2e'
+};
+
+function drawGrid(ctx, w, h, xTicks, yTicks, xLabels, yLabels) {
+    ctx.strokeStyle = COLORS.grid;
+    ctx.lineWidth = 1;
+    const padL = 55, padR = 15, padT = 15, padB = 30;
+    const plotW = w - padL - padR, plotH = h - padT - padB;
+
+    // Horizontal lines
+    ctx.font = '11px JetBrains Mono, Consolas, monospace';
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'middle';
+    for (let i = 0; i < yTicks; i++) {
+        const y = padT + (plotH / (yTicks - 1)) * i;
+        ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(w - padR, y); ctx.stroke();
+        if (yLabels && yLabels[i] !== undefined) {
+            ctx.fillStyle = COLORS.muted;
+            ctx.fillText(yLabels[i], padL - 6, y);
+        }
+    }
+    // Vertical lines
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    for (let i = 0; i < xTicks; i++) {
+        const x = padL + (plotW / (xTicks - 1)) * i;
+        ctx.beginPath(); ctx.moveTo(x, padT); ctx.lineTo(x, h - padB); ctx.stroke();
+        if (xLabels && xLabels[i] !== undefined) {
+            ctx.fillStyle = COLORS.muted;
+            ctx.fillText(xLabels[i], x, h - padB + 6);
+        }
+    }
+    return { padL, padR, padT, padB, plotW, plotH };
+}
+
+function mapX(i, n, padL, plotW) { return padL + (i / (n - 1)) * plotW; }
+function mapY(v, minV, maxV, padT, plotH) { return padT + ((maxV - v) / (maxV - minV)) * plotH; }
+
+function drawLine(ctx, data, minV, maxV, pad, color, lineWidth) {
+    const { padL, padT, plotW, plotH } = pad;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = lineWidth || 1.5;
+    ctx.beginPath();
+    for (let i = 0; i < data.length; i++) {
+        const x = mapX(i, data.length, padL, plotW);
+        const y = mapY(data[i], minV, maxV, padT, plotH);
+        i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+}
+
+function drawHLine(ctx, v, minV, maxV, pad, color, dash) {
+    const { padL, padR, padT, plotW, plotH } = pad;
+    const y = mapY(v, minV, maxV, padT, plotH);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1;
+    ctx.setLineDash(dash || [5, 4]);
+    ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(padL + plotW, y); ctx.stroke();
+    ctx.setLineDash([]);
+}
+
+function drawBand(ctx, upper, lower, minV, maxV, pad, color) {
+    const { padL, padT, plotW, plotH } = pad;
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    for (let i = 0; i < upper.length; i++) {
+        const x = mapX(i, upper.length, padL, plotW);
+        const y = mapY(upper[i], minV, maxV, padT, plotH);
+        i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    }
+    for (let i = lower.length - 1; i >= 0; i--) {
+        const x = mapX(i, lower.length, padL, plotW);
+        const y = mapY(lower[i], minV, maxV, padT, plotH);
+        ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+    ctx.fill();
+}
+
+function drawDots(ctx, indices, values, minV, maxV, pad, n, color, radius) {
+    const { padL, padT, plotW, plotH } = pad;
+    ctx.fillStyle = color;
+    for (let k = 0; k < indices.length; k++) {
+        const x = mapX(indices[k], n, padL, plotW);
+        const y = mapY(values[k], minV, maxV, padT, plotH);
+        ctx.beginPath(); ctx.arc(x, y, radius || 4, 0, Math.PI * 2); ctx.fill();
+    }
+}
+
+function drawColoredZones(ctx, zoneData, minV, maxV, pad, n) {
+    const { padL, padT, plotW, plotH } = pad;
+    for (const zone of zoneData) {
+        ctx.fillStyle = zone.color;
+        const x1 = mapX(zone.start, n, padL, plotW);
+        const x2 = mapX(zone.end, n, padL, plotW);
+        ctx.fillRect(x1, padT, x2 - x1, plotH);
+    }
+}
+
+function generateOU(n, kappa, mu, sigma, dt) {
+    const data = [mu + randn() * sigma * 0.5];
+    for (let i = 1; i < n; i++) {
+        const prev = data[i - 1];
+        data.push(prev + kappa * (mu - prev) * dt + sigma * Math.sqrt(dt) * randn());
+    }
+    return data;
+}
+
+function generateMeanRevertingPrice(n, kappa) {
+    const mu = 100;
+    const sigma = 2;
+    const dt = 1;
+    const data = [mu + randn() * 3];
+    for (let i = 1; i < n; i++) {
+        const prev = data[i - 1];
+        data.push(prev + kappa * (mu - prev) * dt / 50 + sigma * randn());
+    }
+    return data;
+}
+
+function rollingMA(data, period) {
+    const result = [];
+    for (let i = 0; i < data.length; i++) {
+        if (i < period - 1) { result.push(null); continue; }
+        let sum = 0;
+        for (let j = i - period + 1; j <= i; j++) sum += data[j];
+        result.push(sum / period);
+    }
+    return result;
+}
+
+function rollingStd(data, period) {
+    const result = [];
+    for (let i = 0; i < data.length; i++) {
+        if (i < period - 1) { result.push(null); continue; }
+        let sum = 0, sumSq = 0;
+        for (let j = i - period + 1; j <= i; j++) { sum += data[j]; sumSq += data[j] * data[j]; }
+        const mean = sum / period;
+        result.push(Math.sqrt(sumSq / period - mean * mean));
+    }
+    return result;
+}
+
+function computeRSI(data, period) {
+    const rsi = new Array(data.length).fill(null);
+    if (data.length < period + 1) return rsi;
+    let avgGain = 0, avgLoss = 0;
+    for (let i = 1; i <= period; i++) {
+        const change = data[i] - data[i - 1];
+        if (change > 0) avgGain += change; else avgLoss -= change;
+    }
+    avgGain /= period; avgLoss /= period;
+    rsi[period] = avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
+    for (let i = period + 1; i < data.length; i++) {
+        const change = data[i] - data[i - 1];
+        const gain = change > 0 ? change : 0;
+        const loss = change < 0 ? -change : 0;
+        avgGain = (avgGain * (period - 1) + gain) / period;
+        avgLoss = (avgLoss * (period - 1) + loss) / period;
+        rsi[i] = avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss);
+    }
+    return rsi;
+}
+
+function computeZScore(data, window) {
+    const z = [];
+    for (let i = 0; i < data.length; i++) {
+        if (i < window - 1) { z.push(null); continue; }
+        let sum = 0, sumSq = 0;
+        for (let j = i - window + 1; j <= i; j++) { sum += data[j]; sumSq += data[j] * data[j]; }
+        const mean = sum / window;
+        const std = Math.sqrt(sumSq / window - mean * mean);
+        z.push(std === 0 ? 0 : (data[i] - mean) / std);
+    }
+    return z;
+}
+
+function fmt(v, d) { return v == null ? '--' : v.toFixed(d !== undefined ? d : 2); }
+
+// ============================================================
+//  SECTION 1: Ornstein-Uhlenbeck Process
+// ============================================================
+(function() {
+    const canvas = document.getElementById('canvas-ou');
+    const sliderK = document.getElementById('ou-kappa');
+    const sliderS = document.getElementById('ou-sigma');
+    const valK = document.getElementById('ou-kappa-val');
+    const valS = document.getElementById('ou-sigma-val');
+    const btnRegen = document.getElementById('ou-regen');
+    const btnAnimate = document.getElementById('ou-animate');
+
+    const N = 500, MU = 100, DT = 0.02;
+    let animating = false, animFrame = 0, animId = null;
+    let data = [];
+
+    function generate() {
+        const kappa = parseFloat(sliderK.value);
+        const sigma = parseFloat(sliderS.value);
+        data = generateOU(N, kappa, MU, sigma, DT);
+        return data;
+    }
+
+    function draw(count) {
+        const { ctx, w, h } = initCanvas(canvas);
+        ctx.clearRect(0, 0, w, h);
+        const kappa = parseFloat(sliderK.value);
+        const sigma = parseFloat(sliderS.value);
+        const eqStd = sigma / Math.sqrt(2 * Math.max(kappa, 0.01));
+        const len = count || data.length;
+        const slice = data.slice(0, len);
+
+        const minV = MU - eqStd * 3;
+        const maxV = MU + eqStd * 3;
+
+        const yLabels = [];
+        const yTicks = 5;
+        for (let i = 0; i < yTicks; i++) yLabels.push(fmt(maxV - (maxV - minV) * i / (yTicks - 1), 1));
+        const xLabels = [];
+        const xTicks = 6;
+        for (let i = 0; i < xTicks; i++) xLabels.push(Math.round((len - 1) * i / (xTicks - 1)));
+
+        const pad = drawGrid(ctx, w, h, xTicks, yTicks, xLabels, yLabels);
+
+        // ±2σ band
+        const u2 = new Array(len).fill(MU + 2 * eqStd);
+        const l2 = new Array(len).fill(MU - 2 * eqStd);
+        drawBand(ctx, u2, l2, minV, maxV, pad, 'rgba(255,82,82,0.08)');
+
+        // ±1σ band
+        const u1 = new Array(len).fill(MU + eqStd);
+        const l1 = new Array(len).fill(MU - eqStd);
+        drawBand(ctx, u1, l1, minV, maxV, pad, 'rgba(255,171,64,0.12)');
+
+        // Mean line
+        drawHLine(ctx, MU, minV, maxV, pad, COLORS.yellow, [6, 4]);
+
+        // Price line
+        drawLine(ctx, slice, minV, maxV, pad, COLORS.blue, 1.5);
+
+        // Label
+        ctx.fillStyle = COLORS.muted;
+        ctx.font = '11px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText('μ=' + MU, pad.padL + 4, mapY(MU, minV, maxV, pad.padT, pad.plotH) - 8);
+    }
+
+    function reset() {
+        if (animId) { cancelAnimationFrame(animId); animId = null; }
+        animating = false;
+        btnAnimate.textContent = '▶ 动画';
+        generate();
+        draw();
+    }
+
+    function toggleAnimate() {
+        if (animating) {
+            cancelAnimationFrame(animId);
+            animId = null;
+            animating = false;
+            btnAnimate.textContent = '▶ 动画';
+            return;
+        }
+        animating = true;
+        btnAnimate.textContent = '⏸ 暂停';
+        generate();
+        animFrame = 2;
+        function step() {
+            if (!animating) return;
+            draw(animFrame);
+            animFrame = Math.min(animFrame + 2, data.length);
+            if (animFrame < data.length) {
+                animId = requestAnimationFrame(step);
+            } else {
+                animating = false;
+                btnAnimate.textContent = '▶ 动画';
+            }
+        }
+        step();
+    }
+
+    sliderK.oninput = () => { valK.textContent = parseFloat(sliderK.value).toFixed(2); reset(); };
+    sliderS.oninput = () => { valS.textContent = parseFloat(sliderS.value).toFixed(1); reset(); };
+    btnRegen.onclick = reset;
+    btnAnimate.onclick = toggleAnimate;
+
+    generate();
+    setTimeout(() => draw(), 50);
+    window.addEventListener('resize', () => { if (!animating) draw(); });
+})();
+
+// ============================================================
+//  SECTION 2: Bollinger Bands
+// ============================================================
+(function() {
+    const canvas = document.getElementById('canvas-bb');
+    const sliderP = document.getElementById('bb-period');
+    const sliderW = document.getElementById('bb-width');
+    const valP = document.getElementById('bb-period-val');
+    const valW = document.getElementById('bb-width-val');
+    const btnRegen = document.getElementById('bb-regen');
+    const metricsDiv = document.getElementById('bb-metrics');
+
+    const N = 300;
+    let priceData = [];
+
+    function genPrice() {
+        priceData = generateMeanRevertingPrice(N, 0.3);
+    }
+
+    function run() {
+        const period = parseInt(sliderP.value);
+        const width = parseFloat(sliderW.value);
+        const ma = rollingMA(priceData, period);
+        const std = rollingStd(priceData, period);
+
+        const upper = [], lower = [];
+        for (let i = 0; i < N; i++) {
+            if (ma[i] === null) { upper.push(null); lower.push(null); continue; }
+            upper.push(ma[i] + width * std[i]);
+            lower.push(ma[i] - width * std[i]);
+        }
+
+        // Signals
+        const buys = [], buyPrices = [], sells = [], sellPrices = [];
+        let holding = false;
+        for (let i = period; i < N; i++) {
+            if (!holding && priceData[i] <= lower[i]) {
+                buys.push(i); buyPrices.push(priceData[i]); holding = true;
+            } else if (holding && priceData[i] >= upper[i]) {
+                sells.push(i); sellPrices.push(priceData[i]); holding = false;
+            }
+        }
+
+        // Metrics
+        let totalReturn = 0, wins = 0, trades = Math.min(buys.length, sells.length);
+        for (let i = 0; i < trades; i++) {
+            const ret = (sellPrices[i] - buyPrices[i]) / buyPrices[i];
+            totalReturn += ret;
+            if (ret > 0) wins++;
+        }
+
+        draw(ma, upper, lower, buys, buyPrices, sells, sellPrices);
+        metricsDiv.innerHTML = `
+            <div class="metric-card"><div class="metric-val metric-blue">${trades}</div><div class="metric-label">交易次数</div></div>
+            <div class="metric-card"><div class="metric-val ${totalReturn >= 0 ? 'metric-green' : 'metric-red'}">${fmt(totalReturn * 100, 1)}%</div><div class="metric-label">累计收益</div></div>
+            <div class="metric-card"><div class="metric-val metric-orange">${trades > 0 ? fmt(wins / trades * 100, 0) : 0}%</div><div class="metric-label">胜率</div></div>
+            <div class="metric-card"><div class="metric-val metric-purple">${trades > 0 ? fmt(totalReturn / trades * 100, 2) : 0}%</div><div class="metric-label">平均收益/笔</div></div>
+        `;
+    }
+
+    function draw(ma, upper, lower, buys, buyPrices, sells, sellPrices) {
+        const { ctx, w, h } = initCanvas(canvas);
+        ctx.clearRect(0, 0, w, h);
+
+        // Filter valid
+        const validUpper = upper.filter(v => v !== null);
+        const validLower = lower.filter(v => v !== null);
+        const allVals = priceData.concat(validUpper).concat(validLower);
+        const minV = Math.min(...allVals) - 2;
+        const maxV = Math.max(...allVals) + 2;
+
+        const yTicks = 5;
+        const yLabels = [];
+        for (let i = 0; i < yTicks; i++) yLabels.push(fmt(maxV - (maxV - minV) * i / (yTicks - 1), 1));
+        const xTicks = 6;
+        const xLabels = [];
+        for (let i = 0; i < xTicks; i++) xLabels.push(Math.round((N - 1) * i / (xTicks - 1)));
+
+        const pad = drawGrid(ctx, w, h, xTicks, yTicks, xLabels, yLabels);
+
+        // Band fill — only valid range
+        const start = upper.findIndex(v => v !== null);
+        if (start >= 0) {
+            const vUpper = upper.slice(start);
+            const vLower = lower.slice(start);
+            // Draw band manually with offset
+            ctx.fillStyle = 'rgba(179,136,255,0.1)';
+            ctx.beginPath();
+            for (let i = 0; i < vUpper.length; i++) {
+                const x = mapX(i + start, N, pad.padL, pad.plotW);
+                const y = mapY(vUpper[i], minV, maxV, pad.padT, pad.plotH);
+                i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+            }
+            for (let i = vLower.length - 1; i >= 0; i--) {
+                const x = mapX(i + start, N, pad.padL, pad.plotW);
+                const y = mapY(vLower[i], minV, maxV, pad.padT, pad.plotH);
+                ctx.lineTo(x, y);
+            }
+            ctx.closePath(); ctx.fill();
+
+            // Band lines
+            ctx.strokeStyle = 'rgba(179,136,255,0.5)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            for (let i = 0; i < vUpper.length; i++) {
+                const x = mapX(i + start, N, pad.padL, pad.plotW);
+                const y = mapY(vUpper[i], minV, maxV, pad.padT, pad.plotH);
+                i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+            ctx.beginPath();
+            for (let i = 0; i < vLower.length; i++) {
+                const x = mapX(i + start, N, pad.padL, pad.plotW);
+                const y = mapY(vLower[i], minV, maxV, pad.padT, pad.plotH);
+                i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+        }
+
+        // MA line
+        const maValid = ma.map((v, i) => v !== null ? v : null);
+        const maStart = maValid.findIndex(v => v !== null);
+        if (maStart >= 0) {
+            ctx.strokeStyle = COLORS.orange;
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            let started = false;
+            for (let i = maStart; i < N; i++) {
+                const x = mapX(i, N, pad.padL, pad.plotW);
+                const y = mapY(maValid[i], minV, maxV, pad.padT, pad.plotH);
+                if (!started) { ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+        }
+
+        // Price
+        drawLine(ctx, priceData, minV, maxV, pad, COLORS.blue, 1.5);
+
+        // Buy/Sell dots
+        drawDots(ctx, buys, buyPrices, minV, maxV, pad, N, COLORS.green, 5);
+        drawDots(ctx, sells, sellPrices, minV, maxV, pad, N, COLORS.red, 5);
+    }
+
+    genPrice();
+    sliderP.oninput = () => { valP.textContent = sliderP.value; run(); };
+    sliderW.oninput = () => { valW.textContent = parseFloat(sliderW.value).toFixed(1); run(); };
+    btnRegen.onclick = () => { genPrice(); run(); };
+    setTimeout(run, 60);
+    window.addEventListener('resize', run);
+})();
+
+// ============================================================
+//  SECTION 3: RSI Strategy
+// ============================================================
+(function() {
+    const canvasPrice = document.getElementById('canvas-rsi-price');
+    const canvasInd = document.getElementById('canvas-rsi-indicator');
+    const sliderP = document.getElementById('rsi-period');
+    const sliderOS = document.getElementById('rsi-oversold');
+    const sliderOB = document.getElementById('rsi-overbought');
+    const valP = document.getElementById('rsi-period-val');
+    const valOS = document.getElementById('rsi-oversold-val');
+    const valOB = document.getElementById('rsi-overbought-val');
+    const btnRegen = document.getElementById('rsi-regen');
+    const metricsDiv = document.getElementById('rsi-metrics');
+
+    const N = 300;
+    let priceData = [];
+
+    function genPrice() {
+        priceData = generateMeanRevertingPrice(N, 0.25);
+    }
+
+    function run() {
+        const period = parseInt(sliderP.value);
+        const oversold = parseInt(sliderOS.value);
+        const overbought = parseInt(sliderOB.value);
+        const rsi = computeRSI(priceData, period);
+
+        // Signals
+        const buys = [], buyPrices = [], sells = [], sellPrices = [];
+        let holding = false;
+        for (let i = period; i < N; i++) {
+            if (rsi[i] === null) continue;
+            if (!holding && rsi[i] < oversold) {
+                buys.push(i); buyPrices.push(priceData[i]); holding = true;
+            } else if (holding && rsi[i] > overbought) {
+                sells.push(i); sellPrices.push(priceData[i]); holding = false;
+            }
+        }
+
+        // Equity curve
+        const equity = [10000];
+        let cash = 10000, shares = 0, bIdx = 0, sIdx = 0;
+        const tBuys = [...buys], tSells = [...sells];
+        let inPos = false;
+        for (let i = 1; i < N; i++) {
+            if (!inPos && tBuys.length > 0 && i === tBuys[0]) {
+                shares = cash / priceData[i];
+                cash = 0; inPos = true; tBuys.shift();
+            } else if (inPos && tSells.length > 0 && i === tSells[0]) {
+                cash = shares * priceData[i];
+                shares = 0; inPos = false; tSells.shift();
+            }
+            equity.push(inPos ? shares * priceData[i] : cash);
+        }
+
+        // Metrics
+        const trades = Math.min(buys.length, sells.length);
+        let wins = 0, totalRet = 0;
+        for (let i = 0; i < trades; i++) {
+            const r = (sellPrices[i] - buyPrices[i]) / buyPrices[i];
+            totalRet += r; if (r > 0) wins++;
+        }
+        const finalEquity = equity[equity.length - 1];
+        const totalPct = (finalEquity / 10000 - 1) * 100;
+
+        drawPrice(rsi, buys, buyPrices, sells, sellPrices, equity);
+        drawIndicator(rsi, oversold, overbought, buys, sells);
+
+        metricsDiv.innerHTML = `
+            <div class="metric-card"><div class="metric-val metric-blue">${trades}</div><div class="metric-label">交易次数</div></div>
+            <div class="metric-card"><div class="metric-val ${totalPct >= 0 ? 'metric-green' : 'metric-red'}">${fmt(totalPct, 1)}%</div><div class="metric-label">总收益</div></div>
+            <div class="metric-card"><div class="metric-val metric-orange">${trades > 0 ? fmt(wins / trades * 100, 0) : 0}%</div><div class="metric-label">胜率</div></div>
+            <div class="metric-card"><div class="metric-val metric-yellow">${fmt(finalEquity, 0)}</div><div class="metric-label">最终权益</div></div>
+        `;
+    }
+
+    function drawPrice(rsi, buys, buyPrices, sells, sellPrices, equity) {
+        const { ctx, w, h } = initCanvas(canvasPrice);
+        ctx.clearRect(0, 0, w, h);
+
+        const minP = Math.min(...priceData) - 2;
+        const maxP = Math.max(...priceData) + 2;
+
+        const yTicks = 5;
+        const yLabels = [];
+        for (let i = 0; i < yTicks; i++) yLabels.push(fmt(maxP - (maxP - minP) * i / (yTicks - 1), 1));
+        const xLabels = [];
+        for (let i = 0; i < 6; i++) xLabels.push(Math.round((N - 1) * i / 5));
+
+        const pad = drawGrid(ctx, w, h, 6, yTicks, xLabels, yLabels);
+
+        drawLine(ctx, priceData, minP, maxP, pad, COLORS.blue, 1.5);
+
+        // Equity as a subtle overlay (scaled to price range)
+        const eqMin = Math.min(...equity), eqMax = Math.max(...equity);
+        const eqScaled = equity.map(v => minP + (v - eqMin) / (eqMax - eqMin) * (maxP - minP));
+        drawLine(ctx, eqScaled, minP, maxP, pad, COLORS.yellow, 1);
+
+        drawDots(ctx, buys, buyPrices, minP, maxP, pad, N, COLORS.green, 5);
+        drawDots(ctx, sells, sellPrices, minP, maxP, pad, N, COLORS.red, 5);
+
+        // Labels
+        ctx.fillStyle = COLORS.muted;
+        ctx.font = '10px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText('价格 + 权益曲线', pad.padL + 5, pad.padT + 12);
+    }
+
+    function drawIndicator(rsi, oversold, overbought, buys, sells) {
+        const { ctx, w, h } = initCanvas(canvasInd);
+        ctx.clearRect(0, 0, w, h);
+
+        const minV = 0, maxV = 100;
+        const yLabels = ['100', '70', '50', '30', '0'];
+        const yTicks = 5;
+        const xLabels = [];
+        for (let i = 0; i < 6; i++) xLabels.push(Math.round((N - 1) * i / 5));
+
+        const pad = drawGrid(ctx, w, h, 6, yTicks, xLabels, yLabels);
+
+        // Oversold / overbought zones
+        const obY = mapY(overbought, minV, maxV, pad.padT, pad.plotH);
+        const osY = mapY(oversold, minV, maxV, pad.padT, pad.plotH);
+        ctx.fillStyle = 'rgba(255,82,82,0.08)';
+        ctx.fillRect(pad.padL, pad.padT, pad.plotW, obY - pad.padT);
+        ctx.fillStyle = 'rgba(22,199,154,0.08)';
+        ctx.fillRect(pad.padL, osY, pad.plotW, pad.padT + pad.plotH - osY);
+
+        drawHLine(ctx, overbought, minV, maxV, pad, COLORS.red, [4, 3]);
+        drawHLine(ctx, oversold, minV, maxV, pad, COLORS.green, [4, 3]);
+        drawHLine(ctx, 50, minV, maxV, pad, COLORS.muted, [2, 4]);
+
+        // RSI line
+        const validRSI = [];
+        let rsiStart = -1;
+        for (let i = 0; i < rsi.length; i++) {
+            if (rsi[i] !== null && rsiStart < 0) rsiStart = i;
+        }
+        if (rsiStart >= 0) {
+            ctx.strokeStyle = COLORS.purple;
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            let started = false;
+            for (let i = rsiStart; i < N; i++) {
+                if (rsi[i] === null) continue;
+                const x = mapX(i, N, pad.padL, pad.plotW);
+                const y = mapY(rsi[i], minV, maxV, pad.padT, pad.plotH);
+                if (!started) { ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+        }
+
+        // Buy/sell markers on RSI
+        const buyRSIs = buys.map(i => rsi[i]);
+        const sellRSIs = sells.map(i => rsi[i]);
+        drawDots(ctx, buys, buyRSIs, minV, maxV, pad, N, COLORS.green, 4);
+        drawDots(ctx, sells, sellRSIs, minV, maxV, pad, N, COLORS.red, 4);
+
+        ctx.fillStyle = COLORS.muted;
+        ctx.font = '10px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText('RSI', pad.padL + 5, pad.padT + 12);
+    }
+
+    genPrice();
+    sliderP.oninput = () => { valP.textContent = sliderP.value; run(); };
+    sliderOS.oninput = () => { valOS.textContent = sliderOS.value; run(); };
+    sliderOB.oninput = () => { valOB.textContent = sliderOB.value; run(); };
+    btnRegen.onclick = () => { genPrice(); run(); };
+    setTimeout(run, 70);
+    window.addEventListener('resize', run);
+})();
+
+// ============================================================
+//  SECTION 4: Z-Score Mean Reversion
+// ============================================================
+(function() {
+    const canvasPrice = document.getElementById('canvas-zs-price');
+    const canvasZ = document.getElementById('canvas-zs-zscore');
+    const sliderW = document.getElementById('zs-window');
+    const sliderEntry = document.getElementById('zs-entry');
+    const sliderExit = document.getElementById('zs-exit');
+    const valW = document.getElementById('zs-window-val');
+    const valEntry = document.getElementById('zs-entry-val');
+    const valExit = document.getElementById('zs-exit-val');
+    const btnRegen = document.getElementById('zs-regen');
+    const metricsDiv = document.getElementById('zs-metrics');
+
+    const N = 300;
+    let priceData = [];
+
+    function genPrice() {
+        priceData = generateMeanRevertingPrice(N, 0.35);
+    }
+
+    function run() {
+        const window = parseInt(sliderW.value);
+        const entryTh = parseFloat(sliderEntry.value);
+        const exitTh = parseFloat(sliderExit.value);
+        const z = computeZScore(priceData, window);
+
+        // Trading: long when z < -entry, short when z > entry, exit when |z| < exitTh
+        const zones = []; // { start, end, color }
+        let position = 0; // 1=long, -1=short, 0=flat
+        let posStart = 0;
+        const trades = [];
+        let entryPrice = 0;
+
+        for (let i = window; i < N; i++) {
+            if (z[i] === null) continue;
+            if (position === 0) {
+                if (z[i] < -entryTh) {
+                    position = 1; posStart = i; entryPrice = priceData[i];
+                } else if (z[i] > entryTh) {
+                    position = -1; posStart = i; entryPrice = priceData[i];
+                }
+            } else {
+                if (Math.abs(z[i]) < exitTh) {
+                    zones.push({
+                        start: posStart, end: i,
+                        color: position === 1 ? 'rgba(22,199,154,0.12)' : 'rgba(255,82,82,0.12)'
+                    });
+                    const pnl = position === 1
+                        ? (priceData[i] - entryPrice) / entryPrice
+                        : (entryPrice - priceData[i]) / entryPrice;
+                    trades.push(pnl);
+                    position = 0;
+                }
+            }
+        }
+
+        // Metrics
+        const nTrades = trades.length;
+        const totalRet = trades.reduce((a, b) => a + b, 0);
+        const wins = trades.filter(t => t > 0).length;
+
+        drawPrice(z, zones);
+        drawZScore(z, entryTh, exitTh, zones);
+
+        metricsDiv.innerHTML = `
+            <div class="metric-card"><div class="metric-val metric-blue">${nTrades}</div><div class="metric-label">交易次数</div></div>
+            <div class="metric-card"><div class="metric-val ${totalRet >= 0 ? 'metric-green' : 'metric-red'}">${fmt(totalRet * 100, 1)}%</div><div class="metric-label">累计收益</div></div>
+            <div class="metric-card"><div class="metric-val metric-orange">${nTrades > 0 ? fmt(wins / nTrades * 100, 0) : 0}%</div><div class="metric-label">胜率</div></div>
+            <div class="metric-card"><div class="metric-val metric-purple">${nTrades > 0 ? fmt(totalRet / nTrades * 100, 2) : '--'}%</div><div class="metric-label">平均收益/笔</div></div>
+        `;
+    }
+
+    function drawPrice(z, zones) {
+        const { ctx, w, h } = initCanvas(canvasPrice);
+        ctx.clearRect(0, 0, w, h);
+
+        const minP = Math.min(...priceData) - 2;
+        const maxP = Math.max(...priceData) + 2;
+
+        const yTicks = 5;
+        const yLabels = [];
+        for (let i = 0; i < yTicks; i++) yLabels.push(fmt(maxP - (maxP - minP) * i / (yTicks - 1), 1));
+        const xLabels = [];
+        for (let i = 0; i < 6; i++) xLabels.push(Math.round((N - 1) * i / 5));
+
+        const pad = drawGrid(ctx, w, h, 6, yTicks, xLabels, yLabels);
+
+        // Zones
+        drawColoredZones(ctx, zones, minP, maxP, pad, N);
+
+        drawLine(ctx, priceData, minP, maxP, pad, COLORS.blue, 1.5);
+
+        ctx.fillStyle = COLORS.muted;
+        ctx.font = '10px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText('价格', pad.padL + 5, pad.padT + 12);
+    }
+
+    function drawZScore(z, entryTh, exitTh, zones) {
+        const { ctx, w, h } = initCanvas(canvasZ);
+        ctx.clearRect(0, 0, w, h);
+
+        const validZ = z.filter(v => v !== null);
+        const absMax = Math.max(3, Math.max(...validZ.map(Math.abs)) + 0.5);
+        const minV = -absMax, maxV = absMax;
+
+        const yTicks = 5;
+        const yLabels = [];
+        for (let i = 0; i < yTicks; i++) yLabels.push(fmt(maxV - (maxV - minV) * i / (yTicks - 1), 1));
+        const xLabels = [];
+        for (let i = 0; i < 6; i++) xLabels.push(Math.round((N - 1) * i / 5));
+
+        const pad = drawGrid(ctx, w, h, 6, yTicks, xLabels, yLabels);
+
+        // Zones
+        drawColoredZones(ctx, zones, minV, maxV, pad, N);
+
+        // Threshold lines
+        drawHLine(ctx, entryTh, minV, maxV, pad, COLORS.red, [4, 3]);
+        drawHLine(ctx, -entryTh, minV, maxV, pad, COLORS.green, [4, 3]);
+        drawHLine(ctx, exitTh, minV, maxV, pad, 'rgba(255,255,255,0.2)', [2, 4]);
+        drawHLine(ctx, -exitTh, minV, maxV, pad, 'rgba(255,255,255,0.2)', [2, 4]);
+        drawHLine(ctx, 0, minV, maxV, pad, COLORS.muted, [3, 3]);
+
+        // Z-score line
+        const zStart = z.findIndex(v => v !== null);
+        if (zStart >= 0) {
+            ctx.strokeStyle = COLORS.purple;
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            let started = false;
+            for (let i = zStart; i < N; i++) {
+                if (z[i] === null) continue;
+                const x = mapX(i, N, pad.padL, pad.plotW);
+                const y = mapY(z[i], minV, maxV, pad.padT, pad.plotH);
+                if (!started) { ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+        }
+
+        ctx.fillStyle = COLORS.muted;
+        ctx.font = '10px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText('Z-Score', pad.padL + 5, pad.padT + 12);
+
+        // Threshold labels
+        ctx.fillStyle = COLORS.red;
+        ctx.textAlign = 'right';
+        ctx.fillText('+' + fmt(entryTh, 1), pad.padL + pad.plotW - 4, mapY(entryTh, minV, maxV, pad.padT, pad.plotH) - 5);
+        ctx.fillStyle = COLORS.green;
+        ctx.fillText('-' + fmt(entryTh, 1), pad.padL + pad.plotW - 4, mapY(-entryTh, minV, maxV, pad.padT, pad.plotH) + 13);
+    }
+
+    genPrice();
+    sliderW.oninput = () => { valW.textContent = sliderW.value; run(); };
+    sliderEntry.oninput = () => { valEntry.textContent = parseFloat(sliderEntry.value).toFixed(1); run(); };
+    sliderExit.oninput = () => { valExit.textContent = parseFloat(sliderExit.value).toFixed(1); run(); };
+    btnRegen.onclick = () => { genPrice(); run(); };
+    setTimeout(run, 80);
+    window.addEventListener('resize', run);
+})();
+
+// ============================================================
+//  SECTION 5: Stationarity Test (ADF)
+// ============================================================
+(function() {
+    const canvas = document.getElementById('canvas-adf');
+    const sliderStr = document.getElementById('adf-strength');
+    const sliderN = document.getElementById('adf-n');
+    const valStr = document.getElementById('adf-strength-val');
+    const valN = document.getElementById('adf-n-val');
+    const btnRegen = document.getElementById('adf-regen');
+    const metricsDiv = document.getElementById('adf-metrics');
+    const resultDiv = document.getElementById('adf-result');
+
+    let seriesData = [];
+
+    function genSeries() {
+        const strength = parseFloat(sliderStr.value);
+        const n = parseInt(sliderN.value);
+        const mu = 100;
+        const sigma = 2;
+        seriesData = [mu + randn() * 3];
+        for (let i = 1; i < n; i++) {
+            const prev = seriesData[i - 1];
+            // strength=0 => random walk, strength=1 => strong mean reversion
+            seriesData.push(prev + strength * (mu - prev) * 0.05 + sigma * randn());
+        }
+    }
+
+    function adfTest(data) {
+        // Simple Dickey-Fuller regression: ΔX_t = α + β * X_{t-1} + ε
+        // Estimate β via OLS
+        const n = data.length;
+        const dX = [], X = [];
+        for (let i = 1; i < n; i++) {
+            dX.push(data[i] - data[i - 1]);
+            X.push(data[i - 1]);
+        }
+        const m = dX.length;
+
+        // OLS: β = (Σ(x - x̄)(y - ȳ)) / Σ(x - x̄)²
+        let sumX = 0, sumY = 0;
+        for (let i = 0; i < m; i++) { sumX += X[i]; sumY += dX[i]; }
+        const meanX = sumX / m, meanY = sumY / m;
+
+        let numr = 0, denr = 0;
+        for (let i = 0; i < m; i++) {
+            numr += (X[i] - meanX) * (dX[i] - meanY);
+            denr += (X[i] - meanX) * (X[i] - meanX);
+        }
+        const beta = denr === 0 ? 0 : numr / denr;
+        const alpha = meanY - beta * meanX;
+
+        // Standard error of β
+        let sse = 0;
+        for (let i = 0; i < m; i++) {
+            const residual = dX[i] - alpha - beta * X[i];
+            sse += residual * residual;
+        }
+        const seBeta = denr === 0 ? Infinity : Math.sqrt((sse / (m - 2)) / denr);
+        const tStat = seBeta === 0 ? 0 : beta / seBeta;
+
+        // Critical values (approximate, for n~250, no trend, 5% ~ -2.86, 1% ~ -3.43)
+        const cv1 = -3.43;
+        const cv5 = -2.86;
+        const cv10 = -2.57;
+
+        const stationary = tStat < cv5;
+        return { tStat, beta, cv1, cv5, cv10, stationary };
+    }
+
+    function run() {
+        genSeries();
+        const result = adfTest(seriesData);
+        draw(result);
+
+        metricsDiv.innerHTML = `
+            <div class="metric-card"><div class="metric-val metric-blue">${fmt(result.tStat, 3)}</div><div class="metric-label">t 统计量</div></div>
+            <div class="metric-card"><div class="metric-val metric-red">${fmt(result.cv1, 2)}</div><div class="metric-label">1% 临界值</div></div>
+            <div class="metric-card"><div class="metric-val metric-orange">${fmt(result.cv5, 2)}</div><div class="metric-label">5% 临界值</div></div>
+            <div class="metric-card"><div class="metric-val metric-purple">${fmt(result.cv10, 2)}</div><div class="metric-label">10% 临界值</div></div>
+            <div class="metric-card"><div class="metric-val ${result.beta < 0 ? 'metric-green' : 'metric-red'}">${fmt(result.beta, 5)}</div><div class="metric-label">β 系数</div></div>
+        `;
+
+        if (result.stationary) {
+            resultDiv.className = 'stationarity-result stationary';
+            resultDiv.innerHTML = '✓ 平稳序列（拒绝单位根假设，p < 0.05）— 适合均值回归策略';
+        } else {
+            resultDiv.className = 'stationarity-result nonstationary';
+            resultDiv.innerHTML = '✗ 非平稳序列（无法拒绝单位根假设）— 不建议使用均值回归策略';
+        }
+    }
+
+    function draw(result) {
+        const { ctx, w, h } = initCanvas(canvas);
+        ctx.clearRect(0, 0, w, h);
+        const n = seriesData.length;
+
+        const mean = seriesData.reduce((a, b) => a + b, 0) / n;
+        const minV = Math.min(...seriesData) - 3;
+        const maxV = Math.max(...seriesData) + 3;
+
+        const yTicks = 5;
+        const yLabels = [];
+        for (let i = 0; i < yTicks; i++) yLabels.push(fmt(maxV - (maxV - minV) * i / (yTicks - 1), 1));
+        const xLabels = [];
+        for (let i = 0; i < 6; i++) xLabels.push(Math.round((n - 1) * i / 5));
+
+        const pad = drawGrid(ctx, w, h, 6, yTicks, xLabels, yLabels);
+
+        // Mean line
+        drawHLine(ctx, mean, minV, maxV, pad, COLORS.yellow, [6, 4]);
+
+        // Series
+        const color = result.stationary ? COLORS.green : COLORS.red;
+        drawLine(ctx, seriesData, minV, maxV, pad, color, 1.5);
+
+        // Background tint
+        ctx.fillStyle = result.stationary ? 'rgba(22,199,154,0.03)' : 'rgba(255,82,82,0.03)';
+        ctx.fillRect(pad.padL, pad.padT, pad.plotW, pad.plotH);
+
+        // Info
+        ctx.fillStyle = COLORS.muted;
+        ctx.font = '11px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText('均值 = ' + fmt(mean, 1), pad.padL + 5, pad.padT + 14);
+        ctx.fillText('t = ' + fmt(result.tStat, 2) + (result.stationary ? '  (平稳)' : '  (非平稳)'),
+            pad.padL + 5, pad.padT + 28);
+    }
+
+    sliderStr.oninput = () => { valStr.textContent = parseFloat(sliderStr.value).toFixed(2); run(); };
+    sliderN.oninput = () => { valN.textContent = sliderN.value; run(); };
+    btnRegen.onclick = run;
+    setTimeout(run, 90);
+    window.addEventListener('resize', run);
+})();
+
+// ============================================================
+//  KaTeX Auto-Render
+// ============================================================
+document.addEventListener('DOMContentLoaded', function() {
+    function tryRender() {
+        if (typeof renderMathInElement === 'function') {
+            renderMathInElement(document.body, {
+                delimiters: [
+                    { left: '$$', right: '$$', display: true },
+                    { left: '\\(', right: '\\)', display: false },
+                    { left: '$', right: '$', display: false }
+                ],
+                throwOnError: false
+            });
+        } else {
+            setTimeout(tryRender, 200);
+        }
+    }
+    tryRender();
+});
+</script>
+</body>
+</html>

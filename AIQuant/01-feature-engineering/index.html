@@ -1,0 +1,1192 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>特征工程 — AI 量化</title>
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script defer src="../shared/scripts/nav.js"></script>
+    <script defer src="../shared/scripts/aiquant-utils.js"></script>
+    <style>
+        .module-intro { margin-bottom: 2rem; }
+        .module-intro h1 span { color: var(--accent-green); }
+        .controls-row {
+            display: flex; flex-wrap: wrap; align-items: center;
+            gap: 0.75rem; margin-bottom: 1rem;
+        }
+        .toggle-btn {
+            padding: 0.35rem 0.8rem; border-radius: var(--radius-sm);
+            border: 1px solid var(--border-color); background: var(--bg-secondary);
+            color: var(--text-secondary); font-size: 0.8rem; cursor: pointer;
+            transition: all 0.2s; font-family: inherit;
+        }
+        .toggle-btn.active {
+            border-color: var(--accent-green); color: var(--accent-green);
+            background: rgba(22,199,154,0.15);
+        }
+        .toggle-btn:hover { border-color: var(--accent-green); }
+        canvas { display: block; border-radius: var(--radius-sm); }
+        .canvas-wrap {
+            background: var(--bg-secondary); border: 1px solid var(--border-color);
+            border-radius: var(--radius-md); padding: 1rem; position: relative;
+        }
+        .canvas-wrap canvas { width: 100%; }
+        .stat-grid {
+            display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+            gap: 0.5rem; margin-top: 0.75rem;
+        }
+        .stat-item {
+            background: var(--bg-card); border-radius: var(--radius-sm);
+            padding: 0.5rem 0.75rem; text-align: center;
+        }
+        .stat-item .label { font-size: 0.72rem; color: var(--text-muted); }
+        .stat-item .value {
+            font-family: var(--font-mono); font-size: 0.9rem;
+            color: var(--accent-green); font-weight: 600;
+        }
+        .select-wrap select {
+            background: var(--bg-secondary); color: var(--text-primary);
+            border: 1px solid var(--border-color); border-radius: var(--radius-sm);
+            padding: 0.35rem 0.6rem; font-size: 0.85rem; font-family: inherit;
+            cursor: pointer; outline: none;
+        }
+        .select-wrap select:focus { border-color: var(--accent-green); }
+        .pipeline-stage {
+            display: inline-flex; align-items: center; gap: 0.4rem;
+            padding: 0.5rem 1rem; background: var(--bg-secondary);
+            border: 1px solid var(--border-color); border-radius: var(--radius-md);
+            cursor: pointer; transition: all 0.25s; font-size: 0.85rem;
+            color: var(--text-secondary); font-family: inherit;
+        }
+        .pipeline-stage.active {
+            border-color: var(--accent-green); color: var(--accent-green);
+            background: rgba(22,199,154,0.12); box-shadow: var(--shadow-glow);
+        }
+        .pipeline-stage:hover { border-color: var(--accent-blue); }
+        .pipeline-arrow {
+            color: var(--text-muted); font-size: 1.1rem; margin: 0 0.25rem;
+        }
+        .pipeline-flow {
+            display: flex; flex-wrap: wrap; align-items: center;
+            gap: 0.3rem; margin-bottom: 1.5rem;
+        }
+        .dim-badge {
+            font-family: var(--font-mono); font-size: 0.75rem;
+            color: var(--accent-orange); background: rgba(255,171,64,0.1);
+            padding: 0.15rem 0.5rem; border-radius: 9999px;
+        }
+        .feature-check {
+            display: flex; align-items: center; gap: 0.5rem;
+            padding: 0.3rem 0; font-size: 0.85rem; color: var(--text-secondary);
+            cursor: pointer;
+        }
+        .feature-check input { accent-color: var(--accent-green); }
+        .importance-legend {
+            display: flex; gap: 1rem; font-size: 0.8rem;
+            color: var(--text-secondary); margin-top: 0.5rem;
+        }
+        .importance-legend span {
+            display: flex; align-items: center; gap: 0.3rem;
+        }
+        .importance-legend .dot {
+            width: 10px; height: 10px; border-radius: 2px; display: inline-block;
+        }
+    </style>
+</head>
+<body>
+<div class="page-container">
+    <!-- Intro -->
+    <div class="module-intro">
+        <h1><span>01</span> 特征工程</h1>
+        <p>量化交易中，特征工程决定了模型的上限。本模块交互演示从原始行情到可建模特征矩阵的完整流程。</p>
+    </div>
+
+    <!-- ===== Section 1: 技术指标特征 ===== -->
+    <div class="section" id="sec-indicators">
+        <div class="section-title"><div class="icon">📈</div><h2>技术指标特征</h2></div>
+        <p>原始 OHLCV 数据可以派生出数十种技术指标，每一种都是模型的一个输入特征。切换下方按钮查看不同指标的叠加效果。</p>
+        <div class="controls-row">
+            <button class="toggle-btn active" data-ind="ma5">MA(5)</button>
+            <button class="toggle-btn active" data-ind="ma20">MA(20)</button>
+            <button class="toggle-btn" data-ind="ma60">MA(60)</button>
+            <button class="toggle-btn active" data-ind="boll">布林带</button>
+            <button class="toggle-btn" data-ind="macd">MACD</button>
+            <button class="toggle-btn" data-ind="vol">成交量</button>
+            <button class="btn btn-sm btn-primary" id="btn-regen">重新生成</button>
+        </div>
+        <div class="canvas-wrap">
+            <canvas id="cvs-indicators" height="420"></canvas>
+        </div>
+        <div class="info-box mt-2">
+            <p>$$\text{MA}(n)_t = \frac{1}{n}\sum_{i=0}^{n-1} C_{t-i}, \quad \text{Boll}_{\text{upper}} = \text{MA}(20) + 2\sigma$$</p>
+        </div>
+    </div>
+
+    <!-- ===== Section 2: 滞后与窗口特征 ===== -->
+    <div class="section" id="sec-lag">
+        <div class="section-title"><div class="icon">🕐</div><h2>滞后特征与窗口特征</h2></div>
+        <p>利用时序上的滞后和滚动窗口统计量，将单一价格序列扩展为多维特征。</p>
+        <div class="split-layout">
+            <div class="text-panel">
+                <h4>窗口大小</h4>
+                <div class="slider-group mb-2">
+                    <label>窗口 <span class="slider-value" id="win-val">20</span></label>
+                    <input type="range" id="win-slider" min="5" max="60" value="20" step="1">
+                </div>
+                <div class="controls-row">
+                    <button class="toggle-btn active" data-lag="1">Lag-1</button>
+                    <button class="toggle-btn active" data-lag="5">Lag-5</button>
+                    <button class="toggle-btn" data-lag="20">Lag-20</button>
+                </div>
+                <h4 class="mt-2">滚动统计量</h4>
+                <div class="controls-row">
+                    <button class="toggle-btn active" data-stat="mean">均值</button>
+                    <button class="toggle-btn active" data-stat="std">标准差</button>
+                    <button class="toggle-btn" data-stat="skew">偏度</button>
+                    <button class="toggle-btn" data-stat="kurt">峰度</button>
+                </div>
+                <div class="stat-grid" id="stat-vals"></div>
+                <div class="info-box mt-2">
+                    <p>$$\text{Skew}=\frac{1}{n}\sum\left(\frac{x_i-\bar{x}}{s}\right)^3, \quad \text{Kurt}=\frac{1}{n}\sum\left(\frac{x_i-\bar{x}}{s}\right)^4 - 3$$</p>
+                </div>
+            </div>
+            <div class="viz-panel">
+                <div class="canvas-wrap">
+                    <canvas id="cvs-lag" height="340"></canvas>
+                </div>
+                <h4 class="mt-2">特征相关矩阵</h4>
+                <div class="canvas-wrap mt-1">
+                    <canvas id="cvs-corr" height="280"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== Section 3: 截面特征 ===== -->
+    <div class="section" id="sec-cross">
+        <div class="section-title"><div class="icon">📊</div><h2>截面特征</h2></div>
+        <p>同一时间截面上，对所有股票按指标排序并做 rank 变换，消除量纲差异，使分布更加均匀。</p>
+        <div class="controls-row">
+            <div class="select-wrap">
+                <select id="cross-metric">
+                    <option value="momentum">动量 (20日收益率)</option>
+                    <option value="volatility">波动率 (20日)</option>
+                    <option value="volume">成交额</option>
+                </select>
+            </div>
+            <button class="btn btn-sm btn-primary" id="btn-cross-regen">刷新数据</button>
+        </div>
+        <div class="split-layout">
+            <div class="text-panel">
+                <div class="canvas-wrap">
+                    <canvas id="cvs-dist-before" height="240"></canvas>
+                </div>
+                <p class="text-sm text-center mt-1">变换前：原始值分布</p>
+            </div>
+            <div class="viz-panel">
+                <div class="canvas-wrap">
+                    <canvas id="cvs-dist-after" height="240"></canvas>
+                </div>
+                <p class="text-sm text-center mt-1">变换后：Rank 均匀分布</p>
+            </div>
+        </div>
+        <div class="canvas-wrap mt-2">
+            <canvas id="cvs-ranking" height="300"></canvas>
+        </div>
+        <div class="info-box mt-2">
+            <p>$$\text{Rank}(x_i) = \frac{\text{rank}(x_i)}{N}, \quad \text{Rank}(x_i) \in [0,1]$$</p>
+        </div>
+    </div>
+
+    <!-- ===== Section 4: 特征重要性 ===== -->
+    <div class="section" id="sec-importance">
+        <div class="section-title"><div class="icon">🎯</div><h2>特征重要性</h2></div>
+        <p>训练简单决策树模型，比较分裂重要性与置换重要性。勾选/取消特征观察准确率变化。</p>
+        <div class="split-layout">
+            <div class="text-panel">
+                <h4>特征开关</h4>
+                <div id="feature-toggles"></div>
+                <div class="stat-grid mt-2">
+                    <div class="stat-item"><div class="label">模型准确率</div><div class="value" id="model-acc">—</div></div>
+                    <div class="stat-item"><div class="label">已选特征</div><div class="value" id="feat-count">—</div></div>
+                </div>
+                <div class="info-box mt-2">
+                    <p>置换重要性：打乱某特征后准确率下降幅度越大，该特征越重要。</p>
+                </div>
+            </div>
+            <div class="viz-panel">
+                <div class="canvas-wrap">
+                    <canvas id="cvs-importance" height="380"></canvas>
+                </div>
+                <div class="importance-legend">
+                    <span><span class="dot" style="background:var(--accent-green)"></span>分裂重要性</span>
+                    <span><span class="dot" style="background:var(--accent-blue)"></span>置换重要性</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== Section 5: 特征工程流水线 ===== -->
+    <div class="section" id="sec-pipeline">
+        <div class="section-title"><div class="icon">🔧</div><h2>特征工程流水线</h2></div>
+        <p>点击各阶段查看数据维度变化与处理细节。</p>
+        <div class="pipeline-flow" id="pipeline-flow"></div>
+        <div class="canvas-wrap">
+            <canvas id="cvs-pipeline" height="380"></canvas>
+        </div>
+        <div class="stat-grid mt-1" id="pipeline-stats"></div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    // ---- KaTeX auto-render ----
+    if (typeof renderMathInElement === 'function') {
+        renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ]
+        });
+    }
+
+    // ---- Utility Helpers ----
+    const C = {
+        green: '#16c79a', blue: '#4fc3f7', purple: '#b388ff',
+        orange: '#ffab40', red: '#ff5252', yellow: '#ffd740', pink: '#ff80ab',
+        bg: '#1a1a2e', bgSec: '#16213e', bgCard: '#0f3460',
+        textPri: '#e8e8e8', textSec: '#a8a8b8', textMut: '#6c6c7c',
+        border: '#2a2a4a'
+    };
+
+    function resizeCanvas(cvs) {
+        const r = window.devicePixelRatio || 1;
+        const rect = cvs.parentElement.getBoundingClientRect();
+        const w = Math.floor(rect.width - 32);
+        const h = parseInt(cvs.getAttribute('height')) || 400;
+        cvs.width = w * r; cvs.height = h * r;
+        cvs.style.width = w + 'px'; cvs.style.height = h + 'px';
+        const ctx = cvs.getContext('2d');
+        ctx.scale(r, r);
+        return { ctx, w, h };
+    }
+
+    function randNorm(mu = 0, sig = 1) {
+        let u = 0, v = 0;
+        while (u === 0) u = Math.random();
+        while (v === 0) v = Math.random();
+        return mu + sig * Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+    }
+
+    function sma(arr, n) {
+        const r = [];
+        for (let i = 0; i < arr.length; i++) {
+            if (i < n - 1) { r.push(null); continue; }
+            let s = 0;
+            for (let j = i - n + 1; j <= i; j++) s += arr[j];
+            r.push(s / n);
+        }
+        return r;
+    }
+
+    function rollingStd(arr, n) {
+        const m = sma(arr, n), r = [];
+        for (let i = 0; i < arr.length; i++) {
+            if (i < n - 1 || m[i] == null) { r.push(null); continue; }
+            let s = 0;
+            for (let j = i - n + 1; j <= i; j++) s += (arr[j] - m[i]) ** 2;
+            r.push(Math.sqrt(s / n));
+        }
+        return r;
+    }
+
+    function rollingSkew(arr, n) {
+        const m = sma(arr, n), sd = rollingStd(arr, n), r = [];
+        for (let i = 0; i < arr.length; i++) {
+            if (i < n - 1 || m[i] == null || !sd[i]) { r.push(null); continue; }
+            let s = 0;
+            for (let j = i - n + 1; j <= i; j++) s += ((arr[j] - m[i]) / sd[i]) ** 3;
+            r.push(s / n);
+        }
+        return r;
+    }
+
+    function rollingKurt(arr, n) {
+        const m = sma(arr, n), sd = rollingStd(arr, n), r = [];
+        for (let i = 0; i < arr.length; i++) {
+            if (i < n - 1 || m[i] == null || !sd[i]) { r.push(null); continue; }
+            let s = 0;
+            for (let j = i - n + 1; j <= i; j++) s += ((arr[j] - m[i]) / sd[i]) ** 4;
+            r.push(s / n - 3);
+        }
+        return r;
+    }
+
+    function drawLine(ctx, pts, color, lw = 1.5) {
+        ctx.beginPath(); ctx.strokeStyle = color; ctx.lineWidth = lw;
+        let started = false;
+        for (let i = 0; i < pts.length; i++) {
+            if (pts[i] == null) { started = false; continue; }
+            if (!started) { ctx.moveTo(i, pts[i]); started = true; }
+            else ctx.lineTo(i, pts[i]);
+        }
+        ctx.stroke();
+    }
+
+    // ---- Generate OHLCV Data ----
+    let ohlcv = [];
+    function genOHLCV(n = 200) {
+        ohlcv = [];
+        let price = 50 + Math.random() * 50;
+        for (let i = 0; i < n; i++) {
+            const ret = randNorm(0.0003, 0.018);
+            const open = price;
+            const close = open * (1 + ret);
+            const high = Math.max(open, close) * (1 + Math.abs(randNorm(0, 0.005)));
+            const low = Math.min(open, close) * (1 - Math.abs(randNorm(0, 0.005)));
+            const vol = Math.max(100, Math.floor(randNorm(5000, 2000)));
+            ohlcv.push({ o: open, h: high, l: low, c: close, v: vol });
+            price = close;
+        }
+        return ohlcv;
+    }
+    genOHLCV();
+
+    // ============== SECTION 1: Technical Indicators ==============
+    const indState = { ma5: true, ma20: true, ma60: false, boll: true, macd: false, vol: false };
+
+    document.querySelectorAll('[data-ind]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const k = btn.dataset.ind;
+            indState[k] = !indState[k];
+            btn.classList.toggle('active', indState[k]);
+            drawIndicators();
+        });
+    });
+
+    document.getElementById('btn-regen').addEventListener('click', () => {
+        genOHLCV();
+        drawIndicators();
+        drawLagSection();
+        drawCrossSection();
+        drawImportance();
+    });
+
+    function drawIndicators() {
+        const cvs = document.getElementById('cvs-indicators');
+        const { ctx, w, h } = resizeCanvas(cvs);
+        ctx.clearRect(0, 0, w, h);
+
+        const closes = ohlcv.map(d => d.c);
+        const showMACD = indState.macd;
+        const showVol = indState.vol;
+        const mainH = showMACD ? h * 0.55 : (showVol ? h * 0.7 : h - 30);
+        const subTop = mainH + 20;
+        const subH = h - subTop - 10;
+
+        // Price scale
+        const allH = ohlcv.map(d => d.h), allL = ohlcv.map(d => d.l);
+        let pMax = Math.max(...allH), pMin = Math.min(...allL);
+        // include boll bands in range
+        if (indState.boll) {
+            const ma20 = sma(closes, 20), std20 = rollingStd(closes, 20);
+            for (let i = 0; i < closes.length; i++) {
+                if (ma20[i] != null) {
+                    pMax = Math.max(pMax, ma20[i] + 2 * std20[i]);
+                    pMin = Math.min(pMin, ma20[i] - 2 * std20[i]);
+                }
+            }
+        }
+        const pad = (pMax - pMin) * 0.05;
+        pMin -= pad; pMax += pad;
+
+        const xStep = w / ohlcv.length;
+        const yMap = v => mainH - 15 - ((v - pMin) / (pMax - pMin)) * (mainH - 30);
+
+        // Grid
+        ctx.strokeStyle = C.border; ctx.lineWidth = 0.5;
+        for (let i = 0; i < 5; i++) {
+            const y = 15 + i * (mainH - 30) / 4;
+            ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+            const val = pMax - (pMax - pMin) * (i / 4);
+            ctx.fillStyle = C.textMut; ctx.font = '10px monospace';
+            ctx.textAlign = 'right'; ctx.fillText(val.toFixed(1), w - 4, y - 3);
+        }
+
+        // Candlestick
+        const candleW = Math.max(1, xStep * 0.6);
+        ohlcv.forEach((d, i) => {
+            const x = i * xStep + xStep / 2;
+            const up = d.c >= d.o;
+            ctx.strokeStyle = up ? C.green : C.red;
+            ctx.fillStyle = up ? C.green : C.red;
+            // wick
+            ctx.beginPath();
+            ctx.moveTo(x, yMap(d.h)); ctx.lineTo(x, yMap(d.l));
+            ctx.lineWidth = 1; ctx.stroke();
+            // body
+            const yTop = yMap(Math.max(d.o, d.c));
+            const yBot = yMap(Math.min(d.o, d.c));
+            const bh = Math.max(1, yBot - yTop);
+            if (up) {
+                ctx.strokeRect(x - candleW / 2, yTop, candleW, bh);
+            } else {
+                ctx.fillRect(x - candleW / 2, yTop, candleW, bh);
+            }
+        });
+
+        // MA lines
+        const maColors = { ma5: C.orange, ma20: C.blue, ma60: C.purple };
+        const maPeriods = { ma5: 5, ma20: 20, ma60: 60 };
+        ['ma5', 'ma20', 'ma60'].forEach(k => {
+            if (!indState[k]) return;
+            const vals = sma(closes, maPeriods[k]);
+            const pts = vals.map((v, i) => v == null ? null : yMap(v));
+            const mapped = pts.map((v, i) => v);
+            ctx.save();
+            drawLineX(ctx, mapped, maColors[k], 1.5, xStep);
+            ctx.restore();
+        });
+
+        // Bollinger Bands
+        if (indState.boll) {
+            const ma20 = sma(closes, 20), std20 = rollingStd(closes, 20);
+            const upper = ma20.map((m, i) => m == null ? null : m + 2 * std20[i]);
+            const lower = ma20.map((m, i) => m == null ? null : m - 2 * std20[i]);
+            // fill area
+            ctx.save();
+            ctx.globalAlpha = 0.08; ctx.fillStyle = C.blue;
+            ctx.beginPath();
+            let started = false;
+            for (let i = 0; i < upper.length; i++) {
+                if (upper[i] == null) continue;
+                const x = i * xStep + xStep / 2;
+                if (!started) { ctx.moveTo(x, yMap(upper[i])); started = true; }
+                else ctx.lineTo(x, yMap(upper[i]));
+            }
+            for (let i = upper.length - 1; i >= 0; i--) {
+                if (lower[i] == null) continue;
+                ctx.lineTo(i * xStep + xStep / 2, yMap(lower[i]));
+            }
+            ctx.closePath(); ctx.fill();
+            ctx.restore();
+            drawLineX(ctx, upper.map(v => v == null ? null : yMap(v)), C.blue, 1, xStep);
+            drawLineX(ctx, lower.map(v => v == null ? null : yMap(v)), C.blue, 1, xStep);
+        }
+
+        // Volume bars
+        if (showVol && !showMACD) {
+            const vMax = Math.max(...ohlcv.map(d => d.v));
+            ohlcv.forEach((d, i) => {
+                const x = i * xStep + xStep / 2;
+                const bh = (d.v / vMax) * subH;
+                ctx.fillStyle = d.c >= d.o ? 'rgba(22,199,154,0.4)' : 'rgba(255,82,82,0.4)';
+                ctx.fillRect(x - candleW / 2, h - 10 - bh, candleW, bh);
+            });
+            ctx.fillStyle = C.textMut; ctx.font = '10px sans-serif';
+            ctx.textAlign = 'left'; ctx.fillText('成交量', 4, subTop + 12);
+        }
+
+        // MACD
+        if (showMACD) {
+            const ema12 = ema(closes, 12), ema26 = ema(closes, 26);
+            const diff = ema12.map((v, i) => v != null && ema26[i] != null ? v - ema26[i] : null);
+            const dea = emaSeries(diff, 9);
+            const hist = diff.map((v, i) => v != null && dea[i] != null ? 2 * (v - dea[i]) : null);
+            const vals = [...diff, ...dea, ...hist].filter(v => v != null);
+            const mMax = Math.max(...vals.map(Math.abs)) * 1.1;
+
+            const subMid = subTop + subH / 2;
+            ctx.strokeStyle = C.border; ctx.lineWidth = 0.5;
+            ctx.beginPath(); ctx.moveTo(0, subMid); ctx.lineTo(w, subMid); ctx.stroke();
+
+            const yM = v => subMid - (v / mMax) * (subH / 2 - 5);
+            // histogram
+            hist.forEach((v, i) => {
+                if (v == null) return;
+                const x = i * xStep + xStep / 2;
+                ctx.fillStyle = v >= 0 ? 'rgba(22,199,154,0.5)' : 'rgba(255,82,82,0.5)';
+                const barH = Math.abs((v / mMax) * (subH / 2 - 5));
+                ctx.fillRect(x - candleW / 2, v >= 0 ? yM(v) : subMid, candleW, barH);
+            });
+            drawLineX(ctx, diff.map(v => v == null ? null : yM(v)), C.orange, 1.2, xStep);
+            drawLineX(ctx, dea.map(v => v == null ? null : yM(v)), C.blue, 1.2, xStep);
+            ctx.fillStyle = C.textMut; ctx.font = '10px sans-serif';
+            ctx.textAlign = 'left'; ctx.fillText('MACD', 4, subTop + 12);
+        }
+
+        // Legend
+        ctx.font = '11px sans-serif'; ctx.textAlign = 'left';
+        let lx = 8;
+        const labels = [];
+        if (indState.ma5) labels.push(['MA(5)', C.orange]);
+        if (indState.ma20) labels.push(['MA(20)', C.blue]);
+        if (indState.ma60) labels.push(['MA(60)', C.purple]);
+        if (indState.boll) labels.push(['布林带', C.blue]);
+        labels.forEach(([t, c]) => {
+            ctx.fillStyle = c;
+            ctx.fillRect(lx, 4, 14, 3);
+            ctx.fillStyle = C.textSec;
+            ctx.fillText(t, lx + 18, 10);
+            lx += ctx.measureText(t).width + 30;
+        });
+    }
+
+    function drawLineX(ctx, pts, color, lw, xStep) {
+        ctx.beginPath(); ctx.strokeStyle = color; ctx.lineWidth = lw;
+        let started = false;
+        for (let i = 0; i < pts.length; i++) {
+            const x = i * xStep + xStep / 2;
+            if (pts[i] == null) { started = false; continue; }
+            if (!started) { ctx.moveTo(x, pts[i]); started = true; }
+            else ctx.lineTo(x, pts[i]);
+        }
+        ctx.stroke();
+    }
+
+    function ema(arr, n) {
+        const k = 2 / (n + 1), r = [];
+        let prev = null;
+        for (let i = 0; i < arr.length; i++) {
+            if (arr[i] == null) { r.push(null); continue; }
+            if (prev == null) { prev = arr[i]; r.push(prev); }
+            else { prev = arr[i] * k + prev * (1 - k); r.push(prev); }
+        }
+        return r;
+    }
+
+    function emaSeries(arr, n) {
+        const k = 2 / (n + 1), r = [];
+        let prev = null;
+        for (let i = 0; i < arr.length; i++) {
+            if (arr[i] == null) { r.push(null); continue; }
+            if (prev == null) { prev = arr[i]; r.push(prev); }
+            else { prev = arr[i] * k + prev * (1 - k); r.push(prev); }
+        }
+        return r;
+    }
+
+    drawIndicators();
+
+    // ============== SECTION 2: Lag & Window Features ==============
+    const lagState = { 1: true, 5: true, 20: false };
+    const statState = { mean: true, std: true, skew: false, kurt: false };
+
+    document.querySelectorAll('[data-lag]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const k = parseInt(btn.dataset.lag);
+            lagState[k] = !lagState[k];
+            btn.classList.toggle('active', lagState[k]);
+            drawLagSection();
+        });
+    });
+    document.querySelectorAll('[data-stat]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const k = btn.dataset.stat;
+            statState[k] = !statState[k];
+            btn.classList.toggle('active', statState[k]);
+            drawLagSection();
+        });
+    });
+    const winSlider = document.getElementById('win-slider');
+    const winVal = document.getElementById('win-val');
+    winSlider.addEventListener('input', () => {
+        winVal.textContent = winSlider.value;
+        drawLagSection();
+    });
+
+    function drawLagSection() {
+        drawLagChart();
+        drawCorrMatrix();
+        updateStatVals();
+    }
+
+    function drawLagChart() {
+        const cvs = document.getElementById('cvs-lag');
+        const { ctx, w, h } = resizeCanvas(cvs);
+        ctx.clearRect(0, 0, w, h);
+        const closes = ohlcv.map(d => d.c);
+        const n = closes.length;
+        const win = parseInt(winSlider.value);
+
+        // compute returns
+        const rets = closes.map((c, i) => i === 0 ? 0 : (c - closes[i - 1]) / closes[i - 1]);
+
+        // Collect series
+        const series = [{ data: rets, color: C.textPri, label: '收益率' }];
+        const lagColors = { 1: C.orange, 5: C.blue, 20: C.purple };
+        Object.keys(lagState).forEach(k => {
+            if (!lagState[k]) return;
+            const lag = parseInt(k);
+            const d = new Array(n).fill(null);
+            for (let i = lag; i < n; i++) d[i] = rets[i - lag];
+            series.push({ data: d, color: lagColors[k], label: `Lag-${k}` });
+        });
+
+        const statColors = { mean: C.green, std: C.yellow, skew: C.pink, kurt: C.red };
+        const statFns = { mean: sma, std: rollingStd, skew: rollingSkew, kurt: rollingKurt };
+        Object.keys(statState).forEach(k => {
+            if (!statState[k]) return;
+            series.push({ data: statFns[k](rets, win), color: statColors[k], label: k });
+        });
+
+        // Y range
+        const allVals = series.flatMap(s => s.data.filter(v => v != null));
+        let yMin = Math.min(...allVals), yMax = Math.max(...allVals);
+        const pad = (yMax - yMin) * 0.1 || 0.01;
+        yMin -= pad; yMax += pad;
+
+        const xStep = w / n;
+        const yMap = v => 15 + (1 - (v - yMin) / (yMax - yMin)) * (h - 30);
+
+        // grid
+        ctx.strokeStyle = C.border; ctx.lineWidth = 0.5;
+        for (let i = 0; i <= 4; i++) {
+            const y = 15 + i * (h - 30) / 4;
+            ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+            ctx.fillStyle = C.textMut; ctx.font = '9px monospace'; ctx.textAlign = 'right';
+            ctx.fillText((yMax - (yMax - yMin) * i / 4).toFixed(4), w - 4, y - 2);
+        }
+
+        series.forEach(s => {
+            drawLineX(ctx, s.data.map(v => v == null ? null : yMap(v)), s.color, 1.3, xStep);
+        });
+
+        // legend
+        ctx.font = '10px sans-serif'; ctx.textAlign = 'left';
+        let lx = 6;
+        series.forEach(s => {
+            ctx.fillStyle = s.color; ctx.fillRect(lx, 4, 12, 3);
+            ctx.fillStyle = C.textSec; ctx.fillText(s.label, lx + 16, 10);
+            lx += ctx.measureText(s.label).width + 28;
+        });
+    }
+
+    function drawCorrMatrix() {
+        const cvs = document.getElementById('cvs-corr');
+        const { ctx, w, h } = resizeCanvas(cvs);
+        ctx.clearRect(0, 0, w, h);
+
+        const closes = ohlcv.map(d => d.c);
+        const rets = closes.map((c, i) => i === 0 ? 0 : (c - closes[i - 1]) / closes[i - 1]);
+        const win = parseInt(winSlider.value);
+
+        const features = {
+            '收益率': rets,
+            'Lag-1': rets.map((_, i) => i >= 1 ? rets[i - 1] : null),
+            'Lag-5': rets.map((_, i) => i >= 5 ? rets[i - 5] : null),
+            '均值': sma(rets, win),
+            '标准差': rollingStd(rets, win),
+            '偏度': rollingSkew(rets, win),
+        };
+        const names = Object.keys(features);
+        const vectors = Object.values(features);
+        const n = names.length;
+
+        // compute correlation
+        function corr(a, b) {
+            let sx = 0, sy = 0, sxx = 0, syy = 0, sxy = 0, cnt = 0;
+            for (let i = 0; i < a.length; i++) {
+                if (a[i] == null || b[i] == null) continue;
+                sx += a[i]; sy += b[i];
+                sxx += a[i] * a[i]; syy += b[i] * b[i];
+                sxy += a[i] * b[i]; cnt++;
+            }
+            if (cnt < 3) return 0;
+            const mx = sx / cnt, my = sy / cnt;
+            const vx = sxx / cnt - mx * mx, vy = syy / cnt - my * my;
+            if (vx <= 0 || vy <= 0) return 0;
+            return (sxy / cnt - mx * my) / (Math.sqrt(vx) * Math.sqrt(vy));
+        }
+
+        const mat = [];
+        for (let i = 0; i < n; i++) {
+            mat[i] = [];
+            for (let j = 0; j < n; j++) mat[i][j] = corr(vectors[i], vectors[j]);
+        }
+
+        const cellW = Math.min((w - 70) / n, 42);
+        const cellH = Math.min((h - 40) / n, 36);
+        const offX = 70, offY = 30;
+
+        // header
+        ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
+        ctx.fillStyle = C.textSec;
+        for (let j = 0; j < n; j++) {
+            ctx.save();
+            ctx.translate(offX + j * cellW + cellW / 2, offY - 6);
+            ctx.rotate(-0.5);
+            ctx.fillText(names[j], 0, 0);
+            ctx.restore();
+        }
+
+        for (let i = 0; i < n; i++) {
+            ctx.fillStyle = C.textSec; ctx.font = '10px sans-serif';
+            ctx.textAlign = 'right';
+            ctx.fillText(names[i], offX - 6, offY + i * cellH + cellH / 2 + 4);
+            for (let j = 0; j < n; j++) {
+                const v = mat[i][j];
+                const t = (v + 1) / 2; // 0..1
+                const r = Math.round(255 * (1 - t) * 0.8);
+                const g = Math.round(80 + 175 * t);
+                const b = Math.round(130 + 125 * t * (1 - t));
+                ctx.fillStyle = `rgba(${r},${g},${b},0.85)`;
+                ctx.fillRect(offX + j * cellW, offY + i * cellH, cellW - 1, cellH - 1);
+                ctx.fillStyle = Math.abs(v) > 0.5 ? '#fff' : C.textSec;
+                ctx.font = '9px monospace'; ctx.textAlign = 'center';
+                ctx.fillText(v.toFixed(2), offX + j * cellW + cellW / 2, offY + i * cellH + cellH / 2 + 3);
+            }
+        }
+    }
+
+    function updateStatVals() {
+        const closes = ohlcv.map(d => d.c);
+        const rets = closes.map((c, i) => i === 0 ? 0 : (c - closes[i - 1]) / closes[i - 1]);
+        const win = parseInt(winSlider.value);
+        const last = rets.length - 1;
+        const m = sma(rets, win)[last];
+        const s = rollingStd(rets, win)[last];
+        const sk = rollingSkew(rets, win)[last];
+        const ku = rollingKurt(rets, win)[last];
+
+        const el = document.getElementById('stat-vals');
+        el.innerHTML = [
+            ['均值', m], ['标准差', s], ['偏度', sk], ['峰度', ku]
+        ].map(([lab, v]) =>
+            `<div class="stat-item"><div class="label">${lab}</div><div class="value">${v != null ? v.toFixed(4) : '—'}</div></div>`
+        ).join('');
+    }
+
+    drawLagSection();
+
+    // ============== SECTION 3: Cross-Section ==============
+    let stockData = [];
+    function genStocks(n = 50) {
+        stockData = [];
+        for (let i = 0; i < n; i++) {
+            stockData.push({
+                name: `S${String(i + 1).padStart(3, '0')}`,
+                momentum: randNorm(0.02, 0.15),
+                volatility: Math.abs(randNorm(0.2, 0.1)),
+                volume: Math.max(100, Math.floor(randNorm(5000, 3000))),
+            });
+        }
+    }
+    genStocks();
+
+    const crossMetric = document.getElementById('cross-metric');
+    crossMetric.addEventListener('change', drawCrossSection);
+    document.getElementById('btn-cross-regen').addEventListener('click', () => {
+        genStocks();
+        drawCrossSection();
+    });
+
+    function drawCrossSection() {
+        const metric = crossMetric.value;
+        const vals = stockData.map(s => s[metric]);
+        const n = vals.length;
+
+        // Rank transform
+        const sorted = vals.map((v, i) => ({ v, i })).sort((a, b) => a.v - b.v);
+        const ranks = new Array(n);
+        sorted.forEach((d, rank) => { ranks[d.i] = (rank + 1) / n; });
+
+        drawDistribution('cvs-dist-before', vals, '原始值分布');
+        drawDistribution('cvs-dist-after', ranks, 'Rank 分布');
+        drawRankChart(vals, ranks, metric);
+    }
+
+    function drawDistribution(cvsId, vals, title) {
+        const cvs = document.getElementById(cvsId);
+        const { ctx, w, h } = resizeCanvas(cvs);
+        ctx.clearRect(0, 0, w, h);
+
+        const min = Math.min(...vals), max = Math.max(...vals);
+        const bins = 20;
+        const bw = (max - min) / bins || 1;
+        const counts = new Array(bins).fill(0);
+        vals.forEach(v => {
+            let b = Math.floor((v - min) / bw);
+            if (b >= bins) b = bins - 1;
+            counts[b]++;
+        });
+        const cMax = Math.max(...counts);
+
+        const padL = 40, padR = 10, padT = 30, padB = 25;
+        const cw = (w - padL - padR) / bins;
+
+        ctx.fillStyle = C.textSec; ctx.font = '11px sans-serif';
+        ctx.textAlign = 'center'; ctx.fillText(title, w / 2, 16);
+
+        // y axis
+        ctx.strokeStyle = C.border; ctx.lineWidth = 0.5;
+        for (let i = 0; i <= 4; i++) {
+            const y = padT + (h - padT - padB) * (1 - i / 4);
+            ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(w - padR, y); ctx.stroke();
+            ctx.fillStyle = C.textMut; ctx.font = '9px monospace'; ctx.textAlign = 'right';
+            ctx.fillText(Math.round(cMax * i / 4), padL - 4, y + 3);
+        }
+
+        counts.forEach((c, i) => {
+            const x = padL + i * cw;
+            const bh = (c / cMax) * (h - padT - padB);
+            ctx.fillStyle = 'rgba(22,199,154,0.6)';
+            ctx.fillRect(x + 1, h - padB - bh, cw - 2, bh);
+        });
+
+        // x ticks
+        ctx.fillStyle = C.textMut; ctx.font = '8px monospace'; ctx.textAlign = 'center';
+        [0, Math.floor(bins / 2), bins - 1].forEach(i => {
+            const v = min + (i + 0.5) * bw;
+            ctx.fillText(v.toFixed(2), padL + (i + 0.5) * cw, h - padB + 14);
+        });
+    }
+
+    function drawRankChart(vals, ranks, metric) {
+        const cvs = document.getElementById('cvs-ranking');
+        const { ctx, w, h } = resizeCanvas(cvs);
+        ctx.clearRect(0, 0, w, h);
+        const n = vals.length;
+
+        const padL = 50, padR = 20, padT = 30, padB = 60;
+        const barW = (w - padL - padR) / n;
+
+        // sort by original value
+        const indices = vals.map((v, i) => i).sort((a, b) => vals[a] - vals[b]);
+
+        ctx.fillStyle = C.textSec; ctx.font = '12px sans-serif';
+        ctx.textAlign = 'center';
+        const metricNames = { momentum: '动量', volatility: '波动率', volume: '成交额' };
+        ctx.fillText(`${metricNames[metric]} — 排序 & Rank 变换 (${n} 只股票)`, w / 2, 18);
+
+        // bars: original scaled
+        const vMin = Math.min(...vals), vMax = Math.max(...vals);
+        const range = vMax - vMin || 1;
+
+        indices.forEach((idx, pos) => {
+            const x = padL + pos * barW;
+            const normV = (vals[idx] - vMin) / range;
+            const bh = normV * (h - padT - padB);
+            // gradient by rank
+            const t = ranks[idx];
+            const r = Math.round(255 * (1 - t));
+            const g = Math.round(199 * t);
+            const b = Math.round(154 * t);
+            ctx.fillStyle = `rgba(${r},${g + 60},${b + 100},0.7)`;
+            ctx.fillRect(x + 1, h - padB - bh, Math.max(1, barW - 2), bh);
+        });
+
+        // axis labels
+        ctx.fillStyle = C.textMut; ctx.font = '9px monospace'; ctx.textAlign = 'center';
+        [0, Math.floor(n / 4), Math.floor(n / 2), Math.floor(3 * n / 4), n - 1].forEach(pos => {
+            if (pos < n) {
+                ctx.fillText(stockData[indices[pos]].name, padL + pos * barW + barW / 2, h - padB + 14);
+            }
+        });
+        ctx.save();
+        ctx.translate(14, (h - padT - padB) / 2 + padT);
+        ctx.rotate(-Math.PI / 2);
+        ctx.fillStyle = C.textSec; ctx.font = '11px sans-serif';
+        ctx.textAlign = 'center'; ctx.fillText('标准化值', 0, 0);
+        ctx.restore();
+
+        // color legend
+        const lgW = 150, lgH = 10, lgX = w - padR - lgW, lgY = h - 20;
+        const grd = ctx.createLinearGradient(lgX, 0, lgX + lgW, 0);
+        grd.addColorStop(0, 'rgba(255,60,100,0.7)');
+        grd.addColorStop(1, 'rgba(22,199,154,0.7)');
+        ctx.fillStyle = grd; ctx.fillRect(lgX, lgY, lgW, lgH);
+        ctx.fillStyle = C.textMut; ctx.font = '9px sans-serif'; ctx.textAlign = 'center';
+        ctx.fillText('Rank=0', lgX, lgY + 22);
+        ctx.fillText('Rank=1', lgX + lgW, lgY + 22);
+    }
+
+    drawCrossSection();
+
+    // ============== SECTION 4: Feature Importance ==============
+    const featureNames = ['MA(5)', 'MA(20)', 'Boll_width', '收益率', 'Lag-1', 'Lag-5',
+                          '波动率', '偏度', '成交额变化', 'MACD_hist'];
+    const featureEnabled = {};
+    featureNames.forEach(f => featureEnabled[f] = true);
+
+    // Generate importance values (simulated)
+    let splitImportance = {}, permImportance = {};
+    function genImportance() {
+        splitImportance = {}; permImportance = {};
+        featureNames.forEach(f => {
+            splitImportance[f] = Math.random() * 0.3 + 0.02;
+            permImportance[f] = splitImportance[f] * (0.6 + Math.random() * 0.8);
+        });
+        // normalize split
+        const total = Object.values(splitImportance).reduce((a, b) => a + b, 0);
+        featureNames.forEach(f => splitImportance[f] /= total);
+    }
+    genImportance();
+
+    function buildFeatureToggles() {
+        const el = document.getElementById('feature-toggles');
+        el.innerHTML = featureNames.map(f =>
+            `<label class="feature-check">
+                <input type="checkbox" data-feat="${f}" ${featureEnabled[f] ? 'checked' : ''}>
+                ${f}
+            </label>`
+        ).join('');
+        el.querySelectorAll('input').forEach(cb => {
+            cb.addEventListener('change', () => {
+                featureEnabled[cb.dataset.feat] = cb.checked;
+                drawImportance();
+            });
+        });
+    }
+    buildFeatureToggles();
+
+    function drawImportance() {
+        const cvs = document.getElementById('cvs-importance');
+        const { ctx, w, h } = resizeCanvas(cvs);
+        ctx.clearRect(0, 0, w, h);
+
+        const active = featureNames.filter(f => featureEnabled[f]);
+        const count = active.length;
+        document.getElementById('feat-count').textContent = count;
+
+        // model accuracy simulation: more features => higher, with noise
+        const baseAcc = 0.52;
+        const accPerFeat = 0.035;
+        const acc = Math.min(0.82, baseAcc + count * accPerFeat * (0.8 + Math.random() * 0.4));
+        document.getElementById('model-acc').textContent = (acc * 100).toFixed(1) + '%';
+
+        if (count === 0) {
+            ctx.fillStyle = C.textMut; ctx.font = '14px sans-serif';
+            ctx.textAlign = 'center'; ctx.fillText('请至少选择一个特征', w / 2, h / 2);
+            return;
+        }
+
+        // sort by split importance
+        const sorted = [...active].sort((a, b) => splitImportance[b] - splitImportance[a]);
+
+        const padL = 90, padR = 20, padT = 20, padB = 30;
+        const barH = Math.min(28, (h - padT - padB) / sorted.length - 4);
+        const gap = 4;
+        const maxVal = Math.max(
+            ...sorted.map(f => Math.max(splitImportance[f], permImportance[f]))
+        );
+        const chartW = w - padL - padR;
+
+        sorted.forEach((f, i) => {
+            const y = padT + i * (barH + gap);
+            const disabled = !featureEnabled[f];
+
+            // label
+            ctx.fillStyle = disabled ? C.textMut : C.textSec;
+            ctx.font = '11px sans-serif'; ctx.textAlign = 'right';
+            ctx.fillText(f, padL - 8, y + barH / 2 + 4);
+
+            // split importance bar
+            const sw = (splitImportance[f] / maxVal) * chartW;
+            ctx.fillStyle = 'rgba(22,199,154,0.7)';
+            ctx.fillRect(padL, y, sw, barH / 2 - 1);
+
+            // perm importance bar
+            const pw = (permImportance[f] / maxVal) * chartW;
+            ctx.fillStyle = 'rgba(79,195,247,0.7)';
+            ctx.fillRect(padL, y + barH / 2 + 1, pw, barH / 2 - 1);
+
+            // values
+            ctx.font = '9px monospace'; ctx.textAlign = 'left';
+            ctx.fillStyle = C.green;
+            ctx.fillText(splitImportance[f].toFixed(3), padL + sw + 4, y + barH / 2 - 2);
+            ctx.fillStyle = C.blue;
+            ctx.fillText(permImportance[f].toFixed(3), padL + pw + 4, y + barH - 2);
+        });
+
+        // axis
+        ctx.strokeStyle = C.border; ctx.lineWidth = 0.5;
+        ctx.beginPath(); ctx.moveTo(padL, padT); ctx.lineTo(padL, h - padB); ctx.stroke();
+        for (let i = 0; i <= 4; i++) {
+            const x = padL + (chartW * i / 4);
+            ctx.beginPath(); ctx.moveTo(x, h - padB); ctx.lineTo(x, h - padB + 4); ctx.stroke();
+            ctx.fillStyle = C.textMut; ctx.font = '9px monospace'; ctx.textAlign = 'center';
+            ctx.fillText((maxVal * i / 4).toFixed(2), x, h - padB + 16);
+        }
+    }
+
+    drawImportance();
+
+    // ============== SECTION 5: Pipeline ==============
+    const pipelineStages = [
+        { id: 'raw', label: '原始数据', icon: '📥', dim: [200, 5], desc: 'OHLCV 5列行情' },
+        { id: 'tech', label: '技术指标', icon: '📈', dim: [200, 15], desc: '加入 MA, Boll, MACD 等' },
+        { id: 'lag', label: '滞后特征', icon: '🕐', dim: [200, 25], desc: '加入 Lag-1,5,20 和滚动统计' },
+        { id: 'norm', label: '标准化', icon: '⚖', dim: [200, 25], desc: 'Z-score / MinMax 缩放' },
+        { id: 'select', label: '特征选择', icon: '✂', dim: [200, 12], desc: '删除低重要性 & 高相关特征' },
+        { id: 'output', label: '模型输入', icon: '🤖', dim: [180, 12], desc: '去除前 20 行空值' },
+    ];
+    let activeStage = 0;
+
+    function buildPipeline() {
+        const el = document.getElementById('pipeline-flow');
+        el.innerHTML = pipelineStages.map((s, i) =>
+            (i > 0 ? '<span class="pipeline-arrow">→</span>' : '') +
+            `<button class="pipeline-stage ${i === activeStage ? 'active' : ''}" data-stage="${i}">
+                ${s.icon} ${s.label}
+                <span class="dim-badge">${s.dim[0]}×${s.dim[1]}</span>
+            </button>`
+        ).join('');
+        el.querySelectorAll('.pipeline-stage').forEach(btn => {
+            btn.addEventListener('click', () => {
+                activeStage = parseInt(btn.dataset.stage);
+                buildPipeline();
+                drawPipeline();
+            });
+        });
+    }
+    buildPipeline();
+
+    function drawPipeline() {
+        const cvs = document.getElementById('cvs-pipeline');
+        const { ctx, w, h } = resizeCanvas(cvs);
+        ctx.clearRect(0, 0, w, h);
+
+        const stage = pipelineStages[activeStage];
+        const [rows, cols] = stage.dim;
+
+        const padL = 50, padR = 20, padT = 50, padB = 40;
+        const gridW = w - padL - padR;
+        const gridH = h - padT - padB;
+
+        // title
+        ctx.fillStyle = C.textPri; ctx.font = 'bold 14px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(`${stage.icon} ${stage.label} — ${stage.desc}`, w / 2, 24);
+        ctx.fillStyle = C.accent;
+        ctx.font = '12px monospace';
+        ctx.fillStyle = C.orange;
+        ctx.fillText(`shape: (${rows}, ${cols})`, w / 2, 42);
+
+        // draw matrix grid visualization
+        const displayRows = Math.min(rows, 25);
+        const displayCols = cols;
+        const cellW = Math.min(gridW / displayCols, 50);
+        const cellH = Math.min(gridH / displayRows, 22);
+        const totalW = cellW * displayCols;
+        const totalH = cellH * displayRows;
+        const startX = padL + (gridW - totalW) / 2;
+        const startY = padT + (gridH - totalH) / 2;
+
+        // generate fake data for visualization
+        const rng = (() => { let s = activeStage * 1234 + 5678; return () => { s = (s * 16807) % 2147483647; return s / 2147483647; }; })();
+
+        for (let r = 0; r < displayRows; r++) {
+            for (let c = 0; c < displayCols; c++) {
+                let v = rng();
+                // stage-specific coloring
+                if (activeStage === 0) { /* raw: neutral */ }
+                else if (activeStage === 3) { v = (v - 0.5) * 2; v = (v + 1) / 2; } // normalized spread
+                else if (activeStage === 4 && c >= cols) { continue; }
+
+                const x = startX + c * cellW;
+                const y = startY + r * cellH;
+
+                // color by value
+                const t = Math.max(0, Math.min(1, v));
+                const red = Math.round(255 * (1 - t) * 0.6);
+                const green = Math.round(60 + 199 * t * 0.7);
+                const blue = Math.round(100 + 154 * t);
+                ctx.fillStyle = `rgba(${red},${green},${blue},0.75)`;
+                ctx.fillRect(x + 0.5, y + 0.5, cellW - 1, cellH - 1);
+
+                if (cellW > 30 && cellH > 14) {
+                    ctx.fillStyle = 'rgba(255,255,255,0.6)';
+                    ctx.font = '8px monospace'; ctx.textAlign = 'center';
+                    const displayV = activeStage === 3 ? ((v - 0.5) * 4).toFixed(1) : v.toFixed(2);
+                    ctx.fillText(displayV, x + cellW / 2, y + cellH / 2 + 3);
+                }
+            }
+        }
+
+        // row labels
+        ctx.fillStyle = C.textMut; ctx.font = '9px monospace'; ctx.textAlign = 'right';
+        for (let r = 0; r < displayRows; r++) {
+            if (r % 5 === 0 || r === displayRows - 1)
+                ctx.fillText(`${r}`, startX - 6, startY + r * cellH + cellH / 2 + 3);
+        }
+        if (rows > displayRows) {
+            ctx.fillStyle = C.textMut; ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
+            ctx.fillText(`⋮ (共 ${rows} 行)`, w / 2, startY + totalH + 18);
+        }
+
+        // column header
+        ctx.font = '8px monospace'; ctx.textAlign = 'center';
+        const colNames = getColNames(activeStage, cols);
+        for (let c = 0; c < displayCols; c++) {
+            ctx.save();
+            ctx.translate(startX + c * cellW + cellW / 2, startY - 4);
+            ctx.rotate(-0.6);
+            ctx.fillStyle = C.textSec;
+            ctx.fillText(colNames[c] || `f${c}`, 0, 0);
+            ctx.restore();
+        }
+
+        // dim tracking
+        const statsEl = document.getElementById('pipeline-stats');
+        statsEl.innerHTML = pipelineStages.map((s, i) =>
+            `<div class="stat-item" style="${i === activeStage ? 'border:1px solid var(--accent-green)' : ''}">
+                <div class="label">${s.label}</div>
+                <div class="value">${s.dim[0]}×${s.dim[1]}</div>
+            </div>`
+        ).join('');
+    }
+
+    function getColNames(stage, n) {
+        const base = ['Open', 'High', 'Low', 'Close', 'Vol'];
+        const tech = ['MA5', 'MA20', 'MA60', 'Boll_up', 'Boll_lo', 'Boll_w', 'MACD', 'DEA', 'Hist', 'RSI'];
+        const lag = ['Lag1', 'Lag5', 'Lag20', 'R_mean', 'R_std', 'R_skew', 'R_kurt', 'Vol_ma', 'Vol_std', 'Mom'];
+        if (stage === 0) return base;
+        if (stage === 1) return [...base, ...tech];
+        if (stage >= 2 && stage <= 3) return [...base, ...tech, ...lag];
+        // selection: pick subset
+        const all = [...base, ...tech, ...lag];
+        const selected = [0, 3, 4, 5, 6, 8, 10, 13, 14, 17, 20, 22].slice(0, n);
+        return selected.map(i => all[i] || `f${i}`);
+    }
+
+    drawPipeline();
+
+    // ---- Resize handler ----
+    let resizeTimer;
+    window.addEventListener('resize', () => {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(() => {
+            drawIndicators();
+            drawLagSection();
+            drawCrossSection();
+            drawImportance();
+            drawPipeline();
+        }, 150);
+    });
+});
+</script>
+
+<!-- KaTeX auto-render fallback -->
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const checkKatex = setInterval(() => {
+        if (typeof renderMathInElement === 'function') {
+            clearInterval(checkKatex);
+            renderMathInElement(document.body, {
+                delimiters: [
+                    {left: '$$', right: '$$', display: true},
+                    {left: '$', right: '$', display: false}
+                ]
+            });
+        }
+    }, 200);
+    setTimeout(() => clearInterval(checkKatex), 5000);
+});
+</script>
+</body>
+</html>

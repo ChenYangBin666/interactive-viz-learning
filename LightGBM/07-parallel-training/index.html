@@ -1,0 +1,1419 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>并行训练 — LightGBM</title>
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+SC:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+    <script defer src="../shared/scripts/nav.js"></script>
+    <script defer src="../shared/scripts/lgbm-utils.js"></script>
+    <style>
+        /* ===== Page Header ===== */
+        .page-header {
+            text-align: center;
+            padding: 1.5rem 0 2rem;
+        }
+        .page-header h1 {
+            font-size: 2.2rem;
+            background: linear-gradient(135deg, var(--accent-blue), var(--accent-purple));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .page-header .subtitle {
+            color: var(--text-secondary);
+            font-size: 1rem;
+            margin-top: 0.3rem;
+        }
+
+        /* ===== Canvas containers ===== */
+        .canvas-wrap {
+            position: relative;
+            width: 100%;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+        }
+        .canvas-wrap canvas {
+            display: block;
+            width: 100%;
+        }
+
+        /* ===== Controls row ===== */
+        .controls-row {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+
+        /* ===== Step description ===== */
+        .step-desc {
+            min-height: 3rem;
+            padding: 0.75rem 1rem;
+            background: rgba(22, 199, 154, 0.06);
+            border-left: 3px solid var(--accent-green);
+            border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+            margin-top: 0.75rem;
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+            line-height: 1.6;
+        }
+
+        /* ===== Communication comparison ===== */
+        .comm-cards {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 1.2rem;
+        }
+        @media (max-width: 900px) {
+            .comm-cards { grid-template-columns: 1fr; }
+        }
+        .comm-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1.2rem;
+            text-align: center;
+            transition: border-color 0.3s;
+        }
+        .comm-card:hover {
+            border-color: var(--accent-green);
+        }
+        .comm-card h4 {
+            margin-bottom: 0.5rem;
+        }
+        .comm-card .formula {
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            color: var(--accent-blue);
+            margin-bottom: 0.75rem;
+        }
+        .comm-card .volume-bar {
+            height: 28px;
+            background: var(--border-color);
+            border-radius: 4px;
+            overflow: hidden;
+            margin-top: 0.5rem;
+        }
+        .comm-card .volume-fill {
+            height: 100%;
+            border-radius: 4px;
+            transition: width 0.5s var(--anim-ease);
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            padding-right: 6px;
+            font-size: 0.7rem;
+            font-family: var(--font-mono);
+            color: var(--bg-primary);
+            font-weight: 700;
+            min-width: 40px;
+        }
+        .comm-card .volume-label {
+            font-size: 0.78rem;
+            color: var(--text-muted);
+            margin-top: 0.3rem;
+        }
+
+        /* ===== Speedup chart ===== */
+        .speedup-legend {
+            display: flex;
+            gap: 1.5rem;
+            justify-content: center;
+            margin-top: 0.75rem;
+            font-size: 0.82rem;
+        }
+        .speedup-legend span {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+        }
+        .speedup-legend .dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+
+        /* ===== Slider inline ===== */
+        .slider-inline {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .slider-inline label {
+            font-size: 0.82rem;
+            color: var(--text-secondary);
+            white-space: nowrap;
+        }
+        .slider-inline input[type="range"] {
+            width: 140px;
+        }
+        .slider-inline .val {
+            font-family: var(--font-mono);
+            font-size: 0.82rem;
+            color: var(--accent-green);
+            min-width: 2.5rem;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+<div class="page-container">
+    <!-- Header -->
+    <header class="page-header">
+        <h1>并行训练</h1>
+        <p class="subtitle">Parallel Training — 特征并行 / 数据并行 / 投票并行</p>
+    </header>
+
+    <!-- ============================================================ -->
+    <!-- Section 1: 特征并行 -->
+    <!-- ============================================================ -->
+    <section class="section" id="sec-feature">
+        <div class="section-title">
+            <div class="icon">1</div>
+            <h2>特征并行 (Feature Parallelism)</h2>
+        </div>
+        <p>每个 Worker 持有<strong>全部数据行</strong>，但只负责一部分特征列。各 Worker 在自己的特征子集上寻找最佳分裂点，然后通过通信选出全局最优分裂。</p>
+        <div class="info-box">
+            <p>瓶颈：每个 Worker 仍需存储完整数据集，通信开销为 \(O(W)\) 次分裂结果广播，其中 \(W\) 为 Worker 数量。</p>
+        </div>
+        <div class="canvas-wrap" style="height:420px">
+            <canvas id="cvFeature" height="420"></canvas>
+        </div>
+        <div class="controls-row">
+            <button class="btn btn-primary" id="btnFeaturePlay">播放动画</button>
+            <button class="btn" id="btnFeatureReset">重置</button>
+            <span class="text-sm text-muted" id="featureStepText">点击"播放动画"开始</span>
+        </div>
+        <div class="step-desc" id="featureDesc">特征并行将数据矩阵按列（特征维度）切分到不同 Worker 上。</div>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- Section 2: 数据并行 -->
+    <!-- ============================================================ -->
+    <section class="section" id="sec-data">
+        <div class="section-title">
+            <div class="icon">2</div>
+            <h2>数据并行 (Data Parallelism)</h2>
+        </div>
+        <p>每个 Worker 持有<strong>一部分数据行</strong>，各自构建本地直方图，然后通过 All-Reduce 合并为全局直方图，再在全局直方图上找最优分裂点。</p>
+        <div class="info-box success">
+            <p>优势：通信量为直方图大小 \(O(\text{features} \times \text{bins})\)，远小于数据本身的大小。</p>
+        </div>
+        <div class="canvas-wrap" style="height:420px">
+            <canvas id="cvData" height="420"></canvas>
+        </div>
+        <div class="controls-row">
+            <button class="btn btn-primary" id="btnDataPlay">播放动画</button>
+            <button class="btn" id="btnDataReset">重置</button>
+            <span class="text-sm text-muted" id="dataStepText">点击"播放动画"开始</span>
+        </div>
+        <div class="step-desc" id="dataDesc">数据并行将数据矩阵按行（样本维度）切分到不同 Worker 上。</div>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- Section 3: 投票并行 -->
+    <!-- ============================================================ -->
+    <section class="section" id="sec-voting">
+        <div class="section-title">
+            <div class="icon">3</div>
+            <h2>投票并行 (Voting Parallelism)</h2>
+        </div>
+        <p>LightGBM 的创新方案。每个 Worker 先在本地找出 top-k 候选分裂点，然后进行投票。只有票数最高的候选才在全局直方图上精确评估，大幅减少通信量。</p>
+        <div class="info-box warning">
+            <p>关键思路：大多数 Worker 会在相似的特征上发现好的分裂点，因此投票能有效筛选出全局最优候选。</p>
+        </div>
+        <div class="canvas-wrap" style="height:460px">
+            <canvas id="cvVoting" height="460"></canvas>
+        </div>
+        <div class="controls-row">
+            <button class="btn btn-primary" id="btnVotingPlay">播放动画</button>
+            <button class="btn" id="btnVotingReset">重置</button>
+            <span class="text-sm text-muted" id="votingStepText">点击"播放动画"开始</span>
+        </div>
+        <div class="step-desc" id="votingDesc">投票并行通过本地 top-k 选举和全局投票来减少不必要的通信。</div>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- Section 4: 通信开销对比 -->
+    <!-- ============================================================ -->
+    <section class="section" id="sec-comm">
+        <div class="section-title">
+            <div class="icon">4</div>
+            <h2>通信开销对比</h2>
+        </div>
+        <p>调整参数，实时观察三种并行策略的通信开销变化。</p>
+        <div class="controls-row" style="margin-bottom:1.2rem">
+            <div class="slider-inline">
+                <label>Worker 数:</label>
+                <input type="range" id="sliderWorkers" min="2" max="16" value="4" step="1">
+                <span class="val" id="valWorkers">4</span>
+            </div>
+            <div class="slider-inline">
+                <label>特征数:</label>
+                <input type="range" id="sliderFeatures" min="10" max="200" value="50" step="10">
+                <span class="val" id="valFeatures">50</span>
+            </div>
+            <div class="slider-inline">
+                <label>分箱数:</label>
+                <input type="range" id="sliderBins" min="16" max="256" value="64" step="16">
+                <span class="val" id="valBins">64</span>
+            </div>
+        </div>
+        <div class="comm-cards" id="commCards">
+            <!-- filled by JS -->
+        </div>
+        <div class="canvas-wrap" style="height:300px;margin-top:1.2rem">
+            <canvas id="cvComm" height="300"></canvas>
+        </div>
+    </section>
+
+    <!-- ============================================================ -->
+    <!-- Section 5: 加速比可视化 -->
+    <!-- ============================================================ -->
+    <section class="section" id="sec-speedup">
+        <div class="section-title">
+            <div class="icon">5</div>
+            <h2>加速比可视化 (Speedup)</h2>
+        </div>
+        <p>根据 Amdahl 定律，加速比受串行部分比例限制：$$S(p) = \frac{1}{(1-f) + \frac{f}{p}}$$ 其中 \(f\) 为可并行化的比例，\(p\) 为 Worker 数量。通信开销进一步降低实际加速比。</p>
+        <div class="controls-row" style="margin-bottom:1rem">
+            <div class="slider-inline">
+                <label>可并行比例 f:</label>
+                <input type="range" id="sliderParFrac" min="0.5" max="0.99" value="0.9" step="0.01">
+                <span class="val" id="valParFrac">0.90</span>
+            </div>
+            <div class="slider-inline">
+                <label>通信开销系数:</label>
+                <input type="range" id="sliderCommOverhead" min="0" max="0.1" value="0.02" step="0.005">
+                <span class="val" id="valCommOverhead">0.020</span>
+            </div>
+        </div>
+        <div class="canvas-wrap" style="height:400px">
+            <canvas id="cvSpeedup" height="400"></canvas>
+        </div>
+        <div class="speedup-legend">
+            <span><span class="dot" style="background:var(--accent-blue)"></span> 理论加速比 (Amdahl)</span>
+            <span><span class="dot" style="background:var(--accent-green)"></span> 实际加速比 (含通信)</span>
+            <span><span class="dot" style="background:var(--accent-orange)"></span> 线性加速 (理想)</span>
+        </div>
+    </section>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    // =======================================
+    // Utility: High-DPI canvas setup
+    // =======================================
+    function setupCanvas(canvas, w, h) {
+        const dpr = window.devicePixelRatio || 1;
+        canvas.width = w * dpr;
+        canvas.height = h * dpr;
+        canvas.style.width = w + 'px';
+        canvas.style.height = h + 'px';
+        const ctx = canvas.getContext('2d');
+        ctx.scale(dpr, dpr);
+        return ctx;
+    }
+
+    function getCanvasSize(canvas) {
+        return { w: canvas.parentElement.clientWidth, h: parseInt(canvas.style.height) || 420 };
+    }
+
+    const COLORS = {
+        green: '#16c79a', blue: '#4fc3f7', purple: '#b388ff',
+        orange: '#ffab40', red: '#ff5252', yellow: '#ffd740',
+        pink: '#ff80ab', text: '#e8e8e8', muted: '#6c6c7c',
+        bg: '#1a1a2e', bgSec: '#16213e', border: '#2a2a4a',
+        card: '#0f3460'
+    };
+
+    const workerColors = [COLORS.blue, COLORS.green, COLORS.orange, COLORS.purple, COLORS.pink, COLORS.red, COLORS.yellow, '#80cbc4'];
+
+    function drawRoundRect(ctx, x, y, w, h, r) {
+        ctx.beginPath();
+        ctx.moveTo(x + r, y);
+        ctx.lineTo(x + w - r, y);
+        ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+        ctx.lineTo(x + w, y + h - r);
+        ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+        ctx.lineTo(x + r, y + h);
+        ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+        ctx.lineTo(x, y + r);
+        ctx.quadraticCurveTo(x, y, x + r, y);
+        ctx.closePath();
+    }
+
+    function drawArrow(ctx, x1, y1, x2, y2, color, lineWidth) {
+        const headLen = 8;
+        const angle = Math.atan2(y2 - y1, x2 - x1);
+        ctx.save();
+        ctx.strokeStyle = color;
+        ctx.fillStyle = color;
+        ctx.lineWidth = lineWidth || 2;
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(x2, y2);
+        ctx.lineTo(x2 - headLen * Math.cos(angle - Math.PI / 6), y2 - headLen * Math.sin(angle - Math.PI / 6));
+        ctx.lineTo(x2 - headLen * Math.cos(angle + Math.PI / 6), y2 - headLen * Math.sin(angle + Math.PI / 6));
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+    }
+
+    function fillTextCenter(ctx, text, x, y) {
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(text, x, y);
+    }
+
+    function lerp(a, b, t) { return a + (b - a) * t; }
+    function clamp01(t) { return Math.max(0, Math.min(1, t)); }
+    function easeInOut(t) { return t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t; }
+
+    // =======================================
+    // Section 1: Feature Parallelism
+    // =======================================
+    (() => {
+        const canvas = document.getElementById('cvFeature');
+        const { w, h } = getCanvasSize(canvas);
+        const ctx = setupCanvas(canvas, w, h);
+        const btnPlay = document.getElementById('btnFeaturePlay');
+        const btnReset = document.getElementById('btnFeatureReset');
+        const stepText = document.getElementById('featureStepText');
+        const descEl = document.getElementById('featureDesc');
+
+        const ROWS = 6, COLS = 8, WORKERS = 4;
+        const cellW = 32, cellH = 22;
+        let anim = { step: 0, t: 0, playing: false, rafId: null };
+
+        const steps = [
+            { label: '初始状态', desc: '完整数据矩阵包含 6 行样本和 8 列特征。每个 Worker 持有全部行数据。' },
+            { label: '按列切分', desc: '数据矩阵按特征列垂直切分，每个 Worker 分配到 2 列特征。注意每个 Worker 仍保留所有行。' },
+            { label: '本地寻找最优', desc: '每个 Worker 在自己负责的特征子集上独立寻找最佳分裂点。' },
+            { label: '通信: 广播结果', desc: 'Worker 之间交换各自找到的最佳分裂点及其增益值。' },
+            { label: '选出全局最优', desc: '比较所有 Worker 的候选分裂点，选出全局最优分裂并广播给所有 Worker。' }
+        ];
+
+        const rng = LGBMUtils ? LGBMUtils.seededRandom(42) : (function(s){return function(){s=(s+0x6d2b79f5)|0;let t=Math.imul(s^(s>>>15),1|s);t=(t+Math.imul(t^(t>>>7),61|t))^t;return((t^(t>>>14))>>>0)/4294967296;}})(42);
+        const matData = [];
+        for (let r = 0; r < ROWS; r++) {
+            matData[r] = [];
+            for (let c = 0; c < COLS; c++) matData[r][c] = (rng() * 9 + 1).toFixed(1);
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, w, h);
+            const step = anim.step;
+            const t = easeInOut(clamp01(anim.t));
+            const matX = (w - COLS * cellW) / 2;
+            const matY = 30;
+
+            // Draw workers label
+            if (step >= 1) {
+                const colsPerW = COLS / WORKERS;
+                for (let wi = 0; wi < WORKERS; wi++) {
+                    const x1 = matX + wi * colsPerW * cellW;
+                    const xm = x1 + colsPerW * cellW / 2;
+                    ctx.font = '600 11px "Noto Sans SC", sans-serif';
+                    ctx.fillStyle = workerColors[wi];
+                    fillTextCenter(ctx, 'Worker ' + wi, xm, matY - 12);
+                }
+            }
+
+            // Matrix
+            for (let r = 0; r < ROWS; r++) {
+                for (let c = 0; c < COLS; c++) {
+                    const wi = Math.floor(c / (COLS / WORKERS));
+                    let x = matX + c * cellW;
+                    let y = matY + r * cellH;
+                    let alpha = 1;
+
+                    if (step >= 1) {
+                        // Slight horizontal separation per worker
+                        const sep = step >= 1 ? t * 8 : 0;
+                        x += wi * sep;
+                    }
+
+                    const highlighted = step === 2 && wi === Math.floor(t * WORKERS) % WORKERS;
+                    const color = step >= 1 ? workerColors[wi] : COLORS.blue;
+
+                    ctx.save();
+                    ctx.globalAlpha = alpha;
+                    drawRoundRect(ctx, x, y, cellW - 2, cellH - 2, 3);
+                    ctx.fillStyle = highlighted ? color : 'rgba(' + hexToRgb(color) + ', 0.15)';
+                    ctx.fill();
+                    ctx.strokeStyle = highlighted ? color : 'rgba(' + hexToRgb(color) + ', 0.4)';
+                    ctx.lineWidth = highlighted ? 2 : 1;
+                    ctx.stroke();
+
+                    ctx.font = '10px "JetBrains Mono", monospace';
+                    ctx.fillStyle = highlighted ? COLORS.bg : COLORS.text;
+                    fillTextCenter(ctx, matData[r][c], x + (cellW - 2) / 2, y + (cellH - 2) / 2);
+                    ctx.restore();
+                }
+            }
+
+            // Worker boxes at bottom
+            const workerY = matY + ROWS * cellH + 60;
+            const workerW = 100, workerH = 50;
+            const totalWW = WORKERS * workerW + (WORKERS - 1) * 20;
+            const wxStart = (w - totalWW) / 2;
+
+            for (let wi = 0; wi < WORKERS; wi++) {
+                const wx = wxStart + wi * (workerW + 20);
+                drawRoundRect(ctx, wx, workerY, workerW, workerH, 6);
+                ctx.fillStyle = 'rgba(' + hexToRgb(workerColors[wi]) + ', 0.1)';
+                ctx.fill();
+                ctx.strokeStyle = workerColors[wi];
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+                ctx.font = '600 12px "Noto Sans SC", sans-serif';
+                ctx.fillStyle = workerColors[wi];
+                fillTextCenter(ctx, 'Worker ' + wi, wx + workerW / 2, workerY + 18);
+
+                if (step >= 2) {
+                    ctx.font = '10px "JetBrains Mono", monospace';
+                    ctx.fillStyle = COLORS.text;
+                    const gain = (rng() * 2 + 0.5).toFixed(2);
+                    fillTextCenter(ctx, 'gain=' + ((wi + 1) * 0.8 + 0.3).toFixed(2), wx + workerW / 2, workerY + 36);
+                }
+            }
+
+            // Arrows from matrix to workers
+            if (step >= 1) {
+                const colsPerW = COLS / WORKERS;
+                for (let wi = 0; wi < WORKERS; wi++) {
+                    const mx = matX + wi * colsPerW * cellW + colsPerW * cellW / 2 + wi * (step >= 1 ? t * 8 : 0);
+                    const my = matY + ROWS * cellH + 4;
+                    const wx = wxStart + wi * (workerW + 20) + workerW / 2;
+                    const wy = workerY - 4;
+                    const arrowT = step === 1 ? t : 1;
+                    const ay = lerp(my, wy, arrowT);
+                    drawArrow(ctx, mx, my, mx + (wx - mx) * arrowT, ay, workerColors[wi], 1.5);
+                }
+            }
+
+            // Communication arrows between workers
+            if (step >= 3) {
+                const comT = step === 3 ? t : 1;
+                const cy = workerY + workerH + 20;
+                // Horizontal line
+                const lx1 = wxStart + workerW / 2;
+                const lx2 = wxStart + (WORKERS - 1) * (workerW + 20) + workerW / 2;
+                ctx.save();
+                ctx.strokeStyle = COLORS.yellow;
+                ctx.lineWidth = 2;
+                ctx.setLineDash([4, 4]);
+                ctx.globalAlpha = comT;
+                ctx.beginPath();
+                ctx.moveTo(lx1, cy);
+                ctx.lineTo(lerp(lx1, lx2, comT), cy);
+                ctx.stroke();
+                ctx.setLineDash([]);
+
+                for (let wi = 0; wi < WORKERS; wi++) {
+                    const wx = wxStart + wi * (workerW + 20) + workerW / 2;
+                    ctx.beginPath();
+                    ctx.moveTo(wx, workerY + workerH);
+                    ctx.lineTo(wx, cy);
+                    ctx.stroke();
+                }
+                ctx.restore();
+
+                ctx.font = '600 11px "Noto Sans SC", sans-serif';
+                ctx.fillStyle = COLORS.yellow;
+                fillTextCenter(ctx, '交换最优分裂结果', w / 2, cy + 16);
+            }
+
+            // Global best
+            if (step >= 4) {
+                const gy = workerY + workerH + 55;
+                drawRoundRect(ctx, w / 2 - 80, gy, 160, 36, 6);
+                ctx.fillStyle = 'rgba(' + hexToRgb(COLORS.green) + ', 0.15)';
+                ctx.fill();
+                ctx.strokeStyle = COLORS.green;
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                ctx.font = '700 13px "Noto Sans SC", sans-serif';
+                ctx.fillStyle = COLORS.green;
+                fillTextCenter(ctx, '全局最优分裂', w / 2, gy + 18);
+            }
+        }
+
+        function hexToRgb(hex) {
+            hex = hex.replace('#', '');
+            return parseInt(hex.substr(0, 2), 16) + ',' + parseInt(hex.substr(2, 2), 16) + ',' + parseInt(hex.substr(4, 2), 16);
+        }
+
+        function animate() {
+            if (!anim.playing) return;
+            anim.t += 0.015;
+            if (anim.t >= 1) {
+                anim.t = 1;
+                draw();
+                if (anim.step < steps.length - 1) {
+                    setTimeout(() => {
+                        anim.step++;
+                        anim.t = 0;
+                        stepText.textContent = '步骤 ' + (anim.step + 1) + '/' + steps.length + ': ' + steps[anim.step].label;
+                        descEl.textContent = steps[anim.step].desc;
+                        anim.rafId = requestAnimationFrame(animate);
+                    }, 600);
+                } else {
+                    anim.playing = false;
+                    btnPlay.textContent = '播放动画';
+                }
+                return;
+            }
+            draw();
+            anim.rafId = requestAnimationFrame(animate);
+        }
+
+        btnPlay.addEventListener('click', () => {
+            if (anim.playing) { anim.playing = false; btnPlay.textContent = '继续'; return; }
+            if (anim.step >= steps.length - 1 && anim.t >= 1) { resetFeature(); }
+            anim.playing = true;
+            btnPlay.textContent = '暂停';
+            animate();
+        });
+
+        function resetFeature() {
+            anim = { step: 0, t: 0, playing: false, rafId: null };
+            stepText.textContent = '点击"播放动画"开始';
+            descEl.textContent = steps[0].desc;
+            btnPlay.textContent = '播放动画';
+            draw();
+        }
+        btnReset.addEventListener('click', resetFeature);
+        draw();
+    })();
+
+    // =======================================
+    // Section 2: Data Parallelism
+    // =======================================
+    (() => {
+        const canvas = document.getElementById('cvData');
+        const { w, h } = getCanvasSize(canvas);
+        const ctx = setupCanvas(canvas, w, h);
+        const btnPlay = document.getElementById('btnDataPlay');
+        const btnReset = document.getElementById('btnDataReset');
+        const stepText = document.getElementById('dataStepText');
+        const descEl = document.getElementById('dataDesc');
+
+        const ROWS = 8, COLS = 6, WORKERS = 4;
+        const cellW = 36, cellH = 20;
+        let anim = { step: 0, t: 0, playing: false };
+
+        const steps = [
+            { label: '初始状态', desc: '完整数据矩阵有 8 行样本和 6 列特征。' },
+            { label: '按行切分', desc: '数据矩阵按样本行水平切分，每个 Worker 获得 2 行数据。' },
+            { label: '构建本地直方图', desc: '每个 Worker 在自己的数据子集上独立构建直方图。' },
+            { label: 'All-Reduce 合并', desc: 'Worker 之间执行 All-Reduce 操作，将本地直方图合并为全局直方图。' },
+            { label: '全局直方图找最优', desc: '在合并后的全局直方图上找到最佳分裂点。通信量仅为直方图大小。' }
+        ];
+
+        const rng2 = LGBMUtils ? LGBMUtils.seededRandom(123) : (function(s){return function(){s=(s+0x6d2b79f5)|0;let t=Math.imul(s^(s>>>15),1|s);t=(t+Math.imul(t^(t>>>7),61|t))^t;return((t^(t>>>14))>>>0)/4294967296;}})(123);
+        const matData = [];
+        for (let r = 0; r < ROWS; r++) {
+            matData[r] = [];
+            for (let c = 0; c < COLS; c++) matData[r][c] = (rng2() * 9 + 1).toFixed(1);
+        }
+
+        function hexToRgb(hex) {
+            hex = hex.replace('#', '');
+            return parseInt(hex.substr(0, 2), 16) + ',' + parseInt(hex.substr(2, 2), 16) + ',' + parseInt(hex.substr(4, 2), 16);
+        }
+
+        // Fake histogram data per worker
+        const histBins = 5;
+        const workerHists = [];
+        for (let wi = 0; wi < WORKERS; wi++) {
+            workerHists[wi] = [];
+            for (let b = 0; b < histBins; b++) workerHists[wi].push(Math.floor(rng2() * 8) + 2);
+        }
+        const globalHist = [];
+        for (let b = 0; b < histBins; b++) {
+            let s = 0;
+            for (let wi = 0; wi < WORKERS; wi++) s += workerHists[wi][b];
+            globalHist.push(s);
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, w, h);
+            const step = anim.step;
+            const t = easeInOut(clamp01(anim.t));
+            const matX = 30;
+            const matY = 30;
+            const rowsPerW = ROWS / WORKERS;
+
+            // Matrix
+            for (let r = 0; r < ROWS; r++) {
+                const wi = Math.floor(r / rowsPerW);
+                for (let c = 0; c < COLS; c++) {
+                    let x = matX + c * cellW;
+                    let y = matY + r * cellH;
+                    if (step >= 1) y += wi * t * 14;
+
+                    const color = step >= 1 ? workerColors[wi] : COLORS.blue;
+                    drawRoundRect(ctx, x, y, cellW - 2, cellH - 2, 3);
+                    ctx.fillStyle = 'rgba(' + hexToRgb(color) + ', 0.15)';
+                    ctx.fill();
+                    ctx.strokeStyle = 'rgba(' + hexToRgb(color) + ', 0.4)';
+                    ctx.lineWidth = 1;
+                    ctx.stroke();
+
+                    ctx.font = '9px "JetBrains Mono", monospace';
+                    ctx.fillStyle = COLORS.text;
+                    fillTextCenter(ctx, matData[r][c], x + (cellW - 2) / 2, y + (cellH - 2) / 2);
+                }
+                // Worker label
+                if (step >= 1 && r % rowsPerW === 0) {
+                    const wi = Math.floor(r / rowsPerW);
+                    const y = matY + r * cellH + wi * t * 14;
+                    ctx.font = '600 10px "Noto Sans SC", sans-serif';
+                    ctx.fillStyle = workerColors[wi];
+                    ctx.textAlign = 'right';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText('W' + wi, matX - 6, y + rowsPerW * cellH / 2);
+                }
+            }
+
+            // Local histograms
+            const histX = matX + COLS * cellW + 60;
+            const histW = 18, histMaxH = 40;
+            if (step >= 2) {
+                for (let wi = 0; wi < WORKERS; wi++) {
+                    const hy = matY + wi * (ROWS / WORKERS * cellH + 14 * (step >= 1 ? t : 0));
+                    const maxVal = Math.max(...workerHists[wi]);
+                    ctx.font = '600 10px "Noto Sans SC", sans-serif';
+                    ctx.fillStyle = workerColors[wi];
+                    fillTextCenter(ctx, '本地直方图', histX + histBins * (histW + 2) / 2, hy - 4);
+
+                    const animT = step === 2 ? t : 1;
+                    for (let b = 0; b < histBins; b++) {
+                        const bh = (workerHists[wi][b] / maxVal) * histMaxH * animT;
+                        const bx = histX + b * (histW + 2);
+                        const by = hy + histMaxH - bh + 6;
+                        drawRoundRect(ctx, bx, by, histW, bh, 2);
+                        ctx.fillStyle = 'rgba(' + hexToRgb(workerColors[wi]) + ', 0.6)';
+                        ctx.fill();
+                    }
+                }
+            }
+
+            // All-reduce arrows
+            if (step >= 3) {
+                const arrowX = histX + histBins * (histW + 2) + 30;
+                const midY = matY + ROWS * cellH / 2 + 20;
+                const comT = step === 3 ? t : 1;
+
+                for (let wi = 0; wi < WORKERS; wi++) {
+                    const hy = matY + wi * (ROWS / WORKERS * cellH + 14) + 20;
+                    const ax = histX + histBins * (histW + 2) + 10;
+                    drawArrow(ctx, ax, hy, ax + 20 * comT, lerp(hy, midY, comT), COLORS.yellow, 1.5);
+                }
+
+                ctx.font = '600 11px "Noto Sans SC", sans-serif';
+                ctx.fillStyle = COLORS.yellow;
+                fillTextCenter(ctx, 'All-Reduce', arrowX + 20, midY - 16);
+            }
+
+            // Global histogram
+            if (step >= 4) {
+                const gx = histX + histBins * (histW + 2) + 70;
+                const gy = matY + ROWS * cellH / 2 - 20;
+                const maxG = Math.max(...globalHist);
+                const ghW = 22, ghMaxH = 70;
+
+                ctx.font = '700 12px "Noto Sans SC", sans-serif';
+                ctx.fillStyle = COLORS.green;
+                fillTextCenter(ctx, '全局直方图', gx + histBins * (ghW + 2) / 2, gy - 8);
+
+                const animT = step === 4 ? t : 1;
+                for (let b = 0; b < histBins; b++) {
+                    const bh = (globalHist[b] / maxG) * ghMaxH * animT;
+                    const bx = gx + b * (ghW + 2);
+                    const by = gy + ghMaxH - bh + 6;
+                    drawRoundRect(ctx, bx, by, ghW, bh, 2);
+                    ctx.fillStyle = 'rgba(' + hexToRgb(COLORS.green) + ', 0.7)';
+                    ctx.fill();
+                }
+
+                // Best split marker
+                if (animT > 0.5) {
+                    const bestBin = 2;
+                    const bx = gx + bestBin * (ghW + 2) + ghW / 2;
+                    ctx.save();
+                    ctx.strokeStyle = COLORS.red;
+                    ctx.lineWidth = 2;
+                    ctx.setLineDash([3, 3]);
+                    ctx.beginPath();
+                    ctx.moveTo(bx, gy);
+                    ctx.lineTo(bx, gy + ghMaxH + 10);
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+                    ctx.font = '600 10px "Noto Sans SC", sans-serif';
+                    ctx.fillStyle = COLORS.red;
+                    fillTextCenter(ctx, '最优分裂', bx, gy + ghMaxH + 22);
+                    ctx.restore();
+                }
+            }
+        }
+
+        function animate() {
+            if (!anim.playing) return;
+            anim.t += 0.015;
+            if (anim.t >= 1) {
+                anim.t = 1;
+                draw();
+                if (anim.step < steps.length - 1) {
+                    setTimeout(() => {
+                        anim.step++;
+                        anim.t = 0;
+                        stepText.textContent = '步骤 ' + (anim.step + 1) + '/' + steps.length + ': ' + steps[anim.step].label;
+                        descEl.textContent = steps[anim.step].desc;
+                        anim.rafId = requestAnimationFrame(animate);
+                    }, 600);
+                } else {
+                    anim.playing = false;
+                    btnPlay.textContent = '播放动画';
+                }
+                return;
+            }
+            draw();
+            anim.rafId = requestAnimationFrame(animate);
+        }
+
+        btnPlay.addEventListener('click', () => {
+            if (anim.playing) { anim.playing = false; btnPlay.textContent = '继续'; return; }
+            if (anim.step >= steps.length - 1 && anim.t >= 1) { resetData(); }
+            anim.playing = true;
+            btnPlay.textContent = '暂停';
+            animate();
+        });
+
+        function resetData() {
+            anim = { step: 0, t: 0, playing: false };
+            stepText.textContent = '点击"播放动画"开始';
+            descEl.textContent = steps[0].desc;
+            btnPlay.textContent = '播放动画';
+            draw();
+        }
+        btnReset.addEventListener('click', resetData);
+        draw();
+    })();
+
+    // =======================================
+    // Section 3: Voting Parallelism
+    // =======================================
+    (() => {
+        const canvas = document.getElementById('cvVoting');
+        const { w, h } = getCanvasSize(canvas);
+        const ctx = setupCanvas(canvas, w, h);
+        const btnPlay = document.getElementById('btnVotingPlay');
+        const btnReset = document.getElementById('btnVotingReset');
+        const stepText = document.getElementById('votingStepText');
+        const descEl = document.getElementById('votingDesc');
+
+        const WORKERS = 4, K = 3, FEATURES = 6;
+        let anim = { step: 0, t: 0, playing: false };
+
+        const steps = [
+            { label: '本地 top-k', desc: '每个 Worker 在本地数据上找出增益最大的 top-3 候选分裂点。' },
+            { label: '投票', desc: '所有 Worker 对自己的 top-k 候选进行投票。每个候选获得出现次数作为票数。' },
+            { label: '汇总票数', desc: '汇总投票结果，按票数排序。票数最高的候选入选。' },
+            { label: '精确评估', desc: '仅对票数最高的候选在全局直方图上做精确评估，大幅减少通信量。' }
+        ];
+
+        const rng3 = LGBMUtils ? LGBMUtils.seededRandom(77) : (function(s){return function(){s=(s+0x6d2b79f5)|0;let t=Math.imul(s^(s>>>15),1|s);t=(t+Math.imul(t^(t>>>7),61|t))^t;return((t^(t>>>14))>>>0)/4294967296;}})(77);
+
+        const featureNames = [];
+        for (let i = 0; i < FEATURES; i++) featureNames.push('F' + i);
+
+        // Each worker's top-k: indices into features
+        const workerTopK = [];
+        for (let wi = 0; wi < WORKERS; wi++) {
+            const picks = [];
+            const candidates = [0, 1, 2, 3, 4, 5];
+            for (let k = 0; k < K; k++) {
+                const idx = Math.floor(rng3() * candidates.length);
+                picks.push(candidates.splice(idx, 1)[0]);
+            }
+            picks.sort((a, b) => a - b);
+            workerTopK.push(picks);
+        }
+
+        // Vote counts
+        const votes = new Array(FEATURES).fill(0);
+        for (let wi = 0; wi < WORKERS; wi++) {
+            for (let k = 0; k < K; k++) votes[workerTopK[wi][k]]++;
+        }
+        const maxVotes = Math.max(...votes);
+        const topCandidates = [];
+        for (let i = 0; i < FEATURES; i++) {
+            if (votes[i] >= maxVotes - 1 && votes[i] > 0) topCandidates.push(i);
+        }
+
+        function hexToRgb(hex) {
+            hex = hex.replace('#', '');
+            return parseInt(hex.substr(0, 2), 16) + ',' + parseInt(hex.substr(2, 2), 16) + ',' + parseInt(hex.substr(4, 2), 16);
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, w, h);
+            const step = anim.step;
+            const t = easeInOut(clamp01(anim.t));
+
+            // Worker boxes
+            const wBoxW = 130, wBoxH = 90;
+            const startX = 20;
+            const gapY = 10;
+            const startY = 20;
+
+            for (let wi = 0; wi < WORKERS; wi++) {
+                const y = startY + wi * (wBoxH + gapY);
+                drawRoundRect(ctx, startX, y, wBoxW, wBoxH, 6);
+                ctx.fillStyle = 'rgba(' + hexToRgb(workerColors[wi]) + ', 0.08)';
+                ctx.fill();
+                ctx.strokeStyle = workerColors[wi];
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+
+                ctx.font = '700 11px "Noto Sans SC", sans-serif';
+                ctx.fillStyle = workerColors[wi];
+                fillTextCenter(ctx, 'Worker ' + wi, startX + wBoxW / 2, y + 16);
+
+                // Top-k candidates
+                if (step >= 0) {
+                    const cT = step === 0 ? t : 1;
+                    for (let k = 0; k < K; k++) {
+                        const fi = workerTopK[wi][k];
+                        const cx = startX + 15 + k * 38;
+                        const cy = y + 38;
+                        const bw = 34, bh = 22;
+
+                        ctx.globalAlpha = cT;
+                        drawRoundRect(ctx, cx, cy, bw, bh, 3);
+                        const isTop = step >= 3 && topCandidates.includes(fi);
+                        ctx.fillStyle = isTop ? 'rgba(' + hexToRgb(COLORS.green) + ', 0.3)' : 'rgba(' + hexToRgb(COLORS.blue) + ', 0.2)';
+                        ctx.fill();
+                        ctx.strokeStyle = isTop ? COLORS.green : COLORS.blue;
+                        ctx.lineWidth = isTop ? 2 : 1;
+                        ctx.stroke();
+
+                        ctx.font = '600 10px "JetBrains Mono", monospace';
+                        ctx.fillStyle = isTop ? COLORS.green : COLORS.text;
+                        fillTextCenter(ctx, featureNames[fi], cx + bw / 2, cy + bh / 2);
+                        ctx.globalAlpha = 1;
+                    }
+
+                    // Gain values
+                    ctx.font = '9px "JetBrains Mono", monospace';
+                    ctx.fillStyle = COLORS.muted;
+                    ctx.globalAlpha = cT;
+                    for (let k = 0; k < K; k++) {
+                        const cx = startX + 15 + k * 38;
+                        fillTextCenter(ctx, (rng3() * 2 + 0.5).toFixed(1), cx + 17, startY + wi * (wBoxH + gapY) + 72);
+                    }
+                    ctx.globalAlpha = 1;
+                }
+            }
+
+            // Voting area
+            const voteX = startX + wBoxW + 60;
+            const voteY = startY + 10;
+
+            if (step >= 1) {
+                // Arrows from workers to vote area
+                const arrowT = step === 1 ? t : 1;
+                for (let wi = 0; wi < WORKERS; wi++) {
+                    const y = startY + wi * (wBoxH + gapY) + wBoxH / 2;
+                    const tx = voteX - 10;
+                    drawArrow(ctx, startX + wBoxW + 4, y, lerp(startX + wBoxW + 4, tx, arrowT), y, workerColors[wi], 1.5);
+                }
+
+                ctx.font = '700 13px "Noto Sans SC", sans-serif';
+                ctx.fillStyle = COLORS.yellow;
+                fillTextCenter(ctx, '投票统计', voteX + 80, voteY - 4);
+            }
+
+            // Vote bar chart
+            if (step >= 2) {
+                const barW = 30, barMaxH = 100, barGap = 10;
+                const barY = voteY + 20;
+                const chartW = FEATURES * (barW + barGap);
+                const chartX = voteX + (160 - chartW) / 2 + 10;
+                const chartBottom = barY + barMaxH + 5;
+
+                const bT = step === 2 ? t : 1;
+
+                // Axis
+                ctx.strokeStyle = COLORS.border;
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(chartX - 5, chartBottom);
+                ctx.lineTo(chartX + chartW, chartBottom);
+                ctx.stroke();
+
+                for (let i = 0; i < FEATURES; i++) {
+                    const x = chartX + i * (barW + barGap);
+                    const bh = maxVotes > 0 ? (votes[i] / maxVotes) * barMaxH * bT : 0;
+                    const isTopC = step >= 3 && topCandidates.includes(i);
+
+                    drawRoundRect(ctx, x, chartBottom - bh, barW, bh, 3);
+                    ctx.fillStyle = isTopC ? COLORS.green : 'rgba(' + hexToRgb(COLORS.blue) + ', 0.5)';
+                    ctx.fill();
+                    if (isTopC) {
+                        ctx.strokeStyle = COLORS.green;
+                        ctx.lineWidth = 2;
+                        ctx.stroke();
+                    }
+
+                    // Label
+                    ctx.font = '600 10px "JetBrains Mono", monospace';
+                    ctx.fillStyle = isTopC ? COLORS.green : COLORS.text;
+                    fillTextCenter(ctx, featureNames[i], x + barW / 2, chartBottom + 14);
+
+                    // Vote count
+                    if (bh > 10) {
+                        ctx.font = '700 11px "JetBrains Mono", monospace';
+                        ctx.fillStyle = COLORS.bg;
+                        fillTextCenter(ctx, '' + votes[i], x + barW / 2, chartBottom - bh + 12);
+                    }
+                }
+
+                // Winner annotation
+                if (step >= 3) {
+                    const annY = chartBottom + 35;
+                    drawRoundRect(ctx, chartX - 5, annY, chartW + 5, 32, 6);
+                    ctx.fillStyle = 'rgba(' + hexToRgb(COLORS.green) + ', 0.1)';
+                    ctx.fill();
+                    ctx.strokeStyle = COLORS.green;
+                    ctx.lineWidth = 1.5;
+                    ctx.stroke();
+
+                    ctx.font = '600 11px "Noto Sans SC", sans-serif';
+                    ctx.fillStyle = COLORS.green;
+                    const winners = topCandidates.map(i => featureNames[i]).join(', ');
+                    fillTextCenter(ctx, '全局精确评估: ' + winners, chartX + chartW / 2, annY + 16);
+                }
+            }
+
+            // Final result
+            if (step >= 3) {
+                const resX = voteX - 10;
+                const resY = startY + WORKERS * (90 + 10) - 30;
+                ctx.font = '600 11px "Noto Sans SC", sans-serif';
+                ctx.fillStyle = COLORS.muted;
+                fillTextCenter(ctx, '通信量大幅减少: 仅传输 top 候选的直方图', w / 2, resY + 20);
+            }
+        }
+
+        function animate() {
+            if (!anim.playing) return;
+            anim.t += 0.015;
+            if (anim.t >= 1) {
+                anim.t = 1;
+                draw();
+                if (anim.step < steps.length - 1) {
+                    setTimeout(() => {
+                        anim.step++;
+                        anim.t = 0;
+                        stepText.textContent = '步骤 ' + (anim.step + 1) + '/' + steps.length + ': ' + steps[anim.step].label;
+                        descEl.textContent = steps[anim.step].desc;
+                        anim.rafId = requestAnimationFrame(animate);
+                    }, 700);
+                } else {
+                    anim.playing = false;
+                    btnPlay.textContent = '播放动画';
+                }
+                return;
+            }
+            draw();
+            anim.rafId = requestAnimationFrame(animate);
+        }
+
+        btnPlay.addEventListener('click', () => {
+            if (anim.playing) { anim.playing = false; btnPlay.textContent = '继续'; return; }
+            if (anim.step >= steps.length - 1 && anim.t >= 1) { resetVoting(); }
+            anim.playing = true;
+            btnPlay.textContent = '暂停';
+            animate();
+        });
+
+        function resetVoting() {
+            anim = { step: 0, t: 0, playing: false };
+            stepText.textContent = '点击"播放动画"开始';
+            descEl.textContent = steps[0].desc;
+            btnPlay.textContent = '播放动画';
+            draw();
+        }
+        btnReset.addEventListener('click', resetVoting);
+        draw();
+    })();
+
+    // =======================================
+    // Section 4: Communication Cost Comparison
+    // =======================================
+    (() => {
+        const sWorkers = document.getElementById('sliderWorkers');
+        const sFeatures = document.getElementById('sliderFeatures');
+        const sBins = document.getElementById('sliderBins');
+        const vWorkers = document.getElementById('valWorkers');
+        const vFeatures = document.getElementById('valFeatures');
+        const vBins = document.getElementById('valBins');
+        const cardsEl = document.getElementById('commCards');
+        const canvas = document.getElementById('cvComm');
+
+        function update() {
+            const W = +sWorkers.value;
+            const F = +sFeatures.value;
+            const B = +sBins.value;
+            vWorkers.textContent = W;
+            vFeatures.textContent = F;
+            vBins.textContent = B;
+
+            // Communication volumes (in units)
+            // Feature parallel: broadcast split result = O(W) messages, each with split info
+            const featureComm = W * F * 8; // each worker broadcasts best split per feature chunk
+            // Data parallel: all-reduce histograms = O(F * B * W)
+            const dataComm = F * B * 2 * (W - 1); // all-reduce factor
+            // Voting parallel: local top-k + vote results ~ O(k * W + selected * B)
+            const k = Math.min(10, F);
+            const votingComm = k * W * 8 + k * 2 * B * 2;
+
+            const maxComm = Math.max(featureComm, dataComm, votingComm, 1);
+
+            const methods = [
+                {
+                    name: '特征并行',
+                    formula: 'O(W x F)',
+                    volume: featureComm,
+                    color: COLORS.blue,
+                    detail: (featureComm / 1000).toFixed(1) + 'K'
+                },
+                {
+                    name: '数据并行',
+                    formula: 'O(F x B x W)',
+                    volume: dataComm,
+                    color: COLORS.orange,
+                    detail: (dataComm / 1000).toFixed(1) + 'K'
+                },
+                {
+                    name: '投票并行',
+                    formula: 'O(k x W + k x B)',
+                    volume: votingComm,
+                    color: COLORS.green,
+                    detail: (votingComm / 1000).toFixed(1) + 'K'
+                }
+            ];
+
+            cardsEl.innerHTML = methods.map(m => {
+                const pct = Math.max(5, (m.volume / maxComm) * 100);
+                return `<div class="comm-card">
+                    <h4 style="color:${m.color}">${m.name}</h4>
+                    <div class="formula">${m.formula}</div>
+                    <div class="volume-bar">
+                        <div class="volume-fill" style="width:${pct}%;background:${m.color}">${m.detail}</div>
+                    </div>
+                    <div class="volume-label">通信量: ${m.detail} 单位</div>
+                </div>`;
+            }).join('');
+
+            // Draw data flow diagram
+            drawCommDiagram(W, methods);
+        }
+
+        function hexToRgb(hex) {
+            hex = hex.replace('#', '');
+            return parseInt(hex.substr(0, 2), 16) + ',' + parseInt(hex.substr(2, 2), 16) + ',' + parseInt(hex.substr(4, 2), 16);
+        }
+
+        function drawCommDiagram(numWorkers, methods) {
+            const { w, h } = getCanvasSize(canvas);
+            const ctx = setupCanvas(canvas, w, h);
+            ctx.clearRect(0, 0, w, h);
+
+            const colW = w / 3;
+            const centerY = h / 2;
+            const workerR = 14;
+            const hubR = 20;
+
+            methods.forEach((m, mi) => {
+                const cx = colW * mi + colW / 2;
+
+                // Title
+                ctx.font = '700 12px "Noto Sans SC", sans-serif';
+                ctx.fillStyle = m.color;
+                fillTextCenter(ctx, m.name, cx, 22);
+
+                // Hub
+                ctx.beginPath();
+                ctx.arc(cx, centerY, hubR, 0, Math.PI * 2);
+                ctx.fillStyle = 'rgba(' + hexToRgb(m.color) + ', 0.2)';
+                ctx.fill();
+                ctx.strokeStyle = m.color;
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                ctx.font = '600 9px "Noto Sans SC", sans-serif';
+                ctx.fillStyle = m.color;
+                fillTextCenter(ctx, '汇总', cx, centerY);
+
+                // Workers around hub
+                const displayW = Math.min(numWorkers, 8);
+                for (let wi = 0; wi < displayW; wi++) {
+                    const angle = (wi / displayW) * Math.PI * 2 - Math.PI / 2;
+                    const dist = 80;
+                    const wx = cx + Math.cos(angle) * dist;
+                    const wy = centerY + Math.sin(angle) * dist;
+
+                    // Arrow
+                    const dx = cx - wx, dy = centerY - wy;
+                    const len = Math.sqrt(dx * dx + dy * dy);
+                    const nx = dx / len, ny = dy / len;
+                    drawArrow(ctx, wx + nx * workerR, wy + ny * workerR,
+                              cx - nx * hubR, centerY - ny * hubR,
+                              'rgba(' + hexToRgb(m.color) + ', 0.5)', 1);
+
+                    // Worker circle
+                    ctx.beginPath();
+                    ctx.arc(wx, wy, workerR, 0, Math.PI * 2);
+                    ctx.fillStyle = 'rgba(' + hexToRgb(workerColors[wi % workerColors.length]) + ', 0.15)';
+                    ctx.fill();
+                    ctx.strokeStyle = workerColors[wi % workerColors.length];
+                    ctx.lineWidth = 1.5;
+                    ctx.stroke();
+                    ctx.font = '600 8px "JetBrains Mono", monospace';
+                    ctx.fillStyle = COLORS.text;
+                    fillTextCenter(ctx, 'W' + wi, wx, wy);
+                }
+
+                // Volume at bottom
+                ctx.font = '600 11px "JetBrains Mono", monospace';
+                ctx.fillStyle = m.color;
+                fillTextCenter(ctx, m.detail, cx, h - 18);
+            });
+        }
+
+        sWorkers.addEventListener('input', update);
+        sFeatures.addEventListener('input', update);
+        sBins.addEventListener('input', update);
+        update();
+    })();
+
+    // =======================================
+    // Section 5: Speedup Visualization
+    // =======================================
+    (() => {
+        const canvas = document.getElementById('cvSpeedup');
+        const sParFrac = document.getElementById('sliderParFrac');
+        const sCommOH = document.getElementById('sliderCommOverhead');
+        const vParFrac = document.getElementById('valParFrac');
+        const vCommOH = document.getElementById('valCommOverhead');
+
+        function hexToRgb(hex) {
+            hex = hex.replace('#', '');
+            return parseInt(hex.substr(0, 2), 16) + ',' + parseInt(hex.substr(2, 2), 16) + ',' + parseInt(hex.substr(4, 2), 16);
+        }
+
+        function update() {
+            const f = +sParFrac.value;
+            const c = +sCommOH.value;
+            vParFrac.textContent = f.toFixed(2);
+            vCommOH.textContent = c.toFixed(3);
+
+            const { w, h } = getCanvasSize(canvas);
+            const ctx = setupCanvas(canvas, w, h);
+            ctx.clearRect(0, 0, w, h);
+
+            const pad = { top: 40, right: 40, bottom: 55, left: 65 };
+            const cw = w - pad.left - pad.right;
+            const ch = h - pad.top - pad.bottom;
+
+            const maxP = 32;
+            const maxS = maxP;
+            const pValues = [];
+            for (let p = 1; p <= maxP; p++) pValues.push(p);
+
+            // Axis
+            ctx.strokeStyle = COLORS.border;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(pad.left, pad.top);
+            ctx.lineTo(pad.left, pad.top + ch);
+            ctx.lineTo(pad.left + cw, pad.top + ch);
+            ctx.stroke();
+
+            // Axis labels
+            ctx.font = '600 12px "Noto Sans SC", sans-serif';
+            ctx.fillStyle = COLORS.text;
+            fillTextCenter(ctx, 'Worker 数量 (p)', pad.left + cw / 2, h - 10);
+            ctx.save();
+            ctx.translate(16, pad.top + ch / 2);
+            ctx.rotate(-Math.PI / 2);
+            fillTextCenter(ctx, '加速比 S(p)', 0, 0);
+            ctx.restore();
+
+            // Grid and tick labels
+            ctx.font = '10px "JetBrains Mono", monospace';
+            ctx.fillStyle = COLORS.muted;
+            const xTicks = [1, 4, 8, 16, 24, 32];
+            xTicks.forEach(p => {
+                const x = pad.left + ((p - 1) / (maxP - 1)) * cw;
+                ctx.beginPath();
+                ctx.strokeStyle = 'rgba(42,42,74,0.5)';
+                ctx.moveTo(x, pad.top);
+                ctx.lineTo(x, pad.top + ch);
+                ctx.stroke();
+                fillTextCenter(ctx, '' + p, x, pad.top + ch + 16);
+            });
+
+            const yTicks = [1, 4, 8, 12, 16, 20, 24, 28, 32];
+            yTicks.forEach(s => {
+                if (s > maxS) return;
+                const y = pad.top + ch - (s / maxS) * ch;
+                ctx.beginPath();
+                ctx.strokeStyle = 'rgba(42,42,74,0.5)';
+                ctx.moveTo(pad.left, y);
+                ctx.lineTo(pad.left + cw, y);
+                ctx.stroke();
+                ctx.textAlign = 'right';
+                ctx.textBaseline = 'middle';
+                ctx.fillText('' + s, pad.left - 8, y);
+            });
+
+            function toScreen(p, s) {
+                return {
+                    x: pad.left + ((p - 1) / (maxP - 1)) * cw,
+                    y: pad.top + ch - (s / maxS) * ch
+                };
+            }
+
+            // Linear speedup (ideal)
+            ctx.beginPath();
+            ctx.strokeStyle = COLORS.orange;
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([6, 4]);
+            pValues.forEach((p, i) => {
+                const pt = toScreen(p, p);
+                if (i === 0) ctx.moveTo(pt.x, pt.y);
+                else ctx.lineTo(pt.x, pt.y);
+            });
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            // Amdahl's law (theoretical)
+            ctx.beginPath();
+            ctx.strokeStyle = COLORS.blue;
+            ctx.lineWidth = 2.5;
+            pValues.forEach((p, i) => {
+                const s = 1 / ((1 - f) + f / p);
+                const pt = toScreen(p, s);
+                if (i === 0) ctx.moveTo(pt.x, pt.y);
+                else ctx.lineTo(pt.x, pt.y);
+            });
+            ctx.stroke();
+
+            // Practical (with communication overhead)
+            ctx.beginPath();
+            ctx.strokeStyle = COLORS.green;
+            ctx.lineWidth = 2.5;
+            pValues.forEach((p, i) => {
+                const amdahl = 1 / ((1 - f) + f / p);
+                const commPenalty = c * p * Math.log2(Math.max(2, p));
+                const s = Math.max(0.5, amdahl / (1 + commPenalty));
+                const pt = toScreen(p, s);
+                if (i === 0) ctx.moveTo(pt.x, pt.y);
+                else ctx.lineTo(pt.x, pt.y);
+            });
+            ctx.stroke();
+
+            // Highlight max practical speedup
+            let maxPractical = 0, bestP = 1;
+            pValues.forEach(p => {
+                const amdahl = 1 / ((1 - f) + f / p);
+                const commPenalty = c * p * Math.log2(Math.max(2, p));
+                const s = Math.max(0.5, amdahl / (1 + commPenalty));
+                if (s > maxPractical) { maxPractical = s; bestP = p; }
+            });
+
+            const ptBest = toScreen(bestP, maxPractical);
+            ctx.beginPath();
+            ctx.arc(ptBest.x, ptBest.y, 5, 0, Math.PI * 2);
+            ctx.fillStyle = COLORS.green;
+            ctx.fill();
+            ctx.strokeStyle = COLORS.bg;
+            ctx.lineWidth = 2;
+            ctx.stroke();
+
+            ctx.font = '600 11px "Noto Sans SC", sans-serif';
+            ctx.fillStyle = COLORS.green;
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'bottom';
+            ctx.fillText('最优: p=' + bestP + ', S=' + maxPractical.toFixed(1), ptBest.x + 10, ptBest.y - 4);
+
+            // Amdahl limit line
+            const amdahlLimit = 1 / (1 - f);
+            if (amdahlLimit <= maxS) {
+                const ly = pad.top + ch - (amdahlLimit / maxS) * ch;
+                ctx.save();
+                ctx.strokeStyle = COLORS.purple;
+                ctx.lineWidth = 1;
+                ctx.setLineDash([4, 4]);
+                ctx.beginPath();
+                ctx.moveTo(pad.left, ly);
+                ctx.lineTo(pad.left + cw, ly);
+                ctx.stroke();
+                ctx.setLineDash([]);
+                ctx.font = '600 10px "Noto Sans SC", sans-serif';
+                ctx.fillStyle = COLORS.purple;
+                ctx.textAlign = 'right';
+                ctx.textBaseline = 'bottom';
+                ctx.fillText('Amdahl 极限: ' + amdahlLimit.toFixed(1) + 'x', pad.left + cw - 5, ly - 4);
+                ctx.restore();
+            }
+        }
+
+        sParFrac.addEventListener('input', update);
+        sCommOH.addEventListener('input', update);
+        update();
+
+        // Redraw on resize
+        let resizeTimer;
+        window.addEventListener('resize', () => {
+            clearTimeout(resizeTimer);
+            resizeTimer = setTimeout(update, 200);
+        });
+    })();
+
+    // =======================================
+    // KaTeX auto-render
+    // =======================================
+    if (typeof renderMathInElement === 'function') {
+        renderMathInElement(document.body, {
+            delimiters: [
+                { left: '$$', right: '$$', display: true },
+                { left: '\\(', right: '\\)', display: false },
+                { left: '\\[', right: '\\]', display: true }
+            ],
+            throwOnError: false
+        });
+    }
+});
+</script>
+</body>
+</html>

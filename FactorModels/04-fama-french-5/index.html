@@ -1,0 +1,1279 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fama-French 五因子 — 因子模型</title>
+<link rel="stylesheet" href="../shared/styles/common.css">
+<link rel="stylesheet" href="../shared/styles/components.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" defer>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" defer></script>
+<script src="../shared/scripts/nav.js" defer></script>
+<script src="../shared/scripts/factor-utils.js" defer></script>
+<style>
+/* ===== Page-specific styles ===== */
+.hero-formula {
+    text-align: center;
+    padding: 2rem 1.5rem;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    margin: 1.5rem 0;
+}
+.hero-formula .katex { font-size: 1.25em; }
+
+.canvas-wrap {
+    position: relative;
+    width: 100%;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+}
+.canvas-wrap canvas { display: block; width: 100%; }
+
+.controls-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    align-items: center;
+    margin: 1rem 0;
+}
+
+.select-wrap {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+.select-wrap label { font-size: 0.85rem; color: var(--text-secondary); white-space: nowrap; }
+.select-wrap select {
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    padding: 0.4rem 0.6rem;
+    font-family: inherit;
+    font-size: 0.85rem;
+    cursor: pointer;
+}
+.select-wrap select:focus { border-color: var(--accent-green); outline: none; }
+
+.stat-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 0.75rem;
+    margin: 1rem 0;
+}
+.stat-item {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    padding: 0.75rem;
+    text-align: center;
+}
+.stat-item .stat-label { font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.3rem; }
+.stat-item .stat-value { font-family: var(--font-mono); font-size: 1rem; font-weight: 700; }
+
+.factor-tag {
+    display: inline-block;
+    padding: 0.15rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    margin: 0 0.2rem;
+}
+.tag-mkt { background: rgba(99,102,241,0.2); color: #6366f1; }
+.tag-smb { background: rgba(245,158,11,0.2); color: #f59e0b; }
+.tag-hml { background: rgba(16,185,129,0.2); color: #10b981; }
+.tag-rmw { background: rgba(139,92,246,0.2); color: #8b5cf6; }
+.tag-cma { background: rgba(6,182,212,0.2); color: #06b6d4; }
+
+.toggle-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin: 0.75rem 0;
+}
+.factor-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.35rem 0.7rem;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    cursor: pointer;
+    font-size: 0.82rem;
+    transition: all 0.2s;
+    user-select: none;
+}
+.factor-toggle.active { border-color: var(--accent-green); background: rgba(22,199,154,0.1); }
+.factor-toggle .dot {
+    width: 10px; height: 10px; border-radius: 50%;
+}
+
+.heatmap-pair {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.5rem;
+    margin: 1rem 0;
+}
+@media (max-width: 900px) { .heatmap-pair { grid-template-columns: 1fr; } }
+.heatmap-box { text-align: center; }
+.heatmap-box h4 { margin-bottom: 0.75rem; color: var(--text-secondary); font-size: 0.9rem; }
+</style>
+</head>
+<body>
+<div class="page-container">
+
+<!-- ============================================================ -->
+<!-- Section 1: 从三因子到五因子 -->
+<!-- ============================================================ -->
+<section class="section" id="sec-intro">
+    <div class="section-title">
+        <div class="icon">1</div>
+        <h2>从三因子到五因子</h2>
+    </div>
+
+    <div class="split-layout">
+        <div class="text-panel">
+            <p>Fama-French 三因子模型虽然解释了市场、规模和价值效应，但实证研究发现以下两个异象无法被三因子捕获：</p>
+            <div class="info-box">
+                <p><strong>盈利效应：</strong>高盈利能力的公司获得更高的预期收益。按操作利润排序的组合在 FF3 下仍有显著正 alpha。</p>
+            </div>
+            <div class="info-box warning">
+                <p><strong>投资效应：</strong>资产增长率低（保守投资）的公司收益更高。高投资（激进）公司反而收益偏低，FF3 无法解释。</p>
+            </div>
+            <p>为此，Fama & French (2015) 引入两个新因子：</p>
+            <ul style="color:var(--text-secondary); margin-left:1.2rem; margin-bottom:1rem;">
+                <li><span class="factor-tag tag-rmw">RMW</span> — Robust Minus Weak（高盈利 - 低盈利）</li>
+                <li><span class="factor-tag tag-cma">CMA</span> — Conservative Minus Aggressive（低投资 - 高投资）</li>
+            </ul>
+            <p>下面的图表展示：按盈利 / 投资排序的五分位组合在 FF3 模型下仍存在显著 alpha（定价误差）。</p>
+        </div>
+        <div class="viz-panel">
+            <div class="canvas-wrap">
+                <canvas id="cvs-anomaly" height="420"></canvas>
+            </div>
+            <div class="controls-row">
+                <div class="btn-group">
+                    <button class="btn btn-sm active" data-anomaly="profit">盈利异象</button>
+                    <button class="btn btn-sm" data-anomaly="invest">投资异象</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="hero-formula">
+        <p style="color:var(--text-secondary); margin-bottom:0.5rem;">Fama-French 五因子模型</p>
+        $$R_i - R_f = \alpha_i + \beta_i^{MKT}(R_m - R_f) + \beta_i^{SMB}\,SMB + \beta_i^{HML}\,HML + \beta_i^{RMW}\,RMW + \beta_i^{CMA}\,CMA + \varepsilon_i$$
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(160px,1fr)); gap:0.75rem; margin-top:1.2rem; text-align:left;">
+            <div style="font-size:0.82rem; color:var(--text-secondary);">
+                <span class="factor-tag tag-mkt">MKT</span> 市场超额收益
+            </div>
+            <div style="font-size:0.82rem; color:var(--text-secondary);">
+                <span class="factor-tag tag-smb">SMB</span> 小盘 - 大盘
+            </div>
+            <div style="font-size:0.82rem; color:var(--text-secondary);">
+                <span class="factor-tag tag-hml">HML</span> 高 B/M - 低 B/M
+            </div>
+            <div style="font-size:0.82rem; color:var(--text-secondary);">
+                <span class="factor-tag tag-rmw">RMW</span> 高盈利 - 低盈利
+            </div>
+            <div style="font-size:0.82rem; color:var(--text-secondary);">
+                <span class="factor-tag tag-cma">CMA</span> 低投资 - 高投资
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ============================================================ -->
+<!-- Section 2: RMW 盈利因子 -->
+<!-- ============================================================ -->
+<section class="section" id="sec-rmw">
+    <div class="section-title">
+        <div class="icon">2</div>
+        <h2>RMW 盈利因子</h2>
+    </div>
+
+    <div class="split-layout">
+        <div class="text-panel">
+            <p>将股票按<strong>操作盈利能力</strong>（Operating Profitability = (Revenue - COGS - SGA - Interest) / Book Equity）从低到高分为五组：</p>
+            <div class="info-box success">
+                <p>RMW = 高盈利组合收益 - 低盈利组合收益。历史年化溢价约 3%~4%。</p>
+            </div>
+            <p><strong>经济直觉：</strong>高盈利公司能更有效地利用资产产生现金流，投资者要求更低的折现率 —— 但实际上高盈利公司股票收益更高，说明市场可能低估了持续盈利能力的价值。</p>
+            <p>右侧上方柱状图展示各分位年化收益，下方为 RMW 因子的累积收益曲线。</p>
+        </div>
+        <div class="viz-panel">
+            <div class="canvas-wrap">
+                <canvas id="cvs-rmw-bar" height="240"></canvas>
+            </div>
+            <div class="canvas-wrap" style="margin-top:1rem;">
+                <canvas id="cvs-rmw-cum" height="260"></canvas>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ============================================================ -->
+<!-- Section 3: CMA 投资因子 -->
+<!-- ============================================================ -->
+<section class="section" id="sec-cma">
+    <div class="section-title">
+        <div class="icon">3</div>
+        <h2>CMA 投资因子</h2>
+    </div>
+
+    <div class="split-layout">
+        <div class="text-panel">
+            <p>将股票按<strong>总资产增长率</strong>（Asset Growth = (Total Assets_t - Total Assets_{t-1}) / Total Assets_{t-1}）从低到高分为五组：</p>
+            <div class="info-box success">
+                <p>CMA = 保守（低投资）组合收益 - 激进（高投资）组合收益。历史年化溢价约 2%~3%。</p>
+            </div>
+            <p><strong>q-理论解释：</strong>根据投资 q-理论，给定预期盈利能力，预期收益与投资成反比。投资少的公司面临更高的资本成本（折现率），因此股票预期收益更高。</p>
+            <p>右侧上方柱状图展示各分位年化收益，下方为 CMA 因子的累积收益曲线。</p>
+        </div>
+        <div class="viz-panel">
+            <div class="canvas-wrap">
+                <canvas id="cvs-cma-bar" height="240"></canvas>
+            </div>
+            <div class="canvas-wrap" style="margin-top:1rem;">
+                <canvas id="cvs-cma-cum" height="260"></canvas>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ============================================================ -->
+<!-- Section 4: 五因子回归与对比 -->
+<!-- ============================================================ -->
+<section class="section" id="sec-regression">
+    <div class="section-title">
+        <div class="icon">4</div>
+        <h2>五因子回归与对比</h2>
+    </div>
+
+    <p>使用 5x5 规模-价值排序组合（25 个组合），对比 FF3 与 FF5 的定价能力。FF5 通过加入 RMW 和 CMA 进一步缩小了 alpha（定价误差）。</p>
+
+    <h3 style="margin-top:1.5rem;">Alpha 热力图对比：FF3 vs FF5</h3>
+    <div class="heatmap-pair">
+        <div class="heatmap-box">
+            <h4>FF3 Alpha (%/月)</h4>
+            <div class="canvas-wrap"><canvas id="cvs-heatmap-ff3" height="320"></canvas></div>
+        </div>
+        <div class="heatmap-box">
+            <h4>FF5 Alpha (%/月)</h4>
+            <div class="canvas-wrap"><canvas id="cvs-heatmap-ff5" height="320"></canvas></div>
+        </div>
+    </div>
+
+    <h3 style="margin-top:1.5rem;">交互式回归：选择组合查看五因子暴露</h3>
+    <div class="controls-row">
+        <div class="select-wrap">
+            <label>规模分组:</label>
+            <select id="sel-size">
+                <option value="0">S1 (最小)</option>
+                <option value="1">S2</option>
+                <option value="2" selected>S3</option>
+                <option value="3">S4</option>
+                <option value="4">S5 (最大)</option>
+            </select>
+        </div>
+        <div class="select-wrap">
+            <label>价值分组:</label>
+            <select id="sel-value">
+                <option value="0">V1 (低 B/M)</option>
+                <option value="1">V2</option>
+                <option value="2" selected>V3</option>
+                <option value="3">V4</option>
+                <option value="4">V5 (高 B/M)</option>
+            </select>
+        </div>
+    </div>
+    <div class="stat-grid" id="beta-stats"></div>
+
+    <div class="info-box" style="margin-top:1rem;">
+        <p><strong>GRS 检验 (Gibbons-Ross-Shanken)：</strong>检验所有 25 个组合的 alpha 是否联合为零。FF5 的 GRS 统计量通常显著小于 FF3，表明五因子模型的定价误差整体更小。然而即使在 FF5 下，GRS 检验仍然拒绝 alpha 联合为零的原假设，说明五因子模型也非完美定价模型。</p>
+    </div>
+
+    <h3 style="margin-top:1.5rem;">R² 对比：CAPM vs FF3 vs FF5</h3>
+    <div class="canvas-wrap">
+        <canvas id="cvs-r2compare" height="360"></canvas>
+    </div>
+</section>
+
+<!-- ============================================================ -->
+<!-- Section 5: 因子冗余性问题 -->
+<!-- ============================================================ -->
+<section class="section" id="sec-redundancy">
+    <div class="section-title">
+        <div class="icon">5</div>
+        <h2>因子冗余性问题</h2>
+    </div>
+
+    <div class="split-layout">
+        <div class="text-panel">
+            <p>Fama & French (2015) 发现一个重要结论：当模型包含 RMW 和 CMA 后，<span class="factor-tag tag-hml">HML</span>（价值因子）变得冗余——其收益可以被其余四个因子完全解释。</p>
+            <div class="info-box warning">
+                <p><strong>HML 冗余性：</strong>将 HML 对 MKT、SMB、RMW、CMA 回归，alpha 接近零且不显著，R² 很高。这意味着 HML 不包含独立的定价信息。</p>
+            </div>
+            <p><strong>争论：</strong>价值因子是否应该从模型中移除？支持者认为保留它有助于理解传统价值效应；反对者认为它增加了多重共线性。</p>
+            <p>右上方为五因子相关性矩阵热力图。中间展示 HML 对其余四因子的回归（Spanning Test）。下方交互可逐一移除因子，观察模型整体 R² 的变化。</p>
+        </div>
+        <div class="viz-panel">
+            <h4 style="margin-bottom:0.5rem;">五因子相关性矩阵</h4>
+            <div class="canvas-wrap">
+                <canvas id="cvs-corr" height="340"></canvas>
+            </div>
+
+            <h4 style="margin-top:1.5rem; margin-bottom:0.5rem;">HML Spanning Test</h4>
+            <p class="text-sm text-muted">将 HML 对 MKT、SMB、RMW、CMA 回归，检验 HML 是否能被其余因子解释：</p>
+            <div class="stat-grid" id="spanning-stats"></div>
+            <div class="canvas-wrap" style="margin-top:0.5rem;">
+                <canvas id="cvs-spanning" height="240"></canvas>
+            </div>
+
+            <h4 style="margin-top:1.5rem; margin-bottom:0.5rem;">因子移除实验</h4>
+            <p class="text-sm text-muted">点击因子标签开关，观察 25 个组合的平均 R² 变化：</p>
+            <div class="toggle-row" id="factor-toggles"></div>
+            <div class="stat-grid" id="redundancy-stats"></div>
+            <div class="canvas-wrap" style="margin-top:0.75rem;">
+                <canvas id="cvs-redundancy" height="280"></canvas>
+            </div>
+        </div>
+    </div>
+</section>
+
+</div><!-- /page-container -->
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    // Wait for factor-utils
+    if (typeof FactorUtils === 'undefined') { console.warn('FactorUtils not loaded'); return; }
+
+    const FU = FactorUtils;
+    const rng = FU.seededRandom(2024);
+
+    // =========================================================================
+    //  Global data generation
+    // =========================================================================
+    const T = 252 * 10; // 10 years monthly approx
+    const ppy = 252;
+
+    // Generate factor returns
+    const factorData = FU.generateFactorReturns(T, { periodsPerYear: ppy, rng });
+    const mkt = factorData.market;
+    const smb = factorData.size;
+    const hml = factorData.value;
+    const rmw = factorData.profitability;
+    const cma = factorData.investment;
+
+    // Generate 25 size-value portfolios (5x5)
+    const portfolios25 = [];
+    const rng2 = FU.seededRandom(777);
+    for (let si = 0; si < 5; si++) {
+        for (let vi = 0; vi < 5; vi++) {
+            const betaMkt = 0.8 + rng2() * 0.4;
+            const betaSMB = (2 - si) * 0.15 + (rng2() - 0.5) * 0.1;
+            const betaHML = (vi - 2) * 0.2 + (rng2() - 0.5) * 0.1;
+            const betaRMW = (rng2() - 0.5) * 0.3;
+            const betaCMA = (rng2() - 0.5) * 0.3;
+            const trueAlpha = (rng2() - 0.5) * 0.0002;
+            const specVol = (0.12 + rng2() * 0.1) / Math.sqrt(ppy);
+
+            const returns = [];
+            for (let t = 0; t < T; t++) {
+                returns.push(
+                    trueAlpha + betaMkt * mkt[t] + betaSMB * smb[t] +
+                    betaHML * hml[t] + betaRMW * rmw[t] + betaCMA * cma[t] +
+                    specVol * FU.normalRandom(rng2)
+                );
+            }
+            portfolios25.push({ si, vi, returns, betaMkt, betaSMB, betaHML, betaRMW, betaCMA });
+        }
+    }
+
+    // Pre-compute FF3 and FF5 regressions for all 25 portfolios
+    const ff3Results = portfolios25.map(p =>
+        FU.factorExposure(p.returns, [mkt, smb, hml])
+    );
+    const ff5Results = portfolios25.map(p =>
+        FU.factorExposure(p.returns, [mkt, smb, hml, rmw, cma])
+    );
+    // CAPM results
+    const capmResults = portfolios25.map(p =>
+        FU.factorExposure(p.returns, [mkt])
+    );
+
+    // =========================================================================
+    //  Helper: high-DPI canvas
+    // =========================================================================
+    function setupCanvas(id) {
+        const canvas = document.getElementById(id);
+        const rect = canvas.getBoundingClientRect();
+        const dpr = window.devicePixelRatio || 1;
+        canvas.width = rect.width * dpr;
+        canvas.height = (parseInt(canvas.getAttribute('height')) || 400) * dpr;
+        canvas.style.height = (parseInt(canvas.getAttribute('height')) || 400) + 'px';
+        const ctx = canvas.getContext('2d');
+        ctx.scale(dpr, dpr);
+        return { canvas, ctx, w: rect.width, h: parseInt(canvas.getAttribute('height')) || 400 };
+    }
+
+    function clearCanvas(ctx, w, h) {
+        ctx.fillStyle = '#16213e';
+        ctx.fillRect(0, 0, w, h);
+    }
+
+    // =========================================================================
+    //  Section 1: Anomaly chart (FF3 alphas by quintile)
+    // =========================================================================
+    const anomalyMode = { current: 'profit' };
+
+    function genQuintileData(type) {
+        const rng3 = FU.seededRandom(type === 'profit' ? 111 : 222);
+        // Simulated annual returns by quintile
+        if (type === 'profit') {
+            return {
+                labels: ['Q1\n低盈利', 'Q2', 'Q3', 'Q4', 'Q5\n高盈利'],
+                returns: [0.06, 0.08, 0.10, 0.12, 0.15],
+                alphas: [-0.18, -0.08, 0.02, 0.10, 0.22],
+                title: '按盈利能力排序 — FF3 下的 Alpha (%/月)'
+            };
+        } else {
+            return {
+                labels: ['Q1\n低投资', 'Q2', 'Q3', 'Q4', 'Q5\n高投资'],
+                returns: [0.13, 0.11, 0.10, 0.08, 0.06],
+                alphas: [0.20, 0.10, 0.01, -0.10, -0.18],
+                title: '按资产增长率排序 — FF3 下的 Alpha (%/月)'
+            };
+        }
+    }
+
+    function drawAnomaly() {
+        const { ctx, w, h } = setupCanvas('cvs-anomaly');
+        clearCanvas(ctx, w, h);
+        const data = genQuintileData(anomalyMode.current);
+
+        const pad = { top: 50, right: 40, bottom: 70, left: 70 };
+        const cw = w - pad.left - pad.right;
+        const ch = h - pad.top - pad.bottom;
+
+        // Title
+        ctx.fillStyle = '#e8e8e8';
+        ctx.font = 'bold 14px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(data.title, w / 2, 28);
+
+        // Bars: returns (left half) and alphas (right half)
+        const barW = cw / 12;
+        const gap = cw / 5;
+
+        // Y axis range for alphas
+        const maxAlpha = 0.30;
+        const minAlpha = -0.30;
+
+        // Draw zero line
+        const zeroY = pad.top + ch * (maxAlpha / (maxAlpha - minAlpha));
+        ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(pad.left, zeroY);
+        ctx.lineTo(w - pad.right, zeroY);
+        ctx.stroke();
+
+        // Y axis
+        ctx.fillStyle = '#a8a8b8';
+        ctx.font = '11px monospace';
+        ctx.textAlign = 'right';
+        for (let v = -0.2; v <= 0.25; v += 0.1) {
+            const y = pad.top + ch * ((maxAlpha - v) / (maxAlpha - minAlpha));
+            ctx.fillText(v.toFixed(1), pad.left - 8, y + 4);
+            ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+            ctx.beginPath();
+            ctx.moveTo(pad.left, y);
+            ctx.lineTo(w - pad.right, y);
+            ctx.stroke();
+        }
+        ctx.fillStyle = '#a8a8b8';
+        ctx.font = '12px sans-serif';
+        ctx.save();
+        ctx.translate(16, pad.top + ch / 2);
+        ctx.rotate(-Math.PI / 2);
+        ctx.textAlign = 'center';
+        ctx.fillText('Alpha (%/月)', 0, 0);
+        ctx.restore();
+
+        // Draw bars
+        const colors = ['#ff5252', '#ff8a80', '#a8a8b8', '#80cbc4', '#16c79a'];
+        for (let i = 0; i < 5; i++) {
+            const x = pad.left + (i + 0.5) * gap - barW / 2;
+            const val = data.alphas[i];
+            const barH = Math.abs(val) / (maxAlpha - minAlpha) * ch;
+            const y = val >= 0 ? zeroY - barH : zeroY;
+
+            ctx.fillStyle = colors[i];
+            ctx.beginPath();
+            const r = 4;
+            if (val >= 0) {
+                ctx.moveTo(x, y + r);
+                ctx.arcTo(x, y, x + r, y, r);
+                ctx.arcTo(x + barW, y, x + barW, y + r, r);
+                ctx.lineTo(x + barW, zeroY);
+                ctx.lineTo(x, zeroY);
+            } else {
+                ctx.moveTo(x, zeroY);
+                ctx.lineTo(x + barW, zeroY);
+                ctx.lineTo(x + barW, y + barH - r);
+                ctx.arcTo(x + barW, y + barH, x + barW - r, y + barH, r);
+                ctx.arcTo(x, y + barH, x, y + barH - r, r);
+            }
+            ctx.closePath();
+            ctx.fill();
+
+            // Value label
+            ctx.fillStyle = '#e8e8e8';
+            ctx.font = 'bold 12px monospace';
+            ctx.textAlign = 'center';
+            const labelY = val >= 0 ? y - 8 : y + barH + 14;
+            ctx.fillText(val.toFixed(2), x + barW / 2, labelY);
+
+            // X label
+            ctx.fillStyle = '#a8a8b8';
+            ctx.font = '11px sans-serif';
+            const lines = data.labels[i].split('\n');
+            lines.forEach((line, li) => {
+                ctx.fillText(line, x + barW / 2, h - pad.bottom + 18 + li * 14);
+            });
+        }
+
+        // Significance arrows
+        ctx.fillStyle = '#ff5252';
+        ctx.font = '11px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('← FF3 无法解释的显著 Alpha →', w / 2, h - 8);
+    }
+
+    // Anomaly button handlers
+    document.querySelectorAll('[data-anomaly]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('[data-anomaly]').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            anomalyMode.current = btn.dataset.anomaly;
+            drawAnomaly();
+        });
+    });
+
+    // =========================================================================
+    //  Section 2: RMW factor
+    // =========================================================================
+    function drawQuintileBar(canvasId, data, title, colors) {
+        const { ctx, w, h } = setupCanvas(canvasId);
+        clearCanvas(ctx, w, h);
+
+        const pad = { top: 40, right: 30, bottom: 50, left: 60 };
+        const cw = w - pad.left - pad.right;
+        const ch = h - pad.top - pad.bottom;
+
+        ctx.fillStyle = '#e8e8e8';
+        ctx.font = 'bold 13px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(title, w / 2, 22);
+
+        const maxVal = Math.max(...data.values) * 1.2;
+        const barGap = cw / data.values.length;
+        const barW = barGap * 0.6;
+
+        // Y axis
+        ctx.fillStyle = '#a8a8b8';
+        ctx.font = '11px monospace';
+        ctx.textAlign = 'right';
+        for (let i = 0; i <= 4; i++) {
+            const v = (maxVal / 4) * i;
+            const y = pad.top + ch - (v / maxVal) * ch;
+            ctx.fillText((v * 100).toFixed(1) + '%', pad.left - 8, y + 4);
+            ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+            ctx.beginPath();
+            ctx.moveTo(pad.left, y);
+            ctx.lineTo(w - pad.right, y);
+            ctx.stroke();
+        }
+
+        for (let i = 0; i < data.values.length; i++) {
+            const x = pad.left + i * barGap + (barGap - barW) / 2;
+            const barH = (data.values[i] / maxVal) * ch;
+            const y = pad.top + ch - barH;
+
+            ctx.fillStyle = colors[i];
+            const r = 4;
+            ctx.beginPath();
+            ctx.moveTo(x, y + r);
+            ctx.arcTo(x, y, x + r, y, r);
+            ctx.arcTo(x + barW, y, x + barW, y + r, r);
+            ctx.lineTo(x + barW, pad.top + ch);
+            ctx.lineTo(x, pad.top + ch);
+            ctx.closePath();
+            ctx.fill();
+
+            ctx.fillStyle = '#e8e8e8';
+            ctx.font = 'bold 11px monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText((data.values[i] * 100).toFixed(1) + '%', x + barW / 2, y - 6);
+
+            ctx.fillStyle = '#a8a8b8';
+            ctx.font = '11px sans-serif';
+            ctx.fillText(data.labels[i], x + barW / 2, pad.top + ch + 18);
+        }
+    }
+
+    function drawCumReturn(canvasId, returns, title, color) {
+        const { ctx, w, h } = setupCanvas(canvasId);
+        clearCanvas(ctx, w, h);
+
+        const pad = { top: 40, right: 30, bottom: 40, left: 60 };
+        const cw = w - pad.left - pad.right;
+        const ch = h - pad.top - pad.bottom;
+
+        ctx.fillStyle = '#e8e8e8';
+        ctx.font = 'bold 13px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(title, w / 2, 22);
+
+        const cum = FU.cumulativeReturns(returns);
+        const minV = Math.min(...cum);
+        const maxV = Math.max(...cum);
+        const range = maxV - minV || 1;
+
+        // Grid
+        ctx.fillStyle = '#a8a8b8';
+        ctx.font = '11px monospace';
+        ctx.textAlign = 'right';
+        for (let i = 0; i <= 4; i++) {
+            const v = minV + (range / 4) * i;
+            const y = pad.top + ch - ((v - minV) / range) * ch;
+            ctx.fillText(v.toFixed(2), pad.left - 8, y + 4);
+            ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+            ctx.beginPath();
+            ctx.moveTo(pad.left, y);
+            ctx.lineTo(w - pad.right, y);
+            ctx.stroke();
+        }
+
+        // X axis labels (years)
+        ctx.textAlign = 'center';
+        const totalYears = Math.floor(cum.length / ppy);
+        for (let yr = 0; yr <= totalYears; yr++) {
+            const x = pad.left + (yr * ppy / (cum.length - 1)) * cw;
+            ctx.fillStyle = '#6c6c7c';
+            ctx.fillText('Y' + yr, x, h - pad.bottom + 18);
+        }
+
+        // Line 1.0 reference
+        const refY = pad.top + ch - ((1 - minV) / range) * ch;
+        ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath();
+        ctx.moveTo(pad.left, refY);
+        ctx.lineTo(w - pad.right, refY);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Draw line
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        for (let i = 0; i < cum.length; i++) {
+            const x = pad.left + (i / (cum.length - 1)) * cw;
+            const y = pad.top + ch - ((cum[i] - minV) / range) * ch;
+            if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+
+        // Fill area
+        ctx.lineTo(pad.left + cw, pad.top + ch);
+        ctx.lineTo(pad.left, pad.top + ch);
+        ctx.closePath();
+        ctx.fillStyle = color.replace(')', ',0.1)').replace('rgb', 'rgba');
+        ctx.fill();
+
+        // End value
+        const endVal = cum[cum.length - 1];
+        ctx.fillStyle = color;
+        ctx.font = 'bold 12px monospace';
+        ctx.textAlign = 'left';
+        const endY = pad.top + ch - ((endVal - minV) / range) * ch;
+        ctx.fillText(endVal.toFixed(2) + 'x', pad.left + cw + 4, endY + 4);
+    }
+
+    function drawRMW() {
+        const profitColors = ['#ff5252', '#ff8a80', '#a8a8b8', '#b388ff', '#8b5cf6'];
+        drawQuintileBar('cvs-rmw-bar', {
+            labels: ['Q1 低盈利', 'Q2', 'Q3', 'Q4', 'Q5 高盈利'],
+            values: [0.065, 0.082, 0.098, 0.115, 0.138]
+        }, '按盈利能力排序的五分位年化收益', profitColors);
+
+        drawCumReturn('cvs-rmw-cum', rmw, 'RMW 因子累积收益', '#8b5cf6');
+    }
+
+    // =========================================================================
+    //  Section 3: CMA factor
+    // =========================================================================
+    function drawCMA() {
+        const investColors = ['#06b6d4', '#67e8f9', '#a8a8b8', '#ffab40', '#ff5252'];
+        drawQuintileBar('cvs-cma-bar', {
+            labels: ['Q1 低投资', 'Q2', 'Q3', 'Q4', 'Q5 高投资'],
+            values: [0.128, 0.112, 0.098, 0.085, 0.068]
+        }, '按资产增长率排序的五分位年化收益', investColors);
+
+        drawCumReturn('cvs-cma-cum', cma, 'CMA 因子累积收益', '#06b6d4');
+    }
+
+    // =========================================================================
+    //  Section 4: Regression comparison
+    // =========================================================================
+    function drawHeatmap(canvasId, results, label) {
+        const { ctx, w, h } = setupCanvas(canvasId);
+        clearCanvas(ctx, w, h);
+
+        const pad = { top: 40, right: 20, bottom: 30, left: 55 };
+        const cw = w - pad.left - pad.right;
+        const ch = h - pad.top - pad.bottom;
+        const cellW = cw / 5;
+        const cellH = ch / 5;
+
+        // Labels
+        ctx.fillStyle = '#a8a8b8';
+        ctx.font = '11px sans-serif';
+        ctx.textAlign = 'center';
+        const sizeLabels = ['S1', 'S2', 'S3', 'S4', 'S5'];
+        const valueLabels = ['V1', 'V2', 'V3', 'V4', 'V5'];
+
+        // Column headers (Value)
+        for (let j = 0; j < 5; j++) {
+            ctx.fillText(valueLabels[j], pad.left + (j + 0.5) * cellW, pad.top - 8);
+        }
+        // Row headers (Size)
+        ctx.textAlign = 'right';
+        for (let i = 0; i < 5; i++) {
+            ctx.fillText(sizeLabels[i], pad.left - 8, pad.top + (i + 0.5) * cellH + 4);
+        }
+
+        // Title
+        ctx.fillStyle = '#e8e8e8';
+        ctx.font = '12px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('Value →', pad.left + cw / 2, pad.top - 22);
+        ctx.save();
+        ctx.translate(12, pad.top + ch / 2);
+        ctx.rotate(-Math.PI / 2);
+        ctx.fillText('Size →', 0, 0);
+        ctx.restore();
+
+        // Draw cells
+        const alphas = results.map(r => r.alpha * 100 * 21); // monthly alpha in %
+        const maxAbs = Math.max(0.3, ...alphas.map(a => Math.abs(a)));
+
+        for (let i = 0; i < 5; i++) {
+            for (let j = 0; j < 5; j++) {
+                const idx = i * 5 + j;
+                const x = pad.left + j * cellW;
+                const y = pad.top + i * cellH;
+                const alpha = alphas[idx];
+
+                ctx.fillStyle = FU.valueToColor(alpha, -maxAbs, maxAbs);
+                ctx.fillRect(x + 1, y + 1, cellW - 2, cellH - 2);
+
+                // Value text
+                const brightness = Math.abs(alpha) / maxAbs;
+                ctx.fillStyle = brightness > 0.6 ? '#1a1a2e' : '#e8e8e8';
+                ctx.font = 'bold 11px monospace';
+                ctx.textAlign = 'center';
+                ctx.fillText(alpha.toFixed(2), x + cellW / 2, y + cellH / 2 + 4);
+            }
+        }
+    }
+
+    function drawHeatmaps() {
+        drawHeatmap('cvs-heatmap-ff3', ff3Results, 'FF3');
+        drawHeatmap('cvs-heatmap-ff5', ff5Results, 'FF5');
+    }
+
+    // Beta stats panel
+    function updateBetaStats() {
+        const si = parseInt(document.getElementById('sel-size').value);
+        const vi = parseInt(document.getElementById('sel-value').value);
+        const idx = si * 5 + vi;
+        const r5 = ff5Results[idx];
+        const r3 = ff3Results[idx];
+
+        const names = ['MKT', 'SMB', 'HML', 'RMW', 'CMA'];
+        const colors = ['#6366f1', '#f59e0b', '#10b981', '#8b5cf6', '#06b6d4'];
+
+        let html = '';
+        html += `<div class="stat-item"><div class="stat-label">Alpha (FF5)</div><div class="stat-value" style="color:${Math.abs(r5.alpha * 100 * 21) > 0.1 ? '#ff5252' : '#16c79a'}">${(r5.alpha * 100 * 21).toFixed(3)}%</div></div>`;
+        for (let k = 0; k < 5; k++) {
+            html += `<div class="stat-item"><div class="stat-label">${names[k]} Beta</div><div class="stat-value" style="color:${colors[k]}">${r5.betas[k].toFixed(3)}</div></div>`;
+        }
+        html += `<div class="stat-item"><div class="stat-label">R² (FF5)</div><div class="stat-value" style="color:#16c79a">${(r5.r2 * 100).toFixed(1)}%</div></div>`;
+        html += `<div class="stat-item"><div class="stat-label">R² (FF3)</div><div class="stat-value" style="color:#a8a8b8">${(r3.r2 * 100).toFixed(1)}%</div></div>`;
+        document.getElementById('beta-stats').innerHTML = html;
+    }
+
+    document.getElementById('sel-size').addEventListener('change', updateBetaStats);
+    document.getElementById('sel-value').addEventListener('change', updateBetaStats);
+
+    // R² comparison bar chart
+    function drawR2Compare() {
+        const { ctx, w, h } = setupCanvas('cvs-r2compare');
+        clearCanvas(ctx, w, h);
+
+        const pad = { top: 40, right: 30, bottom: 70, left: 60 };
+        const cw = w - pad.left - pad.right;
+        const ch = h - pad.top - pad.bottom;
+
+        ctx.fillStyle = '#e8e8e8';
+        ctx.font = 'bold 14px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('25 个组合的平均 R² 对比', w / 2, 24);
+
+        const avgR2 = {
+            capm: FU.mean(capmResults.map(r => r.r2)),
+            ff3: FU.mean(ff3Results.map(r => r.r2)),
+            ff5: FU.mean(ff5Results.map(r => r.r2))
+        };
+
+        const models = [
+            { name: 'CAPM\n(1 因子)', val: avgR2.capm, color: '#6366f1' },
+            { name: 'FF3\n(3 因子)', val: avgR2.ff3, color: '#10b981' },
+            { name: 'FF5\n(5 因子)', val: avgR2.ff5, color: '#8b5cf6' }
+        ];
+
+        const barGap = cw / 3;
+        const barW = barGap * 0.5;
+
+        // Y axis
+        ctx.fillStyle = '#a8a8b8';
+        ctx.font = '11px monospace';
+        ctx.textAlign = 'right';
+        for (let i = 0; i <= 5; i++) {
+            const v = i * 20;
+            const y = pad.top + ch - (v / 100) * ch;
+            ctx.fillText(v + '%', pad.left - 8, y + 4);
+            ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+            ctx.beginPath();
+            ctx.moveTo(pad.left, y);
+            ctx.lineTo(w - pad.right, y);
+            ctx.stroke();
+        }
+
+        models.forEach((m, i) => {
+            const x = pad.left + i * barGap + (barGap - barW) / 2;
+            const barH = m.val * ch;
+            const y = pad.top + ch - barH;
+
+            // Gradient
+            const grad = ctx.createLinearGradient(x, y, x, pad.top + ch);
+            grad.addColorStop(0, m.color);
+            grad.addColorStop(1, m.color + '33');
+            ctx.fillStyle = grad;
+
+            const r = 5;
+            ctx.beginPath();
+            ctx.moveTo(x, y + r);
+            ctx.arcTo(x, y, x + r, y, r);
+            ctx.arcTo(x + barW, y, x + barW, y + r, r);
+            ctx.lineTo(x + barW, pad.top + ch);
+            ctx.lineTo(x, pad.top + ch);
+            ctx.closePath();
+            ctx.fill();
+
+            // Border
+            ctx.strokeStyle = m.color;
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+
+            // Value
+            ctx.fillStyle = '#e8e8e8';
+            ctx.font = 'bold 14px monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText((m.val * 100).toFixed(1) + '%', x + barW / 2, y - 10);
+
+            // Label
+            ctx.fillStyle = '#a8a8b8';
+            ctx.font = '12px sans-serif';
+            const lines = m.name.split('\n');
+            lines.forEach((line, li) => {
+                ctx.fillText(line, x + barW / 2, pad.top + ch + 18 + li * 15);
+            });
+        });
+    }
+
+    // =========================================================================
+    //  Section 5: Factor redundancy
+    // =========================================================================
+
+    // Correlation matrix
+    function drawCorrelation() {
+        const { ctx, w, h } = setupCanvas('cvs-corr');
+        clearCanvas(ctx, w, h);
+
+        const factorArrays = [mkt, smb, hml, rmw, cma];
+        const names = ['MKT', 'SMB', 'HML', 'RMW', 'CMA'];
+        const n = 5;
+
+        const corr = [];
+        for (let i = 0; i < n; i++) {
+            corr[i] = [];
+            for (let j = 0; j < n; j++) {
+                corr[i][j] = FU.correlation(factorArrays[i], factorArrays[j]);
+            }
+        }
+
+        const pad = { top: 50, right: 30, bottom: 30, left: 60 };
+        const cw = w - pad.left - pad.right;
+        const ch = h - pad.top - pad.bottom;
+        const cellW = cw / n;
+        const cellH = ch / n;
+
+        // Headers
+        ctx.fillStyle = '#a8a8b8';
+        ctx.font = 'bold 12px sans-serif';
+        ctx.textAlign = 'center';
+        const tagColors = ['#6366f1', '#f59e0b', '#10b981', '#8b5cf6', '#06b6d4'];
+        for (let j = 0; j < n; j++) {
+            ctx.fillStyle = tagColors[j];
+            ctx.fillText(names[j], pad.left + (j + 0.5) * cellW, pad.top - 10);
+        }
+        ctx.textAlign = 'right';
+        for (let i = 0; i < n; i++) {
+            ctx.fillStyle = tagColors[i];
+            ctx.fillText(names[i], pad.left - 8, pad.top + (i + 0.5) * cellH + 5);
+        }
+
+        // Cells
+        for (let i = 0; i < n; i++) {
+            for (let j = 0; j < n; j++) {
+                const x = pad.left + j * cellW;
+                const y = pad.top + i * cellH;
+                const val = corr[i][j];
+
+                ctx.fillStyle = FU.valueToColor(val, -1, 1);
+                ctx.fillRect(x + 2, y + 2, cellW - 4, cellH - 4);
+
+                // Round corners
+                ctx.strokeStyle = 'rgba(26,26,46,0.5)';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(x + 2, y + 2, cellW - 4, cellH - 4);
+
+                const brightness = Math.abs(val);
+                ctx.fillStyle = brightness > 0.5 ? '#1a1a2e' : '#e8e8e8';
+                ctx.font = 'bold 12px monospace';
+                ctx.textAlign = 'center';
+                ctx.fillText(val.toFixed(2), x + cellW / 2, y + cellH / 2 + 5);
+            }
+        }
+    }
+
+    // HML Spanning Test: regress HML on MKT, SMB, RMW, CMA
+    function drawSpanningTest() {
+        const spanResult = FU.factorExposure(hml, [mkt, smb, rmw, cma]);
+        const spanAlpha = spanResult.alpha * 252 * 100; // annualized %
+        const spanR2 = spanResult.r2;
+        const spanBetas = spanResult.betas;
+        const betaNames = ['MKT', 'SMB', 'RMW', 'CMA'];
+        const betaColors = ['#6366f1', '#f59e0b', '#8b5cf6', '#06b6d4'];
+
+        // Stats
+        const statsEl = document.getElementById('spanning-stats');
+        statsEl.innerHTML = `
+            <div class="stat-item"><div class="stat-label">Alpha (年化%)</div><div class="stat-value" style="color:${Math.abs(spanAlpha) < 1 ? '#16c79a' : '#ff5252'}">${spanAlpha.toFixed(2)}%</div></div>
+            <div class="stat-item"><div class="stat-label">R²</div><div class="stat-value" style="color:#16c79a">${(spanR2 * 100).toFixed(1)}%</div></div>
+            <div class="stat-item"><div class="stat-label">结论</div><div class="stat-value" style="color:#ffab40;font-size:0.8rem">${spanR2 > 0.6 ? 'HML 可被解释' : 'HML 独立'}</div></div>
+        `;
+
+        // Bar chart of betas
+        const { ctx, w, h } = setupCanvas('cvs-spanning');
+        clearCanvas(ctx, w, h);
+
+        const pad = { top: 40, right: 30, bottom: 50, left: 60 };
+        const cw = w - pad.left - pad.right;
+        const ch = h - pad.top - pad.bottom;
+
+        ctx.fillStyle = '#e8e8e8';
+        ctx.font = 'bold 13px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('HML 对其余四因子的回归系数', w / 2, 22);
+
+        const maxBeta = Math.max(0.5, ...spanBetas.map(b => Math.abs(b))) * 1.3;
+        const zeroY = pad.top + ch / 2;
+
+        // Zero line
+        ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(pad.left, zeroY);
+        ctx.lineTo(w - pad.right, zeroY);
+        ctx.stroke();
+
+        // Y axis ticks
+        ctx.fillStyle = '#a8a8b8';
+        ctx.font = '11px monospace';
+        ctx.textAlign = 'right';
+        for (let v = -0.4; v <= 0.45; v += 0.2) {
+            const y = zeroY - (v / maxBeta) * (ch / 2);
+            ctx.fillText(v.toFixed(1), pad.left - 8, y + 4);
+            ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+            ctx.beginPath();
+            ctx.moveTo(pad.left, y);
+            ctx.lineTo(w - pad.right, y);
+            ctx.stroke();
+        }
+
+        const barGap = cw / 4;
+        const barW = barGap * 0.55;
+
+        for (let i = 0; i < 4; i++) {
+            const x = pad.left + i * barGap + (barGap - barW) / 2;
+            const val = spanBetas[i];
+            const barH = Math.abs(val) / maxBeta * (ch / 2);
+            const y = val >= 0 ? zeroY - barH : zeroY;
+
+            ctx.fillStyle = betaColors[i];
+            const r = 4;
+            ctx.beginPath();
+            if (val >= 0) {
+                ctx.moveTo(x, y + r);
+                ctx.arcTo(x, y, x + r, y, r);
+                ctx.arcTo(x + barW, y, x + barW, y + r, r);
+                ctx.lineTo(x + barW, zeroY);
+                ctx.lineTo(x, zeroY);
+            } else {
+                ctx.moveTo(x, zeroY);
+                ctx.lineTo(x + barW, zeroY);
+                ctx.lineTo(x + barW, y + barH - r);
+                ctx.arcTo(x + barW, y + barH, x + barW - r, y + barH, r);
+                ctx.arcTo(x, y + barH, x, y + barH - r, r);
+            }
+            ctx.closePath();
+            ctx.fill();
+
+            // Value label
+            ctx.fillStyle = '#e8e8e8';
+            ctx.font = 'bold 11px monospace';
+            ctx.textAlign = 'center';
+            const ly = val >= 0 ? y - 8 : y + barH + 14;
+            ctx.fillText(val.toFixed(3), x + barW / 2, ly);
+
+            // X label
+            ctx.fillStyle = betaColors[i];
+            ctx.font = 'bold 11px sans-serif';
+            ctx.fillText(betaNames[i], x + barW / 2, h - pad.bottom + 16);
+        }
+
+        // Alpha annotation
+        ctx.fillStyle = '#ffab40';
+        ctx.font = '11px sans-serif';
+        ctx.textAlign = 'right';
+        ctx.fillText('Alpha(年化) = ' + spanAlpha.toFixed(2) + '%   R² = ' + (spanR2 * 100).toFixed(1) + '%', w - pad.right, h - 6);
+    }
+
+    // Factor toggle experiment
+    const factorState = {
+        MKT: true, SMB: true, HML: true, RMW: true, CMA: true
+    };
+    const factorInfo = [
+        { key: 'MKT', label: '市场 MKT', color: '#6366f1', data: mkt },
+        { key: 'SMB', label: '规模 SMB', color: '#f59e0b', data: smb },
+        { key: 'HML', label: '价值 HML', color: '#10b981', data: hml },
+        { key: 'RMW', label: '盈利 RMW', color: '#8b5cf6', data: rmw },
+        { key: 'CMA', label: '投资 CMA', color: '#06b6d4', data: cma },
+    ];
+
+    function buildToggles() {
+        const container = document.getElementById('factor-toggles');
+        container.innerHTML = '';
+        factorInfo.forEach(f => {
+            const div = document.createElement('div');
+            div.className = 'factor-toggle' + (factorState[f.key] ? ' active' : '');
+            div.innerHTML = `<span class="dot" style="background:${f.color}"></span>${f.label}`;
+            div.addEventListener('click', () => {
+                // Must keep at least 1 factor
+                const activeCount = Object.values(factorState).filter(v => v).length;
+                if (factorState[f.key] && activeCount <= 1) return;
+                factorState[f.key] = !factorState[f.key];
+                div.classList.toggle('active');
+                updateRedundancy();
+            });
+            container.appendChild(div);
+        });
+    }
+
+    function updateRedundancy() {
+        const activeFactors = factorInfo.filter(f => factorState[f.key]);
+        const factorArrays = activeFactors.map(f => f.data);
+
+        // Re-run regressions for all 25 portfolios
+        const results = portfolios25.map(p =>
+            FU.factorExposure(p.returns, factorArrays)
+        );
+
+        const avgR2 = FU.mean(results.map(r => r.r2));
+        const avgAbsAlpha = FU.mean(results.map(r => Math.abs(r.alpha * 100 * 21)));
+        const maxAbsAlpha = Math.max(...results.map(r => Math.abs(r.alpha * 100 * 21)));
+
+        const statsEl = document.getElementById('redundancy-stats');
+        statsEl.innerHTML = `
+            <div class="stat-item"><div class="stat-label">活跃因子数</div><div class="stat-value" style="color:#4fc3f7">${activeFactors.length}</div></div>
+            <div class="stat-item"><div class="stat-label">平均 R²</div><div class="stat-value" style="color:#16c79a">${(avgR2 * 100).toFixed(1)}%</div></div>
+            <div class="stat-item"><div class="stat-label">平均 |Alpha|</div><div class="stat-value" style="color:#ffab40">${avgAbsAlpha.toFixed(3)}%</div></div>
+            <div class="stat-item"><div class="stat-label">最大 |Alpha|</div><div class="stat-value" style="color:#ff5252">${maxAbsAlpha.toFixed(3)}%</div></div>
+        `;
+
+        drawRedundancyChart(results, activeFactors);
+    }
+
+    function drawRedundancyChart(results, activeFactors) {
+        const { ctx, w, h } = setupCanvas('cvs-redundancy');
+        clearCanvas(ctx, w, h);
+
+        const pad = { top: 35, right: 30, bottom: 50, left: 55 };
+        const cw = w - pad.left - pad.right;
+        const ch = h - pad.top - pad.bottom;
+
+        ctx.fillStyle = '#e8e8e8';
+        ctx.font = 'bold 13px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('25 个组合的 R² 分布', w / 2, 20);
+
+        const r2s = results.map(r => r.r2);
+        const barGap = cw / 25;
+        const barW = barGap * 0.75;
+
+        // Y axis
+        ctx.fillStyle = '#a8a8b8';
+        ctx.font = '11px monospace';
+        ctx.textAlign = 'right';
+        for (let i = 0; i <= 5; i++) {
+            const v = i * 20;
+            const y = pad.top + ch - (v / 100) * ch;
+            ctx.fillText(v + '%', pad.left - 6, y + 4);
+            ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+            ctx.beginPath();
+            ctx.moveTo(pad.left, y);
+            ctx.lineTo(w - pad.right, y);
+            ctx.stroke();
+        }
+
+        // Bars
+        for (let i = 0; i < 25; i++) {
+            const x = pad.left + i * barGap + (barGap - barW) / 2;
+            const barH = r2s[i] * ch;
+            const y = pad.top + ch - barH;
+
+            const hue = r2s[i] > 0.9 ? 160 : r2s[i] > 0.7 ? 45 : 0;
+            ctx.fillStyle = `hsl(${hue}, 70%, 55%)`;
+            ctx.fillRect(x, y, barW, barH);
+
+            // Portfolio label
+            if (i % 5 === 0) {
+                const si = Math.floor(i / 5);
+                ctx.fillStyle = '#6c6c7c';
+                ctx.font = '9px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('S' + (si + 1), pad.left + (si * 5 + 2) * barGap + barGap / 2, h - pad.bottom + 14);
+            }
+        }
+
+        // Average line
+        const avgR2 = FU.mean(r2s);
+        const avgY = pad.top + ch - avgR2 * ch;
+        ctx.strokeStyle = '#16c79a';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([6, 4]);
+        ctx.beginPath();
+        ctx.moveTo(pad.left, avgY);
+        ctx.lineTo(w - pad.right, avgY);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        ctx.fillStyle = '#16c79a';
+        ctx.font = 'bold 11px monospace';
+        ctx.textAlign = 'left';
+        ctx.fillText('平均 ' + (avgR2 * 100).toFixed(1) + '%', w - pad.right - 80, avgY - 6);
+
+        // Factor legend
+        ctx.font = '10px sans-serif';
+        let lx = pad.left;
+        ctx.fillStyle = '#a8a8b8';
+        ctx.fillText('包含因子: ', lx, h - 6);
+        lx += 58;
+        activeFactors.forEach(f => {
+            ctx.fillStyle = f.color;
+            ctx.fillRect(lx, h - 13, 8, 8);
+            ctx.fillStyle = '#a8a8b8';
+            ctx.fillText(f.key, lx + 11, h - 6);
+            lx += 40;
+        });
+    }
+
+    // =========================================================================
+    //  Initialize all
+    // =========================================================================
+    function initAll() {
+        drawAnomaly();
+        drawRMW();
+        drawCMA();
+        drawHeatmaps();
+        updateBetaStats();
+        drawR2Compare();
+        drawCorrelation();
+        drawSpanningTest();
+        buildToggles();
+        updateRedundancy();
+    }
+
+    initAll();
+
+    // Resize handler
+    let resizeTimer;
+    window.addEventListener('resize', () => {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(initAll, 200);
+    });
+});
+</script>
+
+<!-- KaTeX auto-render -->
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    if (typeof renderMathInElement === 'function') {
+        renderMathInElement(document.body, {
+            delimiters: [
+                { left: '$$', right: '$$', display: true },
+                { left: '\\(', right: '\\)', display: false },
+                { left: '$', right: '$', display: false }
+            ],
+            throwOnError: false
+        });
+    } else {
+        const check = setInterval(() => {
+            if (typeof renderMathInElement === 'function') {
+                clearInterval(check);
+                renderMathInElement(document.body, {
+                    delimiters: [
+                        { left: '$$', right: '$$', display: true },
+                        { left: '\\(', right: '\\)', display: false },
+                        { left: '$', right: '$', display: false }
+                    ],
+                    throwOnError: false
+                });
+            }
+        }, 100);
+        setTimeout(() => clearInterval(check), 5000);
+    }
+});
+</script>
+</body>
+</html>

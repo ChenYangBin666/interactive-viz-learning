@@ -1,0 +1,1340 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>收益归因 — 因子模型</title>
+<link rel="stylesheet" href="../shared/styles/common.css">
+<link rel="stylesheet" href="../shared/styles/components.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" defer>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" defer></script>
+<script src="../shared/scripts/nav.js" defer></script>
+<script src="../shared/scripts/factor-utils.js" defer></script>
+<style>
+.section-tabs { display:flex; gap:0; margin-bottom:1.5rem; border-bottom:2px solid var(--border-color); flex-wrap:wrap; }
+.section-tab { padding:.6rem 1.2rem; background:none; border:none; color:var(--text-muted); font-family:inherit; font-size:.9rem; cursor:pointer; position:relative; transition:color .2s; }
+.section-tab:hover { color:var(--text-secondary); }
+.section-tab.active { color:var(--accent-green); }
+.section-tab.active::after { content:''; position:absolute; bottom:-2px; left:0; right:0; height:2px; background:var(--accent-green); }
+.section-panel { display:none; }
+.section-panel.active { display:block; }
+
+.attr-table { width:100%; border-collapse:collapse; font-size:.85rem; }
+.attr-table th, .attr-table td { padding:.5rem .6rem; border:1px solid var(--border-color); text-align:center; }
+.attr-table th { background:var(--bg-card); color:var(--accent-green); font-weight:600; }
+.attr-table td { background:var(--bg-secondary); }
+.attr-table input { width:60px; background:var(--bg-primary); border:1px solid var(--border-color); border-radius:4px; color:var(--text-primary); padding:2px 4px; text-align:center; font-family:var(--font-mono); font-size:.8rem; }
+.attr-table input:focus { border-color:var(--accent-green); outline:none; }
+.attr-table .total-row { background:var(--bg-card); font-weight:600; }
+
+.summary-cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:.75rem; margin-bottom:1.5rem; }
+.summary-card { background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:var(--radius-md); padding:.75rem 1rem; text-align:center; }
+.summary-card .label { font-size:.75rem; color:var(--text-muted); margin-bottom:.25rem; }
+.summary-card .value { font-family:var(--font-mono); font-size:1.1rem; font-weight:700; }
+.summary-card .value.positive { color:var(--accent-green); }
+.summary-card .value.negative { color:var(--accent-red); }
+
+.controls-row { display:flex; gap:1rem; align-items:center; flex-wrap:wrap; margin-bottom:1rem; }
+.controls-row select { background:var(--bg-primary); border:1px solid var(--border-color); border-radius:var(--radius-sm); color:var(--text-primary); padding:.4rem .8rem; font-family:inherit; font-size:.85rem; cursor:pointer; }
+.controls-row select:focus { border-color:var(--accent-green); outline:none; }
+
+canvas { display:block; width:100%; border-radius:var(--radius-md); }
+.chart-container { background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:var(--radius-md); padding:1rem; margin-bottom:1rem; }
+.chart-row { display:grid; grid-template-columns:1fr 1fr; gap:1rem; }
+@media(max-width:900px){ .chart-row { grid-template-columns:1fr; } }
+
+.formula-box { background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:var(--radius-md); padding:1rem 1.2rem; margin:1rem 0; }
+</style>
+</head>
+<body>
+<div class="page-container">
+<h1>模块 08：收益归因</h1>
+<p>将组合收益和风险分解至各因素来源，评估投资决策的质量。</p>
+
+<div class="section-tabs" id="mainTabs">
+    <button class="section-tab active" data-tab="brinson">Brinson 归因</button>
+    <button class="section-tab" data-tab="factor">因子归因</button>
+    <button class="section-tab" data-tab="risk">风险归因</button>
+    <button class="section-tab" data-tab="alpha">Alpha 分析</button>
+    <button class="section-tab" data-tab="report">归因报告</button>
+</div>
+
+<!-- ====== 1. Brinson 归因 ====== -->
+<div class="section-panel active" id="panel-brinson">
+<div class="section">
+<div class="section-title"><span class="icon">1</span><h2>Brinson-Fachler 归因框架</h2></div>
+<p>将主动收益分解为资产配置效应、个股选择效应和交互效应：</p>
+<div class="formula-box">
+$$R_p - R_b = \underbrace{\sum_i (w_{p,i}-w_{b,i}) \cdot R_{b,i}}_{\text{配置效应}} + \underbrace{\sum_i w_{b,i} \cdot (R_{p,i}-R_{b,i})}_{\text{选择效应}} + \underbrace{\sum_i (w_{p,i}-w_{b,i})(R_{p,i}-R_{b,i})}_{\text{交互效应}}$$
+</div>
+<p class="text-sm text-muted">编辑下表中的权重与收益（百分比），图表会实时更新。</p>
+<div style="overflow-x:auto; margin-bottom:1rem;">
+<table class="attr-table" id="brinsonTable">
+<thead>
+<tr><th>行业</th><th>组合权重%</th><th>基准权重%</th><th>组合收益%</th><th>基准收益%</th><th>配置效应</th><th>选择效应</th><th>交互效应</th></tr>
+</thead>
+<tbody id="brinsonBody"></tbody>
+</table>
+</div>
+<div class="chart-row">
+    <div class="chart-container"><h4 style="margin-bottom:.5rem">各行业归因效应</h4><canvas id="brinsonBar" height="300"></canvas></div>
+    <div class="chart-container"><h4 style="margin-bottom:.5rem">总归因分解</h4><canvas id="brinsonPie" height="300"></canvas></div>
+</div>
+</div>
+</div>
+
+<!-- ====== 2. 因子归因 ====== -->
+<div class="section-panel" id="panel-factor">
+<div class="section">
+<div class="section-title"><span class="icon">2</span><h2>因子归因分析</h2></div>
+<p>利用因子模型将组合收益分解为各因子贡献与 Alpha：</p>
+<div class="formula-box">
+$$r_p = \alpha + \sum_{k=1}^{K} \beta_k \cdot f_k + \varepsilon$$
+</div>
+<div class="controls-row">
+    <label>时间段：</label>
+    <select id="factorPeriod">
+        <option value="0">全期 (252天)</option>
+        <option value="1">前半段 (1-126天)</option>
+        <option value="2">后半段 (127-252天)</option>
+        <option value="3">Q1 (1-63天)</option>
+        <option value="4">Q2 (64-126天)</option>
+        <option value="5">Q3 (127-189天)</option>
+        <option value="6">Q4 (190-252天)</option>
+    </select>
+</div>
+<div class="summary-cards" id="factorSummary"></div>
+<div class="chart-container"><h4 style="margin-bottom:.5rem">瀑布图：收益分解</h4><canvas id="waterfallChart" height="320"></canvas></div>
+<div class="chart-container"><h4 style="margin-bottom:.5rem">因子贡献随时间变化（堆叠柱状图）</h4><canvas id="stackedBar" height="300"></canvas></div>
+</div>
+</div>
+
+<!-- ====== 3. 风险归因 ====== -->
+<div class="section-panel" id="panel-risk">
+<div class="section">
+<div class="section-title"><span class="icon">3</span><h2>风险归因</h2></div>
+<p>将组合方差分解为因子风险与特异性风险：</p>
+<div class="formula-box">
+$$\sigma_p^2 = \underbrace{\boldsymbol{w}^T B \Sigma_f B^T \boldsymbol{w}}_{\text{因子风险}} + \underbrace{\boldsymbol{w}^T D \boldsymbol{w}}_{\text{特异风险}}$$
+</div>
+<div class="controls-row">
+    <label>市场暴露:</label><input type="range" id="riskBetaMkt" min="0" max="200" value="100" style="width:120px"><span id="riskBetaMktVal" class="text-sm" style="min-width:40px">1.00</span>
+    <label>规模:</label><input type="range" id="riskBetaSize" min="-100" max="100" value="20" style="width:100px"><span id="riskBetaSizeVal" class="text-sm" style="min-width:40px">0.20</span>
+    <label>价值:</label><input type="range" id="riskBetaVal" min="-100" max="100" value="30" style="width:100px"><span id="riskBetaValVal" class="text-sm" style="min-width:40px">0.30</span>
+    <label>动量:</label><input type="range" id="riskBetaMom" min="-100" max="100" value="-10" style="width:100px"><span id="riskBetaMomVal" class="text-sm" style="min-width:40px">-0.10</span>
+</div>
+<div class="chart-row">
+    <div class="chart-container"><h4 style="margin-bottom:.5rem">风险分解树形图</h4><canvas id="riskTreemap" height="320"></canvas></div>
+    <div class="chart-container"><h4 style="margin-bottom:.5rem">边际风险贡献</h4><canvas id="marginalRisk" height="320"></canvas></div>
+</div>
+<div class="summary-cards" id="riskSummary"></div>
+</div>
+</div>
+
+<!-- ====== 4. Alpha 分析 ====== -->
+<div class="section-panel" id="panel-alpha">
+<div class="section">
+<div class="section-title"><span class="icon">4</span><h2>Alpha 分析</h2></div>
+<p>评估基金经理产生 Alpha 的能力和统计显著性。</p>
+<div class="summary-cards" id="alphaSummary"></div>
+<div class="chart-container"><h4 style="margin-bottom:.5rem">滚动 Alpha（60日窗口）与置信区间</h4><canvas id="rollingAlpha" height="280"></canvas></div>
+<div class="chart-row">
+    <div class="chart-container"><h4 style="margin-bottom:.5rem">Alpha 分布：Bootstrap 模拟</h4><canvas id="bootstrapChart" height="280"></canvas></div>
+    <div class="chart-container"><h4 style="margin-bottom:.5rem">胜率与信息比率</h4><canvas id="hitRateChart" height="280"></canvas></div>
+</div>
+</div>
+</div>
+
+<!-- ====== 5. 归因报告 ====== -->
+<div class="section-panel" id="panel-report">
+<div class="section">
+<div class="section-title"><span class="icon">5</span><h2>归因报告生成器</h2></div>
+<div class="controls-row">
+    <label>选择组合：</label>
+    <select id="reportPortfolio">
+        <option value="growth">成长基金</option>
+        <option value="value">价值基金</option>
+        <option value="quant">量化基金</option>
+    </select>
+    <button class="btn btn-primary" onclick="Report.generate()">生成报告</button>
+</div>
+<div class="summary-cards" id="reportSummary"></div>
+<div class="chart-row">
+    <div class="chart-container"><h4 style="margin-bottom:.5rem">Brinson 归因</h4><canvas id="reportBrinson" height="280"></canvas></div>
+    <div class="chart-container"><h4 style="margin-bottom:.5rem">因子归因</h4><canvas id="reportFactor" height="280"></canvas></div>
+</div>
+<div class="chart-container"><h4 style="margin-bottom:.5rem">滚动归因堆叠面积图</h4><canvas id="reportRolling" height="300"></canvas></div>
+</div>
+</div>
+
+</div><!-- page-container -->
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    if (typeof renderMathInElement === 'function') {
+        renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ]
+        });
+    }
+});
+
+/* ====== Tab switching ====== */
+document.querySelectorAll('.section-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+        document.querySelectorAll('.section-tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.section-panel').forEach(p => p.classList.remove('active'));
+        tab.classList.add('active');
+        document.getElementById('panel-' + tab.dataset.tab).classList.add('active');
+    });
+});
+
+/* ====== Shared data generation ====== */
+const FU = typeof FactorUtils !== 'undefined' ? FactorUtils : null;
+const rng = FU ? FU.seededRandom(42) : (() => Math.random);
+const nRand = () => FU ? FU.normalRandom(typeof rng === 'function' ? rng : undefined) : (Math.random() - 0.5) * 2;
+
+const COLORS = {
+    green: '#16c79a', blue: '#4fc3f7', purple: '#b388ff', orange: '#ffab40',
+    red: '#ff5252', yellow: '#ffd740', pink: '#ff80ab', cyan: '#06b6d4',
+    indigo: '#6366f1', slate: '#94a3b8', emerald: '#10b981'
+};
+
+function getCtx(id) {
+    const c = document.getElementById(id);
+    if (!c) return null;
+    const dpr = window.devicePixelRatio || 1;
+    const rect = c.getBoundingClientRect();
+    c.width = rect.width * dpr;
+    c.height = rect.height * dpr;
+    const ctx = c.getContext('2d');
+    ctx.scale(dpr, dpr);
+    ctx.W = rect.width;
+    ctx.H = rect.height;
+    return ctx;
+}
+
+function pct(v, d) { return (v * 100).toFixed(d !== undefined ? d : 2) + '%'; }
+
+/* ================================================================
+   1. BRINSON ATTRIBUTION
+   ================================================================ */
+const Brinson = (() => {
+    const sectors = ['金融','科技','医药','消费','工业','能源','材料','公用事业'];
+    const defaultData = [
+        { wp:25, wb:20, rp:8, rb:6 },
+        { wp:20, wb:15, rp:12, rb:10 },
+        { wp:10, wb:12, rp:5, rb:7 },
+        { wp:15, wb:18, rp:9, rb:8 },
+        { wp:10, wb:12, rp:6, rb:5 },
+        { wp:5,  wb:8,  rp:3, rb:4 },
+        { wp:8,  wb:10, rp:7, rb:6 },
+        { wp:7,  wb:5,  rp:4, rb:3 },
+    ];
+
+    function buildTable() {
+        const tbody = document.getElementById('brinsonBody');
+        let html = '';
+        for (let i = 0; i < sectors.length; i++) {
+            const d = defaultData[i];
+            html += `<tr>
+                <td style="font-weight:600;text-align:left;padding-left:1rem">${sectors[i]}</td>
+                <td><input type="number" class="brinson-input" data-row="${i}" data-col="wp" value="${d.wp}" step="1"></td>
+                <td><input type="number" class="brinson-input" data-row="${i}" data-col="wb" value="${d.wb}" step="1"></td>
+                <td><input type="number" class="brinson-input" data-row="${i}" data-col="rp" value="${d.rp}" step="0.5"></td>
+                <td><input type="number" class="brinson-input" data-row="${i}" data-col="rb" value="${d.rb}" step="0.5"></td>
+                <td id="alloc_${i}" style="font-family:var(--font-mono)">-</td>
+                <td id="selec_${i}" style="font-family:var(--font-mono)">-</td>
+                <td id="inter_${i}" style="font-family:var(--font-mono)">-</td>
+            </tr>`;
+        }
+        html += `<tr class="total-row"><td style="text-align:left;padding-left:1rem">合计</td><td id="sum_wp">-</td><td id="sum_wb">-</td><td id="sum_rp">-</td><td id="sum_rb">-</td><td id="sum_alloc">-</td><td id="sum_selec">-</td><td id="sum_inter">-</td></tr>`;
+        tbody.innerHTML = html;
+        document.querySelectorAll('.brinson-input').forEach(inp => inp.addEventListener('input', update));
+    }
+
+    function getData() {
+        const data = [];
+        for (let i = 0; i < sectors.length; i++) {
+            const get = col => parseFloat(document.querySelector(`.brinson-input[data-row="${i}"][data-col="${col}"]`).value) || 0;
+            data.push({ wp: get('wp')/100, wb: get('wb')/100, rp: get('rp')/100, rb: get('rb')/100 });
+        }
+        return data;
+    }
+
+    function compute(data) {
+        const rb_total = data.reduce((s,d) => s + d.wb * d.rb, 0);
+        const results = data.map(d => ({
+            alloc: (d.wp - d.wb) * (d.rb - rb_total),
+            selec: d.wb * (d.rp - d.rb),
+            inter: (d.wp - d.wb) * (d.rp - d.rb)
+        }));
+        return results;
+    }
+
+    function update() {
+        const data = getData();
+        const results = compute(data);
+        let sumAlloc = 0, sumSelec = 0, sumInter = 0;
+        for (let i = 0; i < sectors.length; i++) {
+            const colorVal = v => v >= 0 ? COLORS.green : COLORS.red;
+            document.getElementById('alloc_'+i).innerHTML = `<span style="color:${colorVal(results[i].alloc)}">${pct(results[i].alloc)}</span>`;
+            document.getElementById('selec_'+i).innerHTML = `<span style="color:${colorVal(results[i].selec)}">${pct(results[i].selec)}</span>`;
+            document.getElementById('inter_'+i).innerHTML = `<span style="color:${colorVal(results[i].inter)}">${pct(results[i].inter)}</span>`;
+            sumAlloc += results[i].alloc; sumSelec += results[i].selec; sumInter += results[i].inter;
+        }
+        const sumWp = data.reduce((s,d) => s + d.wp, 0);
+        const sumWb = data.reduce((s,d) => s + d.wb, 0);
+        const sumRp = data.reduce((s,d) => s + d.wp * d.rp, 0);
+        const sumRb = data.reduce((s,d) => s + d.wb * d.rb, 0);
+        document.getElementById('sum_wp').textContent = pct(sumWp,0);
+        document.getElementById('sum_wb').textContent = pct(sumWb,0);
+        document.getElementById('sum_rp').textContent = pct(sumRp);
+        document.getElementById('sum_rb').textContent = pct(sumRb);
+        document.getElementById('sum_alloc').innerHTML = `<span style="color:${sumAlloc>=0?COLORS.green:COLORS.red}">${pct(sumAlloc)}</span>`;
+        document.getElementById('sum_selec').innerHTML = `<span style="color:${sumSelec>=0?COLORS.green:COLORS.red}">${pct(sumSelec)}</span>`;
+        document.getElementById('sum_inter').innerHTML = `<span style="color:${sumInter>=0?COLORS.green:COLORS.red}">${pct(sumInter)}</span>`;
+
+        drawBar(data, results);
+        drawPie(sumAlloc, sumSelec, sumInter);
+    }
+
+    function drawBar(data, results) {
+        const ctx = getCtx('brinsonBar');
+        if (!ctx) return;
+        const W = ctx.W, H = ctx.H;
+        const pad = { t:20, r:20, b:50, l:60 };
+        const cw = W - pad.l - pad.r, ch = H - pad.t - pad.b;
+        ctx.clearRect(0,0,W,H);
+
+        const n = sectors.length;
+        const groupW = cw / n;
+        const barW = groupW * 0.25;
+
+        let maxV = 0;
+        results.forEach(r => { maxV = Math.max(maxV, Math.abs(r.alloc), Math.abs(r.selec), Math.abs(r.inter)); });
+        maxV = Math.max(maxV, 0.005) * 1.2;
+
+        const yScale = v => pad.t + ch/2 - (v / maxV) * (ch/2);
+        const zeroY = pad.t + ch/2;
+
+        // grid
+        ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+        ctx.lineWidth = 1;
+        for (let i = -4; i <= 4; i++) {
+            const y = zeroY - (i/4) * (ch/2);
+            ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(W-pad.r, y); ctx.stroke();
+        }
+        // zero line
+        ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+        ctx.beginPath(); ctx.moveTo(pad.l, zeroY); ctx.lineTo(W-pad.r, zeroY); ctx.stroke();
+
+        // y axis labels
+        ctx.fillStyle = '#94a3b8'; ctx.font = '11px monospace'; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+        for (let i = -4; i <= 4; i++) {
+            const v = (i/4) * maxV;
+            ctx.fillText(pct(v,1), pad.l - 6, zeroY - (i/4)*(ch/2));
+        }
+
+        const barColors = [COLORS.blue, COLORS.orange, COLORS.purple];
+        const labels = ['配置','选择','交互'];
+
+        for (let i = 0; i < n; i++) {
+            const cx = pad.l + groupW * i + groupW/2;
+            const vals = [results[i].alloc, results[i].selec, results[i].inter];
+            for (let j = 0; j < 3; j++) {
+                const x = cx - barW*1.5 + j*barW;
+                const y0 = zeroY;
+                const y1 = yScale(vals[j]);
+                ctx.fillStyle = barColors[j];
+                ctx.globalAlpha = 0.85;
+                ctx.fillRect(x, Math.min(y0,y1), barW-2, Math.abs(y1-y0));
+                ctx.globalAlpha = 1;
+            }
+            // sector label
+            ctx.fillStyle = '#a8a8b8'; ctx.font = '11px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+            ctx.fillText(sectors[i], cx, H - pad.b + 6);
+        }
+
+        // legend
+        for (let j = 0; j < 3; j++) {
+            const lx = pad.l + j * 80;
+            ctx.fillStyle = barColors[j]; ctx.fillRect(lx, H-18, 12, 12);
+            ctx.fillStyle = '#a8a8b8'; ctx.font = '11px sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+            ctx.fillText(labels[j], lx + 16, H-12);
+        }
+    }
+
+    function drawPie(alloc, selec, inter) {
+        const ctx = getCtx('brinsonPie');
+        if (!ctx) return;
+        const W = ctx.W, H = ctx.H;
+        ctx.clearRect(0,0,W,H);
+
+        const vals = [Math.abs(alloc), Math.abs(selec), Math.abs(inter)];
+        const total = vals.reduce((a,b)=>a+b, 0) || 1;
+        const colors = [COLORS.blue, COLORS.orange, COLORS.purple];
+        const labels = ['配置效应','选择效应','交互效应'];
+        const origVals = [alloc, selec, inter];
+
+        const cx = W/2, cy = H/2 - 10, r = Math.min(W,H)*0.32;
+
+        let angle = -Math.PI/2;
+        for (let i = 0; i < 3; i++) {
+            const sweep = (vals[i] / total) * 2 * Math.PI;
+            ctx.beginPath();
+            ctx.moveTo(cx, cy);
+            ctx.arc(cx, cy, r, angle, angle + sweep);
+            ctx.closePath();
+            ctx.fillStyle = colors[i];
+            ctx.globalAlpha = 0.85;
+            ctx.fill();
+            ctx.globalAlpha = 1;
+
+            // label
+            const mid = angle + sweep/2;
+            const lx = cx + Math.cos(mid) * (r * 0.65);
+            const ly = cy + Math.sin(mid) * (r * 0.65);
+            ctx.fillStyle = '#fff'; ctx.font = 'bold 12px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+            if (vals[i]/total > 0.08) ctx.fillText(pct(origVals[i]), lx, ly);
+
+            angle += sweep;
+        }
+
+        // legend
+        for (let i = 0; i < 3; i++) {
+            const lx = W/2 - 100 + i * 90;
+            const ly = H - 20;
+            ctx.fillStyle = colors[i]; ctx.fillRect(lx, ly, 12, 12);
+            ctx.fillStyle = '#a8a8b8'; ctx.font = '11px sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+            ctx.fillText(labels[i], lx+16, ly+6);
+        }
+
+        // center total
+        ctx.fillStyle = '#e8e8e8'; ctx.font = 'bold 16px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText('主动收益', cx, cy - 10);
+        const activeReturn = alloc + selec + inter;
+        ctx.fillStyle = activeReturn >= 0 ? COLORS.green : COLORS.red;
+        ctx.font = 'bold 18px monospace';
+        ctx.fillText(pct(activeReturn), cx, cy + 12);
+    }
+
+    function init() { buildTable(); update(); }
+    return { init, update };
+})();
+
+/* ================================================================
+   2. FACTOR ATTRIBUTION
+   ================================================================ */
+const FactorAttr = (() => {
+    const factorNames = ['市场','规模','价值','动量','盈利','投资'];
+    const factorKeys = ['market','size','value','momentum','profitability','investment'];
+    const fColors = [COLORS.indigo, '#f59e0b', COLORS.emerald, COLORS.red, '#8b5cf6', COLORS.cyan];
+
+    let portfolioReturns = [];
+    let factorReturnsData = {};
+    let betas = [];
+    let alphaVal = 0;
+
+    function generateData() {
+        const seed = FU ? FU.seededRandom(88) : Math.random;
+        const rng2 = typeof seed === 'function' ? seed : (() => Math.random());
+        const T = 252;
+
+        if (FU) {
+            const fd = FU.generateFactorReturns(T, { periodsPerYear: 252, rng: rng2 });
+            factorReturnsData = fd;
+        } else {
+            factorKeys.forEach(k => { factorReturnsData[k] = Array.from({length:T}, () => (Math.random()-0.5)*0.02); });
+        }
+
+        betas = [1.05, 0.25, 0.35, -0.15, 0.20, 0.10];
+        alphaVal = 0.0002;
+
+        portfolioReturns = [];
+        for (let t = 0; t < T; t++) {
+            let r = alphaVal;
+            for (let k = 0; k < factorKeys.length; k++) {
+                r += betas[k] * factorReturnsData[factorKeys[k]][t];
+            }
+            r += (FU ? FU.normalRandom(rng2) : (Math.random()-0.5)*2) * 0.005;
+            portfolioReturns.push(r);
+        }
+    }
+
+    function getPeriodRange(p) {
+        const ranges = [[0,252],[0,126],[126,252],[0,63],[63,126],[126,189],[189,252]];
+        return ranges[p] || ranges[0];
+    }
+
+    function update() {
+        const period = parseInt(document.getElementById('factorPeriod').value);
+        const [s, e] = getPeriodRange(period);
+        const pRet = portfolioReturns.slice(s, e);
+        const totalRet = pRet.reduce((a,b) => a+b, 0);
+
+        const contributions = [];
+        for (let k = 0; k < factorKeys.length; k++) {
+            const fRet = factorReturnsData[factorKeys[k]].slice(s, e);
+            contributions.push(betas[k] * fRet.reduce((a,b) => a+b, 0));
+        }
+        const factorTotal = contributions.reduce((a,b)=>a+b, 0);
+        const residual = totalRet - factorTotal;
+
+        // summary cards
+        const sumEl = document.getElementById('factorSummary');
+        sumEl.innerHTML = `
+            <div class="summary-card"><div class="label">组合总收益</div><div class="value ${totalRet>=0?'positive':'negative'}">${pct(totalRet)}</div></div>
+            <div class="summary-card"><div class="label">因子贡献</div><div class="value ${factorTotal>=0?'positive':'negative'}">${pct(factorTotal)}</div></div>
+            <div class="summary-card"><div class="label">Alpha + 残差</div><div class="value ${residual>=0?'positive':'negative'}">${pct(residual)}</div></div>
+        `;
+
+        drawWaterfall(totalRet, contributions, residual);
+        drawStacked();
+    }
+
+    function drawWaterfall(totalRet, contributions, residual) {
+        const ctx = getCtx('waterfallChart');
+        if (!ctx) return;
+        const W = ctx.W, H = ctx.H;
+        const pad = {t:30, r:30, b:60, l:70};
+        ctx.clearRect(0,0,W,H);
+
+        const labels = ['总收益', ...factorNames, 'Alpha'];
+        const vals = [totalRet, ...contributions.map(c => -c), -residual];
+        const n = labels.length;
+
+        let running = totalRet;
+        const bars = [{start: 0, end: totalRet, val: totalRet}];
+        for (let i = 1; i < n; i++) {
+            const next = running + vals[i];
+            bars.push({start: running, end: next, val: vals[i]});
+            running = next;
+        }
+
+        let minV = 0, maxV = 0;
+        bars.forEach(b => { minV = Math.min(minV, b.start, b.end); maxV = Math.max(maxV, b.start, b.end); });
+        const range = (maxV - minV) || 0.01;
+        minV -= range * 0.1; maxV += range * 0.1;
+
+        const cw = W - pad.l - pad.r, ch = H - pad.t - pad.b;
+        const yScale = v => pad.t + ch * (1 - (v - minV) / (maxV - minV));
+        const barW = cw / n * 0.6;
+
+        // grid
+        ctx.strokeStyle = 'rgba(255,255,255,0.06)'; ctx.lineWidth = 1;
+        for (let i = 0; i <= 5; i++) {
+            const v = minV + (maxV-minV)*i/5;
+            const y = yScale(v);
+            ctx.beginPath(); ctx.moveTo(pad.l,y); ctx.lineTo(W-pad.r,y); ctx.stroke();
+            ctx.fillStyle='#94a3b8'; ctx.font='11px monospace'; ctx.textAlign='right'; ctx.textBaseline='middle';
+            ctx.fillText(pct(v,1), pad.l-6, y);
+        }
+
+        const allColors = [COLORS.green, ...fColors, COLORS.orange];
+        for (let i = 0; i < n; i++) {
+            const cx = pad.l + (cw/n)*i + (cw/n)/2;
+            const y1 = yScale(bars[i].start);
+            const y2 = yScale(bars[i].end);
+            ctx.fillStyle = i === 0 ? COLORS.green : (i === n-1 ? COLORS.orange : fColors[i-1]);
+            ctx.globalAlpha = 0.85;
+            ctx.fillRect(cx - barW/2, Math.min(y1,y2), barW, Math.abs(y2-y1) || 2);
+            ctx.globalAlpha = 1;
+
+            // connector
+            if (i > 0 && i < n-1) {
+                ctx.strokeStyle = 'rgba(255,255,255,0.15)'; ctx.setLineDash([3,3]);
+                ctx.beginPath(); ctx.moveTo(cx + barW/2, y2); ctx.lineTo(cx + cw/n - barW/2, y2); ctx.stroke();
+                ctx.setLineDash([]);
+            }
+
+            // value label
+            ctx.fillStyle = '#e8e8e8'; ctx.font = '10px monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+            ctx.fillText(pct(i===0? bars[i].val : -bars[i].val, 2), cx, Math.min(y1,y2) - 3);
+
+            // sector label
+            ctx.fillStyle = '#a8a8b8'; ctx.font = '11px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+            ctx.save(); ctx.translate(cx, H - pad.b + 6); ctx.rotate(-0.3);
+            ctx.fillText(labels[i], 0, 0);
+            ctx.restore();
+        }
+    }
+
+    function drawStacked() {
+        const ctx = getCtx('stackedBar');
+        if (!ctx) return;
+        const W = ctx.W, H = ctx.H;
+        const pad = {t:20, r:20, b:40, l:60};
+        ctx.clearRect(0,0,W,H);
+
+        const months = 12;
+        const perMonth = Math.floor(252/months);
+        const monthContribs = [];
+        for (let m = 0; m < months; m++) {
+            const s = m * perMonth, e = Math.min(s + perMonth, 252);
+            const contribs = [];
+            for (let k = 0; k < factorKeys.length; k++) {
+                let c = 0;
+                for (let t = s; t < e; t++) c += betas[k] * factorReturnsData[factorKeys[k]][t];
+                contribs.push(c);
+            }
+            monthContribs.push(contribs);
+        }
+
+        let maxPos = 0, maxNeg = 0;
+        monthContribs.forEach(mc => {
+            let pos = 0, neg = 0;
+            mc.forEach(v => { if(v>0) pos+=v; else neg+=v; });
+            maxPos = Math.max(maxPos, pos); maxNeg = Math.min(maxNeg, neg);
+        });
+        const range = (maxPos - maxNeg) || 0.01;
+        maxPos += range*0.1; maxNeg -= range*0.1;
+
+        const cw = W - pad.l - pad.r, ch = H - pad.t - pad.b;
+        const yScale = v => pad.t + ch * (1 - (v - maxNeg)/(maxPos - maxNeg));
+        const barW = cw / months * 0.7;
+        const zeroY = yScale(0);
+
+        // grid
+        ctx.strokeStyle = 'rgba(255,255,255,0.06)'; ctx.lineWidth=1;
+        for (let i=0;i<=4;i++) { const v=maxNeg+(maxPos-maxNeg)*i/4; const y=yScale(v); ctx.beginPath();ctx.moveTo(pad.l,y);ctx.lineTo(W-pad.r,y);ctx.stroke(); ctx.fillStyle='#94a3b8';ctx.font='11px monospace';ctx.textAlign='right';ctx.textBaseline='middle';ctx.fillText(pct(v,1),pad.l-6,y);}
+        ctx.strokeStyle='rgba(255,255,255,0.2)'; ctx.beginPath();ctx.moveTo(pad.l,zeroY);ctx.lineTo(W-pad.r,zeroY);ctx.stroke();
+
+        for (let m = 0; m < months; m++) {
+            const cx = pad.l + (cw/months)*m + (cw/months)/2;
+            let posY = zeroY, negY = zeroY;
+
+            for (let k = 0; k < factorKeys.length; k++) {
+                const v = monthContribs[m][k];
+                ctx.fillStyle = fColors[k]; ctx.globalAlpha = 0.8;
+                if (v >= 0) {
+                    const h = (v / (maxPos-maxNeg)) * ch;
+                    ctx.fillRect(cx - barW/2, posY - h, barW, h);
+                    posY -= h;
+                } else {
+                    const h = (-v / (maxPos-maxNeg)) * ch;
+                    ctx.fillRect(cx - barW/2, negY, barW, h);
+                    negY += h;
+                }
+            }
+            ctx.globalAlpha = 1;
+            ctx.fillStyle='#a8a8b8';ctx.font='11px sans-serif';ctx.textAlign='center';ctx.textBaseline='top';
+            ctx.fillText('M'+(m+1), cx, H-pad.b+4);
+        }
+
+        // legend
+        for (let k = 0; k < factorNames.length; k++) {
+            const lx = pad.l + k * 70;
+            ctx.fillStyle = fColors[k]; ctx.fillRect(lx, H-14, 10, 10);
+            ctx.fillStyle='#a8a8b8'; ctx.font='10px sans-serif'; ctx.textAlign='left'; ctx.textBaseline='middle';
+            ctx.fillText(factorNames[k], lx+14, H-9);
+        }
+    }
+
+    function init() {
+        generateData();
+        update();
+        document.getElementById('factorPeriod').addEventListener('change', update);
+    }
+    return { init, update };
+})();
+
+/* ================================================================
+   3. RISK ATTRIBUTION
+   ================================================================ */
+const RiskAttr = (() => {
+    const factorNames = ['市场','规模','价值','动量'];
+    const fColors = [COLORS.indigo, '#f59e0b', COLORS.emerald, COLORS.red];
+    const annualVols = [0.16, 0.10, 0.10, 0.14];
+    const corrMatrix = [
+        [1, 0.2, -0.15, -0.1],
+        [0.2, 1, 0.1, -0.05],
+        [-0.15, 0.1, 1, -0.3],
+        [-0.1, -0.05, -0.3, 1]
+    ];
+    const specificVol = 0.18;
+
+    function getBetas() {
+        return [
+            parseFloat(document.getElementById('riskBetaMkt').value)/100,
+            parseFloat(document.getElementById('riskBetaSize').value)/100,
+            parseFloat(document.getElementById('riskBetaVal').value)/100,
+            parseFloat(document.getElementById('riskBetaMom').value)/100
+        ];
+    }
+
+    function computeRisk(betas) {
+        const K = 4;
+        const covMatrix = [];
+        for (let i=0;i<K;i++){covMatrix[i]=[];for(let j=0;j<K;j++){covMatrix[i][j]=corrMatrix[i][j]*annualVols[i]*annualVols[j];}}
+
+        let factorVar = 0;
+        for(let i=0;i<K;i++) for(let j=0;j<K;j++) factorVar += betas[i]*betas[j]*covMatrix[i][j];
+        const specVar = specificVol * specificVol;
+        const totalVar = factorVar + specVar;
+
+        const factorContribs = [];
+        for (let i=0;i<K;i++) {
+            let c = 0;
+            for(let j=0;j<K;j++) c += betas[i]*betas[j]*covMatrix[i][j];
+            factorContribs.push(c);
+        }
+
+        const marginal = [];
+        const totalVol = Math.sqrt(totalVar);
+        for (let i=0;i<K;i++) {
+            let mc = 0;
+            for(let j=0;j<K;j++) mc += betas[j]*covMatrix[i][j];
+            marginal.push(mc / totalVol);
+        }
+
+        return { totalVar, factorVar, specVar, factorContribs, marginal, totalVol };
+    }
+
+    function update() {
+        const betas = getBetas();
+        document.getElementById('riskBetaMktVal').textContent = betas[0].toFixed(2);
+        document.getElementById('riskBetaSizeVal').textContent = betas[1].toFixed(2);
+        document.getElementById('riskBetaValVal').textContent = betas[2].toFixed(2);
+        document.getElementById('riskBetaMomVal').textContent = betas[3].toFixed(2);
+
+        const risk = computeRisk(betas);
+
+        const sumEl = document.getElementById('riskSummary');
+        sumEl.innerHTML = `
+            <div class="summary-card"><div class="label">总波动率</div><div class="value">${pct(risk.totalVol)}</div></div>
+            <div class="summary-card"><div class="label">因子风险占比</div><div class="value">${pct(risk.factorVar/risk.totalVar)}</div></div>
+            <div class="summary-card"><div class="label">特异风险占比</div><div class="value">${pct(risk.specVar/risk.totalVar)}</div></div>
+            <div class="summary-card"><div class="label">总方差</div><div class="value">${(risk.totalVar*10000).toFixed(1)} bps²</div></div>
+        `;
+
+        drawTreemap(risk);
+        drawMarginal(risk);
+    }
+
+    function drawTreemap(risk) {
+        const ctx = getCtx('riskTreemap');
+        if (!ctx) return;
+        const W = ctx.W, H = ctx.H;
+        ctx.clearRect(0,0,W,H);
+        const pad = 10;
+
+        const items = [];
+        for (let i=0;i<4;i++) items.push({name:factorNames[i], val:Math.abs(risk.factorContribs[i]), color:fColors[i], orig:risk.factorContribs[i]});
+        items.push({name:'特异风险', val:risk.specVar, color:COLORS.slate, orig:risk.specVar});
+        const total = items.reduce((s,it)=>s+it.val, 0) || 1;
+
+        // Simple treemap layout: horizontal slices
+        let y = pad;
+        const availW = W - 2*pad, availH = H - 2*pad;
+        items.sort((a,b) => b.val - a.val);
+
+        for (const item of items) {
+            const h = (item.val / total) * availH;
+            if (h < 2) continue;
+
+            ctx.fillStyle = item.color; ctx.globalAlpha = 0.7;
+            ctx.fillRect(pad, y, availW, h);
+            ctx.globalAlpha = 1;
+            ctx.strokeStyle = 'rgba(0,0,0,0.3)'; ctx.lineWidth = 1;
+            ctx.strokeRect(pad, y, availW, h);
+
+            if (h > 20) {
+                ctx.fillStyle = '#fff'; ctx.font = 'bold 13px sans-serif'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+                ctx.fillText(item.name + '  ' + pct(item.val/total,1), pad + 10, y + h/2);
+                ctx.textAlign = 'right';
+                ctx.font = '12px monospace';
+                ctx.fillText((item.orig >= 0 ? '+' : '') + (item.orig*10000).toFixed(1) + ' bps²', W - pad - 10, y + h/2);
+            }
+            y += h;
+        }
+    }
+
+    function drawMarginal(risk) {
+        const ctx = getCtx('marginalRisk');
+        if (!ctx) return;
+        const W = ctx.W, H = ctx.H;
+        const pad = {t:20, r:20, b:50, l:60};
+        ctx.clearRect(0,0,W,H);
+
+        const labels = [...factorNames];
+        const vals = risk.marginal;
+        const n = labels.length;
+        let maxV = 0;
+        vals.forEach(v => maxV = Math.max(maxV, Math.abs(v)));
+        maxV = Math.max(maxV, 0.01) * 1.2;
+
+        const cw = W-pad.l-pad.r, ch = H-pad.t-pad.b;
+        const zeroY = pad.t + ch/2;
+        const barW = cw/n * 0.5;
+        const yScale = v => zeroY - (v/maxV)*(ch/2);
+
+        ctx.strokeStyle='rgba(255,255,255,0.06)';ctx.lineWidth=1;
+        for(let i=-4;i<=4;i++){const y=zeroY-(i/4)*(ch/2);ctx.beginPath();ctx.moveTo(pad.l,y);ctx.lineTo(W-pad.r,y);ctx.stroke();}
+        ctx.strokeStyle='rgba(255,255,255,0.2)';ctx.beginPath();ctx.moveTo(pad.l,zeroY);ctx.lineTo(W-pad.r,zeroY);ctx.stroke();
+        ctx.fillStyle='#94a3b8';ctx.font='11px monospace';ctx.textAlign='right';ctx.textBaseline='middle';
+        for(let i=-4;i<=4;i++){ctx.fillText(((i/4)*maxV*100).toFixed(1)+'%', pad.l-6, zeroY-(i/4)*(ch/2));}
+
+        for (let i=0;i<n;i++) {
+            const cx = pad.l + (cw/n)*i + (cw/n)/2;
+            const y1 = zeroY, y2 = yScale(vals[i]);
+            ctx.fillStyle = fColors[i]; ctx.globalAlpha = 0.85;
+            ctx.fillRect(cx-barW/2, Math.min(y1,y2), barW, Math.abs(y2-y1)||2);
+            ctx.globalAlpha = 1;
+            ctx.fillStyle='#e8e8e8';ctx.font='10px monospace';ctx.textAlign='center';ctx.textBaseline= vals[i]>=0?'bottom':'top';
+            ctx.fillText(pct(vals[i]), cx, vals[i]>=0? Math.min(y1,y2)-3 : Math.max(y1,y2)+3);
+            ctx.fillStyle='#a8a8b8';ctx.font='12px sans-serif';ctx.textAlign='center';ctx.textBaseline='top';
+            ctx.fillText(labels[i], cx, H-pad.b+6);
+        }
+
+        ctx.fillStyle='#a8a8b8';ctx.font='11px sans-serif';ctx.textAlign='center';ctx.textBaseline='top';
+        ctx.fillText('边际风险贡献 (MCTR)', W/2, H-14);
+    }
+
+    function init() {
+        update();
+        ['riskBetaMkt','riskBetaSize','riskBetaVal','riskBetaMom'].forEach(id => {
+            document.getElementById(id).addEventListener('input', update);
+        });
+    }
+    return { init, update };
+})();
+
+/* ================================================================
+   4. ALPHA ANALYSIS
+   ================================================================ */
+const AlphaAnalysis = (() => {
+    let portfolioRets = [], benchmarkRets = [];
+    const T = 252, window = 60;
+
+    function generateData() {
+        const rng2 = FU ? FU.seededRandom(77) : null;
+        const nr = () => FU ? FU.normalRandom(rng2) : (Math.random()-0.5)*2.5;
+        benchmarkRets = []; portfolioRets = [];
+        for (let t=0;t<T;t++) {
+            const bm = 0.0003 + 0.01 * nr();
+            benchmarkRets.push(bm);
+            portfolioRets.push(bm + 0.0002 + 0.004 * nr());
+        }
+    }
+
+    function computeRollingAlpha() {
+        const alphas = [], upper = [], lower = [];
+        for (let i=0;i<T;i++) {
+            if (i < window-1) { alphas.push(NaN); upper.push(NaN); lower.push(NaN); continue; }
+            const pSlice = portfolioRets.slice(i-window+1, i+1);
+            const bSlice = benchmarkRets.slice(i-window+1, i+1);
+            const active = pSlice.map((p,j) => p - bSlice[j]);
+            const m = FU ? FU.mean(active) : active.reduce((a,b)=>a+b,0)/active.length;
+            const s = FU ? FU.std(active) : Math.sqrt(active.reduce((a,b)=>a+(b-m)*(b-m),0)/active.length);
+            const se = s / Math.sqrt(window);
+            alphas.push(m * 252);
+            upper.push((m + 1.96*se) * 252);
+            lower.push((m - 1.96*se) * 252);
+        }
+        return {alphas, upper, lower};
+    }
+
+    function update() {
+        const activeRets = portfolioRets.map((p,i) => p - benchmarkRets[i]);
+        const meanActive = FU ? FU.mean(activeRets) : activeRets.reduce((a,b)=>a+b,0)/activeRets.length;
+        const annAlpha = meanActive * 252;
+        const stdActive = FU ? FU.std(activeRets) : Math.sqrt(activeRets.reduce((a,b)=>a+(b-meanActive)*(b-meanActive),0)/activeRets.length);
+        const te = stdActive * Math.sqrt(252);
+        const ir = te > 0 ? annAlpha / te : 0;
+        const hitRate = activeRets.filter(a => a > 0).length / activeRets.length;
+        const tStat = (meanActive / (stdActive/Math.sqrt(T)));
+
+        const sumEl = document.getElementById('alphaSummary');
+        sumEl.innerHTML = `
+            <div class="summary-card"><div class="label">年化 Alpha</div><div class="value ${annAlpha>=0?'positive':'negative'}">${pct(annAlpha)}</div></div>
+            <div class="summary-card"><div class="label">跟踪误差</div><div class="value">${pct(te)}</div></div>
+            <div class="summary-card"><div class="label">信息比率</div><div class="value ${ir>=0?'positive':'negative'}">${ir.toFixed(3)}</div></div>
+            <div class="summary-card"><div class="label">t 统计量</div><div class="value ${Math.abs(tStat)>1.96?'positive':'negative'}">${tStat.toFixed(2)}</div></div>
+            <div class="summary-card"><div class="label">胜率</div><div class="value ${hitRate>0.5?'positive':'negative'}">${pct(hitRate,1)}</div></div>
+        `;
+
+        drawRollingAlpha();
+        drawBootstrap(activeRets, annAlpha);
+        drawHitRate(activeRets, ir);
+    }
+
+    function drawRollingAlpha() {
+        const ctx = getCtx('rollingAlpha');
+        if(!ctx) return;
+        const W=ctx.W, H=ctx.H;
+        const pad={t:20,r:20,b:35,l:60};
+        ctx.clearRect(0,0,W,H);
+
+        const {alphas, upper, lower} = computeRollingAlpha();
+        const valid = alphas.filter(a => !isNaN(a));
+        let minV = Infinity, maxV = -Infinity;
+        for(let i=0;i<alphas.length;i++) {
+            if(isNaN(alphas[i])) continue;
+            minV=Math.min(minV, lower[i]); maxV=Math.max(maxV, upper[i]);
+        }
+        const range = (maxV-minV)||0.01; minV-=range*0.1; maxV+=range*0.1;
+
+        const cw=W-pad.l-pad.r, ch=H-pad.t-pad.b;
+        const xScale = i => pad.l + (i/T)*cw;
+        const yScale = v => pad.t + ch*(1-(v-minV)/(maxV-minV));
+
+        // grid
+        ctx.strokeStyle='rgba(255,255,255,0.06)';ctx.lineWidth=1;
+        for(let i=0;i<=4;i++){const v=minV+(maxV-minV)*i/4;const y=yScale(v);ctx.beginPath();ctx.moveTo(pad.l,y);ctx.lineTo(W-pad.r,y);ctx.stroke();ctx.fillStyle='#94a3b8';ctx.font='11px monospace';ctx.textAlign='right';ctx.textBaseline='middle';ctx.fillText(pct(v,1),pad.l-6,y);}
+
+        // zero line
+        if(minV<=0 && maxV>=0){ctx.strokeStyle='rgba(255,255,255,0.2)';ctx.beginPath();ctx.moveTo(pad.l,yScale(0));ctx.lineTo(W-pad.r,yScale(0));ctx.stroke();}
+
+        // confidence band
+        ctx.fillStyle='rgba(22,199,154,0.1)';
+        ctx.beginPath();
+        let started=false;
+        for(let i=0;i<T;i++){if(isNaN(upper[i]))continue;if(!started){ctx.moveTo(xScale(i),yScale(upper[i]));started=true;}else ctx.lineTo(xScale(i),yScale(upper[i]));}
+        for(let i=T-1;i>=0;i--){if(isNaN(lower[i]))continue;ctx.lineTo(xScale(i),yScale(lower[i]));}
+        ctx.closePath();ctx.fill();
+
+        // upper/lower lines
+        ctx.strokeStyle='rgba(22,199,154,0.3)';ctx.lineWidth=1;ctx.setLineDash([4,4]);
+        ctx.beginPath();started=false;
+        for(let i=0;i<T;i++){if(isNaN(upper[i]))continue;if(!started){ctx.moveTo(xScale(i),yScale(upper[i]));started=true;}else ctx.lineTo(xScale(i),yScale(upper[i]));}
+        ctx.stroke();
+        ctx.beginPath();started=false;
+        for(let i=0;i<T;i++){if(isNaN(lower[i]))continue;if(!started){ctx.moveTo(xScale(i),yScale(lower[i]));started=true;}else ctx.lineTo(xScale(i),yScale(lower[i]));}
+        ctx.stroke();ctx.setLineDash([]);
+
+        // alpha line
+        ctx.strokeStyle=COLORS.green;ctx.lineWidth=2;
+        ctx.beginPath();started=false;
+        for(let i=0;i<T;i++){if(isNaN(alphas[i]))continue;if(!started){ctx.moveTo(xScale(i),yScale(alphas[i]));started=true;}else ctx.lineTo(xScale(i),yScale(alphas[i]));}
+        ctx.stroke();
+
+        // x labels
+        ctx.fillStyle='#a8a8b8';ctx.font='11px sans-serif';ctx.textAlign='center';ctx.textBaseline='top';
+        for(let m=0;m<12;m++){const d=Math.floor(m*252/12);ctx.fillText('M'+(m+1),xScale(d),H-pad.b+4);}
+    }
+
+    function drawBootstrap(activeRets, realAlpha) {
+        const ctx = getCtx('bootstrapChart');
+        if(!ctx) return;
+        const W=ctx.W, H=ctx.H;
+        const pad={t:20,r:20,b:40,l:50};
+        ctx.clearRect(0,0,W,H);
+
+        // bootstrap under null (shuffle active returns)
+        const nBoot = 2000, nBins = 40;
+        const bootAlphas = [];
+        const centered = activeRets.map(a => a - (FU?FU.mean(activeRets):activeRets.reduce((s,v)=>s+v,0)/activeRets.length));
+        const rng2 = FU ? FU.seededRandom(99) : null;
+        for(let b=0;b<nBoot;b++){
+            let s=0;
+            for(let i=0;i<centered.length;i++){
+                const idx = Math.floor((rng2?rng2():Math.random())*centered.length);
+                s += centered[idx];
+            }
+            bootAlphas.push((s/centered.length)*252);
+        }
+
+        let bMin=Infinity,bMax=-Infinity;
+        bootAlphas.forEach(a=>{bMin=Math.min(bMin,a);bMax=Math.max(bMax,a);});
+        const binW=(bMax-bMin)/nBins;
+        const bins=new Array(nBins).fill(0);
+        bootAlphas.forEach(a=>{const idx=Math.min(nBins-1,Math.floor((a-bMin)/binW));bins[idx]++;});
+        const maxBin=Math.max(...bins);
+
+        const cw=W-pad.l-pad.r, ch=H-pad.t-pad.b;
+        const barW2=cw/nBins;
+
+        // bars
+        for(let i=0;i<nBins;i++){
+            const x=pad.l+i*barW2;
+            const h=(bins[i]/maxBin)*ch;
+            const binCenter=bMin+(i+0.5)*binW;
+            ctx.fillStyle = binCenter > realAlpha ? 'rgba(255,82,82,0.4)' : 'rgba(79,195,247,0.5)';
+            ctx.fillRect(x,pad.t+ch-h,barW2-1,h);
+        }
+
+        // real alpha line
+        const alphaX = pad.l + ((realAlpha-bMin)/(bMax-bMin))*cw;
+        ctx.strokeStyle=COLORS.green;ctx.lineWidth=2;ctx.setLineDash([5,3]);
+        ctx.beginPath();ctx.moveTo(alphaX,pad.t);ctx.lineTo(alphaX,pad.t+ch);ctx.stroke();ctx.setLineDash([]);
+        ctx.fillStyle=COLORS.green;ctx.font='bold 11px sans-serif';ctx.textAlign='center';ctx.textBaseline='bottom';
+        ctx.fillText('实际α='+pct(realAlpha,1),alphaX,pad.t-2);
+
+        // p-value
+        const pValue = bootAlphas.filter(a=>a>=realAlpha).length/nBoot;
+        ctx.fillStyle='#e8e8e8';ctx.font='12px sans-serif';ctx.textAlign='right';ctx.textBaseline='top';
+        ctx.fillText('p-value: '+(pValue).toFixed(3),W-pad.r,pad.t+4);
+        ctx.fillText(pValue<0.05?'显著 (p<0.05)':'不显著', W-pad.r, pad.t+20);
+
+        // x axis
+        ctx.fillStyle='#a8a8b8';ctx.font='10px monospace';ctx.textAlign='center';ctx.textBaseline='top';
+        for(let i=0;i<=4;i++){const v=bMin+(bMax-bMin)*i/4;const x=pad.l+(i/4)*cw;ctx.fillText(pct(v,1),x,H-pad.b+4);}
+        ctx.fillStyle='#a8a8b8';ctx.font='11px sans-serif';ctx.textAlign='center';ctx.textBaseline='top';
+        ctx.fillText('零假设下的 Alpha 分布',W/2,H-14);
+    }
+
+    function drawHitRate(activeRets, ir) {
+        const ctx = getCtx('hitRateChart');
+        if(!ctx) return;
+        const W=ctx.W, H=ctx.H;
+        const pad={t:30,r:20,b:40,l:20};
+        ctx.clearRect(0,0,W,H);
+
+        // Left side: hit rate donut
+        const hitRate = activeRets.filter(a=>a>0).length/activeRets.length;
+        const cx1=W*0.25, cy1=H/2, r=Math.min(W*0.2, H*0.35);
+
+        // donut
+        ctx.beginPath();ctx.arc(cx1,cy1,r,-Math.PI/2,-Math.PI/2+hitRate*2*Math.PI);
+        ctx.strokeStyle=COLORS.green;ctx.lineWidth=16;ctx.lineCap='round';ctx.stroke();
+        ctx.beginPath();ctx.arc(cx1,cy1,r,-Math.PI/2+hitRate*2*Math.PI,-Math.PI/2+2*Math.PI);
+        ctx.strokeStyle='rgba(255,82,82,0.5)';ctx.lineWidth=16;ctx.lineCap='round';ctx.stroke();
+
+        ctx.fillStyle='#e8e8e8';ctx.font='bold 20px monospace';ctx.textAlign='center';ctx.textBaseline='middle';
+        ctx.fillText(pct(hitRate,1),cx1,cy1);
+        ctx.font='12px sans-serif';ctx.fillStyle='#a8a8b8';
+        ctx.fillText('胜率',cx1,cy1+20);
+
+        // Right side: IR gauge
+        const cx2=W*0.7, cy2=H/2;
+        ctx.fillStyle='#a8a8b8';ctx.font='12px sans-serif';ctx.textAlign='center';ctx.textBaseline='bottom';
+        ctx.fillText('信息比率',cx2,cy2-r-10);
+
+        // gauge arc
+        const gaugeR = r*0.9;
+        ctx.beginPath();ctx.arc(cx2,cy2+10,gaugeR,Math.PI,0);ctx.strokeStyle='rgba(255,255,255,0.1)';ctx.lineWidth=12;ctx.stroke();
+
+        // fill based on IR (map -2..2 to 0..PI)
+        const irClamped = Math.max(-2,Math.min(2,ir));
+        const irAngle = Math.PI * ((irClamped+2)/4);
+        const irColor = ir >= 0.5 ? COLORS.green : ir >= 0 ? COLORS.yellow : COLORS.red;
+        ctx.beginPath();ctx.arc(cx2,cy2+10,gaugeR,Math.PI,Math.PI+irAngle);ctx.strokeStyle=irColor;ctx.lineWidth=12;ctx.lineCap='round';ctx.stroke();
+
+        ctx.fillStyle='#e8e8e8';ctx.font='bold 20px monospace';ctx.textAlign='center';ctx.textBaseline='middle';
+        ctx.fillText(ir.toFixed(3),cx2,cy2+10);
+
+        // IR CI
+        const irSe = 1/Math.sqrt(T);
+        ctx.font='11px sans-serif';ctx.fillStyle='#a8a8b8';
+        ctx.fillText('95% CI: ['+( ir-1.96*irSe).toFixed(2)+', '+(ir+1.96*irSe).toFixed(2)+']',cx2,cy2+35);
+
+        // labels
+        ctx.fillStyle='#6c6c7c';ctx.font='10px sans-serif';
+        ctx.textAlign='left'; ctx.fillText('-2',cx2-gaugeR-5,cy2+25);
+        ctx.textAlign='right'; ctx.fillText('+2',cx2+gaugeR+5,cy2+25);
+    }
+
+    function init(){ generateData(); update(); }
+    return { init, update };
+})();
+
+/* ================================================================
+   5. REPORT GENERATOR
+   ================================================================ */
+const Report = (() => {
+    const portfolios = {
+        growth: {
+            name:'成长基金', beta:1.15,
+            sectors: {wp:[30,25,5,15,10,3,5,7], wb:[20,15,12,18,12,8,10,5]},
+            factorBetas:[1.15, -0.1, -0.2, 0.35, 0.15, -0.05],
+            alpha: 0.0003
+        },
+        value: {
+            name:'价值基金', beta:0.85,
+            sectors: {wp:[20,10,15,10,15,10,12,8], wb:[20,15,12,18,12,8,10,5]},
+            factorBetas:[0.85, 0.3, 0.45, -0.2, 0.25, 0.15],
+            alpha: 0.0001
+        },
+        quant: {
+            name:'量化基金', beta:1.0,
+            sectors: {wp:[22,16,11,17,11,7,9,7], wb:[20,15,12,18,12,8,10,5]},
+            factorBetas:[1.0, 0.05, 0.1, 0.15, 0.1, 0.05],
+            alpha: 0.00015
+        }
+    };
+    const sectorNames = ['金融','科技','医药','消费','工业','能源','材料','公用'];
+    const factorNames = ['市场','规模','价值','动量','盈利','投资'];
+    const fColors = [COLORS.indigo, '#f59e0b', COLORS.emerald, COLORS.red, '#8b5cf6', COLORS.cyan];
+
+    function generate() {
+        const key = document.getElementById('reportPortfolio').value;
+        const pf = portfolios[key];
+        const rng2 = FU ? FU.seededRandom(key==='growth'?10:key==='value'?20:30) : null;
+        const nr = () => FU ? FU.normalRandom(rng2) : (Math.random()-0.5)*2.5;
+        const T = 252;
+
+        // generate returns
+        const benchRets = [], portRets = [];
+        for(let t=0;t<T;t++){
+            const bm = 0.0003 + 0.01*nr();
+            benchRets.push(bm);
+            portRets.push(bm * pf.beta + pf.alpha + 0.005*nr());
+        }
+
+        const totalP = portRets.reduce((a,b)=>a+b,0);
+        const totalB = benchRets.reduce((a,b)=>a+b,0);
+        const activeRet = totalP - totalB;
+        const activeArr = portRets.map((p,i)=>p-benchRets[i]);
+        const m = FU?FU.mean(activeArr):activeArr.reduce((a,b)=>a+b,0)/activeArr.length;
+        const s = FU?FU.std(activeArr):Math.sqrt(activeArr.reduce((a,b)=>a+(b-m)*(b-m),0)/activeArr.length);
+        const te = s * Math.sqrt(252);
+        const ir = te>0 ? m*252/te : 0;
+
+        document.getElementById('reportSummary').innerHTML = `
+            <div class="summary-card"><div class="label">组合收益</div><div class="value ${totalP>=0?'positive':'negative'}">${pct(totalP)}</div></div>
+            <div class="summary-card"><div class="label">基准收益</div><div class="value">${pct(totalB)}</div></div>
+            <div class="summary-card"><div class="label">主动收益</div><div class="value ${activeRet>=0?'positive':'negative'}">${pct(activeRet)}</div></div>
+            <div class="summary-card"><div class="label">跟踪误差</div><div class="value">${pct(te)}</div></div>
+            <div class="summary-card"><div class="label">信息比率</div><div class="value ${ir>=0?'positive':'negative'}">${ir.toFixed(3)}</div></div>
+        `;
+
+        drawReportBrinson(pf, benchRets, nr);
+        drawReportFactor(pf, benchRets, portRets);
+        drawReportRolling(pf, benchRets, portRets);
+    }
+
+    function drawReportBrinson(pf, benchRets, nr) {
+        const ctx = getCtx('reportBrinson');
+        if(!ctx) return;
+        const W=ctx.W, H=ctx.H;
+        const pad={t:20,r:20,b:50,l:60};
+        ctx.clearRect(0,0,W,H);
+
+        // generate sector returns
+        const sectorRp = [], sectorRb = [];
+        for(let i=0;i<8;i++){
+            const base = 0.03 + nr()*0.05;
+            sectorRb.push(base);
+            sectorRp.push(base + (pf.sectors.wp[i]-pf.sectors.wb[i])/100 * 0.1 + nr()*0.02);
+        }
+
+        const wp = pf.sectors.wp.map(w=>w/100);
+        const wb = pf.sectors.wb.map(w=>w/100);
+        const rbTotal = wb.reduce((s,w,i) => s+w*sectorRb[i], 0);
+
+        const results = wp.map((w,i) => ({
+            alloc: (wp[i]-wb[i])*(sectorRb[i]-rbTotal),
+            selec: wb[i]*(sectorRp[i]-sectorRb[i]),
+            inter: (wp[i]-wb[i])*(sectorRp[i]-sectorRb[i])
+        }));
+
+        const n = 8;
+        const cw=W-pad.l-pad.r, ch=H-pad.t-pad.b;
+        const groupW = cw/n, barW = groupW*0.25;
+        let maxV=0;
+        results.forEach(r=>{maxV=Math.max(maxV,Math.abs(r.alloc),Math.abs(r.selec),Math.abs(r.inter));});
+        maxV = Math.max(maxV,0.005)*1.3;
+        const zeroY = pad.t+ch/2;
+
+        ctx.strokeStyle='rgba(255,255,255,0.06)';ctx.lineWidth=1;
+        for(let i=-3;i<=3;i++){const y=zeroY-(i/3)*(ch/2);ctx.beginPath();ctx.moveTo(pad.l,y);ctx.lineTo(W-pad.r,y);ctx.stroke();}
+        ctx.strokeStyle='rgba(255,255,255,0.2)';ctx.beginPath();ctx.moveTo(pad.l,zeroY);ctx.lineTo(W-pad.r,zeroY);ctx.stroke();
+        ctx.fillStyle='#94a3b8';ctx.font='10px monospace';ctx.textAlign='right';ctx.textBaseline='middle';
+        for(let i=-3;i<=3;i++){ctx.fillText(pct((i/3)*maxV,1),pad.l-4,zeroY-(i/3)*(ch/2));}
+
+        const barColors=[COLORS.blue, COLORS.orange, COLORS.purple];
+        for(let i=0;i<n;i++){
+            const cx=pad.l+groupW*i+groupW/2;
+            const vals=[results[i].alloc,results[i].selec,results[i].inter];
+            for(let j=0;j<3;j++){
+                const x=cx-barW*1.5+j*barW;
+                const y0=zeroY, y1=zeroY-(vals[j]/maxV)*(ch/2);
+                ctx.fillStyle=barColors[j];ctx.globalAlpha=0.8;
+                ctx.fillRect(x,Math.min(y0,y1),barW-1,Math.abs(y1-y0)||1);
+                ctx.globalAlpha=1;
+            }
+            ctx.fillStyle='#a8a8b8';ctx.font='10px sans-serif';ctx.textAlign='center';ctx.textBaseline='top';
+            ctx.fillText(sectorNames[i],cx,H-pad.b+4);
+        }
+        // legend
+        const lLabels=['配置','选择','交互'];
+        for(let j=0;j<3;j++){const lx=pad.l+j*65;ctx.fillStyle=barColors[j];ctx.fillRect(lx,H-16,10,10);ctx.fillStyle='#a8a8b8';ctx.font='10px sans-serif';ctx.textAlign='left';ctx.textBaseline='middle';ctx.fillText(lLabels[j],lx+14,H-11);}
+    }
+
+    function drawReportFactor(pf, benchRets, portRets) {
+        const ctx = getCtx('reportFactor');
+        if(!ctx)return;
+        const W=ctx.W, H=ctx.H;
+        const pad={t:25,r:20,b:55,l:65};
+        ctx.clearRect(0,0,W,H);
+
+        // simulate factor contributions
+        const rng3 = FU?FU.seededRandom(55):null;
+        const nr2 = ()=>FU?FU.normalRandom(rng3):(Math.random()-0.5)*2;
+        const totalRet = portRets.reduce((a,b)=>a+b,0);
+        const contributions = pf.factorBetas.map((b,i)=>b*(0.03+nr2()*0.02));
+        const factorTotal = contributions.reduce((a,b)=>a+b,0);
+        const alpha = totalRet - factorTotal;
+
+        const labels = ['总收益',...factorNames,'Alpha'];
+        const n = labels.length;
+        let running = totalRet;
+        const bars = [{s:0,e:totalRet}];
+        for(let i=0;i<contributions.length;i++){
+            const next=running-contributions[i];
+            bars.push({s:running,e:next});
+            running=next;
+        }
+        bars.push({s:running,e:0});
+
+        let minV=Infinity,maxV=-Infinity;
+        bars.forEach(b=>{minV=Math.min(minV,b.s,b.e);maxV=Math.max(maxV,b.s,b.e);});
+        const range=(maxV-minV)||0.01;minV-=range*0.15;maxV+=range*0.15;
+
+        const cw=W-pad.l-pad.r, ch=H-pad.t-pad.b;
+        const yScale=v=>pad.t+ch*(1-(v-minV)/(maxV-minV));
+        const barW2=cw/n*0.55;
+
+        ctx.strokeStyle='rgba(255,255,255,0.06)';ctx.lineWidth=1;
+        for(let i=0;i<=4;i++){const v=minV+(maxV-minV)*i/4;const y=yScale(v);ctx.beginPath();ctx.moveTo(pad.l,y);ctx.lineTo(W-pad.r,y);ctx.stroke();ctx.fillStyle='#94a3b8';ctx.font='10px monospace';ctx.textAlign='right';ctx.textBaseline='middle';ctx.fillText(pct(v,1),pad.l-4,y);}
+
+        const allColors=[COLORS.green,...fColors,COLORS.orange];
+        for(let i=0;i<n;i++){
+            const cx=pad.l+(cw/n)*i+(cw/n)/2;
+            const y1=yScale(bars[i].s), y2=yScale(bars[i].e);
+            ctx.fillStyle=allColors[i];ctx.globalAlpha=0.8;
+            ctx.fillRect(cx-barW2/2,Math.min(y1,y2),barW2,Math.abs(y2-y1)||2);
+            ctx.globalAlpha=1;
+            if(i>0&&i<n-1){ctx.strokeStyle='rgba(255,255,255,0.12)';ctx.setLineDash([3,3]);ctx.beginPath();ctx.moveTo(cx+barW2/2,y2);ctx.lineTo(cx+cw/n-barW2/2,y2);ctx.stroke();ctx.setLineDash([]);}
+            ctx.fillStyle='#a8a8b8';ctx.font='10px sans-serif';ctx.textAlign='center';ctx.textBaseline='top';
+            ctx.save();ctx.translate(cx,H-pad.b+4);ctx.rotate(-0.3);ctx.fillText(labels[i],0,0);ctx.restore();
+        }
+    }
+
+    function drawReportRolling(pf, benchRets, portRets) {
+        const ctx = getCtx('reportRolling');
+        if(!ctx) return;
+        const W=ctx.W, H=ctx.H;
+        const pad={t:20,r:20,b:40,l:60};
+        ctx.clearRect(0,0,W,H);
+
+        const T=252, win=40;
+        const rng4 = FU?FU.seededRandom(66):null;
+        const nr3=()=>FU?FU.normalRandom(rng4):(Math.random()-0.5)*2;
+
+        // generate rolling factor contributions
+        const nF=6;
+        const rollingContribs = []; // T arrays of nF values
+        for(let t=0;t<T;t++){
+            const c=[];
+            for(let k=0;k<nF;k++){
+                c.push(pf.factorBetas[k]*0.001*(1+0.5*nr3()));
+            }
+            rollingContribs.push(c);
+        }
+
+        // smooth with rolling window
+        const smoothed = [];
+        for(let t=0;t<T;t++){
+            const s=Math.max(0,t-win+1);
+            const vals = new Array(nF).fill(0);
+            for(let i=s;i<=t;i++) for(let k=0;k<nF;k++) vals[k]+=rollingContribs[i][k];
+            const len=t-s+1;
+            smoothed.push(vals.map(v=>v/len*252)); // annualize
+        }
+
+        // compute stacking
+        let maxV=0, minV=0;
+        smoothed.forEach(row=>{
+            let pos=0,neg=0;
+            row.forEach(v=>{if(v>=0)pos+=v;else neg+=v;});
+            maxV=Math.max(maxV,pos);minV=Math.min(minV,neg);
+        });
+        const range=(maxV-minV)||0.01;maxV+=range*0.1;minV-=range*0.1;
+
+        const cw=W-pad.l-pad.r, ch=H-pad.t-pad.b;
+        const xScale=t=>pad.l+(t/T)*cw;
+        const yScale=v=>pad.t+ch*(1-(v-minV)/(maxV-minV));
+        const zeroY = yScale(0);
+
+        // grid
+        ctx.strokeStyle='rgba(255,255,255,0.06)';ctx.lineWidth=1;
+        for(let i=0;i<=4;i++){const v=minV+(maxV-minV)*i/4;const y=yScale(v);ctx.beginPath();ctx.moveTo(pad.l,y);ctx.lineTo(W-pad.r,y);ctx.stroke();ctx.fillStyle='#94a3b8';ctx.font='10px monospace';ctx.textAlign='right';ctx.textBaseline='middle';ctx.fillText(pct(v,1),pad.l-6,y);}
+        ctx.strokeStyle='rgba(255,255,255,0.15)';ctx.beginPath();ctx.moveTo(pad.l,zeroY);ctx.lineTo(W-pad.r,zeroY);ctx.stroke();
+
+        // draw stacked areas, positive factors
+        // Sort by sign and draw from zero outward
+        for(let k=nF-1;k>=0;k--){
+            ctx.fillStyle=fColors[k];ctx.globalAlpha=0.35;
+            ctx.beginPath();
+            // compute cumulative positive/negative up to factor k
+            ctx.moveTo(xScale(0),zeroY);
+            for(let t=0;t<T;t++){
+                let cumPos=0;
+                for(let j=0;j<=k;j++) if(smoothed[t][j]>=0) cumPos+=smoothed[t][j];
+                ctx.lineTo(xScale(t),yScale(cumPos));
+            }
+            // back along k-1
+            for(let t=T-1;t>=0;t--){
+                let cumPos=0;
+                for(let j=0;j<k;j++) if(smoothed[t][j]>=0) cumPos+=smoothed[t][j];
+                ctx.lineTo(xScale(t),yScale(cumPos));
+            }
+            ctx.closePath();ctx.fill();
+            ctx.globalAlpha=1;
+        }
+
+        // also draw negative contributions
+        for(let k=nF-1;k>=0;k--){
+            ctx.fillStyle=fColors[k];ctx.globalAlpha=0.35;
+            ctx.beginPath();
+            ctx.moveTo(xScale(0),zeroY);
+            for(let t=0;t<T;t++){
+                let cumNeg=0;
+                for(let j=0;j<=k;j++) if(smoothed[t][j]<0) cumNeg+=smoothed[t][j];
+                ctx.lineTo(xScale(t),yScale(cumNeg));
+            }
+            for(let t=T-1;t>=0;t--){
+                let cumNeg=0;
+                for(let j=0;j<k;j++) if(smoothed[t][j]<0) cumNeg+=smoothed[t][j];
+                ctx.lineTo(xScale(t),yScale(cumNeg));
+            }
+            ctx.closePath();ctx.fill();
+            ctx.globalAlpha=1;
+        }
+
+        // x labels
+        ctx.fillStyle='#a8a8b8';ctx.font='11px sans-serif';ctx.textAlign='center';ctx.textBaseline='top';
+        for(let m=0;m<12;m++){ctx.fillText('M'+(m+1),xScale(Math.floor(m*252/12)),H-pad.b+4);}
+
+        // legend
+        for(let k=0;k<nF;k++){
+            const lx=pad.l+k*68;
+            ctx.fillStyle=fColors[k];ctx.globalAlpha=0.7;ctx.fillRect(lx,H-14,10,10);ctx.globalAlpha=1;
+            ctx.fillStyle='#a8a8b8';ctx.font='10px sans-serif';ctx.textAlign='left';ctx.textBaseline='middle';
+            ctx.fillText(factorNames[k],lx+14,H-9);
+        }
+    }
+
+    function init(){ generate(); }
+    return { init, generate };
+})();
+
+/* ====== Initialize all sections ====== */
+window.addEventListener('DOMContentLoaded', () => {
+    Brinson.init();
+    FactorAttr.init();
+    RiskAttr.init();
+    AlphaAnalysis.init();
+    Report.init();
+});
+
+/* ====== Redraw on resize ====== */
+let resizeTimer;
+window.addEventListener('resize', () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+        Brinson.update();
+        FactorAttr.update();
+        RiskAttr.update();
+        AlphaAnalysis.update();
+        Report.generate();
+    }, 200);
+});
+</script>
+</body>
+</html>

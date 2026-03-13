@@ -1,0 +1,1367 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NLP 情感分析 — AI 量化</title>
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script defer src="../shared/scripts/nav.js"></script>
+    <script defer src="../shared/scripts/aiquant-utils.js"></script>
+    <style>
+        .module-intro { margin-bottom: 2rem; }
+        .module-intro h1 span { color: var(--accent-green); }
+        canvas { display: block; border-radius: var(--radius-sm); }
+        .canvas-wrap {
+            background: var(--bg-secondary); border: 1px solid var(--border-color);
+            border-radius: var(--radius-md); padding: 1rem; position: relative;
+        }
+        .canvas-wrap canvas { width: 100%; }
+
+        /* News cards */
+        .news-grid {
+            display: grid; grid-template-columns: 1fr 1fr;
+            gap: 0.75rem; margin-bottom: 1rem;
+        }
+        .news-card {
+            padding: 0.8rem 1rem; border-radius: var(--radius-sm);
+            border: 1px solid var(--border-color); cursor: pointer;
+            transition: all 0.25s; font-size: 0.85rem; line-height: 1.5;
+            background: var(--bg-secondary);
+        }
+        .news-card:hover { transform: translateY(-2px); box-shadow: var(--shadow); }
+        .news-card.positive { border-left: 3px solid var(--accent-green); }
+        .news-card.negative { border-left: 3px solid var(--accent-red); }
+        .news-card.neutral  { border-left: 3px solid var(--text-muted); }
+        .news-card.selected { box-shadow: var(--shadow-glow); border-color: var(--accent-green); }
+        .news-card .source { font-size: 0.72rem; color: var(--text-muted); margin-bottom: 0.2rem; }
+        .news-card .headline { color: var(--text-primary); }
+        .news-card .headline .kw-pos { color: var(--accent-green); font-weight: 600; }
+        .news-card .headline .kw-neg { color: var(--accent-red); font-weight: 600; }
+        .news-card .score-bar {
+            margin-top: 0.5rem; height: 4px; border-radius: 2px;
+            background: var(--border-color); overflow: hidden; position: relative;
+        }
+        .news-card .score-fill {
+            height: 100%; border-radius: 2px; transition: width 0.4s;
+            position: absolute; top: 0;
+        }
+        .news-card .score-label {
+            font-family: var(--font-mono); font-size: 0.72rem; margin-top: 0.25rem;
+        }
+
+        /* Controls */
+        .controls-row {
+            display: flex; flex-wrap: wrap; align-items: center;
+            gap: 0.75rem; margin-bottom: 1rem;
+        }
+        .toggle-btn {
+            padding: 0.35rem 0.8rem; border-radius: var(--radius-sm);
+            border: 1px solid var(--border-color); background: var(--bg-secondary);
+            color: var(--text-secondary); font-size: 0.8rem; cursor: pointer;
+            transition: all 0.2s; font-family: inherit;
+        }
+        .toggle-btn.active {
+            border-color: var(--accent-green); color: var(--accent-green);
+            background: rgba(22,199,154,0.15);
+        }
+        .toggle-btn:hover { border-color: var(--accent-green); }
+
+        /* Pipeline */
+        .pipeline-flow {
+            display: flex; flex-wrap: wrap; align-items: center;
+            gap: 0.3rem; margin-bottom: 1.5rem;
+        }
+        .pipeline-stage {
+            display: inline-flex; align-items: center; gap: 0.4rem;
+            padding: 0.5rem 1rem; background: var(--bg-secondary);
+            border: 1px solid var(--border-color); border-radius: var(--radius-md);
+            cursor: pointer; transition: all 0.25s; font-size: 0.85rem;
+            color: var(--text-secondary); font-family: inherit;
+        }
+        .pipeline-stage.active {
+            border-color: var(--accent-green); color: var(--accent-green);
+            background: rgba(22,199,154,0.12); box-shadow: var(--shadow-glow);
+        }
+        .pipeline-stage:hover { border-color: var(--accent-blue); }
+        .pipeline-arrow { color: var(--text-muted); font-size: 1.1rem; margin: 0 0.25rem; }
+
+        /* Stats */
+        .stat-grid {
+            display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+            gap: 0.5rem; margin-top: 0.75rem;
+        }
+        .stat-item {
+            background: var(--bg-card); border-radius: var(--radius-sm);
+            padding: 0.5rem 0.75rem; text-align: center;
+        }
+        .stat-item .label { font-size: 0.72rem; color: var(--text-muted); }
+        .stat-item .value {
+            font-family: var(--font-mono); font-size: 0.9rem;
+            color: var(--accent-green); font-weight: 600;
+        }
+        .stat-item .value.red { color: var(--accent-red); }
+
+        /* Select */
+        .select-wrap select {
+            background: var(--bg-secondary); color: var(--text-primary);
+            border: 1px solid var(--border-color); border-radius: var(--radius-sm);
+            padding: 0.35rem 0.6rem; font-size: 0.85rem; font-family: inherit;
+            cursor: pointer; outline: none;
+        }
+        .select-wrap select:focus { border-color: var(--accent-green); }
+
+        /* Challenge cards */
+        .challenge-grid {
+            display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+        .challenge-card {
+            background: var(--bg-secondary); border: 1px solid var(--border-color);
+            border-radius: var(--radius-md); padding: 1.2rem; transition: all 0.3s;
+        }
+        .challenge-card:hover { border-color: var(--accent-orange); }
+        .challenge-card h4 { color: var(--accent-orange); margin-bottom: 0.5rem; }
+        .challenge-card p { font-size: 0.85rem; margin-bottom: 0; }
+        .tips-list { list-style: none; padding: 0; }
+        .tips-list li {
+            padding: 0.5rem 0.75rem; border-left: 2px solid var(--accent-blue);
+            margin-bottom: 0.5rem; font-size: 0.85rem; color: var(--text-secondary);
+            background: rgba(79,195,247,0.04); border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+        }
+
+        @media (max-width: 1024px) {
+            .news-grid { grid-template-columns: 1fr; }
+            .challenge-grid { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+<div class="page-container">
+    <!-- ====== Intro ====== -->
+    <div class="module-intro">
+        <h1><span>05</span> NLP 情感分析</h1>
+        <p>利用自然语言处理技术从金融新闻、社交媒体中提取市场情绪，构建量化交易信号。本模块涵盖文本表示、情感评分、指标构建和策略回测。</p>
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- Section 1: 金融文本情感 -->
+    <!-- ============================================================ -->
+    <div class="section" id="sec-sentiment">
+        <div class="section-title"><div class="icon">1</div><h2>金融文本情感</h2></div>
+        <p>点击新闻标题查看关键词高亮与情感评分。绿色=利好，红色=利空，灰色=中性。</p>
+        <div class="controls-row">
+            <button class="toggle-btn active" onclick="filterNews('all')">全部</button>
+            <button class="toggle-btn" onclick="filterNews('positive')">利好</button>
+            <button class="toggle-btn" onclick="filterNews('negative')">利空</button>
+            <button class="toggle-btn" onclick="filterNews('neutral')">中性</button>
+        </div>
+        <div class="news-grid" id="newsGrid"></div>
+        <div class="canvas-wrap" style="margin-bottom:1rem;">
+            <canvas id="cvsSentBars" height="200"></canvas>
+        </div>
+        <div class="canvas-wrap">
+            <canvas id="cvsSentDist" height="180"></canvas>
+            <p class="text-sm text-muted" style="margin-top:0.5rem;">情感分数分布直方图</p>
+        </div>
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- Section 2: 词袋与 TF-IDF -->
+    <!-- ============================================================ -->
+    <div class="section" id="sec-tfidf">
+        <div class="section-title"><div class="icon">2</div><h2>词袋与 TF-IDF</h2></div>
+        <p>文本处理流水线：原始文本 → 分词 → 去停用词 → TF-IDF 向量化。选择不同标题观察向量表示。</p>
+        <div class="pipeline-flow">
+            <button class="pipeline-stage active" data-step="0">原始文本</button>
+            <span class="pipeline-arrow">→</span>
+            <button class="pipeline-stage" data-step="1">分词</button>
+            <span class="pipeline-arrow">→</span>
+            <button class="pipeline-stage" data-step="2">去停用词</button>
+            <span class="pipeline-arrow">→</span>
+            <button class="pipeline-stage" data-step="3">TF-IDF</button>
+        </div>
+        <div class="controls-row">
+            <span class="text-sm text-muted">选择标题：</span>
+            <div class="select-wrap">
+                <select id="selHeadline" onchange="updateTfidf()"></select>
+            </div>
+        </div>
+        <div class="card mb-2" id="pipelineOutput" style="min-height:60px;font-size:0.85rem;line-height:1.8;"></div>
+        <div class="canvas-wrap" style="margin-bottom:1rem;">
+            <canvas id="cvsHeatmap" height="280"></canvas>
+            <p class="text-sm text-muted" style="margin-top:0.5rem;">TF-IDF 热力图：行=文档，列=词汇（前 20 高 TF-IDF 值词）</p>
+        </div>
+        <div class="canvas-wrap">
+            <canvas id="cvsCosine" height="250"></canvas>
+            <p class="text-sm text-muted" style="margin-top:0.5rem;">文档间余弦相似度矩阵</p>
+        </div>
+        <div class="info-box mt-2">
+            <p>$$\text{TF-IDF}(t,d) = \frac{f_{t,d}}{|d|} \cdot \log\frac{N+1}{\text{df}(t)+1}$$</p>
+            <p>$$\cos(\mathbf{a}, \mathbf{b}) = \frac{\mathbf{a} \cdot \mathbf{b}}{||\mathbf{a}|| \cdot ||\mathbf{b}||}$$</p>
+        </div>
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- Section 3: 情感指标构建 -->
+    <!-- ============================================================ -->
+    <div class="section" id="sec-index">
+        <div class="section-title"><div class="icon">3</div><h2>情感指标构建</h2></div>
+        <p>将多条新闻情感分数聚合为日度情感指数，对比股价走势与成交量。</p>
+        <div class="controls-row">
+            <span class="text-sm text-muted">滞后天数：</span>
+            <div class="slider-group" style="min-width:200px;">
+                <input type="range" id="sldLag" min="0" max="10" value="1" oninput="updateLagLabel();drawSentIndex()">
+                <span class="slider-value" id="lblLag">1</span>
+            </div>
+            <button class="toggle-btn active" id="btnShowPrice" onclick="toggleLayer('price')">股价</button>
+            <button class="toggle-btn active" id="btnShowVol" onclick="toggleLayer('vol')">成交量</button>
+            <button class="toggle-btn active" id="btnShowSent" onclick="toggleLayer('sent')">情感</button>
+        </div>
+        <div class="canvas-wrap">
+            <canvas id="cvsSentIndex" height="350"></canvas>
+        </div>
+        <div class="stat-grid" id="corrStats"></div>
+        <div class="canvas-wrap mt-2" style="margin-bottom:1rem;">
+            <canvas id="cvsLagCorr" height="200"></canvas>
+            <p class="text-sm text-muted" style="margin-top:0.5rem;">不同滞后天数下的相关系数柱状图</p>
+        </div>
+        <div class="info-box mt-2">
+            <p>$$S_t = \frac{1}{N_t}\sum_{i=1}^{N_t} s_i \quad \rho(S_{t-k}, r_t) = \text{Pearson}(S_{t-k}, r_t)$$</p>
+        </div>
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- Section 4: 情感交易策略 -->
+    <!-- ============================================================ -->
+    <div class="section" id="sec-strategy">
+        <div class="section-title"><div class="icon">4</div><h2>情感交易策略</h2></div>
+        <p>基于情感阈值生成买卖信号：情感指数 > 阈值买入，< −阈值卖出。</p>
+        <div class="controls-row">
+            <span class="text-sm text-muted">情感阈值：</span>
+            <div class="slider-group" style="min-width:200px;">
+                <input type="range" id="sldThresh" min="5" max="80" value="20" oninput="updateThreshLabel();runStrategy()">
+                <span class="slider-value" id="lblThresh">0.20</span>
+            </div>
+            <button class="toggle-btn active" id="btnShowSignals" onclick="toggleSignals()">显示信号</button>
+        </div>
+        <div class="canvas-wrap" style="margin-bottom:1rem;">
+            <canvas id="cvsStrategy" height="300"></canvas>
+            <p class="text-sm text-muted" style="margin-top:0.5rem;">股价走势与买卖信号</p>
+        </div>
+        <div class="canvas-wrap">
+            <canvas id="cvsEquity" height="250"></canvas>
+            <p class="text-sm text-muted" style="margin-top:0.5rem;">策略净值 vs 买入持有</p>
+        </div>
+        <div class="stat-grid" id="perfStats"></div>
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- Section 5: 挑战与局限 -->
+    <!-- ============================================================ -->
+    <div class="section" id="sec-challenges">
+        <div class="section-title"><div class="icon">5</div><h2>挑战与局限</h2></div>
+        <p>NLP 情感分析在实际量化交易中面临诸多挑战。</p>
+        <div class="challenge-grid">
+            <div class="challenge-card">
+                <h4>反讽与隐喻</h4>
+                <p>"这个季报真是太 '精彩' 了" — 字面正面，实际负面。简单词典方法无法识别反讽语义。</p>
+            </div>
+            <div class="challenge-card">
+                <h4>领域术语</h4>
+                <p>"short squeeze" 中 short 并非负面。金融专业词汇需要领域适配的词典或预训练模型。</p>
+            </div>
+            <div class="challenge-card">
+                <h4>信息已定价</h4>
+                <p>当新闻发布时市场可能已消化信息，情感信号滞后于价格变动，Alpha 衰减迅速。</p>
+            </div>
+        </div>
+        <div class="canvas-wrap" style="margin-bottom:1rem;">
+            <canvas id="cvsDecay" height="260"></canvas>
+            <p class="text-sm text-muted" style="margin-top:0.5rem;">信息衰减曲线：Alpha 随时间快速递减</p>
+        </div>
+        <div class="canvas-wrap" style="margin-bottom:1.5rem;">
+            <canvas id="cvsAlphaDecline" height="240"></canvas>
+            <p class="text-sm text-muted" style="margin-top:0.5rem;">策略累计 Alpha 随使用人数增多而衰减（模拟）</p>
+        </div>
+        <h3>实践建议</h3>
+        <ul class="tips-list">
+            <li>使用金融领域预训练模型（FinBERT）而非通用情感词典</li>
+            <li>结合多源数据：新闻 + 社交媒体 + 分析师报告</li>
+            <li>关注情感变化量（一阶差分）而非绝对值</li>
+            <li>设置信息衰减窗口，新闻影响力通常在 1-3 天后显著降低</li>
+            <li>定期更新停用词与领域词典以适应市场语境变化</li>
+            <li>将情感因子作为多因子模型中的辅助信号，避免单一依赖</li>
+        </ul>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    // Wait for utils to load
+    const waitUtils = setInterval(() => {
+        if (typeof AIQuantUtils !== 'undefined') {
+            clearInterval(waitUtils);
+            initAll();
+        }
+    }, 50);
+});
+
+function initAll() {
+    const U = AIQuantUtils;
+    const C = U.AIQUANT_COLORS;
+    const rng = U.seededRandom(42);
+
+    // ===== Global data =====
+    const cnHeadlines = [
+        { text: '某科技巨头季度营收创历史新高，股价surge大涨', sentiment: 0.85, source: '财经日报' },
+        { text: '央行宣布降准释放流动性，市场rally反弹', sentiment: 0.72, source: '新华财经' },
+        { text: '新能源板块强势growth增长，多只个股涨停', sentiment: 0.68, source: '证券时报' },
+        { text: '某大型地产商债务违约risk风险加剧', sentiment: -0.78, source: '经济观察' },
+        { text: '国际油价plunge暴跌，拖累能源股走低', sentiment: -0.65, source: '路透中文' },
+        { text: '监管部门加强对平台经济的审查', sentiment: -0.42, source: '财新网' },
+        { text: '芯片行业供给缓解，半导体板块gain回升', sentiment: 0.55, source: '科技日报' },
+        { text: '美联储维持利率不变，市场反应平淡', sentiment: 0.05, source: '华尔街见闻' },
+        { text: '某医药公司新药获批，stock目标价upgrade上调', sentiment: 0.62, source: '医药经济报' },
+        { text: '消费数据不及预期，零售板块承压decline下行', sentiment: -0.55, source: '中国证券报' },
+        { text: '人工智能概念持续火热，相关ETF规模创新高record', sentiment: 0.75, source: '上证报' },
+        { text: '贸易摩擦升级，出口企业面临更大压力', sentiment: -0.60, source: '第一财经' },
+    ];
+
+    const posWords = ['surge','gain','profit','bullish','rally','growth','upgrade','beat','strong',
+        'optimistic','record','high','positive','exceed','boost','soar','涨','增长','上调','新高','回升','反弹','火热','创'];
+    const negWords = ['drop','fall','loss','bearish','crash','decline','downgrade','miss','weak',
+        'pessimistic','low','negative','plunge','risk','cut','sink','跌','暴跌','违约','承压','下行','风险','审查'];
+
+    const stockData = U.generateStockData({ length: 120, seed: 55, drift: 0.0004, vol: 0.018 });
+    const prices = stockData.close;
+    const volumes = stockData.volume;
+
+    // Generate daily sentiment from headlines
+    const dailySent = [];
+    for (let i = 0; i < prices.length; i++) {
+        const h = cnHeadlines[Math.floor(rng() * cnHeadlines.length)];
+        const noise = (rng() - 0.5) * 0.3;
+        dailySent.push(Math.max(-1, Math.min(1, h.sentiment + noise)));
+    }
+
+    // Layer visibility
+    const layers = { price: true, vol: true, sent: true };
+    let showSignals = true;
+
+    // ================================================================
+    // Section 1: News Cards
+    // ================================================================
+    let selectedCard = -1;
+    let newsFilter = 'all';
+
+    function getCategory(s) {
+        if (s > 0.2) return 'positive';
+        if (s < -0.2) return 'negative';
+        return 'neutral';
+    }
+
+    function highlightKeywords(text) {
+        let result = text;
+        posWords.forEach(w => {
+            const re = new RegExp(`(${w})`, 'gi');
+            result = result.replace(re, '<span class="kw-pos">$1</span>');
+        });
+        negWords.forEach(w => {
+            const re = new RegExp(`(${w})`, 'gi');
+            result = result.replace(re, '<span class="kw-neg">$1</span>');
+        });
+        return result;
+    }
+
+    function renderNewsCards() {
+        const grid = document.getElementById('newsGrid');
+        grid.innerHTML = '';
+        cnHeadlines.forEach((h, i) => {
+            const cat = getCategory(h.sentiment);
+            if (newsFilter !== 'all' && cat !== newsFilter) return;
+            const card = document.createElement('div');
+            card.className = `news-card ${cat} ${selectedCard === i ? 'selected' : ''}`;
+            const showHL = selectedCard === i;
+            const headline = showHL ? highlightKeywords(h.text) : h.text;
+            const absScore = Math.abs(h.sentiment);
+            const barColor = h.sentiment > 0 ? C.positive : (h.sentiment < 0 ? C.negative : C.neutral);
+            const barLeft = h.sentiment >= 0 ? '50%' : `${50 - absScore * 50}%`;
+            const barWidth = `${absScore * 50}%`;
+            card.innerHTML = `
+                <div class="source">${h.source}</div>
+                <div class="headline">${headline}</div>
+                <div class="score-bar">
+                    <div class="score-fill" style="left:${barLeft};width:${barWidth};background:${barColor};"></div>
+                </div>
+                <div class="score-label" style="color:${barColor};">情感分: ${h.sentiment > 0 ? '+' : ''}${h.sentiment.toFixed(2)}</div>
+            `;
+            card.onclick = () => { selectedCard = selectedCard === i ? -1 : i; renderNewsCards(); drawSentBars(); };
+            grid.appendChild(card);
+        });
+    }
+
+    window.filterNews = function(f) {
+        newsFilter = f;
+        document.querySelectorAll('#sec-sentiment .toggle-btn').forEach(b => b.classList.remove('active'));
+        event.target.classList.add('active');
+        renderNewsCards();
+    };
+
+    function drawSentBars() {
+        const cvs = document.getElementById('cvsSentBars');
+        const ctx = cvs.getContext('2d');
+        cvs.width = cvs.clientWidth * 2; cvs.height = 200 * 2;
+        ctx.scale(2, 2);
+        const W = cvs.clientWidth, H = 200;
+        ctx.clearRect(0, 0, W, H);
+
+        const pad = { l: 40, r: 20, t: 20, b: 30 };
+        const cw = W - pad.l - pad.r;
+        const ch = H - pad.t - pad.b;
+        const n = cnHeadlines.length;
+        const bw = Math.min(30, (cw / n) * 0.7);
+        const gap = cw / n;
+        const midY = pad.t + ch / 2;
+
+        // Grid
+        ctx.strokeStyle = C.grid; ctx.lineWidth = 0.5;
+        ctx.beginPath(); ctx.moveTo(pad.l, midY); ctx.lineTo(W - pad.r, midY); ctx.stroke();
+
+        cnHeadlines.forEach((h, i) => {
+            const x = pad.l + i * gap + gap / 2 - bw / 2;
+            const barH = Math.abs(h.sentiment) * (ch / 2) * 0.9;
+            const y = h.sentiment >= 0 ? midY - barH : midY;
+            const color = h.sentiment > 0.2 ? C.positive : (h.sentiment < -0.2 ? C.negative : C.neutral);
+            ctx.fillStyle = selectedCard === i ? color : color + '99';
+            ctx.fillRect(x, y, bw, barH);
+
+            if (selectedCard === i) {
+                ctx.strokeStyle = '#fff';
+                ctx.lineWidth = 1.5;
+                ctx.strokeRect(x - 1, y - 1, bw + 2, barH + 2);
+            }
+
+            ctx.fillStyle = C.textDim; ctx.font = '9px monospace'; ctx.textAlign = 'center';
+            ctx.fillText(i + 1, x + bw / 2, H - pad.b + 12);
+        });
+
+        // Y labels
+        ctx.fillStyle = C.textDim; ctx.font = '9px monospace'; ctx.textAlign = 'right';
+        ctx.fillText('+1.0', pad.l - 4, pad.t + 8);
+        ctx.fillText('0', pad.l - 4, midY + 3);
+        ctx.fillText('-1.0', pad.l - 4, H - pad.b - 2);
+    }
+
+    function drawSentDist() {
+        const cvs = document.getElementById('cvsSentDist');
+        const ctx = cvs.getContext('2d');
+        cvs.width = cvs.clientWidth * 2; cvs.height = 180 * 2;
+        ctx.scale(2, 2);
+        const W = cvs.clientWidth, H = 180;
+        ctx.clearRect(0, 0, W, H);
+
+        const pad = { l: 40, r: 20, t: 15, b: 30 };
+        const cw = W - pad.l - pad.r;
+        const ch = H - pad.t - pad.b;
+
+        // Histogram bins from -1 to 1
+        const nBins = 12;
+        const bins = new Array(nBins).fill(0);
+        const binW = 2 / nBins;
+        cnHeadlines.forEach(h => {
+            const idx = Math.min(nBins - 1, Math.max(0, Math.floor((h.sentiment + 1) / binW)));
+            bins[idx]++;
+        });
+        const maxBin = Math.max(...bins, 1);
+        const barW = cw / nBins * 0.75;
+        const gap = cw / nBins;
+
+        for (let i = 0; i < nBins; i++) {
+            const x = pad.l + i * gap + (gap - barW) / 2;
+            const bh = (bins[i] / maxBin) * ch * 0.85;
+            const y = pad.t + ch - bh;
+            const sentVal = -1 + (i + 0.5) * binW;
+            if (sentVal > 0.15) ctx.fillStyle = C.positive + 'AA';
+            else if (sentVal < -0.15) ctx.fillStyle = C.negative + 'AA';
+            else ctx.fillStyle = C.neutral + 'AA';
+            ctx.fillRect(x, y, barW, bh);
+
+            // Count label
+            if (bins[i] > 0) {
+                ctx.fillStyle = C.text; ctx.font = '9px monospace'; ctx.textAlign = 'center';
+                ctx.fillText(bins[i], x + barW / 2, y - 4);
+            }
+        }
+
+        // X-axis labels
+        ctx.fillStyle = C.textDim; ctx.font = '8px monospace'; ctx.textAlign = 'center';
+        for (let i = 0; i <= 4; i++) {
+            const v = -1 + (i / 4) * 2;
+            ctx.fillText(v.toFixed(1), pad.l + (i / 4) * cw, H - pad.b + 12);
+        }
+        ctx.font = '10px sans-serif';
+        ctx.fillText('情感分数', pad.l + cw / 2, H - 3);
+
+        // Y-axis
+        ctx.textAlign = 'right';
+        ctx.font = '8px monospace';
+        for (let i = 0; i <= 3; i++) {
+            const v = Math.round((i / 3) * maxBin);
+            const y = pad.t + ch - (i / 3) * ch * 0.85;
+            ctx.fillText(v, pad.l - 4, y + 3);
+        }
+    }
+
+    renderNewsCards();
+    drawSentBars();
+    drawSentDist();
+
+    // ================================================================
+    // Section 2: TF-IDF
+    // ================================================================
+    let pipelineStep = 0;
+    const stopwords = ['the','a','an','is','are','was','were','of','to','in','on','for','and','or','at','by','as',
+        '的','了','在','是','有','和','与','对','从','被','将','向','上','下','中','某'];
+
+    const tfidfDocs = cnHeadlines.map(h => h.text);
+    const tfidfResult = U.tfidfVectors(tfidfDocs);
+
+    // Populate select
+    const selHL = document.getElementById('selHeadline');
+    cnHeadlines.forEach((h, i) => {
+        const opt = document.createElement('option');
+        opt.value = i; opt.textContent = `[${i + 1}] ${h.text.substring(0, 30)}...`;
+        selHL.appendChild(opt);
+    });
+
+    document.querySelectorAll('.pipeline-stage').forEach(btn => {
+        btn.addEventListener('click', () => {
+            pipelineStep = parseInt(btn.dataset.step);
+            document.querySelectorAll('.pipeline-stage').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            updateTfidf();
+        });
+    });
+
+    window.updateTfidf = function() {
+        const idx = parseInt(selHL.value);
+        const text = cnHeadlines[idx].text;
+        const out = document.getElementById('pipelineOutput');
+
+        const tokens = text.split(/(\s+|(?=[，。！？,.])|(?<=[，。！？,.]))/g).filter(t => t.trim());
+        const filtered = tokens.filter(t => !stopwords.includes(t.toLowerCase()) && t.trim().length > 0);
+
+        if (pipelineStep === 0) {
+            out.innerHTML = `<strong>原始文本：</strong><br>${text}`;
+        } else if (pipelineStep === 1) {
+            out.innerHTML = `<strong>分词结果：</strong><br>${tokens.map(t =>
+                `<code style="margin:2px;">${t}</code>`).join(' ')}`;
+        } else if (pipelineStep === 2) {
+            out.innerHTML = `<strong>去停用词（${tokens.length} → ${filtered.length} 词）：</strong><br>${filtered.map(t =>
+                `<code style="margin:2px;">${t}</code>`).join(' ')}`;
+        } else {
+            const vec = tfidfResult.vectors[idx];
+            const topIdx = vec.map((v, i) => ({ v, i })).sort((a, b) => b.v - a.v).slice(0, 8);
+            out.innerHTML = `<strong>TF-IDF 向量（前 8 维）：</strong><br>${topIdx.map(x =>
+                `<code style="margin:2px;">${tfidfResult.vocab[x.i]}: ${x.v.toFixed(3)}</code>`).join(' ')}`;
+        }
+
+        drawHeatmap();
+        drawCosine();
+    };
+
+    function drawHeatmap() {
+        const cvs = document.getElementById('cvsHeatmap');
+        const ctx = cvs.getContext('2d');
+        cvs.width = cvs.clientWidth * 2; cvs.height = 280 * 2;
+        ctx.scale(2, 2);
+        const W = cvs.clientWidth, H = 280;
+        ctx.clearRect(0, 0, W, H);
+
+        const vecs = tfidfResult.vectors;
+        const vocab = tfidfResult.vocab;
+        // Find top 20 words by max TF-IDF across all docs
+        const maxPerWord = vocab.map((_, j) => Math.max(...vecs.map(v => v[j])));
+        const top20 = maxPerWord.map((v, i) => ({ v, i })).sort((a, b) => b.v - a.v).slice(0, 20);
+
+        const pad = { l: 30, r: 20, t: 60, b: 20 };
+        const cw = W - pad.l - pad.r;
+        const ch = H - pad.t - pad.b;
+        const nDocs = vecs.length;
+        const nWords = top20.length;
+        const cellW = cw / nWords;
+        const cellH = ch / nDocs;
+        const maxVal = Math.max(...top20.map(x => x.v), 0.01);
+
+        // Column headers
+        ctx.font = '8px monospace'; ctx.textAlign = 'center'; ctx.fillStyle = C.textDim;
+        top20.forEach((w, j) => {
+            ctx.save();
+            ctx.translate(pad.l + j * cellW + cellW / 2, pad.t - 5);
+            ctx.rotate(-Math.PI / 4);
+            ctx.fillText(vocab[w.i].substring(0, 6), 0, 0);
+            ctx.restore();
+        });
+
+        // Row labels
+        ctx.textAlign = 'right';
+        for (let i = 0; i < nDocs; i++) {
+            ctx.fillStyle = C.textDim;
+            ctx.fillText(`D${i + 1}`, pad.l - 4, pad.t + i * cellH + cellH / 2 + 3);
+        }
+
+        // Cells
+        const selIdx = parseInt(selHL.value);
+        for (let i = 0; i < nDocs; i++) {
+            for (let j = 0; j < nWords; j++) {
+                const val = vecs[i][top20[j].i];
+                const t = val / maxVal;
+                const r = Math.round(10 + t * 100);
+                const g = Math.round(20 + t * 180);
+                const b = Math.round(40 + t * 60);
+                ctx.fillStyle = `rgb(${r},${g},${b})`;
+                ctx.fillRect(pad.l + j * cellW + 0.5, pad.t + i * cellH + 0.5, cellW - 1, cellH - 1);
+
+                if (i === selIdx) {
+                    ctx.strokeStyle = C.primary; ctx.lineWidth = 1.5;
+                    ctx.strokeRect(pad.l + j * cellW, pad.t + i * cellH, cellW, cellH);
+                }
+            }
+        }
+    }
+
+    function drawCosine() {
+        const cvs = document.getElementById('cvsCosine');
+        const ctx = cvs.getContext('2d');
+        cvs.width = cvs.clientWidth * 2; cvs.height = 250 * 2;
+        ctx.scale(2, 2);
+        const W = cvs.clientWidth, H = 250;
+        ctx.clearRect(0, 0, W, H);
+
+        const vecs = tfidfResult.vectors;
+        const n = vecs.length;
+        const pad = { l: 35, r: 20, t: 35, b: 20 };
+        const size = Math.min(W - pad.l - pad.r, H - pad.t - pad.b);
+        const cellS = size / n;
+
+        // Headers
+        ctx.font = '8px monospace'; ctx.fillStyle = C.textDim;
+        for (let i = 0; i < n; i++) {
+            ctx.textAlign = 'center';
+            ctx.fillText(`D${i + 1}`, pad.l + i * cellS + cellS / 2, pad.t - 5);
+            ctx.textAlign = 'right';
+            ctx.fillText(`D${i + 1}`, pad.l - 4, pad.t + i * cellS + cellS / 2 + 3);
+        }
+
+        for (let i = 0; i < n; i++) {
+            for (let j = 0; j < n; j++) {
+                const sim = U.cosineSimilarity(vecs[i], vecs[j]);
+                ctx.fillStyle = U.valueToColor(sim, 0, 1, [10, 20, 50], [0, 230, 255]);
+                ctx.fillRect(pad.l + j * cellS + 0.5, pad.t + i * cellS + 0.5, cellS - 1, cellS - 1);
+
+                if (cellS > 16 && sim > 0.01) {
+                    ctx.fillStyle = sim > 0.5 ? '#000' : '#fff';
+                    ctx.font = '7px monospace'; ctx.textAlign = 'center';
+                    ctx.fillText(sim.toFixed(1), pad.l + j * cellS + cellS / 2, pad.t + i * cellS + cellS / 2 + 3);
+                }
+            }
+        }
+    }
+
+    updateTfidf();
+
+    // ================================================================
+    // Section 3: Sentiment Index
+    // ================================================================
+    window.updateLagLabel = function() {
+        document.getElementById('lblLag').textContent = document.getElementById('sldLag').value;
+    };
+
+    window.toggleLayer = function(layer) {
+        layers[layer] = !layers[layer];
+        const btnMap = { price: 'btnShowPrice', vol: 'btnShowVol', sent: 'btnShowSent' };
+        document.getElementById(btnMap[layer]).classList.toggle('active');
+        drawSentIndex();
+    };
+
+    window.drawSentIndex = function() {
+        const cvs = document.getElementById('cvsSentIndex');
+        const ctx = cvs.getContext('2d');
+        cvs.width = cvs.clientWidth * 2; cvs.height = 350 * 2;
+        ctx.scale(2, 2);
+        const W = cvs.clientWidth, H = 350;
+        ctx.clearRect(0, 0, W, H);
+
+        const lag = parseInt(document.getElementById('sldLag').value);
+        const pad = { l: 55, r: 55, t: 25, b: 35 };
+        const cw = W - pad.l - pad.r;
+        const ch = H - pad.t - pad.b;
+        const n = prices.length;
+
+        // Background grid
+        ctx.strokeStyle = C.grid; ctx.lineWidth = 0.5;
+        for (let i = 0; i <= 5; i++) {
+            const y = pad.t + (i / 5) * ch;
+            ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(W - pad.r, y); ctx.stroke();
+        }
+
+        // Volume bars
+        if (layers.vol) {
+            const maxV = Math.max(...volumes);
+            ctx.fillStyle = 'rgba(120,144,156,0.2)';
+            for (let i = 0; i < n; i++) {
+                const x = pad.l + (i / (n - 1)) * cw;
+                const bh = (volumes[i] / maxV) * ch * 0.3;
+                ctx.fillRect(x - 1, pad.t + ch - bh, 2.5, bh);
+            }
+        }
+
+        // Price line
+        if (layers.price) {
+            const pMin = Math.min(...prices) * 0.98;
+            const pMax = Math.max(...prices) * 1.02;
+            ctx.strokeStyle = C.primary; ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            for (let i = 0; i < n; i++) {
+                const x = pad.l + (i / (n - 1)) * cw;
+                const y = pad.t + (1 - (prices[i] - pMin) / (pMax - pMin)) * ch;
+                i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+
+            // Y-axis left (price)
+            ctx.fillStyle = C.primary; ctx.font = '9px monospace'; ctx.textAlign = 'right';
+            for (let i = 0; i <= 4; i++) {
+                const v = pMin + (i / 4) * (pMax - pMin);
+                const y = pad.t + (1 - i / 4) * ch;
+                ctx.fillText(v.toFixed(1), pad.l - 4, y + 3);
+            }
+        }
+
+        // Sentiment line
+        if (layers.sent) {
+            // 5-day rolling sentiment
+            const smoothSent = [];
+            const window = 5;
+            for (let i = 0; i < n; i++) {
+                if (i < window - 1) { smoothSent.push(dailySent[i]); continue; }
+                let s = 0;
+                for (let j = i - window + 1; j <= i; j++) s += dailySent[j];
+                smoothSent.push(s / window);
+            }
+
+            ctx.strokeStyle = C.positive; ctx.lineWidth = 1.5;
+            ctx.setLineDash([4, 3]);
+            ctx.beginPath();
+            for (let i = 0; i < n; i++) {
+                const x = pad.l + (i / (n - 1)) * cw;
+                const y = pad.t + (1 - (smoothSent[i] + 1) / 2) * ch;
+                i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            // Y-axis right (sentiment)
+            ctx.fillStyle = C.positive; ctx.font = '9px monospace'; ctx.textAlign = 'left';
+            for (let i = 0; i <= 4; i++) {
+                const v = -1 + (i / 4) * 2;
+                const y = pad.t + (1 - i / 4) * ch;
+                ctx.fillText(v.toFixed(1), W - pad.r + 4, y + 3);
+            }
+        }
+
+        // X-axis
+        ctx.fillStyle = C.textDim; ctx.font = '9px monospace'; ctx.textAlign = 'center';
+        for (let i = 0; i <= 5; i++) {
+            const day = Math.round((i / 5) * (n - 1));
+            ctx.fillText(`D${day}`, pad.l + (i / 5) * cw, H - pad.b + 14);
+        }
+
+        // Legend
+        ctx.font = '10px sans-serif';
+        const lgX = pad.l + 10;
+        if (layers.price) {
+            ctx.fillStyle = C.primary; ctx.fillRect(lgX, pad.t + 5, 12, 3);
+            ctx.fillText('股价', lgX + 18, pad.t + 10);
+        }
+        if (layers.sent) {
+            ctx.fillStyle = C.positive; ctx.fillRect(lgX + 60, pad.t + 5, 12, 3);
+            ctx.fillText('情感(5日均)', lgX + 78, pad.t + 10);
+        }
+        if (layers.vol) {
+            ctx.fillStyle = 'rgba(120,144,156,0.5)'; ctx.fillRect(lgX + 160, pad.t + 5, 12, 8);
+            ctx.fillStyle = C.textDim; ctx.fillText('成交量', lgX + 178, pad.t + 10);
+        }
+
+        // Correlation stats
+        const returns = prices.map((p, i) => i > 0 ? (p / prices[i - 1] - 1) : 0);
+        const laggedSent = dailySent.map((_, i) => i >= lag ? dailySent[i - lag] : 0);
+        const validR = returns.slice(Math.max(lag, 1));
+        const validS = laggedSent.slice(Math.max(lag, 1));
+        const corr = U.correlation(validR, validS);
+
+        // Compute correlations at different lags
+        const corrStats = document.getElementById('corrStats');
+        let statsHTML = `<div class="stat-item"><div class="label">当前滞后</div><div class="value">${lag} 天</div></div>`;
+        statsHTML += `<div class="stat-item"><div class="label">相关系数</div><div class="value ${corr < 0 ? 'red' : ''}">${corr.toFixed(4)}</div></div>`;
+        for (let k = 0; k <= 5; k++) {
+            const ls = dailySent.map((_, i) => i >= k ? dailySent[i - k] : 0);
+            const vr = returns.slice(Math.max(k, 1));
+            const vs = ls.slice(Math.max(k, 1));
+            const c = U.correlation(vr, vs);
+            statsHTML += `<div class="stat-item"><div class="label">Lag ${k}</div><div class="value ${c < 0 ? 'red' : ''}">${c.toFixed(4)}</div></div>`;
+        }
+        corrStats.innerHTML = statsHTML;
+        drawLagCorr(lag);
+    };
+
+    function drawLagCorr(activeLag) {
+        const cvs = document.getElementById('cvsLagCorr');
+        const ctx = cvs.getContext('2d');
+        cvs.width = cvs.clientWidth * 2; cvs.height = 200 * 2;
+        ctx.scale(2, 2);
+        const W = cvs.clientWidth, H = 200;
+        ctx.clearRect(0, 0, W, H);
+
+        const pad = { l: 45, r: 20, t: 15, b: 35 };
+        const cw = W - pad.l - pad.r;
+        const ch = H - pad.t - pad.b;
+        const returns = prices.map((p, i) => i > 0 ? (p / prices[i - 1] - 1) : 0);
+
+        const maxLag = 10;
+        const corrs = [];
+        for (let k = 0; k <= maxLag; k++) {
+            const ls = dailySent.map((_, i) => i >= k ? dailySent[i - k] : 0);
+            const vr = returns.slice(Math.max(k, 1));
+            const vs = ls.slice(Math.max(k, 1));
+            corrs.push(U.correlation(vr, vs));
+        }
+
+        const maxAbs = Math.max(...corrs.map(Math.abs), 0.1);
+        const barW = Math.min(28, (cw / (maxLag + 1)) * 0.65);
+        const gap = cw / (maxLag + 1);
+        const midY = pad.t + ch / 2;
+
+        // Zero line
+        ctx.strokeStyle = C.grid; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(pad.l, midY); ctx.lineTo(W - pad.r, midY); ctx.stroke();
+
+        // Grid
+        ctx.strokeStyle = C.grid; ctx.lineWidth = 0.5;
+        for (let i = 0; i <= 4; i++) {
+            if (i === 2) continue;
+            const y = pad.t + (i / 4) * ch;
+            ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(W - pad.r, y); ctx.stroke();
+        }
+
+        corrs.forEach((c, k) => {
+            const x = pad.l + k * gap + (gap - barW) / 2;
+            const bh = (Math.abs(c) / maxAbs) * (ch / 2) * 0.85;
+            const y = c >= 0 ? midY - bh : midY;
+            const isActive = k === activeLag;
+            ctx.fillStyle = isActive ? (c >= 0 ? C.positive : C.negative) : (c >= 0 ? C.positive + '70' : C.negative + '70');
+            ctx.fillRect(x, y, barW, bh);
+
+            if (isActive) {
+                ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5;
+                ctx.strokeRect(x - 1, y - 1, barW + 2, bh + 2);
+            }
+
+            // Value label
+            ctx.fillStyle = C.text; ctx.font = '8px monospace'; ctx.textAlign = 'center';
+            ctx.fillText(c.toFixed(3), x + barW / 2, c >= 0 ? y - 4 : y + bh + 10);
+
+            // X label
+            ctx.fillStyle = isActive ? C.primary : C.textDim;
+            ctx.fillText(`${k}`, x + barW / 2, H - pad.b + 12);
+        });
+
+        ctx.fillStyle = C.textDim; ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
+        ctx.fillText('滞后天数', pad.l + cw / 2, H - 3);
+
+        // Y labels
+        ctx.textAlign = 'right'; ctx.font = '8px monospace'; ctx.fillStyle = C.textDim;
+        ctx.fillText(`+${maxAbs.toFixed(2)}`, pad.l - 4, pad.t + 8);
+        ctx.fillText('0', pad.l - 4, midY + 3);
+        ctx.fillText(`-${maxAbs.toFixed(2)}`, pad.l - 4, H - pad.b - 2);
+    }
+
+    drawSentIndex();
+
+    // ================================================================
+    // Section 4: Trading Strategy
+    // ================================================================
+    let strategyResult = null;
+
+    window.updateThreshLabel = function() {
+        document.getElementById('lblThresh').textContent = (parseInt(document.getElementById('sldThresh').value) / 100).toFixed(2);
+    };
+
+    window.toggleSignals = function() {
+        showSignals = !showSignals;
+        document.getElementById('btnShowSignals').classList.toggle('active');
+        drawStrategy();
+        drawEquity();
+    };
+
+    window.runStrategy = function() {
+        const thresh = parseInt(document.getElementById('sldThresh').value) / 100;
+        const n = prices.length;
+        // Smooth sentiment
+        const smoothSent = [];
+        for (let i = 0; i < n; i++) {
+            if (i < 3) { smoothSent.push(dailySent[i]); continue; }
+            smoothSent.push((dailySent[i] + dailySent[i-1] + dailySent[i-2]) / 3);
+        }
+
+        const signals = []; // { day, type: 'buy'|'sell' }
+        const equity = [1]; // normalized
+        const buyHold = [1];
+        let position = 0; // 0 = flat, 1 = long
+        let entryPrice = 0;
+
+        for (let i = 1; i < n; i++) {
+            const ret = prices[i] / prices[i - 1] - 1;
+            buyHold.push(buyHold[i - 1] * (1 + ret));
+
+            if (position === 0 && smoothSent[i] > thresh) {
+                position = 1; entryPrice = prices[i];
+                signals.push({ day: i, type: 'buy' });
+                equity.push(equity[i - 1]);
+            } else if (position === 1 && smoothSent[i] < -thresh) {
+                position = 0;
+                signals.push({ day: i, type: 'sell' });
+                equity.push(equity[i - 1] * (1 + ret));
+            } else if (position === 1) {
+                equity.push(equity[i - 1] * (1 + ret));
+            } else {
+                equity.push(equity[i - 1]);
+            }
+        }
+
+        strategyResult = { signals, equity, buyHold, smoothSent, thresh };
+        drawStrategy();
+        drawEquity();
+        updatePerfStats();
+    };
+
+    function drawStrategy() {
+        if (!strategyResult) return;
+        const cvs = document.getElementById('cvsStrategy');
+        const ctx = cvs.getContext('2d');
+        cvs.width = cvs.clientWidth * 2; cvs.height = 300 * 2;
+        ctx.scale(2, 2);
+        const W = cvs.clientWidth, H = 300;
+        ctx.clearRect(0, 0, W, H);
+
+        const { signals, smoothSent, thresh } = strategyResult;
+        const n = prices.length;
+        const pad = { l: 50, r: 20, t: 20, b: 30 };
+        const cw = W - pad.l - pad.r;
+        const ch = H - pad.t - pad.b;
+        const pMin = Math.min(...prices) * 0.98;
+        const pMax = Math.max(...prices) * 1.02;
+
+        // Grid
+        ctx.strokeStyle = C.grid; ctx.lineWidth = 0.5;
+        for (let i = 0; i <= 5; i++) {
+            const y = pad.t + (i / 5) * ch;
+            ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(W - pad.r, y); ctx.stroke();
+        }
+
+        // Price line
+        ctx.strokeStyle = C.primary; ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        for (let i = 0; i < n; i++) {
+            const x = pad.l + (i / (n - 1)) * cw;
+            const y = pad.t + (1 - (prices[i] - pMin) / (pMax - pMin)) * ch;
+            i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+
+        // Signals
+        if (showSignals) {
+            signals.forEach(sig => {
+                const x = pad.l + (sig.day / (n - 1)) * cw;
+                const y = pad.t + (1 - (prices[sig.day] - pMin) / (pMax - pMin)) * ch;
+                ctx.beginPath();
+                if (sig.type === 'buy') {
+                    ctx.fillStyle = C.positive;
+                    ctx.moveTo(x, y + 12); ctx.lineTo(x - 6, y + 20); ctx.lineTo(x + 6, y + 20);
+                } else {
+                    ctx.fillStyle = C.negative;
+                    ctx.moveTo(x, y - 12); ctx.lineTo(x - 6, y - 20); ctx.lineTo(x + 6, y - 20);
+                }
+                ctx.closePath(); ctx.fill();
+
+                ctx.fillStyle = sig.type === 'buy' ? C.positive : C.negative;
+                ctx.font = '8px sans-serif'; ctx.textAlign = 'center';
+                ctx.fillText(sig.type === 'buy' ? '买' : '卖', x, sig.type === 'buy' ? y + 30 : y - 24);
+            });
+        }
+
+        // Y-axis
+        ctx.fillStyle = C.textDim; ctx.font = '9px monospace'; ctx.textAlign = 'right';
+        for (let i = 0; i <= 4; i++) {
+            const v = pMin + (i / 4) * (pMax - pMin);
+            ctx.fillText(v.toFixed(1), pad.l - 4, pad.t + (1 - i / 4) * ch + 3);
+        }
+
+        // X-axis
+        ctx.textAlign = 'center';
+        for (let i = 0; i <= 5; i++) {
+            const d = Math.round((i / 5) * (n - 1));
+            ctx.fillText(`D${d}`, pad.l + (i / 5) * cw, H - pad.b + 14);
+        }
+    }
+
+    function drawEquity() {
+        if (!strategyResult) return;
+        const cvs = document.getElementById('cvsEquity');
+        const ctx = cvs.getContext('2d');
+        cvs.width = cvs.clientWidth * 2; cvs.height = 250 * 2;
+        ctx.scale(2, 2);
+        const W = cvs.clientWidth, H = 250;
+        ctx.clearRect(0, 0, W, H);
+
+        const { equity, buyHold } = strategyResult;
+        const n = equity.length;
+        const all = equity.concat(buyHold);
+        const pad = { l: 50, r: 20, t: 20, b: 30 };
+        const cw = W - pad.l - pad.r;
+        const ch = H - pad.t - pad.b;
+        const eMin = Math.min(...all) * 0.98;
+        const eMax = Math.max(...all) * 1.02;
+
+        // Grid
+        ctx.strokeStyle = C.grid; ctx.lineWidth = 0.5;
+        for (let i = 0; i <= 4; i++) {
+            const y = pad.t + (i / 4) * ch;
+            ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(W - pad.r, y); ctx.stroke();
+        }
+
+        // Buy & hold
+        ctx.strokeStyle = C.neutral; ctx.lineWidth = 1.2;
+        ctx.setLineDash([4, 3]);
+        ctx.beginPath();
+        for (let i = 0; i < n; i++) {
+            const x = pad.l + (i / (n - 1)) * cw;
+            const y = pad.t + (1 - (buyHold[i] - eMin) / (eMax - eMin)) * ch;
+            i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Strategy
+        ctx.strokeStyle = C.positive; ctx.lineWidth = 2;
+        ctx.beginPath();
+        for (let i = 0; i < n; i++) {
+            const x = pad.l + (i / (n - 1)) * cw;
+            const y = pad.t + (1 - (equity[i] - eMin) / (eMax - eMin)) * ch;
+            i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+
+        // Fill under strategy
+        ctx.lineTo(pad.l + cw, pad.t + ch);
+        ctx.lineTo(pad.l, pad.t + ch);
+        ctx.closePath();
+        ctx.fillStyle = 'rgba(0,230,118,0.06)';
+        ctx.fill();
+
+        // Y-axis
+        ctx.fillStyle = C.textDim; ctx.font = '9px monospace'; ctx.textAlign = 'right';
+        for (let i = 0; i <= 4; i++) {
+            const v = eMin + (i / 4) * (eMax - eMin);
+            ctx.fillText(v.toFixed(2), pad.l - 4, pad.t + (1 - i / 4) * ch + 3);
+        }
+
+        // X-axis
+        ctx.textAlign = 'center';
+        for (let i = 0; i <= 5; i++) {
+            const d = Math.round((i / 5) * (n - 1));
+            ctx.fillText(`D${d}`, pad.l + (i / 5) * cw, H - pad.b + 14);
+        }
+
+        // Legend
+        ctx.font = '10px sans-serif';
+        ctx.fillStyle = C.positive; ctx.fillRect(pad.l + 10, pad.t + 5, 14, 3);
+        ctx.fillText('情感策略', pad.l + 30, pad.t + 10);
+        ctx.fillStyle = C.neutral; ctx.fillRect(pad.l + 100, pad.t + 5, 14, 3);
+        ctx.fillText('买入持有', pad.l + 120, pad.t + 10);
+    }
+
+    function updatePerfStats() {
+        if (!strategyResult) return;
+        const { equity, buyHold, signals } = strategyResult;
+        const n = equity.length;
+        const stratRet = equity[n - 1] / equity[0] - 1;
+        const bhRet = buyHold[n - 1] / buyHold[0] - 1;
+
+        // Daily returns for Sharpe
+        const dailyRets = [];
+        for (let i = 1; i < n; i++) dailyRets.push(equity[i] / equity[i - 1] - 1);
+        const sharpe = dailyRets.length > 0 ? (U.mean(dailyRets) / (U.std(dailyRets) || 0.001)) * Math.sqrt(252) : 0;
+
+        // Max drawdown
+        let peak = equity[0], maxDD = 0;
+        for (let i = 1; i < n; i++) {
+            if (equity[i] > peak) peak = equity[i];
+            const dd = (peak - equity[i]) / peak;
+            if (dd > maxDD) maxDD = dd;
+        }
+
+        const wins = signals.filter((s, i) => {
+            if (s.type !== 'sell') return false;
+            const buyIdx = signals.slice(0, i).reverse().find(x => x.type === 'buy');
+            return buyIdx && prices[s.day] > prices[buyIdx.day];
+        }).length;
+        const totalTrades = Math.floor(signals.length / 2);
+        const winRate = totalTrades > 0 ? wins / totalTrades : 0;
+
+        const stats = document.getElementById('perfStats');
+        stats.innerHTML = `
+            <div class="stat-item"><div class="label">策略收益</div><div class="value ${stratRet < 0 ? 'red' : ''}">${(stratRet * 100).toFixed(2)}%</div></div>
+            <div class="stat-item"><div class="label">持有收益</div><div class="value ${bhRet < 0 ? 'red' : ''}">${(bhRet * 100).toFixed(2)}%</div></div>
+            <div class="stat-item"><div class="label">超额收益</div><div class="value ${(stratRet - bhRet) < 0 ? 'red' : ''}">${((stratRet - bhRet) * 100).toFixed(2)}%</div></div>
+            <div class="stat-item"><div class="label">夏普比率</div><div class="value">${sharpe.toFixed(2)}</div></div>
+            <div class="stat-item"><div class="label">最大回撤</div><div class="value red">${(maxDD * 100).toFixed(2)}%</div></div>
+            <div class="stat-item"><div class="label">交易次数</div><div class="value">${totalTrades}</div></div>
+            <div class="stat-item"><div class="label">胜率</div><div class="value">${(winRate * 100).toFixed(1)}%</div></div>
+            <div class="stat-item"><div class="label">阈值</div><div class="value">${strategyResult.thresh.toFixed(2)}</div></div>
+        `;
+    }
+
+    runStrategy();
+
+    // ================================================================
+    // Section 5: Challenges — Decay Curve
+    // ================================================================
+    function drawDecay() {
+        const cvs = document.getElementById('cvsDecay');
+        const ctx = cvs.getContext('2d');
+        cvs.width = cvs.clientWidth * 2; cvs.height = 260 * 2;
+        ctx.scale(2, 2);
+        const W = cvs.clientWidth, H = 260;
+        ctx.clearRect(0, 0, W, H);
+
+        const pad = { l: 55, r: 30, t: 25, b: 40 };
+        const cw = W - pad.l - pad.r;
+        const ch = H - pad.t - pad.b;
+
+        // Grid
+        ctx.strokeStyle = C.grid; ctx.lineWidth = 0.5;
+        for (let i = 0; i <= 5; i++) {
+            const y = pad.t + (i / 5) * ch;
+            ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(W - pad.r, y); ctx.stroke();
+        }
+
+        // Decay curves: different half-lives
+        const decays = [
+            { label: '即时新闻', halfLife: 0.5, color: C.negative },
+            { label: '分析报告', halfLife: 2, color: C.accent },
+            { label: '基本面变化', halfLife: 8, color: C.positive },
+        ];
+
+        const nPts = 100;
+        const maxDays = 20;
+
+        decays.forEach(d => {
+            ctx.strokeStyle = d.color; ctx.lineWidth = 2;
+            ctx.beginPath();
+            for (let i = 0; i <= nPts; i++) {
+                const t = (i / nPts) * maxDays;
+                const alpha = Math.exp(-0.693 * t / d.halfLife); // ln(2) ~ 0.693
+                const x = pad.l + (i / nPts) * cw;
+                const y = pad.t + (1 - alpha) * ch;
+                i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+
+            // Fill under
+            ctx.lineTo(pad.l + cw, pad.t + ch);
+            ctx.lineTo(pad.l, pad.t + ch);
+            ctx.closePath();
+            ctx.fillStyle = d.color + '10';
+            ctx.fill();
+        });
+
+        // Axes
+        ctx.fillStyle = C.textDim; ctx.font = '9px monospace';
+        ctx.textAlign = 'right';
+        for (let i = 0; i <= 5; i++) {
+            const v = 1 - i / 5;
+            ctx.fillText(`${(v * 100).toFixed(0)}%`, pad.l - 4, pad.t + (i / 5) * ch + 3);
+        }
+        ctx.textAlign = 'center';
+        for (let i = 0; i <= 5; i++) {
+            const d = Math.round((i / 5) * maxDays);
+            ctx.fillText(`${d}天`, pad.l + (i / 5) * cw, H - pad.b + 14);
+        }
+
+        // Axis labels
+        ctx.fillStyle = C.textDim; ctx.font = '11px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('信息发布后天数', pad.l + cw / 2, H - 5);
+        ctx.save();
+        ctx.translate(12, pad.t + ch / 2);
+        ctx.rotate(-Math.PI / 2);
+        ctx.fillText('Alpha 残留比例', 0, 0);
+        ctx.restore();
+
+        // Legend
+        ctx.font = '10px sans-serif';
+        let lgY = pad.t + 8;
+        decays.forEach(d => {
+            ctx.fillStyle = d.color;
+            ctx.fillRect(W - pad.r - 110, lgY, 12, 3);
+            ctx.fillText(d.label, W - pad.r - 52, lgY + 4);
+            lgY += 18;
+        });
+
+        // Half-life annotation
+        ctx.setLineDash([3, 3]); ctx.strokeStyle = C.textDim + '60'; ctx.lineWidth = 0.8;
+        const halfY = pad.t + 0.5 * ch;
+        ctx.beginPath(); ctx.moveTo(pad.l, halfY); ctx.lineTo(W - pad.r, halfY); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = C.textDim; ctx.font = '8px monospace'; ctx.textAlign = 'left';
+        ctx.fillText('50% 衰减线', pad.l + 5, halfY - 4);
+    }
+
+    drawDecay();
+
+    // Declining alpha demo
+    function drawAlphaDecline() {
+        const cvs = document.getElementById('cvsAlphaDecline');
+        const ctx = cvs.getContext('2d');
+        cvs.width = cvs.clientWidth * 2; cvs.height = 240 * 2;
+        ctx.scale(2, 2);
+        const W = cvs.clientWidth, H = 240;
+        ctx.clearRect(0, 0, W, H);
+
+        const pad = { l: 55, r: 30, t: 25, b: 40 };
+        const cw = W - pad.l - pad.r;
+        const ch = H - pad.t - pad.b;
+
+        // Grid
+        ctx.strokeStyle = C.grid; ctx.lineWidth = 0.5;
+        for (let i = 0; i <= 5; i++) {
+            const y = pad.t + (i / 5) * ch;
+            ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(W - pad.r, y); ctx.stroke();
+        }
+
+        // Simulate alpha decay as more participants use the strategy
+        // Curves for different starting years
+        const curves = [
+            { label: '2018 年', startAlpha: 0.12, decayRate: 0.25, color: C.positive },
+            { label: '2020 年', startAlpha: 0.08, decayRate: 0.35, color: C.primary },
+            { label: '2023 年', startAlpha: 0.04, decayRate: 0.50, color: C.accent },
+        ];
+
+        const nMonths = 36; // 3 years
+        const maxAlpha = 0.15;
+
+        curves.forEach(curve => {
+            ctx.strokeStyle = curve.color; ctx.lineWidth = 2;
+            ctx.beginPath();
+            for (let m = 0; m <= nMonths; m++) {
+                const t = m / 12; // years
+                const alpha = curve.startAlpha * Math.exp(-curve.decayRate * t * 3);
+                const x = pad.l + (m / nMonths) * cw;
+                const y = pad.t + (1 - alpha / maxAlpha) * ch;
+                m === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+        });
+
+        // Zero alpha line
+        ctx.setLineDash([4, 4]); ctx.strokeStyle = C.negative + '60'; ctx.lineWidth = 0.8;
+        const zeroY = pad.t + ch;
+        ctx.beginPath(); ctx.moveTo(pad.l, zeroY); ctx.lineTo(W - pad.r, zeroY); ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Breakeven annotation
+        ctx.fillStyle = C.textDim; ctx.font = '8px monospace'; ctx.textAlign = 'left';
+        ctx.fillText('Alpha = 0（交易成本线）', pad.l + 5, zeroY - 4);
+
+        // Y-axis
+        ctx.fillStyle = C.textDim; ctx.font = '9px monospace'; ctx.textAlign = 'right';
+        for (let i = 0; i <= 5; i++) {
+            const v = maxAlpha * (1 - i / 5);
+            ctx.fillText(`${(v * 100).toFixed(1)}%`, pad.l - 4, pad.t + (i / 5) * ch + 3);
+        }
+
+        // X-axis
+        ctx.textAlign = 'center';
+        for (let i = 0; i <= 3; i++) {
+            const m = Math.round((i / 3) * nMonths);
+            ctx.fillText(`${m}月`, pad.l + (i / 3) * cw, H - pad.b + 14);
+        }
+
+        // Axis labels
+        ctx.fillStyle = C.textDim; ctx.font = '11px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('策略运行时间', pad.l + cw / 2, H - 5);
+        ctx.save();
+        ctx.translate(12, pad.t + ch / 2);
+        ctx.rotate(-Math.PI / 2);
+        ctx.fillText('年化 Alpha', 0, 0);
+        ctx.restore();
+
+        // Legend
+        ctx.font = '10px sans-serif';
+        let lgY = pad.t + 8;
+        curves.forEach(c => {
+            ctx.fillStyle = c.color;
+            ctx.fillRect(W - pad.r - 100, lgY, 12, 3);
+            ctx.textAlign = 'left';
+            ctx.fillText(c.label, W - pad.r - 82, lgY + 4);
+            lgY += 18;
+        });
+    }
+
+    drawAlphaDecline();
+
+    // ================================================================
+    // Resize handler
+    // ================================================================
+    let resizeTimer;
+    window.addEventListener('resize', () => {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(() => {
+            drawSentBars();
+            drawSentDist();
+            drawHeatmap();
+            drawCosine();
+            drawSentIndex();
+            drawStrategy();
+            drawEquity();
+            drawDecay();
+            drawAlphaDecline();
+        }, 150);
+    });
+}
+</script>
+
+<!-- KaTeX auto-render -->
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const waitKatex = setInterval(() => {
+        if (typeof renderMathInElement === 'function') {
+            clearInterval(waitKatex);
+            renderMathInElement(document.body, {
+                delimiters: [
+                    { left: '$$', right: '$$', display: true },
+                    { left: '$', right: '$', display: false }
+                ]
+            });
+        }
+    }, 100);
+});
+</script>
+</body>
+</html>

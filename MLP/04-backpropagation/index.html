@@ -1,0 +1,1616 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>反向传播 — Backpropagation | MLP</title>
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+    <script src="../shared/scripts/mlp-utils.js"></script>
+    <script src="../shared/scripts/nav.js"></script>
+    <style>
+        /* ===== Page-specific Styles ===== */
+        .section-desc {
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+            margin-bottom: 1.25rem;
+            line-height: 1.7;
+        }
+
+        /* Computation Graph */
+        .graph-canvas-wrap {
+            position: relative;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+        }
+        .graph-canvas-wrap canvas {
+            display: block;
+            width: 100%;
+            cursor: pointer;
+        }
+
+        /* Node palette */
+        .node-palette {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+            margin-bottom: 1rem;
+        }
+        .node-palette .btn {
+            min-width: 70px;
+        }
+        .node-palette .btn.selected {
+            background: rgba(22, 199, 154, 0.25);
+            border-color: var(--accent-green);
+            color: var(--accent-green);
+        }
+
+        /* Gradient result box */
+        .gradient-result {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1rem 1.25rem;
+            margin-top: 1rem;
+            font-size: 0.9rem;
+            min-height: 60px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .gradient-result .step-item {
+            padding: 0.4rem 0;
+            border-bottom: 1px solid rgba(42, 42, 74, 0.4);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .gradient-result .step-item:last-child { border-bottom: none; }
+        .gradient-result .step-num {
+            background: var(--accent-purple);
+            color: var(--bg-primary);
+            width: 22px; height: 22px;
+            border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 0.75rem; font-weight: 700;
+            flex-shrink: 0;
+        }
+
+        /* Backprop network viz */
+        .bp-canvas-wrap {
+            position: relative;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+        }
+        .bp-canvas-wrap canvas {
+            display: block;
+            width: 100%;
+        }
+        .bp-formula-box {
+            background: rgba(15, 52, 96, 0.6);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1rem 1.25rem;
+            margin-top: 1rem;
+            min-height: 50px;
+        }
+        .bp-formula-box .formula-label {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            margin-bottom: 0.4rem;
+        }
+
+        /* Contour canvas */
+        .contour-canvas-wrap {
+            position: relative;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+            cursor: crosshair;
+        }
+        .contour-canvas-wrap canvas {
+            display: block;
+            width: 100%;
+        }
+        .gradient-info {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1rem 1.25rem;
+            margin-top: 1rem;
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+        }
+        .gradient-info .gi-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 0.25rem 0;
+        }
+        .gradient-info .gi-label { color: var(--text-muted); }
+        .gradient-info .gi-value { color: var(--accent-green); }
+
+        /* Training loop */
+        .training-canvas-wrap {
+            position: relative;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+        }
+        .training-canvas-wrap canvas {
+            display: block;
+            width: 100%;
+        }
+        .weight-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            margin-top: 0.75rem;
+        }
+        .weight-table th, .weight-table td {
+            padding: 0.35rem 0.6rem;
+            border: 1px solid var(--border-color);
+            text-align: center;
+        }
+        .weight-table th {
+            background: var(--bg-card);
+            color: var(--accent-blue);
+            font-weight: 600;
+        }
+        .weight-table td.changed {
+            color: var(--accent-orange);
+        }
+        .loss-display {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            margin-top: 1rem;
+            padding: 0.75rem 1rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+        }
+        .loss-display .loss-label {
+            color: var(--text-muted);
+            font-size: 0.85rem;
+        }
+        .loss-display .loss-value {
+            font-family: var(--font-mono);
+            font-size: 1.3rem;
+            color: var(--accent-red);
+            font-weight: 700;
+        }
+        .loss-display .iter-value {
+            font-family: var(--font-mono);
+            font-size: 0.9rem;
+            color: var(--accent-blue);
+            margin-left: auto;
+        }
+
+        /* Loss chart */
+        .loss-chart-wrap {
+            margin-top: 0.75rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 0.75rem;
+            height: 120px;
+            position: relative;
+        }
+        .loss-chart-wrap canvas {
+            width: 100%;
+            height: 100%;
+        }
+
+        /* Controls row */
+        .controls-row {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+            margin-bottom: 1rem;
+        }
+
+        /* Editable input */
+        .weight-input {
+            width: 65px;
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            padding: 0.2rem 0.3rem;
+            border-radius: 4px;
+            text-align: center;
+        }
+        .weight-input:focus {
+            outline: none;
+            border-color: var(--accent-green);
+        }
+    </style>
+</head>
+<body>
+<div class="page-container">
+    <!-- Header -->
+    <header class="section">
+        <h1>04 — 反向传播 <span style="color:var(--text-muted);font-size:0.6em;">Backpropagation</span></h1>
+        <p class="section-desc">
+            反向传播算法是训练神经网络的核心。它利用<strong>链式法则</strong>高效地计算损失函数对每个权重的梯度，
+            然后通过<strong>梯度下降</strong>更新权重，使网络逐步学习。
+        </p>
+    </header>
+
+    <!-- ===== Section 1: Chain Rule ===== -->
+    <section class="section" id="sec-chain-rule">
+        <div class="section-title">
+            <div class="icon">1</div>
+            <h2>链式法则 — Chain Rule</h2>
+        </div>
+        <div class="split-layout">
+            <div class="text-panel">
+                <p>对于复合函数 $y = f(g(x))$，链式法则告诉我们：</p>
+                <div class="katex-display">$$\frac{dy}{dx} = \frac{dy}{df} \cdot \frac{df}{dg} \cdot \frac{dg}{dx}$$</div>
+                <p>在下方画布中点击添加计算节点，构建一个小型计算图。然后点击<strong>"计算梯度"</strong>按钮，
+                观察链式法则如何逐步应用。</p>
+                <div class="node-palette">
+                    <button class="btn btn-sm selected" data-node="input" id="palInput">输入 x</button>
+                    <button class="btn btn-sm" data-node="add" id="palAdd">加法 +</button>
+                    <button class="btn btn-sm" data-node="mul" id="palMul">乘法 &times;</button>
+                    <button class="btn btn-sm" data-node="sin" id="palSin">sin</button>
+                    <button class="btn btn-sm" data-node="sq" id="palSq">x&sup2;</button>
+                </div>
+                <div class="controls-row">
+                    <button class="btn btn-primary" id="btnComputeGrad">计算梯度</button>
+                    <button class="btn" id="btnResetGraph">重置</button>
+                    <button class="btn" id="btnExampleGraph">示例图</button>
+                </div>
+                <div class="gradient-result" id="gradResult">
+                    <span class="text-muted">点击画布添加节点，然后点"计算梯度"</span>
+                </div>
+            </div>
+            <div class="viz-panel">
+                <div class="graph-canvas-wrap">
+                    <canvas id="chainCanvas" width="700" height="450"></canvas>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ===== Section 2: Backprop Visualization ===== -->
+    <section class="section" id="sec-backprop">
+        <div class="section-title">
+            <div class="icon">2</div>
+            <h2>反向传播可视化 — Backpropagation Visualized</h2>
+        </div>
+        <div class="split-layout">
+            <div class="text-panel">
+                <p>一个 2-2-1 网络的完整反向传播过程。</p>
+                <p><span style="color:var(--accent-green);">绿色箭头</span>代表前向传播，
+                   <span style="color:var(--accent-red);">红色箭头</span>代表反向传播。</p>
+                <p>在每一步中，我们展示：</p>
+                <ul style="color:var(--text-secondary);font-size:0.9rem;margin-left:1.2rem;margin-bottom:1rem;">
+                    <li><strong>局部梯度</strong>（本层的导数）</li>
+                    <li><strong>上游梯度</strong>（从输出传回的梯度）</li>
+                    <li><strong>它们的乘积</strong>（链式法则）</li>
+                </ul>
+                <div class="bp-formula-box" id="bpFormulaBox">
+                    <div class="formula-label">当前公式</div>
+                    <div id="bpFormula">点击"播放"开始</div>
+                </div>
+                <div class="anim-controls" style="margin-top:1rem;">
+                    <button class="btn btn-sm btn-icon" id="btnBpPrev" title="上一步">&#9664;</button>
+                    <button class="btn btn-sm btn-icon btn-primary" id="btnBpPlay" title="播放/暂停">&#9654;</button>
+                    <button class="btn btn-sm btn-icon" id="btnBpNext" title="下一步">&#9654;</button>
+                    <div class="progress-bar" id="bpProgress"><div class="fill" id="bpFill"></div></div>
+                    <span class="step-label" id="bpStepLabel">0 / 0</span>
+                </div>
+                <div class="controls-row" style="margin-top:0.5rem;">
+                    <button class="btn btn-sm" id="btnBpReset">重置</button>
+                    <div class="slider-group" style="flex:1;">
+                        <label>速度</label>
+                        <input type="range" id="bpSpeed" min="200" max="2000" value="800" step="100">
+                        <span class="slider-value" id="bpSpeedVal">0.8s</span>
+                    </div>
+                </div>
+            </div>
+            <div class="viz-panel">
+                <div class="bp-canvas-wrap">
+                    <canvas id="bpCanvas" width="700" height="500"></canvas>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ===== Section 3: Geometric Meaning of Gradient ===== -->
+    <section class="section" id="sec-geometry">
+        <div class="section-title">
+            <div class="icon">3</div>
+            <h2>梯度的几何意义 — Geometric Meaning</h2>
+        </div>
+        <div class="split-layout">
+            <div class="text-panel">
+                <p>损失函数在参数空间形成一个"地形"。梯度向量指向<strong>最陡上升</strong>方向，
+                其负方向则是<strong>最陡下降</strong>方向。</p>
+                <div class="katex-display">$$\nabla L = \left[\frac{\partial L}{\partial w_1}, \frac{\partial L}{\partial w_2}\right]$$</div>
+                <p>点击等高线图的任意位置，查看该点处的梯度方向（红色=上升，蓝色=下降）。</p>
+                <div class="controls-row">
+                    <label style="font-size:0.85rem;color:var(--text-secondary);">损失函数：</label>
+                    <select class="btn btn-sm" id="lossFnSelect" style="min-width:130px;">
+                        <option value="bowl">碗形 (凸)</option>
+                        <option value="saddle">鞍面</option>
+                        <option value="rosenbrock">Rosenbrock</option>
+                        <option value="bumpy">多谷</option>
+                    </select>
+                </div>
+                <div class="gradient-info" id="gradInfo">
+                    <div class="gi-row"><span class="gi-label">位置 (w1, w2)</span><span class="gi-value" id="giPos">--</span></div>
+                    <div class="gi-row"><span class="gi-label">损失值 L</span><span class="gi-value" id="giLoss">--</span></div>
+                    <div class="gi-row"><span class="gi-label">梯度 &nabla;L</span><span class="gi-value" id="giGrad">--</span></div>
+                    <div class="gi-row"><span class="gi-label">梯度大小 |&nabla;L|</span><span class="gi-value" id="giNorm">--</span></div>
+                </div>
+                <div class="info-box" style="margin-top:1rem;">
+                    <p>梯度的大小代表斜率的陡峭程度。在平坦区域梯度很小，在陡峭区域梯度很大。</p>
+                </div>
+            </div>
+            <div class="viz-panel">
+                <div class="contour-canvas-wrap">
+                    <canvas id="contourCanvas" width="700" height="550"></canvas>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ===== Section 4: Full Training Loop ===== -->
+    <section class="section" id="sec-training">
+        <div class="section-title">
+            <div class="icon">4</div>
+            <h2>完整训练循环 — Full Training Loop</h2>
+        </div>
+        <div class="split-layout">
+            <div class="text-panel">
+                <p>完整的训练循环：<strong>前向传播 &rarr; 计算损失 &rarr; 反向传播 &rarr; 更新权重</strong>。</p>
+                <p>编辑下方权重，然后逐步执行训练循环。观察每次迭代后权重如何变化、损失如何下降。</p>
+                <div class="steps" id="trainSteps">
+                    <div class="step active" data-step="0"><span class="num">1</span> 前向</div>
+                    <div class="step-connector"></div>
+                    <div class="step" data-step="1"><span class="num">2</span> 损失</div>
+                    <div class="step-connector"></div>
+                    <div class="step" data-step="2"><span class="num">3</span> 反向</div>
+                    <div class="step-connector"></div>
+                    <div class="step" data-step="3"><span class="num">4</span> 更新</div>
+                </div>
+                <div class="controls-row">
+                    <button class="btn btn-primary" id="btnTrainStep">下一步</button>
+                    <button class="btn" id="btnTrainAuto">自动训练 10 次</button>
+                    <button class="btn" id="btnTrainReset">重置</button>
+                </div>
+                <div class="slider-group" style="margin-bottom:0.75rem;">
+                    <label>学习率</label>
+                    <input type="range" id="lrSlider" min="0.01" max="1.0" value="0.3" step="0.01">
+                    <span class="slider-value" id="lrVal">0.30</span>
+                </div>
+                <div style="font-size:0.85rem;color:var(--text-muted);margin-bottom:0.5rem;">输入: x=[1.0, 0.5], 目标: y=0.8</div>
+                <div style="overflow-x:auto;">
+                    <table class="weight-table" id="weightTable">
+                        <thead><tr><th>参数</th><th>当前值</th><th>梯度</th><th>更新后</th></tr></thead>
+                        <tbody id="weightBody"></tbody>
+                    </table>
+                </div>
+                <div class="loss-display">
+                    <div>
+                        <div class="loss-label">当前损失</div>
+                        <div class="loss-value" id="trainLoss">--</div>
+                    </div>
+                    <div class="iter-value" id="trainIter">迭代: 0</div>
+                </div>
+                <div class="loss-chart-wrap">
+                    <canvas id="lossChart"></canvas>
+                </div>
+            </div>
+            <div class="viz-panel">
+                <div class="training-canvas-wrap">
+                    <canvas id="trainCanvas" width="700" height="550"></canvas>
+                </div>
+            </div>
+        </div>
+    </section>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    // Render KaTeX
+    if (typeof renderMathInElement !== 'undefined') {
+        renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false}
+            ]
+        });
+    }
+
+    const U = MLPUtils;
+
+    /* ============================================================
+     *  Section 1: Chain Rule — Computation Graph
+     * ============================================================ */
+    (() => {
+        const canvas = document.getElementById('chainCanvas');
+        const ctx = canvas.getContext('2d');
+        const dpr = window.devicePixelRatio || 1;
+        canvas.width = 700 * dpr;
+        canvas.height = 450 * dpr;
+        ctx.scale(dpr, dpr);
+        const W = 700, H = 450;
+
+        let nodes = [];
+        let edges = [];
+        let selectedType = 'input';
+        let dragNode = null;
+        let connectFrom = null;
+        let gradientSteps = [];
+
+        // Palette buttons
+        document.querySelectorAll('.node-palette .btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.node-palette .btn').forEach(b => b.classList.remove('selected'));
+                btn.classList.add('selected');
+                selectedType = btn.dataset.node;
+            });
+        });
+
+        function makeNode(type, x, y) {
+            const id = nodes.length;
+            let label, fn, dfn;
+            switch (type) {
+                case 'input': label = 'x'; fn = v => v; dfn = () => 1; break;
+                case 'add': label = '+'; fn = (a, b) => a + b; dfn = () => [1, 1]; break;
+                case 'mul': label = '\u00d7'; fn = (a, b) => a * b; dfn = (a, b) => [b, a]; break;
+                case 'sin': label = 'sin'; fn = v => Math.sin(v); dfn = v => Math.cos(v); break;
+                case 'sq': label = 'x\u00b2'; fn = v => v * v; dfn = v => 2 * v; break;
+            }
+            return { id, type, label, x, y, value: type === 'input' ? 2.0 : 0, fn, dfn, grad: 0, inputs: [] };
+        }
+
+        function addNode(type, x, y) {
+            const n = makeNode(type, x, y);
+            nodes.push(n);
+            draw();
+        }
+
+        canvas.addEventListener('click', e => {
+            const rect = canvas.getBoundingClientRect();
+            const mx = (e.clientX - rect.left) * (W / rect.width);
+            const my = (e.clientY - rect.top) * (H / rect.height);
+            const hit = nodes.find(n => Math.hypot(n.x - mx, n.y - my) < 25);
+            if (hit) {
+                if (connectFrom && connectFrom !== hit) {
+                    if (!hit.inputs.includes(connectFrom.id)) {
+                        const maxIn = (hit.type === 'add' || hit.type === 'mul') ? 2 : 1;
+                        if (hit.inputs.length < maxIn) {
+                            hit.inputs.push(connectFrom.id);
+                            edges.push({ from: connectFrom.id, to: hit.id });
+                        }
+                    }
+                    connectFrom = null;
+                } else {
+                    connectFrom = hit;
+                }
+            } else {
+                connectFrom = null;
+                addNode(selectedType, mx, my);
+            }
+            draw();
+        });
+
+        canvas.addEventListener('dblclick', e => {
+            const rect = canvas.getBoundingClientRect();
+            const mx = (e.clientX - rect.left) * (W / rect.width);
+            const my = (e.clientY - rect.top) * (H / rect.height);
+            const hit = nodes.find(n => Math.hypot(n.x - mx, n.y - my) < 25);
+            if (hit && hit.type === 'input') {
+                const val = prompt('输入值：', hit.value);
+                if (val !== null && !isNaN(+val)) { hit.value = +val; draw(); }
+            }
+        });
+
+        function forwardGraph() {
+            const order = topoSort();
+            for (const nid of order) {
+                const n = nodes[nid];
+                if (n.type === 'input') continue;
+                const ins = n.inputs.map(i => nodes[i].value);
+                if (n.type === 'add' || n.type === 'mul') {
+                    n.value = ins.length === 2 ? n.fn(ins[0], ins[1]) : (ins.length === 1 ? ins[0] : 0);
+                } else {
+                    n.value = ins.length >= 1 ? n.fn(ins[0]) : 0;
+                }
+            }
+        }
+
+        function topoSort() {
+            const visited = new Set();
+            const order = [];
+            function dfs(id) {
+                if (visited.has(id)) return;
+                visited.add(id);
+                for (const inp of nodes[id].inputs) dfs(inp);
+                order.push(id);
+            }
+            for (let i = 0; i < nodes.length; i++) dfs(i);
+            return order;
+        }
+
+        function backwardGraph() {
+            const order = topoSort().reverse();
+            nodes.forEach(n => n.grad = 0);
+            if (order.length === 0) return [];
+            nodes[order[0]].grad = 1;
+            const steps = [];
+            steps.push({ desc: `输出节点 "${nodes[order[0]].label}" 的梯度设为 1`, nodeId: order[0] });
+            for (const nid of order) {
+                const n = nodes[nid];
+                if (n.inputs.length === 0) continue;
+                const ins = n.inputs.map(i => nodes[i].value);
+                if (n.type === 'add' || n.type === 'mul') {
+                    if (n.inputs.length === 2) {
+                        const [dA, dB] = n.dfn(ins[0], ins[1]);
+                        const gA = n.grad * dA;
+                        const gB = n.grad * dB;
+                        nodes[n.inputs[0]].grad += gA;
+                        nodes[n.inputs[1]].grad += gB;
+                        steps.push({
+                            desc: `${n.label}: 上游=${n.grad.toFixed(3)}, 局部=[${dA.toFixed(3)}, ${dB.toFixed(3)}] => [${gA.toFixed(3)}, ${gB.toFixed(3)}]`,
+                            nodeId: nid
+                        });
+                    }
+                } else {
+                    const d = n.dfn(ins[0]);
+                    const g = n.grad * d;
+                    nodes[n.inputs[0]].grad += g;
+                    steps.push({
+                        desc: `${n.label}: 上游=${n.grad.toFixed(3)}, 局部=${d.toFixed(3)} => ${g.toFixed(3)}`,
+                        nodeId: nid
+                    });
+                }
+            }
+            return steps;
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, W, H);
+            ctx.fillStyle = 'rgba(22, 33, 62, 0.3)';
+            ctx.fillRect(0, 0, W, H);
+
+            // Draw edges
+            for (const e of edges) {
+                const from = nodes[e.from], to = nodes[e.to];
+                ctx.beginPath();
+                ctx.moveTo(from.x, from.y);
+                ctx.lineTo(to.x, to.y);
+                ctx.strokeStyle = 'rgba(79,195,247,0.5)';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                // Arrow
+                const angle = Math.atan2(to.y - from.y, to.x - from.x);
+                const ax = to.x - 28 * Math.cos(angle);
+                const ay = to.y - 28 * Math.sin(angle);
+                ctx.beginPath();
+                ctx.moveTo(ax, ay);
+                ctx.lineTo(ax - 10 * Math.cos(angle - 0.4), ay - 10 * Math.sin(angle - 0.4));
+                ctx.lineTo(ax - 10 * Math.cos(angle + 0.4), ay - 10 * Math.sin(angle + 0.4));
+                ctx.closePath();
+                ctx.fillStyle = 'rgba(79,195,247,0.7)';
+                ctx.fill();
+            }
+
+            // Draw nodes
+            for (const n of nodes) {
+                const isConn = connectFrom === n;
+                ctx.beginPath();
+                ctx.arc(n.x, n.y, 25, 0, Math.PI * 2);
+                ctx.fillStyle = isConn ? 'rgba(22,199,154,0.3)' : 'rgba(15,52,96,0.9)';
+                ctx.fill();
+                ctx.strokeStyle = isConn ? '#16c79a' : (n.type === 'input' ? '#4fc3f7' : '#b388ff');
+                ctx.lineWidth = 2;
+                ctx.stroke();
+
+                ctx.fillStyle = '#e8e8e8';
+                ctx.font = '14px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(n.label, n.x, n.y);
+
+                // Value above
+                ctx.fillStyle = '#16c79a';
+                ctx.font = '11px monospace';
+                ctx.fillText(n.value.toFixed(2), n.x, n.y - 33);
+
+                // Gradient below
+                if (n.grad !== 0) {
+                    ctx.fillStyle = '#ff5252';
+                    ctx.fillText('g=' + n.grad.toFixed(3), n.x, n.y + 37);
+                }
+            }
+
+            if (nodes.length === 0) {
+                ctx.fillStyle = 'rgba(168,168,184,0.4)';
+                ctx.font = '14px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('点击此处添加计算节点', W / 2, H / 2 - 10);
+                ctx.fillText('单击节点可连线，双击输入节点可修改值', W / 2, H / 2 + 15);
+            }
+        }
+
+        document.getElementById('btnComputeGrad').addEventListener('click', () => {
+            if (nodes.length === 0) return;
+            forwardGraph();
+            const steps = backwardGraph();
+            draw();
+            const box = document.getElementById('gradResult');
+            if (steps.length === 0) {
+                box.innerHTML = '<span class="text-muted">无法计算梯度，请确保节点之间有连接</span>';
+                return;
+            }
+            box.innerHTML = steps.map((s, i) =>
+                `<div class="step-item"><span class="step-num">${i + 1}</span><span>${s.desc}</span></div>`
+            ).join('');
+        });
+
+        document.getElementById('btnResetGraph').addEventListener('click', () => {
+            nodes = []; edges = []; connectFrom = null; gradientSteps = [];
+            document.getElementById('gradResult').innerHTML = '<span class="text-muted">点击画布添加节点，然后点"计算梯度"</span>';
+            draw();
+        });
+
+        document.getElementById('btnExampleGraph').addEventListener('click', () => {
+            nodes = []; edges = [];
+            addNode('input', 100, 225); nodes[0].value = 3;
+            addNode('sq', 280, 150);
+            addNode('input', 100, 340); nodes[2].value = 2;
+            addNode('mul', 280, 340);
+            addNode('add', 480, 225);
+            // Connect: x->sq, x->mul, const->mul, sq->add, mul->add
+            nodes[1].inputs = [0]; edges.push({ from: 0, to: 1 });
+            nodes[3].inputs = [0, 2]; edges.push({ from: 0, to: 3 }); edges.push({ from: 2, to: 3 });
+            nodes[4].inputs = [1, 3]; edges.push({ from: 1, to: 4 }); edges.push({ from: 3, to: 4 });
+            forwardGraph();
+            draw();
+            document.getElementById('gradResult').innerHTML =
+                '<span class="text-muted">示例: y = x\u00b2 + 2x (x=3) => 点击"计算梯度"</span>';
+        });
+
+        draw();
+    })();
+
+    /* ============================================================
+     *  Section 2: Backprop Visualization (2-2-1 network)
+     * ============================================================ */
+    (() => {
+        const canvas = document.getElementById('bpCanvas');
+        const ctx = canvas.getContext('2d');
+        const dpr = window.devicePixelRatio || 1;
+        canvas.width = 700 * dpr;
+        canvas.height = 500 * dpr;
+        ctx.scale(dpr, dpr);
+        const W = 700, H = 500;
+
+        // Network: 2 inputs, 2 hidden (sigmoid), 1 output (linear)
+        const input = [1.0, 0.5];
+        const target = [0.8];
+        const w = {
+            h: [[0.3, -0.2], [0.5, 0.4]],   // hidden weights [2x2]
+            bh: [0.1, -0.1],
+            o: [[0.6, -0.3]],                 // output weights [1x2]
+            bo: [0.2]
+        };
+
+        // Positions for drawing
+        const layers = [
+            [{x:100,y:180},{x:100,y:320}],           // input
+            [{x:350,y:150},{x:350,y:350}],            // hidden
+            [{x:600,y:250}]                            // output
+        ];
+
+        // Build forward/backward steps
+        let steps = [];
+        let currentStep = 0;
+        let playing = false;
+        let timer = null;
+        let speed = 800;
+
+        function buildSteps() {
+            steps = [];
+            // Forward: compute z_h, a_h
+            const z_h = [
+                w.h[0][0]*input[0] + w.h[0][1]*input[1] + w.bh[0],
+                w.h[1][0]*input[0] + w.h[1][1]*input[1] + w.bh[1]
+            ];
+            const a_h = z_h.map(U.sigmoid);
+            // Forward: compute z_o, a_o
+            const z_o = [w.o[0][0]*a_h[0] + w.o[0][1]*a_h[1] + w.bo[0]];
+            const a_o = z_o.slice(); // linear output
+            const loss = (a_o[0] - target[0]) ** 2;
+
+            // Backward
+            const dL_da_o = 2 * (a_o[0] - target[0]);
+            const da_o_dz_o = 1; // linear
+            const dL_dz_o = dL_da_o * da_o_dz_o;
+
+            const dL_dw_o0 = dL_dz_o * a_h[0];
+            const dL_dw_o1 = dL_dz_o * a_h[1];
+            const dL_dbo = dL_dz_o;
+
+            const dL_da_h0 = dL_dz_o * w.o[0][0];
+            const dL_da_h1 = dL_dz_o * w.o[0][1];
+
+            const da_h0_dz_h0 = a_h[0] * (1 - a_h[0]);
+            const da_h1_dz_h1 = a_h[1] * (1 - a_h[1]);
+
+            const dL_dz_h0 = dL_da_h0 * da_h0_dz_h0;
+            const dL_dz_h1 = dL_da_h1 * da_h1_dz_h1;
+
+            // Steps: forward
+            steps.push({
+                type: 'forward', phase: 'input',
+                desc: '输入层: x\u2081=' + input[0].toFixed(1) + ', x\u2082=' + input[1].toFixed(1),
+                formula: 'x = [' + input[0] + ', ' + input[1] + ']',
+                highlight: { layer: 0 },
+                arrows: []
+            });
+            steps.push({
+                type: 'forward', phase: 'hidden-z',
+                desc: '隐藏层加权求和',
+                formula: `z_1 = ${z_h[0].toFixed(3)},\\; z_2 = ${z_h[1].toFixed(3)}`,
+                highlight: { layer: 1 },
+                arrows: [[0,0,1,0],[0,0,1,1],[0,1,1,0],[0,1,1,1]],
+                values: { z_h }
+            });
+            steps.push({
+                type: 'forward', phase: 'hidden-a',
+                desc: '隐藏层激活 (sigmoid)',
+                formula: `a_1 = \\sigma(${z_h[0].toFixed(3)}) = ${a_h[0].toFixed(3)},\\; a_2 = ${a_h[1].toFixed(3)}`,
+                highlight: { layer: 1 },
+                arrows: [],
+                values: { a_h }
+            });
+            steps.push({
+                type: 'forward', phase: 'output',
+                desc: '输出层',
+                formula: `\\hat{y} = ${a_o[0].toFixed(3)},\\; L = (\\hat{y} - y)^2 = ${loss.toFixed(4)}`,
+                highlight: { layer: 2 },
+                arrows: [[1,0,2,0],[1,1,2,0]],
+                values: { a_o, loss }
+            });
+            // Backward steps
+            steps.push({
+                type: 'backward', phase: 'dL-output',
+                desc: '输出层梯度',
+                formula: `\\frac{\\partial L}{\\partial \\hat{y}} = 2(\\hat{y}-y) = ${dL_da_o.toFixed(3)}`,
+                highlight: { layer: 2 },
+                arrows: [],
+                values: { dL_da_o }
+            });
+            steps.push({
+                type: 'backward', phase: 'dL-w-output',
+                desc: '输出权重梯度',
+                formula: `\\frac{\\partial L}{\\partial w^o_1} = ${dL_da_o.toFixed(3)} \\cdot ${a_h[0].toFixed(3)} = ${dL_dw_o0.toFixed(4)}`,
+                highlight: { layer: 1 },
+                arrows: [[2,0,1,0],[2,0,1,1]],
+                values: { dL_dw_o0, dL_dw_o1 }
+            });
+            steps.push({
+                type: 'backward', phase: 'dL-hidden',
+                desc: '隐藏层梯度传播',
+                formula: `\\frac{\\partial L}{\\partial a_1} = ${dL_da_o.toFixed(3)} \\cdot w^o_1 = ${dL_da_h0.toFixed(3)}`,
+                highlight: { layer: 1 },
+                arrows: [[2,0,1,0],[2,0,1,1]],
+                values: { dL_da_h0, dL_da_h1 }
+            });
+            steps.push({
+                type: 'backward', phase: 'dL-z-hidden',
+                desc: '乘以激活函数导数',
+                formula: `\\frac{\\partial L}{\\partial z_1} = ${dL_da_h0.toFixed(3)} \\cdot \\sigma'(z_1) = ${dL_da_h0.toFixed(3)} \\cdot ${da_h0_dz_h0.toFixed(3)} = ${dL_dz_h0.toFixed(4)}`,
+                highlight: { layer: 1 },
+                arrows: [],
+                values: { dL_dz_h0, dL_dz_h1 }
+            });
+            steps.push({
+                type: 'backward', phase: 'dL-w-hidden',
+                desc: '隐藏层权重梯度',
+                formula: `\\frac{\\partial L}{\\partial w^h_{11}} = \\frac{\\partial L}{\\partial z_1} \\cdot x_1 = ${dL_dz_h0.toFixed(4)} \\cdot ${input[0].toFixed(1)} = ${(dL_dz_h0*input[0]).toFixed(4)}`,
+                highlight: { layer: 0 },
+                arrows: [[1,0,0,0],[1,0,0,1],[1,1,0,0],[1,1,0,1]],
+                values: { dL_dz_h0, dL_dz_h1 }
+            });
+        }
+
+        buildSteps();
+
+        function draw() {
+            ctx.clearRect(0, 0, W, H);
+            const step = steps[currentStep] || steps[0];
+
+            // Layer labels
+            const layerNames = ['输入层', '隐藏层', '输出层'];
+            const layerColors = ['#4fc3f7', '#ffab40', '#66bb6a'];
+            layers.forEach((layer, li) => {
+                ctx.fillStyle = layerColors[li];
+                ctx.font = '13px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText(layerNames[li], layer[0].x, 60);
+            });
+
+            // Draw all connections lightly
+            for (let li = 0; li < layers.length - 1; li++) {
+                for (let i = 0; i < layers[li].length; i++) {
+                    for (let j = 0; j < layers[li+1].length; j++) {
+                        const from = layers[li][i], to = layers[li+1][j];
+                        ctx.beginPath();
+                        ctx.moveTo(from.x + 22, from.y);
+                        ctx.lineTo(to.x - 22, to.y);
+                        ctx.strokeStyle = 'rgba(42,42,74,0.6)';
+                        ctx.lineWidth = 1;
+                        ctx.stroke();
+                    }
+                }
+            }
+
+            // Draw highlighted arrows
+            if (step && step.arrows) {
+                for (const [fl, fi, tl, ti] of step.arrows) {
+                    const from = layers[fl][fi], to = layers[tl][ti];
+                    const isBackward = step.type === 'backward';
+                    const sx = isBackward ? to.x + 22 : from.x + 22;
+                    const sy = isBackward ? to.y : from.y;
+                    const ex = isBackward ? from.x - 22 : to.x - 22;
+                    const ey = isBackward ? from.y : to.y;
+
+                    ctx.beginPath();
+                    ctx.moveTo(sx, sy);
+                    ctx.lineTo(ex, ey);
+                    ctx.strokeStyle = isBackward ? '#ff5252' : '#16c79a';
+                    ctx.lineWidth = 3;
+                    ctx.stroke();
+
+                    // Arrowhead
+                    const angle = Math.atan2(ey - sy, ex - sx);
+                    ctx.beginPath();
+                    ctx.moveTo(ex, ey);
+                    ctx.lineTo(ex - 12 * Math.cos(angle - 0.35), ey - 12 * Math.sin(angle - 0.35));
+                    ctx.lineTo(ex - 12 * Math.cos(angle + 0.35), ey - 12 * Math.sin(angle + 0.35));
+                    ctx.closePath();
+                    ctx.fillStyle = isBackward ? '#ff5252' : '#16c79a';
+                    ctx.fill();
+                }
+            }
+
+            // Draw nodes
+            layers.forEach((layer, li) => {
+                layer.forEach((pos, ni) => {
+                    const isHighlight = step && step.highlight && step.highlight.layer === li;
+                    ctx.beginPath();
+                    ctx.arc(pos.x, pos.y, 22, 0, Math.PI * 2);
+                    ctx.fillStyle = isHighlight ? 'rgba(22,199,154,0.2)' : 'rgba(15,52,96,0.8)';
+                    ctx.fill();
+                    ctx.strokeStyle = isHighlight ? '#16c79a' : layerColors[li];
+                    ctx.lineWidth = isHighlight ? 3 : 2;
+                    ctx.stroke();
+
+                    // Label
+                    ctx.fillStyle = '#e8e8e8';
+                    ctx.font = '12px monospace';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    if (li === 0) ctx.fillText('x' + (ni + 1), pos.x, pos.y);
+                    else if (li === 1) ctx.fillText('h' + (ni + 1), pos.x, pos.y);
+                    else ctx.fillText('y\u0302', pos.x, pos.y);
+                });
+            });
+
+            // Step description
+            ctx.fillStyle = 'rgba(22,33,62,0.85)';
+            ctx.fillRect(20, H - 60, W - 40, 45);
+            ctx.strokeStyle = step.type === 'backward' ? '#ff5252' : '#16c79a';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(20, H - 60, W - 40, 45);
+            ctx.fillStyle = '#e8e8e8';
+            ctx.font = '13px sans-serif';
+            ctx.textAlign = 'left';
+            ctx.fillText((step.type === 'forward' ? '\u25b6 前向: ' : '\u25c0 反向: ') + step.desc, 35, H - 33);
+
+            // Phase indicator
+            ctx.fillStyle = step.type === 'backward' ? 'rgba(255,82,82,0.15)' : 'rgba(22,199,154,0.08)';
+            ctx.fillRect(0, 0, W, 40);
+            ctx.fillStyle = step.type === 'backward' ? '#ff5252' : '#16c79a';
+            ctx.font = 'bold 14px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(step.type === 'forward' ? 'FORWARD PASS' : 'BACKWARD PASS', W / 2, 26);
+        }
+
+        function updateFormula() {
+            const step = steps[currentStep];
+            if (!step) return;
+            const box = document.getElementById('bpFormula');
+            box.innerHTML = '';
+            try {
+                katex.render(step.formula, box, { displayMode: false, throwOnError: false });
+            } catch (e) {
+                box.textContent = step.formula;
+            }
+        }
+
+        function updateControls() {
+            document.getElementById('bpStepLabel').textContent = `${currentStep + 1} / ${steps.length}`;
+            document.getElementById('bpFill').style.width = ((currentStep + 1) / steps.length * 100) + '%';
+        }
+
+        function goToStep(s) {
+            currentStep = Math.max(0, Math.min(steps.length - 1, s));
+            draw();
+            updateFormula();
+            updateControls();
+        }
+
+        document.getElementById('btnBpPlay').addEventListener('click', () => {
+            playing = !playing;
+            document.getElementById('btnBpPlay').innerHTML = playing ? '\u23f8' : '\u25b6';
+            if (playing) {
+                timer = setInterval(() => {
+                    if (currentStep < steps.length - 1) {
+                        goToStep(currentStep + 1);
+                    } else {
+                        playing = false;
+                        document.getElementById('btnBpPlay').innerHTML = '\u25b6';
+                        clearInterval(timer);
+                    }
+                }, speed);
+            } else {
+                clearInterval(timer);
+            }
+        });
+
+        document.getElementById('btnBpPrev').addEventListener('click', () => goToStep(currentStep - 1));
+        document.getElementById('btnBpNext').addEventListener('click', () => goToStep(currentStep + 1));
+        document.getElementById('btnBpReset').addEventListener('click', () => {
+            playing = false;
+            clearInterval(timer);
+            document.getElementById('btnBpPlay').innerHTML = '\u25b6';
+            goToStep(0);
+        });
+
+        document.getElementById('bpSpeed').addEventListener('input', e => {
+            speed = +e.target.value;
+            document.getElementById('bpSpeedVal').textContent = (speed / 1000).toFixed(1) + 's';
+            if (playing) {
+                clearInterval(timer);
+                timer = setInterval(() => {
+                    if (currentStep < steps.length - 1) goToStep(currentStep + 1);
+                    else { playing = false; document.getElementById('btnBpPlay').innerHTML = '\u25b6'; clearInterval(timer); }
+                }, speed);
+            }
+        });
+
+        goToStep(0);
+    })();
+
+    /* ============================================================
+     *  Section 3: Gradient Geometry — Contour Plot
+     * ============================================================ */
+    (() => {
+        const canvas = document.getElementById('contourCanvas');
+        const ctx = canvas.getContext('2d');
+        const dpr = window.devicePixelRatio || 1;
+        canvas.width = 700 * dpr;
+        canvas.height = 550 * dpr;
+        ctx.scale(dpr, dpr);
+        const W = 700, H = 550;
+
+        let currentFn = 'bowl';
+        let clickPt = null;
+        let gradArrows = []; // history of clicked points
+
+        const lossFns = {
+            bowl: {
+                fn: (x, y) => x * x + 2 * y * y,
+                grad: (x, y) => [2 * x, 4 * y],
+                range: [-3, 3]
+            },
+            saddle: {
+                fn: (x, y) => x * x - y * y,
+                grad: (x, y) => [2 * x, -2 * y],
+                range: [-3, 3]
+            },
+            rosenbrock: {
+                fn: (x, y) => (1 - x) ** 2 + 10 * (y - x * x) ** 2,
+                grad: (x, y) => [
+                    -2 * (1 - x) - 40 * x * (y - x * x),
+                    20 * (y - x * x)
+                ],
+                range: [-2, 2]
+            },
+            bumpy: {
+                fn: (x, y) => Math.sin(x * 2) * Math.cos(y * 2) + 0.3 * (x * x + y * y),
+                grad: (x, y) => [
+                    2 * Math.cos(x * 2) * Math.cos(y * 2) + 0.6 * x,
+                    -2 * Math.sin(x * 2) * Math.sin(y * 2) + 0.6 * y
+                ],
+                range: [-3, 3]
+            }
+        };
+
+        function drawContour() {
+            const fn = lossFns[currentFn];
+            const [lo, hi] = fn.range;
+            const res = 2; // pixel step
+
+            // Compute loss values for color mapping
+            let minL = Infinity, maxL = -Infinity;
+            const grid = [];
+            for (let py = 0; py < H; py += res) {
+                const row = [];
+                for (let px = 0; px < W; px += res) {
+                    const x = lo + (px / W) * (hi - lo);
+                    const y = lo + (py / H) * (hi - lo);
+                    const v = fn.fn(x, y);
+                    row.push(v);
+                    if (v < minL) minL = v;
+                    if (v > maxL) maxL = v;
+                }
+                grid.push(row);
+            }
+
+            // Draw heatmap
+            let ri = 0;
+            for (let py = 0; py < H; py += res) {
+                let ci = 0;
+                for (let px = 0; px < W; px += res) {
+                    const v = grid[ri][ci];
+                    const t = Math.max(0, Math.min(1, (v - minL) / (maxL - minL + 1e-10)));
+                    // Dark blue to purple to yellow
+                    const r = Math.round(26 + t * 180);
+                    const g = Math.round(26 + (1 - Math.abs(t - 0.5) * 2) * 120);
+                    const b = Math.round(100 + (1 - t) * 155);
+                    ctx.fillStyle = `rgb(${r},${g},${b})`;
+                    ctx.fillRect(px, py, res, res);
+                    ci++;
+                }
+                ri++;
+            }
+
+            // Draw contour lines
+            const numContours = 15;
+            ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+            ctx.lineWidth = 0.8;
+            for (let c = 0; c < numContours; c++) {
+                const threshold = minL + (c + 1) / (numContours + 1) * (maxL - minL);
+                // March through grid
+                for (let py = 0; py < H - res; py += res) {
+                    for (let px = 0; px < W - res; px += res) {
+                        const ri2 = Math.floor(py / res);
+                        const ci2 = Math.floor(px / res);
+                        if (ri2 >= grid.length - 1 || ci2 >= grid[0].length - 1) continue;
+                        const a = grid[ri2][ci2] > threshold ? 1 : 0;
+                        const b2 = grid[ri2][ci2 + 1] > threshold ? 1 : 0;
+                        const cc = grid[ri2 + 1][ci2 + 1] > threshold ? 1 : 0;
+                        const d = grid[ri2 + 1][ci2] > threshold ? 1 : 0;
+                        const idx = a * 8 + b2 * 4 + cc * 2 + d;
+                        if (idx === 0 || idx === 15) continue;
+                        ctx.beginPath();
+                        ctx.arc(px + res / 2, py + res / 2, 0.5, 0, Math.PI * 2);
+                        ctx.stroke();
+                    }
+                }
+            }
+
+            // Draw gradient arrows from history
+            for (const pt of gradArrows) {
+                drawGradientArrow(pt.x, pt.y, pt.gx, pt.gy, 0.3);
+            }
+
+            // Axes labels
+            ctx.fillStyle = 'rgba(168,168,184,0.6)';
+            ctx.font = '12px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('w\u2081', W / 2, H - 5);
+            ctx.save();
+            ctx.translate(12, H / 2);
+            ctx.rotate(-Math.PI / 2);
+            ctx.fillText('w\u2082', 0, 0);
+            ctx.restore();
+        }
+
+        function drawGradientArrow(px, py, gx, gy, alpha) {
+            const fn = lossFns[currentFn];
+            const [lo, hi] = fn.range;
+            const norm = Math.sqrt(gx * gx + gy * gy);
+            if (norm < 1e-6) return;
+
+            const scale = 30 / Math.max(norm, 0.5);
+            const dx = gx * scale;
+            const dy = gy * scale;
+
+            // Gradient (ascent) in red
+            ctx.beginPath();
+            ctx.moveTo(px, py);
+            ctx.lineTo(px + dx, py + dy);
+            ctx.strokeStyle = `rgba(255,82,82,${alpha + 0.4})`;
+            ctx.lineWidth = 2.5;
+            ctx.stroke();
+            const ang1 = Math.atan2(dy, dx);
+            ctx.beginPath();
+            ctx.moveTo(px + dx, py + dy);
+            ctx.lineTo(px + dx - 8 * Math.cos(ang1 - 0.4), py + dy - 8 * Math.sin(ang1 - 0.4));
+            ctx.lineTo(px + dx - 8 * Math.cos(ang1 + 0.4), py + dy - 8 * Math.sin(ang1 + 0.4));
+            ctx.closePath();
+            ctx.fillStyle = `rgba(255,82,82,${alpha + 0.4})`;
+            ctx.fill();
+
+            // Negative gradient (descent) in blue
+            ctx.beginPath();
+            ctx.moveTo(px, py);
+            ctx.lineTo(px - dx, py - dy);
+            ctx.strokeStyle = `rgba(79,195,247,${alpha + 0.4})`;
+            ctx.lineWidth = 2.5;
+            ctx.stroke();
+            const ang2 = Math.atan2(-dy, -dx);
+            ctx.beginPath();
+            ctx.moveTo(px - dx, py - dy);
+            ctx.lineTo(px - dx - 8 * Math.cos(ang2 - 0.4), py - dy - 8 * Math.sin(ang2 - 0.4));
+            ctx.lineTo(px - dx - 8 * Math.cos(ang2 + 0.4), py - dy - 8 * Math.sin(ang2 + 0.4));
+            ctx.closePath();
+            ctx.fillStyle = `rgba(79,195,247,${alpha + 0.4})`;
+            ctx.fill();
+
+            // Point
+            ctx.beginPath();
+            ctx.arc(px, py, 4, 0, Math.PI * 2);
+            ctx.fillStyle = '#fff';
+            ctx.fill();
+        }
+
+        function handleClick(e) {
+            const rect = canvas.getBoundingClientRect();
+            const mx = (e.clientX - rect.left) * (W / rect.width);
+            const my = (e.clientY - rect.top) * (H / rect.height);
+            const fn = lossFns[currentFn];
+            const [lo, hi] = fn.range;
+            const wx = lo + (mx / W) * (hi - lo);
+            const wy = lo + (my / H) * (hi - lo);
+            const loss = fn.fn(wx, wy);
+            const [gx, gy] = fn.grad(wx, wy);
+
+            // Convert gradient to pixel space
+            const pxPerUnit = W / (hi - lo);
+            const gpx = gx * pxPerUnit / (Math.sqrt(gx*gx + gy*gy) + 1e-10) * 30;
+            const gpy = gy * pxPerUnit / (Math.sqrt(gx*gx + gy*gy) + 1e-10) * 30;
+
+            gradArrows.push({ x: mx, y: my, gx: gpx, gy: gpy });
+            if (gradArrows.length > 20) gradArrows.shift();
+
+            drawContour();
+
+            // Update info
+            document.getElementById('giPos').textContent = `(${wx.toFixed(2)}, ${wy.toFixed(2)})`;
+            document.getElementById('giLoss').textContent = loss.toFixed(4);
+            document.getElementById('giGrad').textContent = `[${gx.toFixed(3)}, ${gy.toFixed(3)}]`;
+            document.getElementById('giNorm').textContent = Math.sqrt(gx * gx + gy * gy).toFixed(4);
+        }
+
+        canvas.addEventListener('click', handleClick);
+
+        document.getElementById('lossFnSelect').addEventListener('change', e => {
+            currentFn = e.target.value;
+            gradArrows = [];
+            drawContour();
+            document.getElementById('giPos').textContent = '--';
+            document.getElementById('giLoss').textContent = '--';
+            document.getElementById('giGrad').textContent = '--';
+            document.getElementById('giNorm').textContent = '--';
+        });
+
+        drawContour();
+    })();
+
+    /* ============================================================
+     *  Section 4: Full Training Loop
+     * ============================================================ */
+    (() => {
+        const canvas = document.getElementById('trainCanvas');
+        const ctx = canvas.getContext('2d');
+        const dpr = window.devicePixelRatio || 1;
+        canvas.width = 700 * dpr;
+        canvas.height = 550 * dpr;
+        ctx.scale(dpr, dpr);
+        const W = 700, H = 550;
+
+        const lossCanvas = document.getElementById('lossChart');
+        const lctx = lossCanvas.getContext('2d');
+        const ldpr = dpr;
+
+        const input = [1.0, 0.5];
+        const target = 0.8;
+        let lr = 0.3;
+
+        // Simple 2-2-1 network with editable weights
+        let weights = {
+            w11: 0.3, w12: -0.2, w21: 0.5, w22: 0.4,
+            b1: 0.1, b2: -0.1,
+            v1: 0.6, v2: -0.3,
+            bo: 0.2
+        };
+
+        let iteration = 0;
+        let trainPhase = 0; // 0=forward, 1=loss, 2=backward, 3=update
+        let forwardData = null;
+        let gradData = null;
+        let lossHistory = [];
+        let prevWeights = null;
+
+        function resetTraining() {
+            weights = { w11: 0.3, w12: -0.2, w21: 0.5, w22: 0.4, b1: 0.1, b2: -0.1, v1: 0.6, v2: -0.3, bo: 0.2 };
+            iteration = 0;
+            trainPhase = 0;
+            forwardData = null;
+            gradData = null;
+            lossHistory = [];
+            prevWeights = null;
+            updateStepIndicator();
+            updateWeightTable();
+            document.getElementById('trainLoss').textContent = '--';
+            document.getElementById('trainIter').textContent = '\u8fed\u4ee3: 0';
+            drawTrainNetwork();
+            drawLossChart();
+        }
+
+        function forward() {
+            const w = weights;
+            const z1 = w.w11 * input[0] + w.w12 * input[1] + w.b1;
+            const z2 = w.w21 * input[0] + w.w22 * input[1] + w.b2;
+            const a1 = U.sigmoid(z1);
+            const a2 = U.sigmoid(z2);
+            const zo = w.v1 * a1 + w.v2 * a2 + w.bo;
+            const out = zo; // linear output
+            const loss = (out - target) ** 2;
+            return { z1, z2, a1, a2, zo, out, loss };
+        }
+
+        function backward(fd) {
+            const w = weights;
+            const dL_dout = 2 * (fd.out - target);
+            // Output layer
+            const dL_dv1 = dL_dout * fd.a1;
+            const dL_dv2 = dL_dout * fd.a2;
+            const dL_dbo = dL_dout;
+            // Hidden layer
+            const dL_da1 = dL_dout * w.v1;
+            const dL_da2 = dL_dout * w.v2;
+            const da1_dz1 = fd.a1 * (1 - fd.a1);
+            const da2_dz2 = fd.a2 * (1 - fd.a2);
+            const dL_dz1 = dL_da1 * da1_dz1;
+            const dL_dz2 = dL_da2 * da2_dz2;
+            const dL_dw11 = dL_dz1 * input[0];
+            const dL_dw12 = dL_dz1 * input[1];
+            const dL_dw21 = dL_dz2 * input[0];
+            const dL_dw22 = dL_dz2 * input[1];
+            const dL_db1 = dL_dz1;
+            const dL_db2 = dL_dz2;
+            return { dL_dw11, dL_dw12, dL_dw21, dL_dw22, dL_db1, dL_db2, dL_dv1, dL_dv2, dL_dbo };
+        }
+
+        function applyUpdate(g) {
+            prevWeights = { ...weights };
+            weights.w11 -= lr * g.dL_dw11;
+            weights.w12 -= lr * g.dL_dw12;
+            weights.w21 -= lr * g.dL_dw21;
+            weights.w22 -= lr * g.dL_dw22;
+            weights.b1 -= lr * g.dL_db1;
+            weights.b2 -= lr * g.dL_db2;
+            weights.v1 -= lr * g.dL_dv1;
+            weights.v2 -= lr * g.dL_dv2;
+            weights.bo -= lr * g.dL_dbo;
+        }
+
+        function updateStepIndicator() {
+            const steps = document.querySelectorAll('#trainSteps .step');
+            const connectors = document.querySelectorAll('#trainSteps .step-connector');
+            steps.forEach((s, i) => {
+                s.classList.remove('active', 'done');
+                if (i === trainPhase) s.classList.add('active');
+                else if (i < trainPhase) s.classList.add('done');
+            });
+            connectors.forEach((c, i) => {
+                c.classList.toggle('done', i < trainPhase);
+            });
+        }
+
+        function updateWeightTable() {
+            const body = document.getElementById('weightBody');
+            const params = [
+                ['w\u2081\u2081', 'w11'], ['w\u2081\u2082', 'w12'],
+                ['w\u2082\u2081', 'w21'], ['w\u2082\u2082', 'w22'],
+                ['b\u2081', 'b1'], ['b\u2082', 'b2'],
+                ['v\u2081', 'v1'], ['v\u2082', 'v2'],
+                ['b\u2092', 'bo']
+            ];
+            body.innerHTML = params.map(([label, key]) => {
+                const val = weights[key];
+                const grad = gradData ? gradData['dL_d' + key] : null;
+                const newVal = grad !== null ? val - lr * grad : null;
+                const changed = prevWeights && Math.abs(weights[key] - prevWeights[key]) > 1e-6;
+                return `<tr>
+                    <td>${label}</td>
+                    <td class="${changed ? 'changed' : ''}">${val.toFixed(4)}</td>
+                    <td>${grad !== null ? grad.toFixed(4) : '--'}</td>
+                    <td>${newVal !== null ? newVal.toFixed(4) : '--'}</td>
+                </tr>`;
+            }).join('');
+        }
+
+        function drawTrainNetwork() {
+            ctx.clearRect(0, 0, W, H);
+
+            const layers = [
+                [{ x: 100, y: 200, label: 'x\u2081' }, { x: 100, y: 350, label: 'x\u2082' }],
+                [{ x: 350, y: 170, label: 'h\u2081' }, { x: 350, y: 380, label: 'h\u2082' }],
+                [{ x: 600, y: 275, label: '\u0177' }]
+            ];
+            const layerColors = ['#4fc3f7', '#ffab40', '#66bb6a'];
+
+            // Phase colors
+            const phaseColors = ['#16c79a', '#ff5252', '#ff5252', '#b388ff'];
+            const phaseLabels = ['FORWARD', 'LOSS', 'BACKWARD', 'UPDATE'];
+
+            // Phase banner
+            ctx.fillStyle = `rgba(${trainPhase < 1 ? '22,199,154' : trainPhase < 3 ? '255,82,82' : '179,136,255'},0.12)`;
+            ctx.fillRect(0, 0, W, 44);
+            ctx.fillStyle = phaseColors[trainPhase];
+            ctx.font = 'bold 14px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(phaseLabels[trainPhase], W / 2, 28);
+
+            // Layer labels
+            ['输入层', '隐藏层', '输出层'].forEach((name, li) => {
+                ctx.fillStyle = layerColors[li];
+                ctx.font = '12px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText(name, layers[li][0].x, 65);
+            });
+
+            // Weight labels on connections
+            const wLabels = [
+                [0,0,1,0,'w11'], [0,0,1,1,'w21'],
+                [0,1,1,0,'w12'], [0,1,1,1,'w22'],
+                [1,0,2,0,'v1'], [1,1,2,0,'v2']
+            ];
+
+            // Draw connections
+            for (const [fl, fi, tl, ti, wkey] of wLabels) {
+                const from = layers[fl][fi], to = layers[tl][ti];
+                const isActive = (trainPhase === 0 && fl === 0) || (trainPhase === 0 && tl === 2) ||
+                                 (trainPhase === 2 && fl === 0) || (trainPhase === 2 && tl === 2);
+                ctx.beginPath();
+                ctx.moveTo(from.x + 24, from.y);
+                ctx.lineTo(to.x - 24, to.y);
+                ctx.strokeStyle = isActive ? phaseColors[trainPhase] : 'rgba(42,42,74,0.5)';
+                ctx.lineWidth = isActive ? 2.5 : 1;
+                ctx.stroke();
+
+                // Weight label
+                const mx = (from.x + to.x) / 2;
+                const my = (from.y + to.y) / 2 - 8;
+                ctx.fillStyle = 'rgba(168,168,184,0.7)';
+                ctx.font = '10px monospace';
+                ctx.textAlign = 'center';
+                ctx.fillText(wkey + '=' + weights[wkey].toFixed(2), mx, my);
+            }
+
+            // Draw nodes
+            layers.forEach((layer, li) => {
+                layer.forEach((node, ni) => {
+                    ctx.beginPath();
+                    ctx.arc(node.x, node.y, 24, 0, Math.PI * 2);
+                    ctx.fillStyle = 'rgba(15,52,96,0.85)';
+                    ctx.fill();
+                    ctx.strokeStyle = layerColors[li];
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+                    ctx.fillStyle = '#e8e8e8';
+                    ctx.font = '13px monospace';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText(node.label, node.x, node.y);
+
+                    // Show values if forward done
+                    if (forwardData) {
+                        let val = null;
+                        if (li === 0) val = input[ni];
+                        else if (li === 1) val = ni === 0 ? forwardData.a1 : forwardData.a2;
+                        else val = forwardData.out;
+                        if (val !== null) {
+                            ctx.fillStyle = '#16c79a';
+                            ctx.font = '11px monospace';
+                            ctx.fillText(val.toFixed(3), node.x, node.y + 36);
+                        }
+                    }
+                });
+            });
+
+            // Target and loss display
+            if (trainPhase >= 1 && forwardData) {
+                ctx.fillStyle = 'rgba(22,33,62,0.85)';
+                ctx.fillRect(W - 180, 70, 160, 60);
+                ctx.strokeStyle = '#ff5252';
+                ctx.lineWidth = 1;
+                ctx.strokeRect(W - 180, 70, 160, 60);
+                ctx.fillStyle = '#e8e8e8';
+                ctx.font = '12px sans-serif';
+                ctx.textAlign = 'left';
+                ctx.fillText('\u76ee\u6807: ' + target.toFixed(1), W - 170, 92);
+                ctx.fillStyle = '#ff5252';
+                ctx.fillText('L = ' + forwardData.loss.toFixed(6), W - 170, 115);
+            }
+
+            // Gradient arrows during backward
+            if (trainPhase === 2 && gradData) {
+                ctx.fillStyle = 'rgba(22,33,62,0.85)';
+                ctx.fillRect(20, 70, 200, 80);
+                ctx.strokeStyle = '#ff5252';
+                ctx.lineWidth = 1;
+                ctx.strokeRect(20, 70, 200, 80);
+                ctx.fillStyle = '#ff5252';
+                ctx.font = '11px monospace';
+                ctx.textAlign = 'left';
+                ctx.fillText('\u2207w11=' + gradData.dL_dw11.toFixed(4), 30, 92);
+                ctx.fillText('\u2207w12=' + gradData.dL_dw12.toFixed(4), 30, 108);
+                ctx.fillText('\u2207v1 =' + gradData.dL_dv1.toFixed(4), 130, 92);
+                ctx.fillText('\u2207v2 =' + gradData.dL_dv2.toFixed(4), 130, 108);
+                ctx.fillText('\u2207w21=' + gradData.dL_dw21.toFixed(4), 30, 124);
+                ctx.fillText('\u2207w22=' + gradData.dL_dw22.toFixed(4), 30, 140);
+            }
+
+            // Update arrows
+            if (trainPhase === 3 && prevWeights) {
+                ctx.fillStyle = 'rgba(22,33,62,0.85)';
+                ctx.fillRect(20, 70, 260, 45);
+                ctx.strokeStyle = '#b388ff';
+                ctx.lineWidth = 1;
+                ctx.strokeRect(20, 70, 260, 45);
+                ctx.fillStyle = '#b388ff';
+                ctx.font = '12px sans-serif';
+                ctx.textAlign = 'left';
+                ctx.fillText('\u6743\u91cd\u5df2\u66f4\u65b0! \u5b66\u4e60\u7387=' + lr.toFixed(2), 30, 97);
+            }
+        }
+
+        function drawLossChart() {
+            const wrap = document.querySelector('.loss-chart-wrap');
+            const cw = wrap.clientWidth - 16;
+            const ch = wrap.clientHeight - 16;
+            lossCanvas.width = cw * dpr;
+            lossCanvas.height = ch * dpr;
+            lossCanvas.style.width = cw + 'px';
+            lossCanvas.style.height = ch + 'px';
+            lctx.setTransform(1, 0, 0, 1, 0, 0);
+            lctx.scale(dpr, dpr);
+            lctx.clearRect(0, 0, cw, ch);
+
+            if (lossHistory.length < 2) {
+                lctx.fillStyle = 'rgba(168,168,184,0.4)';
+                lctx.font = '12px sans-serif';
+                lctx.textAlign = 'center';
+                lctx.fillText('\u635f\u5931\u66f2\u7ebf\u5c06\u5728\u8bad\u7ec3\u540e\u663e\u793a', cw / 2, ch / 2);
+                return;
+            }
+
+            const maxL = Math.max(...lossHistory) * 1.1 + 0.001;
+            const padL = 40, padR = 10, padT = 10, padB = 20;
+            const plotW = cw - padL - padR;
+            const plotH = ch - padT - padB;
+
+            // Axes
+            lctx.strokeStyle = 'rgba(42,42,74,0.6)';
+            lctx.lineWidth = 1;
+            lctx.beginPath();
+            lctx.moveTo(padL, padT);
+            lctx.lineTo(padL, padT + plotH);
+            lctx.lineTo(padL + plotW, padT + plotH);
+            lctx.stroke();
+
+            // Y label
+            lctx.fillStyle = 'rgba(168,168,184,0.5)';
+            lctx.font = '10px sans-serif';
+            lctx.textAlign = 'right';
+            lctx.fillText(maxL.toFixed(3), padL - 3, padT + 8);
+            lctx.fillText('0', padL - 3, padT + plotH);
+
+            // Line
+            lctx.beginPath();
+            lossHistory.forEach((l, i) => {
+                const x = padL + (i / (lossHistory.length - 1)) * plotW;
+                const y = padT + plotH - (l / maxL) * plotH;
+                if (i === 0) lctx.moveTo(x, y); else lctx.lineTo(x, y);
+            });
+            lctx.strokeStyle = '#ff5252';
+            lctx.lineWidth = 2;
+            lctx.stroke();
+
+            // Dots
+            lossHistory.forEach((l, i) => {
+                const x = padL + (i / (lossHistory.length - 1)) * plotW;
+                const y = padT + plotH - (l / maxL) * plotH;
+                lctx.beginPath();
+                lctx.arc(x, y, 3, 0, Math.PI * 2);
+                lctx.fillStyle = '#ff5252';
+                lctx.fill();
+            });
+        }
+
+        function doStep() {
+            if (trainPhase === 0) {
+                // Forward
+                forwardData = forward();
+                gradData = null;
+                trainPhase = 1;
+            } else if (trainPhase === 1) {
+                // Loss (already computed)
+                lossHistory.push(forwardData.loss);
+                document.getElementById('trainLoss').textContent = forwardData.loss.toFixed(6);
+                trainPhase = 2;
+            } else if (trainPhase === 2) {
+                // Backward
+                gradData = backward(forwardData);
+                trainPhase = 3;
+            } else if (trainPhase === 3) {
+                // Update
+                applyUpdate(gradData);
+                iteration++;
+                document.getElementById('trainIter').textContent = '\u8fed\u4ee3: ' + iteration;
+                trainPhase = 0;
+            }
+            updateStepIndicator();
+            updateWeightTable();
+            drawTrainNetwork();
+            drawLossChart();
+        }
+
+        function doFullIteration() {
+            for (let i = 0; i < 4; i++) doStep();
+        }
+
+        document.getElementById('btnTrainStep').addEventListener('click', doStep);
+
+        document.getElementById('btnTrainAuto').addEventListener('click', () => {
+            let count = 0;
+            function tick() {
+                doFullIteration();
+                count++;
+                if (count < 10) requestAnimationFrame(tick);
+            }
+            tick();
+        });
+
+        document.getElementById('btnTrainReset').addEventListener('click', resetTraining);
+
+        document.getElementById('lrSlider').addEventListener('input', e => {
+            lr = +e.target.value;
+            document.getElementById('lrVal').textContent = lr.toFixed(2);
+        });
+
+        // Init
+        updateStepIndicator();
+        updateWeightTable();
+        drawTrainNetwork();
+        drawLossChart();
+    })();
+});
+</script>
+</body>
+</html>

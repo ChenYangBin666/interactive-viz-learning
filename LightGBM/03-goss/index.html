@@ -1,0 +1,1333 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GOSS — LightGBM</title>
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+    <script defer src="../shared/scripts/nav.js"></script>
+    <script defer src="../shared/scripts/lgbm-utils.js"></script>
+    <style>
+        /* ========== Page-specific styles ========== */
+        .hero {
+            text-align: center;
+            padding: 2rem 0 1.5rem;
+        }
+        .hero h1 {
+            font-size: 2.2rem;
+            margin-bottom: 0.5rem;
+        }
+        .hero .subtitle {
+            color: var(--text-secondary);
+            font-size: 1.05rem;
+        }
+
+        /* Canvas containers */
+        .canvas-wrap {
+            position: relative;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+        }
+        .canvas-wrap canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+
+        /* Controls row */
+        .controls-row {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 1.2rem;
+            padding: 0.75rem 1rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            margin-bottom: 1rem;
+        }
+
+        /* Stat boxes */
+        .stat-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+        .stat-box {
+            flex: 1;
+            min-width: 140px;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            padding: 0.75rem 1rem;
+            text-align: center;
+        }
+        .stat-box .stat-label {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            margin-bottom: 0.3rem;
+        }
+        .stat-box .stat-value {
+            font-family: var(--font-mono);
+            font-size: 1.3rem;
+            font-weight: 700;
+            color: var(--accent-green);
+        }
+        .stat-box .stat-value.blue { color: var(--accent-blue); }
+        .stat-box .stat-value.orange { color: var(--accent-orange); }
+        .stat-box .stat-value.purple { color: var(--accent-purple); }
+
+        /* Step indicators for sampling */
+        .sampling-steps {
+            display: flex;
+            gap: 0;
+            align-items: center;
+            margin-bottom: 1rem;
+            flex-wrap: wrap;
+        }
+        .sampling-step {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 1rem;
+            cursor: pointer;
+            border-radius: var(--radius-sm);
+            transition: all 0.2s;
+            color: var(--text-muted);
+            font-size: 0.85rem;
+        }
+        .sampling-step:hover { color: var(--text-secondary); }
+        .sampling-step.active {
+            color: var(--accent-green);
+            background: rgba(22, 199, 154, 0.1);
+        }
+        .sampling-step.done { color: var(--text-secondary); }
+        .sampling-step .step-num {
+            width: 26px;
+            height: 26px;
+            border-radius: 50%;
+            background: var(--border-color);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 0.8rem;
+            transition: all 0.3s;
+        }
+        .sampling-step.active .step-num {
+            background: var(--accent-green);
+            color: var(--bg-primary);
+        }
+        .sampling-step.done .step-num {
+            background: rgba(22, 199, 154, 0.3);
+            color: var(--accent-green);
+        }
+        .step-arrow {
+            color: var(--text-muted);
+            opacity: 0.4;
+            margin: 0 0.2rem;
+        }
+
+        /* Compare panels */
+        .compare-panels {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5rem;
+        }
+        .compare-panel {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1.2rem;
+        }
+        .compare-panel h4 {
+            margin-bottom: 0.75rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .compare-panel h4 .dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+
+        /* Weight vis */
+        .weight-demo {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5rem;
+            margin-top: 1rem;
+        }
+
+        /* Tradeoff chart area */
+        .tradeoff-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5rem;
+        }
+
+        /* Responsive */
+        @media (max-width: 900px) {
+            .compare-panels,
+            .weight-demo,
+            .tradeoff-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* Step description box */
+        .step-desc {
+            background: var(--bg-card);
+            border-left: 3px solid var(--accent-green);
+            padding: 0.75rem 1rem;
+            border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+            margin-bottom: 1rem;
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+            min-height: 50px;
+        }
+    </style>
+</head>
+<body>
+    <div class="page-container">
+        <!-- Hero -->
+        <div class="hero">
+            <h1>GOSS — 基于梯度的单侧采样</h1>
+            <p class="subtitle">Gradient-based One-Side Sampling：用梯度信息智能选择训练样本，大幅加速而几乎不损精度</p>
+        </div>
+
+        <!-- Section 1: Gradient Distribution -->
+        <div class="section" id="sec-gradient-dist">
+            <div class="section-title">
+                <div class="icon">📊</div>
+                <h2>梯度分布可视化</h2>
+            </div>
+            <p>在梯度提升的每一轮中，每个样本都有一个梯度值。梯度的绝对值反映了该样本的"信息量"——<strong>梯度大的样本预测误差大，对学习贡献更多</strong>。</p>
+            <div class="info-box">
+                <p>核心洞察：梯度绝对值 \(|g_i|\) 越大，说明该样本被当前模型预测得越差，在下一步分裂中提供的信息增益越大。</p>
+            </div>
+            <div class="controls-row">
+                <div class="slider-group">
+                    <label>样本数量</label>
+                    <input type="range" id="numSamples" min="50" max="300" value="150" step="10">
+                    <span class="slider-value" id="numSamplesVal">150</span>
+                </div>
+                <button class="btn btn-primary" id="btnRegenerate">重新生成</button>
+            </div>
+            <div style="display:grid; grid-template-columns: 2fr 1fr; gap:1rem;">
+                <div class="canvas-wrap" style="height:380px;">
+                    <canvas id="cvGradScatter"></canvas>
+                </div>
+                <div class="canvas-wrap" style="height:380px;">
+                    <canvas id="cvGradHist"></canvas>
+                </div>
+            </div>
+            <div class="legend" style="margin-top:0.5rem;">
+                <div class="legend-item"><div class="swatch" style="background:#ff5252;"></div>大梯度（预测误差大）</div>
+                <div class="legend-item"><div class="swatch" style="background:#ffd740;"></div>中等梯度</div>
+                <div class="legend-item"><div class="swatch" style="background:#4fc3f7;opacity:0.4;"></div>小梯度（预测较好）</div>
+            </div>
+        </div>
+
+        <!-- Section 2: GOSS Sampling Process -->
+        <div class="section" id="sec-sampling">
+            <div class="section-title">
+                <div class="icon">⚡</div>
+                <h2>GOSS 采样过程</h2>
+            </div>
+            <p>GOSS 算法分四步对训练样本进行智能采样，保留信息量最大的样本。</p>
+            <div class="controls-row">
+                <div class="slider-group">
+                    <label>Top 比例 <code>a</code></label>
+                    <input type="range" id="topRate" min="0.1" max="0.5" value="0.2" step="0.05">
+                    <span class="slider-value" id="topRateVal">0.20</span>
+                </div>
+                <div class="slider-group">
+                    <label>采样比例 <code>b</code></label>
+                    <input type="range" id="sampleRate" min="0.1" max="0.5" value="0.2" step="0.05">
+                    <span class="slider-value" id="sampleRateVal">0.20</span>
+                </div>
+                <button class="btn" id="btnAutoPlay">▶ 自动播放</button>
+                <button class="btn" id="btnResetSteps">↻ 重置</button>
+            </div>
+            <div class="sampling-steps" id="stepsIndicator">
+                <div class="sampling-step active" data-step="0">
+                    <span class="step-num">1</span>
+                    <span>按梯度排序</span>
+                </div>
+                <span class="step-arrow">→</span>
+                <div class="sampling-step" data-step="1">
+                    <span class="step-num">2</span>
+                    <span>保留 top a%</span>
+                </div>
+                <span class="step-arrow">→</span>
+                <div class="sampling-step" data-step="2">
+                    <span class="step-num">3</span>
+                    <span>随机采样 b%</span>
+                </div>
+                <span class="step-arrow">→</span>
+                <div class="sampling-step" data-step="3">
+                    <span class="step-num">4</span>
+                    <span>权重补偿</span>
+                </div>
+            </div>
+            <div class="step-desc" id="stepDesc">第一步：将所有样本按梯度绝对值从大到小排序。</div>
+            <div class="canvas-wrap" style="height:420px;">
+                <canvas id="cvSampling"></canvas>
+            </div>
+            <div class="stat-row" id="samplingStats">
+                <div class="stat-box">
+                    <div class="stat-label">总样本数</div>
+                    <div class="stat-value" id="statTotal">150</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-label">Top 样本（保留）</div>
+                    <div class="stat-value" id="statTop">30</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-label">随机采样</div>
+                    <div class="stat-value blue" id="statSampled">24</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-label">权重因子</div>
+                    <div class="stat-value orange" id="statWeight">4.0×</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Section 3: Why Keep Large Gradients -->
+        <div class="section" id="sec-why">
+            <div class="section-title">
+                <div class="icon">🎯</div>
+                <h2>为什么保留大梯度</h2>
+            </div>
+            <p>随机采样可能遗漏高梯度（高信息量）的样本，而 GOSS 确保这些关键样本全部保留，从而在样本更少的情况下更准确地估计信息增益。</p>
+            <div class="info-box">
+                <p>信息增益估计公式：$$\tilde{V}_j(d) = \frac{1}{n}\left(\frac{(\sum_{x_i \in A_l} g_i + \frac{1-a}{b}\sum_{x_i \in B_l} g_i)^2}{n_l^j} + \frac{(\sum_{x_i \in A_r} g_i + \frac{1-a}{b}\sum_{x_i \in B_r} g_i)^2}{n_r^j}\right)$$</p>
+            </div>
+            <div class="controls-row">
+                <button class="btn btn-primary" id="btnCompare">重新比较</button>
+                <span class="text-sm text-muted">每次点击使用不同随机种子，观察两种方法的差异</span>
+            </div>
+            <div class="compare-panels">
+                <div class="compare-panel">
+                    <h4><div class="dot" style="background:var(--accent-orange);"></div>随机采样</h4>
+                    <div class="canvas-wrap" style="height:300px;">
+                        <canvas id="cvRandom"></canvas>
+                    </div>
+                    <div class="stat-row">
+                        <div class="stat-box">
+                            <div class="stat-label">信息增益估计</div>
+                            <div class="stat-value orange" id="gainRandom">0.00</div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="stat-label">估计误差</div>
+                            <div class="stat-value orange" id="errRandom">0.00</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="compare-panel">
+                    <h4><div class="dot" style="background:var(--accent-green);"></div>GOSS 采样</h4>
+                    <div class="canvas-wrap" style="height:300px;">
+                        <canvas id="cvGoss"></canvas>
+                    </div>
+                    <div class="stat-row">
+                        <div class="stat-box">
+                            <div class="stat-label">信息增益估计</div>
+                            <div class="stat-value" id="gainGoss">0.00</div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="stat-label">估计误差</div>
+                            <div class="stat-value" id="errGoss">0.00</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Section 4: Weight Compensation -->
+        <div class="section" id="sec-weight">
+            <div class="section-title">
+                <div class="icon">⚖</div>
+                <h2>加权补偿机制</h2>
+            </div>
+            <p>GOSS 从小梯度样本中随机采样后，会将它们的梯度乘以 <code>(1-a)/b</code> 倍权重，以补偿采样带来的偏差。</p>
+            <div class="info-box">
+                <p>权重因子 \(w = \frac{1-a}{b}\)。例如 \(a=0.2, b=0.2\) 时，\(w = \frac{0.8}{0.2} = 4.0\)。这保证了梯度和的期望值无偏。</p>
+            </div>
+            <div class="controls-row">
+                <button class="btn btn-primary" id="btnWeightDemo">重新演示</button>
+            </div>
+            <div class="weight-demo">
+                <div>
+                    <h4 style="margin-bottom:0.5rem; color:var(--accent-orange);">无补偿：有偏估计</h4>
+                    <div class="canvas-wrap" style="height:300px;">
+                        <canvas id="cvNoBias"></canvas>
+                    </div>
+                </div>
+                <div>
+                    <h4 style="margin-bottom:0.5rem; color:var(--accent-green);">有补偿：无偏估计</h4>
+                    <div class="canvas-wrap" style="height:300px;">
+                        <canvas id="cvWithBias"></canvas>
+                    </div>
+                </div>
+            </div>
+            <div class="stat-row" style="margin-top:1rem;">
+                <div class="stat-box">
+                    <div class="stat-label">原始梯度和</div>
+                    <div class="stat-value" id="statOrigSum">0.00</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-label">无补偿估计</div>
+                    <div class="stat-value orange" id="statNoBias">0.00</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-label">有补偿估计</div>
+                    <div class="stat-value" id="statWithBias">0.00</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-label">偏差降低</div>
+                    <div class="stat-value purple" id="statBiasReduction">0%</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Section 5: Speed-Accuracy Tradeoff -->
+        <div class="section" id="sec-tradeoff">
+            <div class="section-title">
+                <div class="icon">🚀</div>
+                <h2>速度与精度权衡</h2>
+            </div>
+            <p>通过调节参数 <code>a</code> 和 <code>b</code>，可以在训练速度和模型精度之间取得平衡。实际应用中，合理的 \(a, b\) 值能带来显著加速且精度损失极小。</p>
+            <div class="controls-row">
+                <div class="slider-group">
+                    <label>Top 比例 <code>a</code></label>
+                    <input type="range" id="tradeA" min="0.05" max="0.5" value="0.2" step="0.05">
+                    <span class="slider-value" id="tradeAVal">0.20</span>
+                </div>
+                <div class="slider-group">
+                    <label>采样比例 <code>b</code></label>
+                    <input type="range" id="tradeB" min="0.05" max="0.5" value="0.2" step="0.05">
+                    <span class="slider-value" id="tradeBVal">0.20</span>
+                </div>
+                <button class="btn btn-primary" id="btnRunExperiment">运行实验</button>
+            </div>
+            <div style="background:var(--bg-card); border:1px solid var(--border-color); border-radius:var(--radius-md); padding:1rem 1.5rem; margin-bottom:1rem; text-align:center;">
+                <span style="font-size:1.1rem; color:var(--text-primary);" id="tradeoffSummary">使用 <strong>36%</strong> 数据，速度提升 <strong>2.8×</strong>，精度保持 <strong>98.5%</strong></span>
+            </div>
+            <div class="tradeoff-grid">
+                <div>
+                    <h4 style="margin-bottom:0.5rem; text-align:center; color:var(--text-secondary);">训练时间对比</h4>
+                    <div class="canvas-wrap" style="height:320px;">
+                        <canvas id="cvSpeedBar"></canvas>
+                    </div>
+                </div>
+                <div>
+                    <h4 style="margin-bottom:0.5rem; text-align:center; color:var(--text-secondary);">精度影响曲线</h4>
+                    <div class="canvas-wrap" style="height:320px;">
+                        <canvas id="cvAccLine"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // ========== Utilities ==========
+    const rng = LGBMUtils.seededRandom(42);
+    let globalSeed = 42;
+
+    function nextSeed() { return ++globalSeed; }
+
+    function gaussianNoise(r) {
+        const u1 = r();
+        const u2 = r();
+        return Math.sqrt(-2 * Math.log(u1 + 1e-10)) * Math.cos(2 * Math.PI * u2);
+    }
+
+    function setupCanvas(canvas) {
+        const rect = canvas.parentElement.getBoundingClientRect();
+        const dpr = window.devicePixelRatio || 1;
+        canvas.width = rect.width * dpr;
+        canvas.height = rect.height * dpr;
+        const ctx = canvas.getContext('2d');
+        ctx.scale(dpr, dpr);
+        return { ctx, w: rect.width, h: rect.height };
+    }
+
+    function lerp(a, b, t) { return a + (b - a) * t; }
+    function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+    function gradientColor(absGrad, maxGrad) {
+        const t = clamp(absGrad / (maxGrad + 1e-10), 0, 1);
+        if (t > 0.7) {
+            const s = (t - 0.7) / 0.3;
+            return `rgba(255, ${Math.round(82 + (215 - 82) * (1 - s))}, ${Math.round(82 + (64 - 82) * s)}, ${0.7 + 0.3 * s})`;
+        } else if (t > 0.3) {
+            const s = (t - 0.3) / 0.4;
+            return `rgba(255, ${Math.round(215 + (82 - 215) * s)}, ${Math.round(64 + (82 - 64) * (1 - s))}, ${0.5 + 0.2 * s})`;
+        }
+        return `rgba(79, 195, 247, ${0.2 + 0.3 * (t / 0.3)})`;
+    }
+
+    // ========== Data Generation ==========
+    let dataPoints = [];
+    let gradients = [];
+    let absGrads = [];
+    let maxAbsGrad = 0;
+
+    function generateData() {
+        const n = parseInt(document.getElementById('numSamples').value);
+        const seed = nextSeed();
+        const r = LGBMUtils.seededRandom(seed);
+        dataPoints = [];
+        gradients = [];
+        absGrads = [];
+
+        for (let i = 0; i < n; i++) {
+            const x = r() * 8 - 4;
+            const y = r() * 6 - 3;
+            dataPoints.push({ x, y });
+            // Simulate gradient: larger near edges, some random hot spots
+            const dist = Math.sqrt(x * x + y * y);
+            const base = 0.1 + Math.abs(Math.sin(x * 0.7)) * 0.5 + Math.abs(Math.cos(y * 0.5)) * 0.3;
+            const g = base + gaussianNoise(r) * 0.3;
+            gradients.push(g);
+            absGrads.push(Math.abs(g));
+        }
+        maxAbsGrad = Math.max(...absGrads);
+    }
+
+    // ========== Section 1: Gradient Distribution ==========
+    function drawGradientScatter() {
+        const cv = document.getElementById('cvGradScatter');
+        const { ctx, w, h } = setupCanvas(cv);
+        ctx.clearRect(0, 0, w, h);
+
+        const pad = { l: 50, r: 20, t: 30, b: 40 };
+        const pw = w - pad.l - pad.r;
+        const ph = h - pad.t - pad.b;
+
+        // Axes
+        ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(pad.l, pad.t);
+        ctx.lineTo(pad.l, h - pad.b);
+        ctx.lineTo(w - pad.r, h - pad.b);
+        ctx.stroke();
+
+        // Labels
+        ctx.fillStyle = '#6c6c7c';
+        ctx.font = '12px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('特征 X₁', w / 2, h - 8);
+        ctx.save();
+        ctx.translate(14, h / 2);
+        ctx.rotate(-Math.PI / 2);
+        ctx.fillText('特征 X₂', 0, 0);
+        ctx.restore();
+
+        // Title
+        ctx.fillStyle = '#a8a8b8';
+        ctx.font = '13px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('数据点（颜色 = 梯度大小）', w / 2, 18);
+
+        // Data range
+        const xMin = -4, xMax = 4, yMin = -3, yMax = 3;
+
+        // Sort by gradient so bright ones render on top
+        const indices = dataPoints.map((_, i) => i);
+        indices.sort((a, b) => absGrads[a] - absGrads[b]);
+
+        for (const i of indices) {
+            const px = pad.l + ((dataPoints[i].x - xMin) / (xMax - xMin)) * pw;
+            const py = pad.t + (1 - (dataPoints[i].y - yMin) / (yMax - yMin)) * ph;
+            const r = 3 + (absGrads[i] / maxAbsGrad) * 5;
+
+            ctx.beginPath();
+            ctx.arc(px, py, r, 0, Math.PI * 2);
+            ctx.fillStyle = gradientColor(absGrads[i], maxAbsGrad);
+            ctx.fill();
+        }
+    }
+
+    function drawGradientHistogram() {
+        const cv = document.getElementById('cvGradHist');
+        const { ctx, w, h } = setupCanvas(cv);
+        ctx.clearRect(0, 0, w, h);
+
+        const pad = { l: 45, r: 15, t: 30, b: 40 };
+        const pw = w - pad.l - pad.r;
+        const ph = h - pad.t - pad.b;
+
+        const numBins = 20;
+        const hist = LGBMUtils.buildHistogram(absGrads, numBins);
+        const maxCount = Math.max(...hist.counts);
+
+        // Title
+        ctx.fillStyle = '#a8a8b8';
+        ctx.font = '13px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('梯度绝对值分布', w / 2, 18);
+
+        // Axes
+        ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(pad.l, pad.t);
+        ctx.lineTo(pad.l, h - pad.b);
+        ctx.lineTo(w - pad.r, h - pad.b);
+        ctx.stroke();
+
+        // Bars
+        const barW = pw / numBins;
+        for (let i = 0; i < numBins; i++) {
+            const barH = (hist.counts[i] / (maxCount + 1)) * ph;
+            const x = pad.l + i * barW;
+            const y = h - pad.b - barH;
+            const t = i / numBins;
+
+            ctx.fillStyle = gradientColor(hist.bins[i], maxAbsGrad);
+            ctx.fillRect(x + 1, y, barW - 2, barH);
+        }
+
+        // X labels
+        ctx.fillStyle = '#6c6c7c';
+        ctx.font = '10px monospace';
+        ctx.textAlign = 'center';
+        for (let i = 0; i <= 4; i++) {
+            const val = hist.edges[0] + (hist.edges[numBins] - hist.edges[0]) * (i / 4);
+            const x = pad.l + (i / 4) * pw;
+            ctx.fillText(val.toFixed(1), x, h - pad.b + 15);
+        }
+        ctx.fillText('|g|', w / 2, h - 5);
+
+        // Y label
+        ctx.save();
+        ctx.translate(12, h / 2);
+        ctx.rotate(-Math.PI / 2);
+        ctx.fillText('频次', 0, 0);
+        ctx.restore();
+    }
+
+    // ========== Section 2: GOSS Sampling Process ==========
+    let currentStep = 0;
+    let sortedIndices = [];
+    let topIndices = new Set();
+    let sampledIndices = new Set();
+    let samplingAnimFrame = null;
+    let autoPlaying = false;
+
+    const stepDescs = [
+        '第一步：将所有样本按梯度绝对值从大到小排序。横轴表示排序后的位置，纵轴表示梯度绝对值。',
+        '第二步：保留排序后前 a% 的大梯度样本（绿色高亮）。这些样本信息量最大，全部保留。',
+        '第三步：从剩余 (1-a)% 的小梯度样本中，随机采样 b%（蓝色高亮）。未选中的样本被丢弃。',
+        '第四步：对随机采样的小梯度样本乘以权重 (1-a)/b 进行补偿，使梯度和估计无偏。蓝色柱体高度放大。'
+    ];
+
+    function computeSamplingData() {
+        const a = parseFloat(document.getElementById('topRate').value);
+        const b = parseFloat(document.getElementById('sampleRate').value);
+        const n = absGrads.length;
+
+        sortedIndices = absGrads.map((_, i) => i);
+        sortedIndices.sort((ia, ib) => absGrads[ib] - absGrads[ia]);
+
+        const topCount = Math.max(1, Math.round(n * a));
+        const restCount = n - topCount;
+        const sampleCount = Math.max(1, Math.round(restCount * b));
+        const weight = (1 - a) / b;
+
+        topIndices = new Set(sortedIndices.slice(0, topCount));
+
+        // Random sample from rest
+        const rest = sortedIndices.slice(topCount);
+        const r = LGBMUtils.seededRandom(globalSeed);
+        for (let i = 0; i < Math.min(sampleCount, rest.length); i++) {
+            const j = i + Math.floor(r() * (rest.length - i));
+            [rest[i], rest[j]] = [rest[j], rest[i]];
+        }
+        sampledIndices = new Set(rest.slice(0, sampleCount));
+
+        document.getElementById('statTotal').textContent = n;
+        document.getElementById('statTop').textContent = topCount;
+        document.getElementById('statSampled').textContent = sampleCount;
+        document.getElementById('statWeight').textContent = weight.toFixed(1) + '×';
+    }
+
+    function drawSampling() {
+        const cv = document.getElementById('cvSampling');
+        const { ctx, w, h } = setupCanvas(cv);
+        ctx.clearRect(0, 0, w, h);
+
+        const a = parseFloat(document.getElementById('topRate').value);
+        const b = parseFloat(document.getElementById('sampleRate').value);
+        const n = sortedIndices.length;
+        const weight = (1 - a) / b;
+
+        const pad = { l: 50, r: 20, t: 20, b: 45 };
+        const pw = w - pad.l - pad.r;
+        const ph = h - pad.t - pad.b;
+
+        // Axes
+        ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(pad.l, pad.t);
+        ctx.lineTo(pad.l, h - pad.b);
+        ctx.lineTo(w - pad.r, h - pad.b);
+        ctx.stroke();
+
+        ctx.fillStyle = '#6c6c7c';
+        ctx.font = '11px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('排序位置（左 = 大梯度）', w / 2, h - 8);
+        ctx.save();
+        ctx.translate(14, h / 2);
+        ctx.rotate(-Math.PI / 2);
+        ctx.fillText('|梯度|', 0, 0);
+        ctx.restore();
+
+        const barW = Math.max(1, pw / n - 0.5);
+        const topCount = Math.max(1, Math.round(n * a));
+
+        for (let rank = 0; rank < n; rank++) {
+            const idx = sortedIndices[rank];
+            let barH = (absGrads[idx] / maxAbsGrad) * ph;
+            let color = 'rgba(255,255,255,0.15)';
+            let active = true;
+
+            if (currentStep >= 0) {
+                // Step 0: sorted, all gray
+                color = 'rgba(255,255,255,0.2)';
+            }
+            if (currentStep >= 1 && topIndices.has(idx)) {
+                color = 'rgba(22, 199, 154, 0.85)';
+            }
+            if (currentStep >= 2 && sampledIndices.has(idx)) {
+                color = 'rgba(79, 195, 247, 0.85)';
+            }
+            if (currentStep >= 2 && !topIndices.has(idx) && !sampledIndices.has(idx)) {
+                color = 'rgba(255,255,255,0.06)';
+                active = false;
+            }
+            if (currentStep >= 3 && sampledIndices.has(idx)) {
+                // Show amplified height
+                barH = Math.min(barH * weight, ph);
+                color = 'rgba(79, 195, 247, 0.9)';
+            }
+
+            const x = pad.l + (rank / n) * pw;
+            const y = h - pad.b - barH;
+
+            ctx.fillStyle = color;
+            ctx.fillRect(x, y, Math.max(barW, 1.5), barH);
+        }
+
+        // Top boundary line
+        if (currentStep >= 1) {
+            const topX = pad.l + (topCount / n) * pw;
+            ctx.strokeStyle = 'rgba(22, 199, 154, 0.6)';
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([5, 3]);
+            ctx.beginPath();
+            ctx.moveTo(topX, pad.t);
+            ctx.lineTo(topX, h - pad.b);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            ctx.fillStyle = 'rgba(22, 199, 154, 0.8)';
+            ctx.font = '11px sans-serif';
+            ctx.textAlign = 'left';
+            ctx.fillText(`← top ${(a * 100).toFixed(0)}%`, topX + 4, pad.t + 15);
+        }
+
+        // Legend
+        if (currentStep >= 1) {
+            const ly = pad.t + 5;
+            ctx.font = '11px sans-serif';
+            ctx.fillStyle = 'rgba(22, 199, 154, 0.85)';
+            ctx.fillRect(w - pad.r - 150, ly, 10, 10);
+            ctx.fillStyle = '#a8a8b8';
+            ctx.textAlign = 'left';
+            ctx.fillText('大梯度（保留）', w - pad.r - 135, ly + 9);
+        }
+        if (currentStep >= 2) {
+            const ly = pad.t + 22;
+            ctx.fillStyle = 'rgba(79, 195, 247, 0.85)';
+            ctx.fillRect(w - pad.r - 150, ly, 10, 10);
+            ctx.fillStyle = '#a8a8b8';
+            ctx.fillText('随机采样', w - pad.r - 135, ly + 9);
+        }
+    }
+
+    function setStep(step) {
+        currentStep = clamp(step, 0, 3);
+        document.getElementById('stepDesc').textContent = stepDescs[currentStep];
+
+        document.querySelectorAll('.sampling-step').forEach((el, i) => {
+            el.classList.remove('active', 'done');
+            if (i === currentStep) el.classList.add('active');
+            else if (i < currentStep) el.classList.add('done');
+        });
+        drawSampling();
+    }
+
+    function autoPlay() {
+        if (autoPlaying) {
+            autoPlaying = false;
+            document.getElementById('btnAutoPlay').textContent = '▶ 自动播放';
+            return;
+        }
+        autoPlaying = true;
+        document.getElementById('btnAutoPlay').textContent = '⏸ 暂停';
+        currentStep = -1;
+        let stepTimer = setInterval(() => {
+            if (!autoPlaying || currentStep >= 3) {
+                clearInterval(stepTimer);
+                autoPlaying = false;
+                document.getElementById('btnAutoPlay').textContent = '▶ 自动播放';
+                return;
+            }
+            setStep(currentStep + 1);
+        }, 1200);
+    }
+
+    // ========== Section 3: Why Keep Large Gradients ==========
+    let compareSeed = 100;
+
+    function drawComparisonPanel(canvasId, indices, weights, isGoss) {
+        const cv = document.getElementById(canvasId);
+        const { ctx, w, h } = setupCanvas(cv);
+        ctx.clearRect(0, 0, w, h);
+
+        const pad = { l: 10, r: 10, t: 15, b: 15 };
+        const pw = w - pad.l - pad.r;
+        const ph = h - pad.t - pad.b;
+
+        const n = dataPoints.length;
+        const xMin = -4, xMax = 4, yMin = -3, yMax = 3;
+        const selectedSet = new Set(indices);
+
+        // Draw unselected as very dim
+        for (let i = 0; i < n; i++) {
+            if (selectedSet.has(i)) continue;
+            const px = pad.l + ((dataPoints[i].x - xMin) / (xMax - xMin)) * pw;
+            const py = pad.t + (1 - (dataPoints[i].y - yMin) / (yMax - yMin)) * ph;
+            ctx.beginPath();
+            ctx.arc(px, py, 2.5, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(255,255,255,0.06)';
+            ctx.fill();
+        }
+
+        // Draw selected
+        for (let j = 0; j < indices.length; j++) {
+            const i = indices[j];
+            const px = pad.l + ((dataPoints[i].x - xMin) / (xMax - xMin)) * pw;
+            const py = pad.t + (1 - (dataPoints[i].y - yMin) / (yMax - yMin)) * ph;
+            const wt = weights ? weights[j] : 1;
+            const r = 3 + (wt > 1 ? 2 : 0) + (absGrads[i] / maxAbsGrad) * 3;
+
+            ctx.beginPath();
+            ctx.arc(px, py, r, 0, Math.PI * 2);
+            if (isGoss) {
+                ctx.fillStyle = wt > 1 ? 'rgba(79, 195, 247, 0.8)' : 'rgba(22, 199, 154, 0.85)';
+            } else {
+                ctx.fillStyle = 'rgba(255, 171, 64, 0.7)';
+            }
+            ctx.fill();
+        }
+    }
+
+    function runComparison() {
+        compareSeed = nextSeed();
+        const a = parseFloat(document.getElementById('topRate').value);
+        const b = parseFloat(document.getElementById('sampleRate').value);
+        const n = absGrads.length;
+        const totalSampleSize = Math.round(n * a) + Math.round((n - Math.round(n * a)) * b);
+
+        // True information gain (using all gradients)
+        const totalGradSum = gradients.reduce((s, g) => s + g, 0);
+        const trueGain = (totalGradSum * totalGradSum) / n;
+
+        // Random sampling
+        const rr = LGBMUtils.seededRandom(compareSeed);
+        const allIdx = Array.from({ length: n }, (_, i) => i);
+        for (let i = 0; i < totalSampleSize && i < allIdx.length; i++) {
+            const j = i + Math.floor(rr() * (allIdx.length - i));
+            [allIdx[i], allIdx[j]] = [allIdx[j], allIdx[i]];
+        }
+        const randomIdx = allIdx.slice(0, totalSampleSize);
+        const randomWeights = randomIdx.map(() => n / totalSampleSize);
+        let randomGradSum = 0;
+        for (let j = 0; j < randomIdx.length; j++) {
+            randomGradSum += gradients[randomIdx[j]] * randomWeights[j];
+        }
+        const randomGain = (randomGradSum * randomGradSum) / n;
+        const randomErr = Math.abs(randomGain - trueGain);
+
+        // GOSS sampling
+        const gossResult = LGBMUtils.gossSubsample(gradients, a, b, compareSeed + 1);
+        let gossGradSum = 0;
+        for (let j = 0; j < gossResult.indices.length; j++) {
+            gossGradSum += gradients[gossResult.indices[j]] * gossResult.weights[j];
+        }
+        const gossGain = (gossGradSum * gossGradSum) / n;
+        const gossErr = Math.abs(gossGain - trueGain);
+
+        drawComparisonPanel('cvRandom', randomIdx, randomWeights, false);
+        drawComparisonPanel('cvGoss', gossResult.indices, gossResult.weights, true);
+
+        document.getElementById('gainRandom').textContent = randomGain.toFixed(2);
+        document.getElementById('errRandom').textContent = randomErr.toFixed(3);
+        document.getElementById('gainGoss').textContent = gossGain.toFixed(2);
+        document.getElementById('errGoss').textContent = gossErr.toFixed(3);
+    }
+
+    // ========== Section 4: Weight Compensation ==========
+    function drawWeightHistogram(canvasId, bars, maxVal, highlightColor, title) {
+        const cv = document.getElementById(canvasId);
+        const { ctx, w, h } = setupCanvas(cv);
+        ctx.clearRect(0, 0, w, h);
+
+        const pad = { l: 50, r: 15, t: 30, b: 35 };
+        const pw = w - pad.l - pad.r;
+        const ph = h - pad.t - pad.b;
+
+        ctx.fillStyle = '#a8a8b8';
+        ctx.font = '12px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(title, w / 2, 18);
+
+        // Axes
+        ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(pad.l, pad.t);
+        ctx.lineTo(pad.l, h - pad.b);
+        ctx.lineTo(w - pad.r, h - pad.b);
+        ctx.stroke();
+
+        if (bars.length === 0) return;
+
+        const barW = pw / bars.length;
+        const absMax = maxVal || Math.max(...bars.map(b => Math.abs(b.value)));
+        const zeroY = pad.t + ph / 2;
+
+        // Zero line
+        ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+        ctx.beginPath();
+        ctx.moveTo(pad.l, zeroY);
+        ctx.lineTo(w - pad.r, zeroY);
+        ctx.stroke();
+
+        for (let i = 0; i < bars.length; i++) {
+            const barH = (bars[i].value / (absMax * 1.2)) * (ph / 2);
+            const x = pad.l + i * barW;
+            const y = barH >= 0 ? zeroY - barH : zeroY;
+
+            ctx.fillStyle = bars[i].color || highlightColor;
+            ctx.fillRect(x + 1, y, barW - 2, Math.abs(barH));
+        }
+
+        // Labels
+        ctx.fillStyle = '#6c6c7c';
+        ctx.font = '10px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('样本分组', w / 2, h - 8);
+    }
+
+    function runWeightDemo() {
+        const a = parseFloat(document.getElementById('topRate').value);
+        const b = parseFloat(document.getElementById('sampleRate').value);
+        const weight = (1 - a) / b;
+        const n = gradients.length;
+
+        const gossResult = LGBMUtils.gossSubsample(gradients, a, b, nextSeed());
+
+        // Group gradients into bins for visualization
+        const numGroups = 10;
+        const groupSize = Math.ceil(n / numGroups);
+
+        // Original gradient sums per group
+        const origBars = [];
+        let origTotal = 0;
+        const sorted = absGrads.map((_, i) => i);
+        sorted.sort((ia, ib) => absGrads[ib] - absGrads[ia]);
+
+        for (let g = 0; g < numGroups; g++) {
+            let sum = 0;
+            for (let i = g * groupSize; i < Math.min((g + 1) * groupSize, n); i++) {
+                sum += gradients[sorted[i]];
+            }
+            origBars.push({ value: sum, color: 'rgba(179, 136, 255, 0.6)' });
+            origTotal += sum;
+        }
+
+        // GOSS without compensation
+        const gossSet = new Set(gossResult.indices);
+        const noBiasBars = [];
+        let noBiasTotal = 0;
+        for (let g = 0; g < numGroups; g++) {
+            let sum = 0;
+            for (let i = g * groupSize; i < Math.min((g + 1) * groupSize, n); i++) {
+                const idx = sorted[i];
+                if (gossSet.has(idx)) {
+                    sum += gradients[idx]; // no weight
+                }
+            }
+            noBiasBars.push({ value: sum, color: 'rgba(255, 171, 64, 0.6)' });
+            noBiasTotal += sum;
+        }
+
+        // GOSS with compensation
+        const weightMap = {};
+        for (let j = 0; j < gossResult.indices.length; j++) {
+            weightMap[gossResult.indices[j]] = gossResult.weights[j];
+        }
+        const withBiasBars = [];
+        let withBiasTotal = 0;
+        for (let g = 0; g < numGroups; g++) {
+            let sum = 0;
+            for (let i = g * groupSize; i < Math.min((g + 1) * groupSize, n); i++) {
+                const idx = sorted[i];
+                if (weightMap[idx] !== undefined) {
+                    sum += gradients[idx] * weightMap[idx];
+                }
+            }
+            withBiasBars.push({ value: sum, color: 'rgba(22, 199, 154, 0.6)' });
+            withBiasTotal += sum;
+        }
+
+        const maxVal = Math.max(
+            ...origBars.map(b => Math.abs(b.value)),
+            ...noBiasBars.map(b => Math.abs(b.value)),
+            ...withBiasBars.map(b => Math.abs(b.value))
+        );
+
+        drawWeightHistogram('cvNoBias', noBiasBars, maxVal, 'rgba(255,171,64,0.6)', '无补偿 — 梯度和 (按分组)');
+        drawWeightHistogram('cvWithBias', withBiasBars, maxVal, 'rgba(22,199,154,0.6)', '有补偿 — 梯度和 (按分组)');
+
+        document.getElementById('statOrigSum').textContent = origTotal.toFixed(2);
+        document.getElementById('statNoBias').textContent = noBiasTotal.toFixed(2);
+        document.getElementById('statWithBias').textContent = withBiasTotal.toFixed(2);
+
+        const noBiasErr = Math.abs(noBiasTotal - origTotal);
+        const withBiasErr = Math.abs(withBiasTotal - origTotal);
+        const reduction = noBiasErr > 0 ? ((1 - withBiasErr / noBiasErr) * 100) : 0;
+        document.getElementById('statBiasReduction').textContent = Math.max(0, reduction).toFixed(0) + '%';
+    }
+
+    // ========== Section 5: Speed-Accuracy Tradeoff ==========
+    function runTradeoffExperiment() {
+        const a = parseFloat(document.getElementById('tradeA').value);
+        const b = parseFloat(document.getElementById('tradeB').value);
+
+        const dataRatio = a + (1 - a) * b;
+        const speedup = 1 / dataRatio;
+
+        // Simulate accuracy: based on how much data is used
+        // More data → higher accuracy. GOSS retains important samples so accuracy is high.
+        // Model: accuracy = 1 - k * (1 - dataRatio)^2, GOSS gets a bonus
+        const gossBonus = a * 0.3; // keeping top gradients helps
+        const accuracy = Math.min(1, 0.85 + 0.15 * dataRatio + gossBonus * (1 - dataRatio));
+
+        document.getElementById('tradeoffSummary').innerHTML =
+            `使用 <strong>${(dataRatio * 100).toFixed(0)}%</strong> 数据，速度提升 <strong>${speedup.toFixed(1)}×</strong>，精度保持 <strong>${(accuracy * 100).toFixed(1)}%</strong>`;
+
+        drawSpeedBar(a, b, dataRatio, speedup);
+        drawAccuracyLine(a, b);
+    }
+
+    function drawSpeedBar(a, b, dataRatio, speedup) {
+        const cv = document.getElementById('cvSpeedBar');
+        const { ctx, w, h } = setupCanvas(cv);
+        ctx.clearRect(0, 0, w, h);
+
+        const pad = { l: 70, r: 30, t: 25, b: 50 };
+        const pw = w - pad.l - pad.r;
+        const ph = h - pad.t - pad.b;
+
+        // Configs to compare
+        const configs = [
+            { label: '全量训练', ratio: 1.0, color: 'rgba(179, 136, 255, 0.7)' },
+            { label: `随机 ${(dataRatio * 100).toFixed(0)}%`, ratio: dataRatio, color: 'rgba(255, 171, 64, 0.7)' },
+            { label: `GOSS (a=${a}, b=${b})`, ratio: dataRatio, color: 'rgba(22, 199, 154, 0.8)' },
+        ];
+
+        const barH = Math.min(ph / configs.length - 15, 40);
+        const maxRatio = 1.0;
+
+        for (let i = 0; i < configs.length; i++) {
+            const y = pad.t + i * (ph / configs.length) + (ph / configs.length - barH) / 2;
+            const barW = (configs[i].ratio / maxRatio) * pw;
+
+            ctx.fillStyle = configs[i].color;
+            ctx.beginPath();
+            ctx.roundRect(pad.l, y, barW, barH, 4);
+            ctx.fill();
+
+            // Label
+            ctx.fillStyle = '#a8a8b8';
+            ctx.font = '11px sans-serif';
+            ctx.textAlign = 'right';
+            ctx.fillText(configs[i].label, pad.l - 8, y + barH / 2 + 4);
+
+            // Value
+            ctx.fillStyle = '#e8e8e8';
+            ctx.font = '12px monospace';
+            ctx.textAlign = 'left';
+            const timeStr = configs[i].ratio === 1.0 ? '1.0×' : `${configs[i].ratio.toFixed(2)}× (${(1 / configs[i].ratio).toFixed(1)}× 快)`;
+            ctx.fillText(timeStr, pad.l + barW + 6, y + barH / 2 + 4);
+        }
+
+        ctx.fillStyle = '#6c6c7c';
+        ctx.font = '11px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('相对训练时间', w / 2, h - 12);
+    }
+
+    function drawAccuracyLine(currentA, currentB) {
+        const cv = document.getElementById('cvAccLine');
+        const { ctx, w, h } = setupCanvas(cv);
+        ctx.clearRect(0, 0, w, h);
+
+        const pad = { l: 55, r: 20, t: 25, b: 50 };
+        const pw = w - pad.l - pad.r;
+        const ph = h - pad.t - pad.b;
+
+        // Generate curve data: vary b from 0.05 to 0.5 with fixed a
+        const a = currentA;
+        const points = [];
+        const randomPoints = [];
+        for (let bv = 0.05; bv <= 0.55; bv += 0.025) {
+            const ratio = a + (1 - a) * bv;
+            const gossBonus = a * 0.3;
+            const gossAcc = Math.min(1, 0.85 + 0.15 * ratio + gossBonus * (1 - ratio));
+            const randAcc = Math.min(1, 0.85 + 0.15 * ratio);
+            points.push({ b: bv, ratio, acc: gossAcc });
+            randomPoints.push({ b: bv, ratio, acc: randAcc });
+        }
+
+        // Axes
+        ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(pad.l, pad.t);
+        ctx.lineTo(pad.l, h - pad.b);
+        ctx.lineTo(w - pad.r, h - pad.b);
+        ctx.stroke();
+
+        // Y axis labels (accuracy)
+        ctx.fillStyle = '#6c6c7c';
+        ctx.font = '10px monospace';
+        ctx.textAlign = 'right';
+        for (let v = 0.85; v <= 1.005; v += 0.05) {
+            const y = pad.t + (1 - (v - 0.85) / 0.15) * ph;
+            ctx.fillText((v * 100).toFixed(0) + '%', pad.l - 6, y + 3);
+            ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+            ctx.beginPath();
+            ctx.moveTo(pad.l, y);
+            ctx.lineTo(w - pad.r, y);
+            ctx.stroke();
+        }
+
+        // X axis labels (data ratio)
+        ctx.textAlign = 'center';
+        for (let i = 0; i < points.length; i += 4) {
+            const x = pad.l + (i / (points.length - 1)) * pw;
+            ctx.fillText((points[i].ratio * 100).toFixed(0) + '%', x, h - pad.b + 18);
+        }
+        ctx.fillText('使用数据比例', w / 2, h - 8);
+
+        ctx.save();
+        ctx.translate(14, pad.t + ph / 2);
+        ctx.rotate(-Math.PI / 2);
+        ctx.fillText('精度', 0, 0);
+        ctx.restore();
+
+        // Random line
+        ctx.strokeStyle = 'rgba(255, 171, 64, 0.6)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        for (let i = 0; i < randomPoints.length; i++) {
+            const x = pad.l + (i / (randomPoints.length - 1)) * pw;
+            const y = pad.t + (1 - (randomPoints[i].acc - 0.85) / 0.15) * ph;
+            if (i === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+
+        // GOSS line
+        ctx.strokeStyle = 'rgba(22, 199, 154, 0.9)';
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        for (let i = 0; i < points.length; i++) {
+            const x = pad.l + (i / (points.length - 1)) * pw;
+            const y = pad.t + (1 - (points[i].acc - 0.85) / 0.15) * ph;
+            if (i === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+
+        // Current point marker
+        const currentRatio = a + (1 - a) * currentB;
+        const currentAcc = Math.min(1, 0.85 + 0.15 * currentRatio + a * 0.3 * (1 - currentRatio));
+        // Find closest index
+        let closestIdx = 0;
+        let closestDist = Infinity;
+        for (let i = 0; i < points.length; i++) {
+            const d = Math.abs(points[i].b - currentB);
+            if (d < closestDist) { closestDist = d; closestIdx = i; }
+        }
+        const cx = pad.l + (closestIdx / (points.length - 1)) * pw;
+        const cy = pad.t + (1 - (currentAcc - 0.85) / 0.15) * ph;
+
+        ctx.beginPath();
+        ctx.arc(cx, cy, 6, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(22, 199, 154, 0.9)';
+        ctx.fill();
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        // Legend
+        ctx.font = '11px sans-serif';
+        ctx.textAlign = 'left';
+        const lx = pad.l + 10;
+        const ly = pad.t + 15;
+        ctx.fillStyle = 'rgba(22, 199, 154, 0.9)';
+        ctx.fillRect(lx, ly - 5, 14, 3);
+        ctx.fillStyle = '#a8a8b8';
+        ctx.fillText('GOSS', lx + 20, ly);
+
+        ctx.fillStyle = 'rgba(255, 171, 64, 0.6)';
+        ctx.fillRect(lx, ly + 13, 14, 3);
+        ctx.fillStyle = '#a8a8b8';
+        ctx.fillText('随机采样', lx + 20, ly + 18);
+    }
+
+    // ========== Event Listeners ==========
+    // Section 1
+    document.getElementById('numSamples').addEventListener('input', function() {
+        document.getElementById('numSamplesVal').textContent = this.value;
+    });
+    document.getElementById('btnRegenerate').addEventListener('click', function() {
+        generateData();
+        drawGradientScatter();
+        drawGradientHistogram();
+        computeSamplingData();
+        setStep(0);
+        runComparison();
+        runWeightDemo();
+    });
+
+    // Section 2
+    document.getElementById('topRate').addEventListener('input', function() {
+        document.getElementById('topRateVal').textContent = parseFloat(this.value).toFixed(2);
+        computeSamplingData();
+        setStep(currentStep);
+    });
+    document.getElementById('sampleRate').addEventListener('input', function() {
+        document.getElementById('sampleRateVal').textContent = parseFloat(this.value).toFixed(2);
+        computeSamplingData();
+        setStep(currentStep);
+    });
+    document.querySelectorAll('.sampling-step').forEach(el => {
+        el.addEventListener('click', function() {
+            setStep(parseInt(this.dataset.step));
+        });
+    });
+    document.getElementById('btnAutoPlay').addEventListener('click', autoPlay);
+    document.getElementById('btnResetSteps').addEventListener('click', function() {
+        autoPlaying = false;
+        document.getElementById('btnAutoPlay').textContent = '▶ 自动播放';
+        setStep(0);
+    });
+
+    // Section 3
+    document.getElementById('btnCompare').addEventListener('click', runComparison);
+
+    // Section 4
+    document.getElementById('btnWeightDemo').addEventListener('click', runWeightDemo);
+
+    // Section 5
+    document.getElementById('tradeA').addEventListener('input', function() {
+        document.getElementById('tradeAVal').textContent = parseFloat(this.value).toFixed(2);
+        runTradeoffExperiment();
+    });
+    document.getElementById('tradeB').addEventListener('input', function() {
+        document.getElementById('tradeBVal').textContent = parseFloat(this.value).toFixed(2);
+        runTradeoffExperiment();
+    });
+    document.getElementById('btnRunExperiment').addEventListener('click', runTradeoffExperiment);
+
+    // ========== Window Resize ==========
+    let resizeTimer;
+    window.addEventListener('resize', function() {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(function() {
+            drawGradientScatter();
+            drawGradientHistogram();
+            drawSampling();
+            runComparison();
+            runWeightDemo();
+            runTradeoffExperiment();
+        }, 200);
+    });
+
+    // ========== Initialize ==========
+    generateData();
+    drawGradientScatter();
+    drawGradientHistogram();
+    computeSamplingData();
+    setStep(0);
+    runComparison();
+    runWeightDemo();
+    runTradeoffExperiment();
+});
+</script>
+
+<!-- KaTeX auto-render -->
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    if (typeof renderMathInElement === 'function') {
+        renderMathInElement(document.body, {
+            delimiters: [
+                { left: '$$', right: '$$', display: true },
+                { left: '\\(', right: '\\)', display: false },
+                { left: '$', right: '$', display: false }
+            ],
+            throwOnError: false
+        });
+    } else {
+        // Retry after scripts load
+        setTimeout(function() {
+            if (typeof renderMathInElement === 'function') {
+                renderMathInElement(document.body, {
+                    delimiters: [
+                        { left: '$$', right: '$$', display: true },
+                        { left: '\\(', right: '\\)', display: false },
+                        { left: '$', right: '$', display: false }
+                    ],
+                    throwOnError: false
+                });
+            }
+        }, 1000);
+    }
+});
+</script>
+</body>
+</html>

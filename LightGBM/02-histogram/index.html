@@ -1,0 +1,1371 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>直方图算法 — LightGBM</title>
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+    <script defer src="../shared/scripts/nav.js"></script>
+    <script defer src="../shared/scripts/lgbm-utils.js"></script>
+    <style>
+        .page-header {
+            text-align: center;
+            padding: 2rem 0 1rem;
+        }
+        .page-header h1 {
+            font-size: 2.2rem;
+            background: linear-gradient(135deg, var(--accent-green), var(--accent-blue));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .page-header p {
+            max-width: 700px;
+            margin: 0.5rem auto 0;
+        }
+
+        /* Canvas containers */
+        .canvas-wrap {
+            position: relative;
+            width: 100%;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+        }
+        .canvas-wrap canvas {
+            display: block;
+            width: 100%;
+        }
+
+        /* Compare panels */
+        .compare-panel {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1.25rem;
+        }
+        .compare-panel h4 {
+            margin-bottom: 0.75rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .compare-panel .complexity {
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            padding: 0.4rem 0.75rem;
+            background: rgba(22,199,154,0.08);
+            border-radius: var(--radius-sm);
+            margin-top: 0.5rem;
+            display: inline-block;
+        }
+
+        /* Timer display */
+        .timer-row {
+            display: flex;
+            align-items: center;
+            gap: 1.5rem;
+            margin-top: 1rem;
+            flex-wrap: wrap;
+        }
+        .timer-box {
+            font-family: var(--font-mono);
+            font-size: 1.4rem;
+            font-weight: 700;
+            padding: 0.5rem 1rem;
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border-color);
+            min-width: 120px;
+            text-align: center;
+        }
+        .timer-box.exact { color: var(--accent-orange); }
+        .timer-box.hist { color: var(--accent-green); }
+        .timer-label {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            text-align: center;
+            margin-top: 0.25rem;
+        }
+        .speedup-badge {
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: var(--accent-green);
+            padding: 0.4rem 0.8rem;
+            background: rgba(22,199,154,0.12);
+            border-radius: var(--radius-sm);
+        }
+
+        /* Controls row */
+        .controls-row {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            flex-wrap: wrap;
+            margin-bottom: 1rem;
+        }
+
+        /* Histogram construction steps */
+        .step-desc {
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+            min-height: 2.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-bottom: 0.75rem;
+        }
+        .step-desc .step-num {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            background: var(--accent-green);
+            color: var(--bg-primary);
+            font-size: 0.75rem;
+            font-weight: 700;
+            flex-shrink: 0;
+        }
+
+        /* Split search highlight */
+        .gain-display {
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            padding: 0.5rem 0.75rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            margin-top: 0.5rem;
+        }
+        .gain-display .best {
+            color: var(--accent-green);
+            font-weight: 700;
+        }
+
+        /* Subtraction trick layout */
+        .subtraction-layout {
+            display: grid;
+            grid-template-columns: 1fr auto 1fr auto 1fr;
+            gap: 0.5rem;
+            align-items: center;
+        }
+        .subtraction-layout .op-symbol {
+            font-size: 2rem;
+            font-weight: 700;
+            color: var(--accent-blue);
+            text-align: center;
+        }
+        .hist-label {
+            text-align: center;
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            margin-bottom: 0.25rem;
+        }
+
+        /* Memory bars */
+        .memory-bar-row {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            margin-bottom: 0.75rem;
+        }
+        .memory-bar-label {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            min-width: 100px;
+            text-align: right;
+        }
+        .memory-bar-track {
+            flex: 1;
+            height: 32px;
+            background: var(--bg-primary);
+            border-radius: var(--radius-sm);
+            overflow: hidden;
+            position: relative;
+        }
+        .memory-bar-fill {
+            height: 100%;
+            border-radius: var(--radius-sm);
+            transition: width 0.5s cubic-bezier(0.65,0,0.35,1);
+            display: flex;
+            align-items: center;
+            padding-left: 0.75rem;
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: #fff;
+            white-space: nowrap;
+        }
+        .memory-bar-fill.exact-bar { background: linear-gradient(90deg, var(--accent-orange), #ff6b35); }
+        .memory-bar-fill.hist-bar { background: linear-gradient(90deg, var(--accent-green), #13b58a); }
+        .savings-text {
+            font-size: 1.2rem;
+            font-weight: 700;
+            color: var(--accent-green);
+            text-align: center;
+            margin-top: 1rem;
+        }
+
+        @media (max-width: 900px) {
+            .subtraction-layout {
+                grid-template-columns: 1fr;
+            }
+            .subtraction-layout .op-symbol {
+                font-size: 1.5rem;
+            }
+        }
+    </style>
+</head>
+<body>
+<div class="page-container">
+    <!-- Header -->
+    <header class="page-header">
+        <h1>直方图算法</h1>
+        <p>LightGBM 的核心加速策略：将连续特征值离散化为直方图，将分裂点搜索复杂度从 $O(N \cdot \log N)$ 降低至 $O(N + k)$，同时大幅降低内存开销。</p>
+    </header>
+
+    <!-- ===================== Section 1: Exact vs Histogram ===================== -->
+    <section class="section" id="sec-compare">
+        <div class="section-title">
+            <div class="icon">1</div>
+            <h2>精确分裂 vs 直方图分裂</h2>
+        </div>
+        <p>精确算法需要对每个特征的所有取值排序后逐一扫描，而直方图算法先将连续值离散到 $k$ 个桶中，只需扫描桶即可找到最佳分裂。</p>
+
+        <div class="controls-row">
+            <div class="slider-group">
+                <label>数据量 N：</label>
+                <input type="range" id="cmpN" min="50" max="2000" step="50" value="500">
+                <span class="slider-value" id="cmpNVal">500</span>
+            </div>
+            <div class="slider-group">
+                <label>桶数 k：</label>
+                <input type="range" id="cmpK" min="8" max="256" step="8" value="32">
+                <span class="slider-value" id="cmpKVal">32</span>
+            </div>
+            <button class="btn btn-primary" id="cmpRunBtn">运行对比</button>
+        </div>
+
+        <div class="compare-grid cols-2">
+            <div class="compare-panel">
+                <h4><span class="badge badge-orange">精确分裂</span></h4>
+                <div class="canvas-wrap"><canvas id="cvExact" height="240"></canvas></div>
+                <div class="complexity">时间复杂度: O(N·log N) = <span id="exactOps">—</span> 次操作</div>
+            </div>
+            <div class="compare-panel">
+                <h4><span class="badge badge-green">直方图分裂</span></h4>
+                <div class="canvas-wrap"><canvas id="cvHist" height="240"></canvas></div>
+                <div class="complexity">时间复杂度: O(N + k) = <span id="histOps">—</span> 次操作</div>
+            </div>
+        </div>
+
+        <div class="timer-row">
+            <div>
+                <div class="timer-box exact" id="exactTime">—</div>
+                <div class="timer-label">精确排序耗时</div>
+            </div>
+            <div>
+                <div class="timer-box hist" id="histTime">—</div>
+                <div class="timer-label">直方图耗时</div>
+            </div>
+            <div class="speedup-badge" id="speedupBadge">加速比: —</div>
+        </div>
+    </section>
+
+    <!-- ===================== Section 2: Histogram Construction ===================== -->
+    <section class="section" id="sec-build">
+        <div class="section-title">
+            <div class="icon">2</div>
+            <h2>直方图构建动画</h2>
+        </div>
+        <p>观察随机生成的特征值如何被分配到各个桶中，并在每个桶上累积梯度 $g_i$ 和海森 $h_i$。</p>
+
+        <div class="controls-row">
+            <div class="slider-group">
+                <label>桶数：</label>
+                <input type="range" id="buildBins" min="0" max="5" step="1" value="2">
+                <span class="slider-value" id="buildBinsVal">32</span>
+            </div>
+            <div class="slider-group">
+                <label>速度：</label>
+                <input type="range" id="buildSpeed" min="1" max="10" step="1" value="5">
+                <span class="slider-value" id="buildSpeedVal">5</span>
+            </div>
+            <button class="btn btn-primary" id="buildPlayBtn">播放</button>
+            <button class="btn" id="buildResetBtn">重置</button>
+        </div>
+
+        <div class="step-desc" id="buildStepDesc">
+            <span class="step-num">1</span>
+            <span>点击「播放」开始观察直方图构建过程</span>
+        </div>
+
+        <div class="canvas-wrap"><canvas id="cvBuild" height="420"></canvas></div>
+
+        <div class="info-box mt-2">
+            <p>桶数越多，分裂精度越高，但内存消耗也随之增加。LightGBM 默认使用 255 个桶，在精度和效率之间取得良好平衡。</p>
+        </div>
+    </section>
+
+    <!-- ===================== Section 3: Optimal Split Search ===================== -->
+    <section class="section" id="sec-split">
+        <div class="section-title">
+            <div class="icon">3</div>
+            <h2>最优分裂点搜索</h2>
+        </div>
+        <p>在构建好的直方图上，从左到右扫描每个桶边界，计算分裂增益。增益公式：</p>
+        <div style="text-align:center;margin:1rem 0;">
+            $$Gain = \frac{G_L^2}{H_L+\lambda} + \frac{G_R^2}{H_R+\lambda} - \frac{(G_L+G_R)^2}{H_L+H_R+\lambda}$$
+        </div>
+
+        <div class="controls-row">
+            <div class="slider-group">
+                <label>正则化 &lambda;：</label>
+                <input type="range" id="splitLambda" min="0.1" max="5" step="0.1" value="1.0">
+                <span class="slider-value" id="splitLambdaVal">1.0</span>
+            </div>
+            <button class="btn btn-primary" id="splitPlayBtn">扫描分裂点</button>
+            <button class="btn" id="splitResetBtn">重置</button>
+        </div>
+
+        <div class="canvas-wrap"><canvas id="cvSplit" height="400"></canvas></div>
+
+        <div class="gain-display mt-1" id="splitGainInfo">
+            当前扫描位置: — | 增益: — | <span class="best">最佳分裂: —</span>
+        </div>
+    </section>
+
+    <!-- ===================== Section 4: Histogram Subtraction ===================== -->
+    <section class="section" id="sec-subtract">
+        <div class="section-title">
+            <div class="icon">4</div>
+            <h2>直方图差加速</h2>
+        </div>
+        <p>构建一个子节点的直方图后，另一个子节点的直方图可通过「父节点 &minus; 兄弟节点」直接得到，节省一半计算量。</p>
+
+        <div class="controls-row">
+            <button class="btn btn-primary" id="subPlayBtn">演示减法</button>
+            <button class="btn" id="subResetBtn">重置</button>
+        </div>
+
+        <div class="subtraction-layout" id="subLayout">
+            <div>
+                <div class="hist-label">父节点直方图</div>
+                <div class="canvas-wrap"><canvas id="cvSubParent" height="200"></canvas></div>
+            </div>
+            <div class="op-symbol">&minus;</div>
+            <div>
+                <div class="hist-label">左子节点直方图</div>
+                <div class="canvas-wrap"><canvas id="cvSubLeft" height="200"></canvas></div>
+            </div>
+            <div class="op-symbol">=</div>
+            <div>
+                <div class="hist-label">右子节点直方图（推导得出）</div>
+                <div class="canvas-wrap"><canvas id="cvSubRight" height="200"></canvas></div>
+            </div>
+        </div>
+
+        <div class="info-box success mt-2">
+            <p>只需构建样本较少的子节点的直方图，另一侧通过减法获取。这使得每次分裂只需遍历 <strong>较小子节点</strong> 的数据，LightGBM 结合 leaf-wise 生长策略实现极致加速。</p>
+        </div>
+    </section>
+
+    <!-- ===================== Section 5: Memory Comparison ===================== -->
+    <section class="section" id="sec-memory">
+        <div class="section-title">
+            <div class="icon">5</div>
+            <h2>内存占用对比</h2>
+        </div>
+        <p>精确算法需要为每个样本存储 float64 特征值（8 字节），而直方图算法只需为每个桶存储少量统计信息。</p>
+
+        <div class="controls-row">
+            <div class="slider-group">
+                <label>数据量 N：</label>
+                <input type="range" id="memN" min="1000" max="10000000" step="1000" value="1000000">
+                <span class="slider-value" id="memNVal">1,000,000</span>
+            </div>
+            <div class="slider-group">
+                <label>特征数 F：</label>
+                <input type="range" id="memF" min="1" max="500" step="1" value="100">
+                <span class="slider-value" id="memFVal">100</span>
+            </div>
+            <div class="slider-group">
+                <label>桶数 k：</label>
+                <input type="range" id="memK" min="8" max="256" step="8" value="256">
+                <span class="slider-value" id="memKVal">256</span>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="memory-bar-row">
+                <div class="memory-bar-label">精确算法</div>
+                <div class="memory-bar-track">
+                    <div class="memory-bar-fill exact-bar" id="memExactBar" style="width:100%;">
+                        <span id="memExactText">—</span>
+                    </div>
+                </div>
+            </div>
+            <div class="memory-bar-row">
+                <div class="memory-bar-label">直方图算法</div>
+                <div class="memory-bar-track">
+                    <div class="memory-bar-fill hist-bar" id="memHistBar" style="width:10%;">
+                        <span id="memHistText">—</span>
+                    </div>
+                </div>
+            </div>
+            <div class="savings-text" id="memSavings">节省内存: —</div>
+        </div>
+
+        <div class="info-box mt-2">
+            <p>精确算法需要存储预排序索引（每个特征一份），即 $N \times F \times 8$ 字节。直方图算法仅需 $N \times F \times 1$（离散化后每个值 1 字节）加上 $k \times F \times 8$（每桶梯度/海森统计），内存降低数倍甚至数十倍。</p>
+        </div>
+    </section>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    /* ========== Constants & Utilities ========== */
+    var C = {
+        green: '#16c79a', blue: '#4fc3f7', purple: '#b388ff',
+        orange: '#ffab40', red: '#ff5252', yellow: '#ffd740',
+        textPrimary: '#e8e8e8', textSecondary: '#a8a8b8', textMuted: '#6c6c7c',
+        bgPrimary: '#1a1a2e', bgSecondary: '#16213e', border: '#2a2a4a'
+    };
+
+    function seededRandom(seed) {
+        var s = seed | 0;
+        return function() {
+            s = (s + 0x6d2b79f5) | 0;
+            var t = Math.imul(s ^ (s >>> 15), 1 | s);
+            t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+            return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+        };
+    }
+
+    function gaussianNoise(rng) {
+        var u1 = rng(), u2 = rng();
+        return Math.sqrt(-2 * Math.log(u1 + 1e-10)) * Math.cos(2 * Math.PI * u2);
+    }
+
+    function setupCanvas(canvas, w, h) {
+        var dpr = window.devicePixelRatio || 1;
+        canvas.width = w * dpr;
+        canvas.height = h * dpr;
+        canvas.style.width = w + 'px';
+        canvas.style.height = h + 'px';
+        var ctx = canvas.getContext('2d');
+        ctx.scale(dpr, dpr);
+        return ctx;
+    }
+
+    function fitCanvas(canvas) {
+        var rect = canvas.parentElement.getBoundingClientRect();
+        var w = Math.floor(rect.width);
+        var h = parseInt(canvas.getAttribute('height')) || 400;
+        return { ctx: setupCanvas(canvas, w, h), w: w, h: h };
+    }
+
+    function formatNumber(n) {
+        if (n >= 1e9) return (n / 1e9).toFixed(1) + 'B';
+        if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+        if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+        return n.toString();
+    }
+
+    function formatBytes(bytes) {
+        if (bytes >= 1e12) return (bytes / 1e12).toFixed(2) + ' TB';
+        if (bytes >= 1e9) return (bytes / 1e9).toFixed(2) + ' GB';
+        if (bytes >= 1e6) return (bytes / 1e6).toFixed(2) + ' MB';
+        if (bytes >= 1e3) return (bytes / 1e3).toFixed(2) + ' KB';
+        return bytes + ' B';
+    }
+
+    function easeInOut(t) {
+        return t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+    }
+
+    /* ================================================================
+       SECTION 1: Exact vs Histogram Comparison
+       ================================================================ */
+    (function() {
+        var sliderN = document.getElementById('cmpN');
+        var sliderK = document.getElementById('cmpK');
+        var valN = document.getElementById('cmpNVal');
+        var valK = document.getElementById('cmpKVal');
+        var runBtn = document.getElementById('cmpRunBtn');
+        var animId = null;
+
+        sliderN.oninput = function() { valN.textContent = this.value; };
+        sliderK.oninput = function() { valK.textContent = this.value; };
+
+        function drawExactSort(ctx, w, h, values, progress) {
+            ctx.clearRect(0, 0, w, h);
+            var n = values.length;
+            var sorted = values.slice().sort(function(a, b) { return a - b; });
+            var barW = Math.max(1, (w - 40) / n);
+            var maxVal = -Infinity, minVal = Infinity;
+            for (var i = 0; i < n; i++) {
+                if (values[i] > maxVal) maxVal = values[i];
+                if (values[i] < minVal) minVal = values[i];
+            }
+            var range = maxVal - minVal || 1;
+            var sortedCount = Math.floor(progress * n);
+
+            for (var i = 0; i < n; i++) {
+                var val = i < sortedCount ? sorted[i] : values[i];
+                var barH = ((val - minVal) / range) * (h - 50) * 0.8 + 5;
+                var x = 20 + i * barW;
+                var y = h - 25 - barH;
+                ctx.fillStyle = i < sortedCount ? C.orange : 'rgba(255,171,64,0.25)';
+                ctx.fillRect(x, y, Math.max(1, barW - 0.5), barH);
+            }
+
+            ctx.fillStyle = C.textSecondary;
+            ctx.font = '12px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('逐个比较排序中... ' + sortedCount + '/' + n, w / 2, h - 6);
+        }
+
+        function drawHistBin(ctx, w, h, values, numBins, progress) {
+            ctx.clearRect(0, 0, w, h);
+            var n = values.length;
+            var minVal = Infinity, maxVal = -Infinity;
+            for (var i = 0; i < n; i++) {
+                if (values[i] < minVal) minVal = values[i];
+                if (values[i] > maxVal) maxVal = values[i];
+            }
+            var range = maxVal - minVal || 1;
+            var binWidth = range / numBins;
+            var counts = new Array(numBins).fill(0);
+            var processedCount = Math.floor(progress * n);
+
+            for (var i = 0; i < processedCount; i++) {
+                var idx = Math.floor((values[i] - minVal) / binWidth);
+                if (idx >= numBins) idx = numBins - 1;
+                if (idx < 0) idx = 0;
+                counts[idx]++;
+            }
+
+            var maxCount = 1;
+            for (var i = 0; i < numBins; i++) if (counts[i] > maxCount) maxCount = counts[i];
+            var barArea = w - 40;
+            var barW = barArea / numBins;
+
+            for (var i = 0; i < numBins; i++) {
+                var barH = (counts[i] / maxCount) * (h - 60) * 0.8;
+                var x = 20 + i * barW;
+                var y = h - 25 - barH;
+
+                ctx.fillStyle = counts[i] > 0 ? C.green : 'rgba(22,199,154,0.15)';
+                ctx.fillRect(x + 1, y, Math.max(1, barW - 2), barH);
+
+                ctx.strokeStyle = 'rgba(22,199,154,0.3)';
+                ctx.lineWidth = 0.5;
+                ctx.strokeRect(x + 1, h - 25 - (h - 60) * 0.8, barW - 2, (h - 60) * 0.8);
+            }
+
+            if (processedCount < n) {
+                var val = values[processedCount];
+                var px = 20 + ((val - minVal) / range) * barArea;
+                ctx.beginPath();
+                ctx.arc(px, 20, 4, 0, Math.PI * 2);
+                ctx.fillStyle = C.yellow;
+                ctx.fill();
+                ctx.beginPath();
+                ctx.setLineDash([3, 3]);
+                ctx.moveTo(px, 24);
+                ctx.lineTo(px, h - 25);
+                ctx.strokeStyle = 'rgba(255,215,64,0.4)';
+                ctx.lineWidth = 1;
+                ctx.stroke();
+                ctx.setLineDash([]);
+            }
+
+            ctx.fillStyle = C.textSecondary;
+            ctx.font = '12px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('装桶中... ' + processedCount + '/' + n, w / 2, h - 6);
+        }
+
+        runBtn.onclick = function() {
+            if (animId) { cancelAnimationFrame(animId); animId = null; }
+
+            var N = parseInt(sliderN.value);
+            var K = parseInt(sliderK.value);
+            var rng = seededRandom(42);
+            var values = [];
+            for (var i = 0; i < N; i++) {
+                values.push(rng() * 100 + gaussianNoise(rng) * 15);
+            }
+
+            var exactOps = Math.round(N * Math.log2(N));
+            var histOps = N + K;
+            document.getElementById('exactOps').textContent = formatNumber(exactOps);
+            document.getElementById('histOps').textContent = formatNumber(histOps);
+
+            var exactDuration = 2000 + N * 0.8;
+            var histDuration = 800 + N * 0.15;
+            var startTime = performance.now();
+            var exactDone = false, histDone = false;
+
+            function animate(now) {
+                var elapsed = now - startTime;
+                var pExact = Math.min(1, elapsed / exactDuration);
+                var pHist = Math.min(1, elapsed / histDuration);
+
+                var rE = fitCanvas(document.getElementById('cvExact'));
+                var rH = fitCanvas(document.getElementById('cvHist'));
+
+                drawExactSort(rE.ctx, rE.w, rE.h, values, easeInOut(pExact));
+                drawHistBin(rH.ctx, rH.w, rH.h, values, K, easeInOut(pHist));
+
+                if (!exactDone) {
+                    document.getElementById('exactTime').textContent =
+                        (Math.min(elapsed, exactDuration) / 1000).toFixed(2) + 's';
+                }
+                if (pExact >= 1) exactDone = true;
+
+                if (!histDone) {
+                    document.getElementById('histTime').textContent =
+                        (Math.min(elapsed, histDuration) / 1000).toFixed(2) + 's';
+                }
+                if (pHist >= 1) histDone = true;
+
+                if (exactDone && histDone) {
+                    document.getElementById('speedupBadge').textContent =
+                        '加速比: ' + (exactDuration / histDuration).toFixed(1) + 'x';
+                    animId = null;
+                    return;
+                }
+                animId = requestAnimationFrame(animate);
+            }
+            animId = requestAnimationFrame(animate);
+        };
+    })();
+
+    /* ================================================================
+       SECTION 2: Histogram Construction Animation
+       ================================================================ */
+    (function() {
+        var binOptions = [8, 16, 32, 64, 128, 256];
+        var sliderBins = document.getElementById('buildBins');
+        var valBins = document.getElementById('buildBinsVal');
+        var sliderSpeed = document.getElementById('buildSpeed');
+        var valSpeed = document.getElementById('buildSpeedVal');
+        var playBtn = document.getElementById('buildPlayBtn');
+        var resetBtn = document.getElementById('buildResetBtn');
+        var stepDesc = document.getElementById('buildStepDesc');
+        var canvas = document.getElementById('cvBuild');
+
+        sliderBins.oninput = function() { valBins.textContent = binOptions[this.value]; };
+        valBins.textContent = binOptions[sliderBins.value];
+        sliderSpeed.oninput = function() { valSpeed.textContent = this.value; };
+
+        var NUM_SAMPLES = 80;
+        var samples = [], gradients = [], hessians = [];
+
+        function generateData() {
+            var rng = seededRandom(123);
+            samples = []; gradients = []; hessians = [];
+            for (var i = 0; i < NUM_SAMPLES; i++) {
+                samples.push(rng() * 10);
+                gradients.push(gaussianNoise(rng) * 2);
+                hessians.push(0.5 + rng() * 1.5);
+            }
+        }
+        generateData();
+
+        var animState = { phase: 0, progress: 0, running: false, animId: null };
+        var lastTime = null;
+
+        var phaseDescriptions = [
+            { num: 1, text: '原始特征值：随机生成的连续数据点' },
+            { num: 2, text: '确定桶边界：将值域均匀划分为 k 个区间' },
+            { num: 3, text: '装桶计数：将每个数据点分配到对应的桶中' },
+            { num: 4, text: '梯度/海森累积：在每个桶中累加梯度和海森值' }
+        ];
+
+        function reset() {
+            if (animState.animId) cancelAnimationFrame(animState.animId);
+            animState = { phase: 0, progress: 0, running: false, animId: null };
+            generateData();
+            drawBuildFrame();
+            stepDesc.innerHTML = '<span class="step-num">1</span><span>点击「播放」开始观察直方图构建过程</span>';
+            playBtn.textContent = '播放';
+        }
+
+        resetBtn.onclick = reset;
+
+        playBtn.onclick = function() {
+            if (animState.running) {
+                animState.running = false;
+                if (animState.animId) cancelAnimationFrame(animState.animId);
+                playBtn.textContent = '继续';
+                return;
+            }
+            if (animState.phase >= 4) reset();
+            animState.running = true;
+            playBtn.textContent = '暂停';
+            lastTime = null;
+            animState.animId = requestAnimationFrame(animateBuild);
+        };
+
+        function animateBuild(now) {
+            if (!animState.running) return;
+            if (!lastTime) lastTime = now;
+            var dt = (now - lastTime) / 1000;
+            lastTime = now;
+
+            var speed = parseInt(sliderSpeed.value);
+            animState.progress += dt * speed * 0.4;
+
+            if (animState.progress >= 1) {
+                animState.progress = 0;
+                animState.phase++;
+                if (animState.phase >= 4) {
+                    animState.phase = 4;
+                    animState.running = false;
+                    playBtn.textContent = '重新播放';
+                    drawBuildFrame();
+                    stepDesc.innerHTML = '<span class="step-num">&#10003;</span><span>直方图构建完成！每个桶包含样本计数、梯度和与海森和</span>';
+                    return;
+                }
+            }
+
+            if (animState.phase < 4) {
+                var desc = phaseDescriptions[animState.phase];
+                stepDesc.innerHTML = '<span class="step-num">' + desc.num + '</span><span>' + desc.text + '</span>';
+            }
+
+            drawBuildFrame();
+            animState.animId = requestAnimationFrame(animateBuild);
+        }
+
+        function drawBuildFrame() {
+            var r = fitCanvas(canvas);
+            var ctx = r.ctx, w = r.w, h = r.h;
+            var numBins = binOptions[sliderBins.value];
+            var pad = { l: 50, r: 20, t: 30, b: 60 };
+            var plotW = w - pad.l - pad.r;
+            var plotH = h - pad.t - pad.b;
+            var minV = 0, maxV = 10;
+            var binWidth = (maxV - minV) / numBins;
+
+            ctx.clearRect(0, 0, w, h);
+
+            /* Phase 0: raw scatter */
+            if (animState.phase === 0) {
+                var showCount = Math.min(NUM_SAMPLES, Math.floor(animState.progress * NUM_SAMPLES) + NUM_SAMPLES);
+                var dotRng = seededRandom(999);
+                for (var i = 0; i < Math.min(showCount, NUM_SAMPLES); i++) {
+                    var x = pad.l + ((samples[i] - minV) / (maxV - minV)) * plotW;
+                    var jitter = gaussianNoise(seededRandom(i * 7)) * 20;
+                    var y = pad.t + plotH * 0.4 + jitter;
+                    ctx.beginPath();
+                    ctx.arc(x, y, 4, 0, Math.PI * 2);
+                    ctx.fillStyle = C.blue;
+                    ctx.globalAlpha = 0.7;
+                    ctx.fill();
+                    ctx.globalAlpha = 1;
+                }
+                drawAxis(ctx, pad, plotW, plotH, 0.85);
+                ctx.fillStyle = C.textMuted;
+                ctx.font = '11px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('特征值', w / 2, h - 10);
+                return;
+            }
+
+            /* Phase 1: bin boundaries */
+            if (animState.phase === 1) {
+                for (var i = 0; i < NUM_SAMPLES; i++) {
+                    var x = pad.l + ((samples[i] - minV) / (maxV - minV)) * plotW;
+                    var y = pad.t + plotH * 0.3 + gaussianNoise(seededRandom(i * 7)) * 15;
+                    ctx.beginPath();
+                    ctx.arc(x, y, 3, 0, Math.PI * 2);
+                    ctx.fillStyle = 'rgba(79,195,247,0.3)';
+                    ctx.fill();
+                }
+                var shownBins = Math.floor(animState.progress * (numBins + 1));
+                for (var i = 0; i <= Math.min(shownBins, numBins); i++) {
+                    var edge = minV + i * binWidth;
+                    var x = pad.l + ((edge - minV) / (maxV - minV)) * plotW;
+                    ctx.beginPath();
+                    ctx.moveTo(x, pad.t + plotH * 0.1);
+                    ctx.lineTo(x, pad.t + plotH * 0.9);
+                    ctx.strokeStyle = 'rgba(22,199,154,0.5)';
+                    ctx.lineWidth = 1;
+                    ctx.stroke();
+                }
+                drawAxis(ctx, pad, plotW, plotH, 0.9);
+                ctx.fillStyle = C.textMuted;
+                ctx.font = '11px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText(numBins + ' 个桶边界', w / 2, h - 10);
+                return;
+            }
+
+            /* Phase 2, 3, 4: histogram bars */
+            var counts = new Array(numBins).fill(0);
+            var gSums = new Array(numBins).fill(0);
+            var hSums = new Array(numBins).fill(0);
+
+            var binnedCount = animState.phase === 2
+                ? Math.floor(animState.progress * NUM_SAMPLES)
+                : NUM_SAMPLES;
+
+            for (var i = 0; i < binnedCount; i++) {
+                var idx = Math.floor((samples[i] - minV) / binWidth);
+                if (idx >= numBins) idx = numBins - 1;
+                if (idx < 0) idx = 0;
+                counts[idx]++;
+                gSums[idx] += gradients[i];
+                hSums[idx] += hessians[i];
+            }
+
+            if (animState.phase >= 3) {
+                counts.fill(0); gSums.fill(0); hSums.fill(0);
+                for (var i = 0; i < NUM_SAMPLES; i++) {
+                    var idx = Math.floor((samples[i] - minV) / binWidth);
+                    if (idx >= numBins) idx = numBins - 1;
+                    if (idx < 0) idx = 0;
+                    counts[idx]++;
+                    gSums[idx] += gradients[i];
+                    hSums[idx] += hessians[i];
+                }
+            }
+
+            var maxCount = 1;
+            for (var i = 0; i < numBins; i++) if (counts[i] > maxCount) maxCount = counts[i];
+            var barW = plotW / numBins;
+            var histTop = pad.t + 20;
+            var histH = plotH * 0.55;
+
+            for (var i = 0; i < numBins; i++) {
+                var barH = (counts[i] / maxCount) * histH;
+                var x = pad.l + i * barW;
+                var y = histTop + histH - barH;
+                ctx.fillStyle = animState.phase >= 3 ? C.green : 'rgba(22,199,154,0.6)';
+                ctx.fillRect(x + 1, y, Math.max(1, barW - 2), barH);
+                if (counts[i] > 0 && barW > 12) {
+                    ctx.fillStyle = C.textPrimary;
+                    ctx.font = '9px monospace';
+                    ctx.textAlign = 'center';
+                    ctx.fillText(counts[i], x + barW / 2, y - 3);
+                }
+            }
+
+            /* Phase 3/4: gradient bars below */
+            if (animState.phase >= 3) {
+                var ghTop = histTop + histH + 30;
+                var ghH = plotH * 0.2;
+                var maxG = 0.1;
+                for (var i = 0; i < numBins; i++) {
+                    var ag = Math.abs(gSums[i]);
+                    if (ag > maxG) maxG = ag;
+                }
+                var gradProgress = animState.phase === 3 ? animState.progress : 1;
+                var showBinCount = Math.floor(gradProgress * numBins);
+
+                ctx.fillStyle = C.textMuted;
+                ctx.font = '10px sans-serif';
+                ctx.textAlign = 'left';
+                ctx.fillText('梯度和 (g)', pad.l, ghTop - 5);
+
+                for (var i = 0; i < Math.min(showBinCount + 1, numBins); i++) {
+                    var gH = (Math.abs(gSums[i]) / maxG) * ghH * 0.8;
+                    var x = pad.l + i * barW;
+                    var mid = ghTop + ghH / 2;
+                    if (gSums[i] >= 0) {
+                        ctx.fillStyle = 'rgba(79,195,247,0.6)';
+                        ctx.fillRect(x + 1, mid - gH, Math.max(1, barW - 2), gH);
+                    } else {
+                        ctx.fillStyle = 'rgba(255,82,82,0.6)';
+                        ctx.fillRect(x + 1, mid, Math.max(1, barW - 2), gH);
+                    }
+                }
+                ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(pad.l, ghTop + ghH / 2);
+                ctx.lineTo(pad.l + plotW, ghTop + ghH / 2);
+                ctx.stroke();
+            }
+
+            /* Highlight currently binned sample */
+            if (animState.phase === 2 && binnedCount < NUM_SAMPLES) {
+                var val = samples[binnedCount];
+                var x = pad.l + ((val - minV) / (maxV - minV)) * plotW;
+                ctx.beginPath();
+                ctx.arc(x, histTop - 10, 5, 0, Math.PI * 2);
+                ctx.fillStyle = C.yellow;
+                ctx.fill();
+                ctx.beginPath();
+                ctx.setLineDash([3, 3]);
+                ctx.moveTo(x, histTop - 5);
+                ctx.lineTo(x, histTop + histH);
+                ctx.strokeStyle = 'rgba(255,215,64,0.4)';
+                ctx.lineWidth = 1;
+                ctx.stroke();
+                ctx.setLineDash([]);
+            }
+
+            ctx.strokeStyle = C.border;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(pad.l, histTop + histH);
+            ctx.lineTo(pad.l + plotW, histTop + histH);
+            ctx.stroke();
+        }
+
+        function drawAxis(ctx, pad, plotW, plotH, yFrac) {
+            ctx.strokeStyle = C.border;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(pad.l, pad.t + plotH * yFrac);
+            ctx.lineTo(pad.l + plotW, pad.t + plotH * yFrac);
+            ctx.stroke();
+            for (var i = 0; i <= 10; i++) {
+                var x = pad.l + (i / 10) * plotW;
+                ctx.fillStyle = C.textMuted;
+                ctx.font = '10px monospace';
+                ctx.textAlign = 'center';
+                ctx.fillText(i.toString(), x, pad.t + plotH * yFrac + 15);
+            }
+        }
+
+        drawBuildFrame();
+        window.addEventListener('resize', drawBuildFrame);
+    })();
+
+    /* ================================================================
+       SECTION 3: Optimal Split Point Search
+       ================================================================ */
+    (function() {
+        var sliderLambda = document.getElementById('splitLambda');
+        var valLambda = document.getElementById('splitLambdaVal');
+        var playBtn = document.getElementById('splitPlayBtn');
+        var resetBtn = document.getElementById('splitResetBtn');
+        var gainInfo = document.getElementById('splitGainInfo');
+        var canvas = document.getElementById('cvSplit');
+
+        sliderLambda.oninput = function() {
+            valLambda.textContent = parseFloat(this.value).toFixed(1);
+        };
+
+        var NUM_BINS = 16;
+        var rng = seededRandom(77);
+        var binGrad = [], binHess = [], binCount = [];
+        for (var i = 0; i < NUM_BINS; i++) {
+            binCount.push(Math.floor(rng() * 30) + 5);
+            binGrad.push(gaussianNoise(rng) * binCount[i] * 0.5);
+            binHess.push(binCount[i] * (0.5 + rng() * 0.5));
+        }
+
+        var scanState = { pos: -1, running: false, animId: null, bestPos: -1, bestGain: -Infinity, gains: [] };
+
+        function resetScan() {
+            if (scanState.animId) clearTimeout(scanState.animId);
+            scanState = { pos: -1, running: false, animId: null, bestPos: -1, bestGain: -Infinity, gains: [] };
+            gainInfo.innerHTML = '当前扫描位置: — | 增益: — | <span class="best">最佳分裂: —</span>';
+            drawSplitFrame();
+            playBtn.textContent = '扫描分裂点';
+        }
+
+        resetBtn.onclick = resetScan;
+
+        playBtn.onclick = function() {
+            if (scanState.running) {
+                scanState.running = false;
+                if (scanState.animId) clearTimeout(scanState.animId);
+                playBtn.textContent = '继续';
+                return;
+            }
+            if (scanState.pos >= NUM_BINS - 2) resetScan();
+            scanState.running = true;
+            playBtn.textContent = '暂停';
+            animateScan();
+        };
+
+        function animateScan() {
+            if (!scanState.running) return;
+            scanState.pos++;
+            if (scanState.pos >= NUM_BINS - 1) {
+                scanState.running = false;
+                playBtn.textContent = '重新扫描';
+                drawSplitFrame();
+                return;
+            }
+
+            var lambda = parseFloat(sliderLambda.value);
+            var leftG = 0, leftH = 0, totalG = 0, totalH = 0;
+            for (var i = 0; i < NUM_BINS; i++) { totalG += binGrad[i]; totalH += binHess[i]; }
+            for (var i = 0; i <= scanState.pos; i++) { leftG += binGrad[i]; leftH += binHess[i]; }
+            var rightG = totalG - leftG;
+            var rightH = totalH - leftH;
+            var gain = (leftG * leftG) / (leftH + lambda) +
+                       (rightG * rightG) / (rightH + lambda) -
+                       (totalG * totalG) / (totalH + lambda);
+
+            scanState.gains.push(gain);
+            if (gain > scanState.bestGain) {
+                scanState.bestGain = gain;
+                scanState.bestPos = scanState.pos;
+            }
+
+            gainInfo.innerHTML = '当前扫描: 桶 ' + (scanState.pos + 1) + ' | 增益: ' + gain.toFixed(3) +
+                ' | <span class="best">最佳: 桶 ' + (scanState.bestPos + 1) + ' (增益=' + scanState.bestGain.toFixed(3) + ')</span>';
+
+            drawSplitFrame();
+            scanState.animId = setTimeout(animateScan, 300);
+        }
+
+        function drawSplitFrame() {
+            var r = fitCanvas(canvas);
+            var ctx = r.ctx, w = r.w, h = r.h;
+            var pad = { l: 50, r: 20, t: 30, b: 30 };
+            var plotW = w - pad.l - pad.r;
+            var barW = plotW / NUM_BINS;
+
+            ctx.clearRect(0, 0, w, h);
+
+            /* Top: histogram of gradient sums */
+            var histH = h * 0.4;
+            var maxG = 0.1;
+            for (var i = 0; i < NUM_BINS; i++) {
+                var ag = Math.abs(binGrad[i]);
+                if (ag > maxG) maxG = ag;
+            }
+
+            ctx.fillStyle = C.textMuted;
+            ctx.font = '11px sans-serif';
+            ctx.textAlign = 'left';
+            ctx.fillText('每桶梯度和', pad.l, pad.t - 5);
+
+            var mid = pad.t + histH / 2;
+            for (var i = 0; i < NUM_BINS; i++) {
+                var barH = (Math.abs(binGrad[i]) / maxG) * (histH / 2 - 10);
+                var x = pad.l + i * barW;
+
+                if (binGrad[i] >= 0) {
+                    ctx.fillStyle = i <= scanState.pos ? C.blue : 'rgba(79,195,247,0.3)';
+                    ctx.fillRect(x + 2, mid - barH, barW - 4, barH);
+                } else {
+                    ctx.fillStyle = i <= scanState.pos ? C.red : 'rgba(255,82,82,0.3)';
+                    ctx.fillRect(x + 2, mid, barW - 4, barH);
+                }
+
+                if (barW > 20) {
+                    ctx.fillStyle = C.textMuted;
+                    ctx.font = '9px monospace';
+                    ctx.textAlign = 'center';
+                    ctx.fillText(binGrad[i].toFixed(1), x + barW / 2, pad.t + histH + 12);
+                }
+            }
+
+            /* Midline */
+            ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(pad.l, mid);
+            ctx.lineTo(pad.l + plotW, mid);
+            ctx.stroke();
+
+            /* Current scan line */
+            if (scanState.pos >= 0 && scanState.pos < NUM_BINS) {
+                var sx = pad.l + (scanState.pos + 1) * barW;
+                ctx.beginPath();
+                ctx.moveTo(sx, pad.t);
+                ctx.lineTo(sx, pad.t + histH + 20);
+                ctx.strokeStyle = C.yellow;
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                ctx.fillStyle = C.yellow;
+                ctx.beginPath();
+                ctx.moveTo(sx - 5, pad.t);
+                ctx.lineTo(sx + 5, pad.t);
+                ctx.lineTo(sx, pad.t + 8);
+                ctx.fill();
+            }
+
+            /* Best split line */
+            if (scanState.bestPos >= 0) {
+                var bx = pad.l + (scanState.bestPos + 1) * barW;
+                ctx.beginPath();
+                ctx.setLineDash([6, 3]);
+                ctx.moveTo(bx, pad.t);
+                ctx.lineTo(bx, pad.t + histH + 20);
+                ctx.strokeStyle = C.green;
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                ctx.setLineDash([]);
+                ctx.fillStyle = C.green;
+                ctx.font = 'bold 11px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('最佳', bx, pad.t + histH + 35);
+            }
+
+            /* Left/Right labels */
+            if (scanState.pos >= 0) {
+                var splitX = pad.l + (scanState.pos + 1) * barW;
+                ctx.font = 'bold 12px sans-serif';
+                ctx.textAlign = 'center';
+                var leftMid = pad.l + (scanState.pos + 1) * barW / 2;
+                var rightMid = splitX + (pad.l + plotW - splitX) / 2;
+                ctx.fillStyle = 'rgba(79,195,247,0.8)';
+                ctx.fillText('左子树 (L)', Math.max(leftMid, pad.l + 30), pad.t + histH + 48);
+                ctx.fillStyle = 'rgba(255,171,64,0.8)';
+                ctx.fillText('右子树 (R)', Math.min(rightMid, pad.l + plotW - 30), pad.t + histH + 48);
+            }
+
+            /* Bottom: gain chart */
+            if (scanState.gains.length > 0) {
+                var gainTop = pad.t + histH + 60;
+                var gainH = h - gainTop - pad.b;
+                var maxGain = -Infinity, minGain = Infinity;
+                for (var i = 0; i < scanState.gains.length; i++) {
+                    if (scanState.gains[i] > maxGain) maxGain = scanState.gains[i];
+                    if (scanState.gains[i] < minGain) minGain = scanState.gains[i];
+                }
+                if (maxGain === minGain) maxGain = minGain + 0.01;
+
+                ctx.fillStyle = C.textMuted;
+                ctx.font = '11px sans-serif';
+                ctx.textAlign = 'left';
+                ctx.fillText('分裂增益', pad.l, gainTop - 5);
+
+                for (var i = 0; i < scanState.gains.length; i++) {
+                    var gBarH = ((scanState.gains[i] - minGain) / (maxGain - minGain)) * (gainH - 10);
+                    var x = pad.l + (i + 0.5) * barW;
+                    var y = gainTop + gainH - gBarH;
+                    ctx.fillStyle = i === scanState.bestPos ? C.green : 'rgba(179,136,255,0.5)';
+                    ctx.fillRect(x - barW * 0.3, y, barW * 0.6, gBarH);
+                    if (barW > 25) {
+                        ctx.fillStyle = C.textSecondary;
+                        ctx.font = '8px monospace';
+                        ctx.textAlign = 'center';
+                        ctx.fillText(scanState.gains[i].toFixed(2), x, y - 3);
+                    }
+                }
+
+                ctx.strokeStyle = C.border;
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(pad.l, gainTop + gainH);
+                ctx.lineTo(pad.l + plotW, gainTop + gainH);
+                ctx.stroke();
+            }
+        }
+
+        drawSplitFrame();
+        window.addEventListener('resize', drawSplitFrame);
+    })();
+
+    /* ================================================================
+       SECTION 4: Histogram Subtraction Trick
+       ================================================================ */
+    (function() {
+        var playBtn = document.getElementById('subPlayBtn');
+        var resetBtn = document.getElementById('subResetBtn');
+        var cvParent = document.getElementById('cvSubParent');
+        var cvLeft = document.getElementById('cvSubLeft');
+        var cvRight = document.getElementById('cvSubRight');
+
+        var NUM_BINS = 10;
+        var rng = seededRandom(55);
+        var parentCounts = [], leftCounts = [], rightCounts = [];
+        for (var i = 0; i < NUM_BINS; i++) {
+            var p = Math.floor(rng() * 40) + 10;
+            var l = Math.floor(rng() * p * 0.7);
+            parentCounts.push(p);
+            leftCounts.push(l);
+            rightCounts.push(p - l);
+        }
+
+        var subState = { phase: 0, progress: 0, running: false, animId: null };
+        var lastSubTime = null;
+
+        function resetSub() {
+            if (subState.animId) cancelAnimationFrame(subState.animId);
+            subState = { phase: 0, progress: 0, running: false, animId: null };
+            drawSubFrame();
+            playBtn.textContent = '演示减法';
+        }
+
+        resetBtn.onclick = resetSub;
+
+        playBtn.onclick = function() {
+            if (subState.running) return;
+            if (subState.phase >= 3) resetSub();
+            subState.running = true;
+            subState.phase = 0;
+            subState.progress = 0;
+            playBtn.textContent = '演示中...';
+            lastSubTime = null;
+            subState.animId = requestAnimationFrame(animateSub);
+        };
+
+        function animateSub(now) {
+            if (!subState.running) return;
+            if (!lastSubTime) lastSubTime = now;
+            var dt = (now - lastSubTime) / 1000;
+            lastSubTime = now;
+
+            subState.progress += dt * 0.8;
+            if (subState.progress >= 1) {
+                subState.progress = 0;
+                subState.phase++;
+                if (subState.phase >= 3) {
+                    subState.phase = 3;
+                    subState.running = false;
+                    playBtn.textContent = '重新演示';
+                    drawSubFrame();
+                    return;
+                }
+            }
+            drawSubFrame();
+            subState.animId = requestAnimationFrame(animateSub);
+        }
+
+        function drawHistBars(ctx, w, h, counts, maxVal, color, showCount, alpha) {
+            ctx.clearRect(0, 0, w, h);
+            var pad = { l: 10, r: 10, t: 15, b: 20 };
+            var plotW = w - pad.l - pad.r;
+            var plotH = h - pad.t - pad.b;
+            var barW = plotW / counts.length;
+
+            for (var i = 0; i < showCount && i < counts.length; i++) {
+                var barH = (counts[i] / maxVal) * plotH * 0.85;
+                var x = pad.l + i * barW;
+                var y = pad.t + plotH - barH;
+
+                ctx.globalAlpha = alpha;
+                ctx.fillStyle = color;
+                ctx.fillRect(x + 2, y, Math.max(1, barW - 4), barH);
+                ctx.globalAlpha = 1;
+
+                if (barW > 18 && counts[i] > 0) {
+                    ctx.fillStyle = C.textPrimary;
+                    ctx.font = 'bold 10px monospace';
+                    ctx.textAlign = 'center';
+                    ctx.fillText(counts[i], x + barW / 2, y - 3);
+                }
+            }
+        }
+
+        function drawSubFrame() {
+            var maxVal = 0;
+            for (var i = 0; i < parentCounts.length; i++) {
+                if (parentCounts[i] > maxVal) maxVal = parentCounts[i];
+            }
+            maxVal += 5;
+
+            var rP = fitCanvas(cvParent);
+            var rL = fitCanvas(cvLeft);
+            var rR = fitCanvas(cvRight);
+
+            if (subState.phase === 0) {
+                var show = Math.floor(subState.progress * NUM_BINS) + 1;
+                drawHistBars(rP.ctx, rP.w, rP.h, parentCounts, maxVal, C.purple, Math.min(show, NUM_BINS), 1);
+                drawHistBars(rL.ctx, rL.w, rL.h, leftCounts, maxVal, C.blue, 0, 0.2);
+                drawHistBars(rR.ctx, rR.w, rR.h, rightCounts, maxVal, C.green, 0, 0.2);
+            } else if (subState.phase === 1) {
+                drawHistBars(rP.ctx, rP.w, rP.h, parentCounts, maxVal, C.purple, NUM_BINS, 1);
+                var show = Math.floor(subState.progress * NUM_BINS) + 1;
+                drawHistBars(rL.ctx, rL.w, rL.h, leftCounts, maxVal, C.blue, Math.min(show, NUM_BINS), 1);
+                drawHistBars(rR.ctx, rR.w, rR.h, rightCounts, maxVal, C.green, 0, 0.2);
+            } else if (subState.phase === 2) {
+                drawHistBars(rP.ctx, rP.w, rP.h, parentCounts, maxVal, C.purple, NUM_BINS, 1);
+                drawHistBars(rL.ctx, rL.w, rL.h, leftCounts, maxVal, C.blue, NUM_BINS, 1);
+                var show = Math.floor(subState.progress * NUM_BINS) + 1;
+                drawHistBars(rR.ctx, rR.w, rR.h, rightCounts, maxVal, C.green, Math.min(show, NUM_BINS), 1);
+
+                /* Flash effect on latest computed bin */
+                if (show <= NUM_BINS) {
+                    var flashPad = 10;
+                    var flashPlotW = rR.w - 20;
+                    var flashBarW = flashPlotW / NUM_BINS;
+                    var flashIdx = Math.min(show - 1, NUM_BINS - 1);
+                    var x = flashPad + flashIdx * flashBarW;
+                    rR.ctx.fillStyle = 'rgba(22,199,154,0.3)';
+                    rR.ctx.fillRect(x, 0, flashBarW, rR.h);
+                }
+            } else {
+                drawHistBars(rP.ctx, rP.w, rP.h, parentCounts, maxVal, C.purple, NUM_BINS, 1);
+                drawHistBars(rL.ctx, rL.w, rL.h, leftCounts, maxVal, C.blue, NUM_BINS, 1);
+                drawHistBars(rR.ctx, rR.w, rR.h, rightCounts, maxVal, C.green, NUM_BINS, 1);
+            }
+        }
+
+        drawSubFrame();
+        window.addEventListener('resize', drawSubFrame);
+    })();
+
+    /* ================================================================
+       SECTION 5: Memory Usage Comparison
+       ================================================================ */
+    (function() {
+        var sliderN = document.getElementById('memN');
+        var sliderF = document.getElementById('memF');
+        var sliderK = document.getElementById('memK');
+        var valN = document.getElementById('memNVal');
+        var valF = document.getElementById('memFVal');
+        var valK = document.getElementById('memKVal');
+
+        function update() {
+            var N = parseInt(sliderN.value);
+            var F = parseInt(sliderF.value);
+            var K = parseInt(sliderK.value);
+
+            valN.textContent = N.toLocaleString();
+            valF.textContent = F;
+            valK.textContent = K;
+
+            /* Exact: float64 values + int32 sorted indices per feature */
+            var exactBytes = N * F * 8 + N * F * 4;
+
+            /* Histogram: 1 byte bin index per sample per feature + gradient+hessian stats per bin */
+            var histBytes = N * F * 1 + K * F * 8 + K * F * 8;
+
+            var maxBytes = Math.max(exactBytes, histBytes);
+            var exactPct = (exactBytes / maxBytes) * 100;
+            var histPct = (histBytes / maxBytes) * 100;
+
+            document.getElementById('memExactBar').style.width = exactPct + '%';
+            document.getElementById('memExactText').textContent = formatBytes(exactBytes);
+            document.getElementById('memHistBar').style.width = Math.max(histPct, 3) + '%';
+            document.getElementById('memHistText').textContent = formatBytes(histBytes);
+
+            var savings = ((1 - histBytes / exactBytes) * 100).toFixed(1);
+            var ratio = (exactBytes / histBytes).toFixed(1);
+            document.getElementById('memSavings').textContent =
+                '节省内存: ' + savings + '% (精确算法是直方图的 ' + ratio + ' 倍)';
+        }
+
+        sliderN.oninput = update;
+        sliderF.oninput = update;
+        sliderK.oninput = update;
+        update();
+    })();
+});
+
+/* Deferred KaTeX auto-render */
+window.addEventListener('load', function() {
+    if (typeof renderMathInElement === 'function') {
+        renderMathInElement(document.body, {
+            delimiters: [
+                { left: '$$', right: '$$', display: true },
+                { left: '$', right: '$', display: false }
+            ]
+        });
+    }
+});
+</script>
+</body>
+</html>

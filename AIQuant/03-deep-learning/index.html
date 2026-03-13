@@ -1,0 +1,1292 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>深度学习 — AI 量化</title>
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" defer>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js" defer></script>
+    <script src="../shared/scripts/nav.js" defer></script>
+    <script src="../shared/scripts/aiquant-utils.js" defer></script>
+    <style>
+        .module-header { text-align: center; padding: 2rem 0 1rem; }
+        .module-header h1 { font-size: 2.2rem; }
+        .module-header .subtitle { color: var(--text-muted); font-size: 1rem; }
+        .canvas-wrap { position: relative; width: 100%; border-radius: var(--radius-md); overflow: hidden; background: var(--bg-secondary); border: 1px solid var(--border-color); }
+        .canvas-wrap canvas { display: block; width: 100%; }
+        .controls-row { display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; margin: 1rem 0; }
+        .controls-row .slider-group { flex: 1; min-width: 200px; }
+        .section .desc { color: var(--text-secondary); font-size: 0.95rem; margin-bottom: 1rem; line-height: 1.8; }
+        .formula-box { background: rgba(22,199,154,0.05); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 1rem 1.2rem; margin: 0.75rem 0; }
+        .metric-row { display: flex; gap: 1rem; flex-wrap: wrap; margin: 0.75rem 0; }
+        .metric-item { background: var(--bg-card); border-radius: var(--radius-sm); padding: 0.5rem 1rem; display: flex; flex-direction: column; align-items: center; min-width: 100px; }
+        .metric-item .label { font-size: 0.75rem; color: var(--text-muted); }
+        .metric-item .value { font-family: var(--font-mono); font-size: 1.1rem; color: var(--accent-green); font-weight: 700; }
+        .legend-inline { display: flex; flex-wrap: wrap; gap: 1rem; margin: 0.5rem 0; font-size: 0.8rem; color: var(--text-secondary); }
+        .legend-inline span { display: flex; align-items: center; gap: 4px; }
+        .legend-inline .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+        .perf-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin: 1rem 0; }
+        .perf-table th, .perf-table td { padding: 0.5rem 0.75rem; border: 1px solid var(--border-color); text-align: center; }
+        .perf-table th { background: var(--bg-card); color: var(--accent-green); font-weight: 600; }
+        .perf-table td { color: var(--text-secondary); }
+        .perf-table tr:hover td { background: rgba(22,199,154,0.05); }
+        .best-val { color: var(--accent-green) !important; font-weight: 700; }
+    </style>
+</head>
+<body>
+<div class="page-container">
+    <div class="module-header">
+        <h1>深度学习</h1>
+        <p class="subtitle">LSTM、Temporal CNN、Transformer 在金融时序预测中的应用与对比</p>
+    </div>
+
+    <!-- ==================== Section 1: LSTM 预测 ==================== -->
+    <div class="section" id="sec-lstm">
+        <div class="section-title"><div class="icon">🧠</div><h2>LSTM 预测</h2></div>
+        <p class="desc">长短期记忆网络（LSTM）通过门控机制解决传统 RNN 的梯度消失问题。遗忘门决定丢弃哪些信息，输入门决定更新哪些新信息，输出门决定输出什么。细胞状态如同传送带，信息可以无损地沿时间线传递。</p>
+        <div class="formula-box">
+            $$f_t = \sigma(W_f [h_{t-1}, x_t] + b_f) \quad i_t = \sigma(W_i [h_{t-1}, x_t] + b_i)$$
+            $$\tilde{C}_t = \tanh(W_C [h_{t-1}, x_t] + b_C) \quad C_t = f_t \odot C_{t-1} + i_t \odot \tilde{C}_t$$
+            $$o_t = \sigma(W_o [h_{t-1}, x_t] + b_o) \quad h_t = o_t \odot \tanh(C_t)$$
+        </div>
+        <div class="controls-row">
+            <button class="btn btn-primary" id="btn-lstm-anim" onclick="LSTM.toggleAnim()">播放动画</button>
+            <button class="btn" onclick="LSTM.reset()">重置</button>
+            <div class="slider-group">
+                <label>预测窗口</label>
+                <input type="range" id="sl-lstm-window" min="5" max="40" value="20" oninput="LSTM.setWindow(this.value)">
+                <span class="slider-value" id="sv-lstm-window">20</span>
+            </div>
+        </div>
+        <div class="canvas-wrap"><canvas id="cv-lstm" height="520"></canvas></div>
+        <div class="legend-inline">
+            <span><span class="dot" style="background:#00e5ff"></span>实际价格</span>
+            <span><span class="dot" style="background:#ff6d00"></span>LSTM 预测</span>
+            <span><span class="dot" style="background:rgba(255,109,0,0.2)"></span>置信区间</span>
+            <span><span class="dot" style="background:#00e676"></span>遗忘门</span>
+            <span><span class="dot" style="background:#7c4dff"></span>输入门</span>
+            <span><span class="dot" style="background:#ff1744"></span>输出门</span>
+        </div>
+        <div class="metric-row" id="lstm-metrics">
+            <div class="metric-item"><span class="label">MSE</span><span class="value" id="m-lstm-mse">--</span></div>
+            <div class="metric-item"><span class="label">MAE</span><span class="value" id="m-lstm-mae">--</span></div>
+            <div class="metric-item"><span class="label">方向准确率</span><span class="value" id="m-lstm-dir">--</span></div>
+        </div>
+    </div>
+
+    <!-- ==================== Section 2: Temporal CNN ==================== -->
+    <div class="section" id="sec-tcn">
+        <div class="section-title"><div class="icon">📊</div><h2>Temporal CNN</h2></div>
+        <p class="desc">时序卷积网络（TCN）使用一维因果卷积处理时间序列。不同大小的卷积核捕捉不同尺度的模式——小核捕捉短期波动，大核捕捉趋势。空洞卷积（Dilated Convolution）通过指数增长的间隔，以较少参数获得超大感受野。</p>
+        <div class="formula-box">
+            $$y_t = \sum_{k=0}^{K-1} w_k \cdot x_{t - d \cdot k} \quad \text{感受野} = 1 + \sum_{l=1}^{L} (K-1) \cdot d_l$$
+        </div>
+        <div class="controls-row">
+            <div class="btn-group">
+                <button class="btn active" data-kernel="3" onclick="TCN.setKernel(3)">核大小 3</button>
+                <button class="btn" data-kernel="5" onclick="TCN.setKernel(5)">核大小 5</button>
+                <button class="btn" data-kernel="7" onclick="TCN.setKernel(7)">核大小 7</button>
+            </div>
+            <div class="slider-group">
+                <label>空洞率</label>
+                <input type="range" id="sl-dilation" min="1" max="8" value="1" oninput="TCN.setDilation(this.value)">
+                <span class="slider-value" id="sv-dilation">1</span>
+            </div>
+            <button class="btn btn-primary" onclick="TCN.animate()">动画展示</button>
+        </div>
+        <div class="canvas-wrap"><canvas id="cv-tcn" height="500"></canvas></div>
+        <div class="legend-inline">
+            <span><span class="dot" style="background:#00e5ff"></span>输入序列</span>
+            <span><span class="dot" style="background:#ff6d00"></span>卷积输出</span>
+            <span><span class="dot" style="background:#7c4dff"></span>卷积核权重</span>
+            <span><span class="dot" style="background:rgba(124,77,255,0.15)"></span>感受野</span>
+        </div>
+        <div class="metric-row">
+            <div class="metric-item"><span class="label">感受野大小</span><span class="value" id="m-tcn-rf">3</span></div>
+            <div class="metric-item"><span class="label">参数量</span><span class="value" id="m-tcn-params">3</span></div>
+            <div class="metric-item"><span class="label">检测模式</span><span class="value" id="m-tcn-pattern">趋势</span></div>
+        </div>
+    </div>
+
+    <!-- ==================== Section 3: Transformer 预测 ==================== -->
+    <div class="section" id="sec-transformer">
+        <div class="section-title"><div class="icon">🔮</div><h2>Transformer 预测</h2></div>
+        <p class="desc">Transformer 通过自注意力机制直接建模序列中任意两个时间步之间的依赖关系，无需像 RNN 那样逐步传递信息。多头注意力让模型同时关注不同维度的模式——有的头关注短期动量，有的头关注长期趋势。</p>
+        <div class="formula-box">
+            $$\text{Attention}(Q,K,V) = \text{softmax}\!\left(\frac{QK^T}{\sqrt{d_k}}\right)V \quad \text{MultiHead} = \text{Concat}(\text{head}_1,...,\text{head}_h)W^O$$
+        </div>
+        <div class="controls-row">
+            <div class="slider-group">
+                <label>注意力头数</label>
+                <input type="range" id="sl-heads" min="1" max="4" value="2" oninput="Transformer.setHeads(this.value)">
+                <span class="slider-value" id="sv-heads">2</span>
+            </div>
+            <div class="slider-group">
+                <label>序列长度</label>
+                <input type="range" id="sl-seqlen" min="6" max="20" value="12" oninput="Transformer.setSeqLen(this.value)">
+                <span class="slider-value" id="sv-seqlen">12</span>
+            </div>
+            <button class="btn btn-primary" onclick="Transformer.animate()">计算注意力</button>
+        </div>
+        <div class="canvas-wrap"><canvas id="cv-transformer" height="560"></canvas></div>
+        <div class="legend-inline">
+            <span><span class="dot" style="background:#00e5ff"></span>实际价格</span>
+            <span><span class="dot" style="background:#ff6d00"></span>Transformer 预测</span>
+            <span><span class="dot" style="background:#7c4dff"></span>注意力权重</span>
+        </div>
+        <div class="metric-row">
+            <div class="metric-item"><span class="label">MSE</span><span class="value" id="m-tf-mse">--</span></div>
+            <div class="metric-item"><span class="label">最强注意力</span><span class="value" id="m-tf-attn">--</span></div>
+        </div>
+    </div>
+
+    <!-- ==================== Section 4: 序列到序列 ==================== -->
+    <div class="section" id="sec-seq2seq">
+        <div class="section-title"><div class="icon">🔁</div><h2>序列到序列</h2></div>
+        <p class="desc">编码器-解码器架构将历史序列编码为上下文向量，再逐步解码出未来预测。预测步数越多，误差累积越严重——这就是多步预测退化问题。实际应用中通常限制预测步数或使用 teacher forcing 技术。</p>
+        <div class="formula-box">
+            $$\text{Encoder: } h_T = f_{\text{enc}}(x_1, ..., x_T) \quad \text{Decoder: } \hat{y}_{T+k} = f_{\text{dec}}(h_T, \hat{y}_{T+1}, ..., \hat{y}_{T+k-1})$$
+        </div>
+        <div class="controls-row">
+            <div class="btn-group">
+                <button class="btn active" data-step="1" onclick="Seq2Seq.setSteps(1)">1 步</button>
+                <button class="btn" data-step="5" onclick="Seq2Seq.setSteps(5)">5 步</button>
+                <button class="btn" data-step="20" onclick="Seq2Seq.setSteps(20)">20 步</button>
+            </div>
+            <button class="btn btn-primary" id="btn-s2s-anim" onclick="Seq2Seq.toggleAnim()">播放动画</button>
+            <button class="btn" onclick="Seq2Seq.reset()">重置</button>
+        </div>
+        <div class="canvas-wrap"><canvas id="cv-seq2seq" height="480"></canvas></div>
+        <div class="legend-inline">
+            <span><span class="dot" style="background:#00e5ff"></span>历史（编码）</span>
+            <span><span class="dot" style="background:#00e676"></span>实际未来</span>
+            <span><span class="dot" style="background:#ff6d00"></span>预测（解码）</span>
+            <span><span class="dot" style="background:rgba(255,109,0,0.15)"></span>误差区间</span>
+        </div>
+        <div class="metric-row">
+            <div class="metric-item"><span class="label">1步 MSE</span><span class="value" id="m-s2s-1">--</span></div>
+            <div class="metric-item"><span class="label">5步 MSE</span><span class="value" id="m-s2s-5">--</span></div>
+            <div class="metric-item"><span class="label">20步 MSE</span><span class="value" id="m-s2s-20">--</span></div>
+            <div class="metric-item"><span class="label">退化倍数</span><span class="value" id="m-s2s-deg">--</span></div>
+        </div>
+    </div>
+
+    <!-- ==================== Section 5: 模型对比 ==================== -->
+    <div class="section" id="sec-compare">
+        <div class="section-title"><div class="icon">⚖</div><h2>模型对比</h2></div>
+        <p class="desc">在相同的数据集上对比 LSTM、TCN 和 Transformer 的预测表现。不同市场状态下，各模型表现各有优劣——趋势市中 TCN 可能更稳定，震荡市中 Transformer 对局部模式更敏感。</p>
+        <div class="controls-row">
+            <div class="btn-group">
+                <button class="btn active" data-ds="trending" onclick="Compare.setDataset('trending')">趋势行情</button>
+                <button class="btn" data-ds="volatile" onclick="Compare.setDataset('volatile')">震荡行情</button>
+                <button class="btn" data-ds="reversal" onclick="Compare.setDataset('reversal')">反转行情</button>
+            </div>
+            <button class="btn btn-primary" onclick="Compare.run()">重新预测</button>
+        </div>
+        <div class="canvas-wrap"><canvas id="cv-compare" height="440"></canvas></div>
+        <div class="legend-inline">
+            <span><span class="dot" style="background:#e0e0e0"></span>实际价格</span>
+            <span><span class="dot" style="background:#00e5ff"></span>LSTM</span>
+            <span><span class="dot" style="background:#7c4dff"></span>TCN</span>
+            <span><span class="dot" style="background:#ff6d00"></span>Transformer</span>
+        </div>
+        <table class="perf-table" id="perf-table">
+            <thead>
+                <tr><th>指标</th><th>LSTM</th><th>TCN</th><th>Transformer</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>MSE</td><td id="pt-lstm-mse">--</td><td id="pt-tcn-mse">--</td><td id="pt-tf-mse">--</td></tr>
+                <tr><td>MAE</td><td id="pt-lstm-mae">--</td><td id="pt-tcn-mae">--</td><td id="pt-tf-mae">--</td></tr>
+                <tr><td>方向准确率</td><td id="pt-lstm-dir">--</td><td id="pt-tcn-dir">--</td><td id="pt-tf-dir">--</td></tr>
+                <tr><td>最大误差</td><td id="pt-lstm-max">--</td><td id="pt-tcn-max">--</td><td id="pt-tf-max">--</td></tr>
+                <tr><td>夏普比率</td><td id="pt-lstm-sharpe">--</td><td id="pt-tcn-sharpe">--</td><td id="pt-tf-sharpe">--</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+// ========== Shared Data & Utilities ==========
+const U = (() => {
+    const DPR = window.devicePixelRatio || 1;
+    function initCanvas(id) {
+        const c = document.getElementById(id);
+        const r = c.getBoundingClientRect();
+        c.width = r.width * DPR;
+        c.height = parseInt(c.getAttribute('height')) * DPR;
+        const ctx = c.getContext('2d');
+        ctx.scale(DPR, DPR);
+        return { c, ctx, w: r.width, h: parseInt(c.getAttribute('height')) };
+    }
+    function genPrices(n, seed, drift, vol) {
+        const rng = AIQuantUtils.seededRandom(seed || 42);
+        const p = [100];
+        for (let i = 1; i < n; i++) {
+            p.push(p[i-1] * Math.exp((drift||0.0003) + (vol||0.015) * AIQuantUtils.normalRandom(0,1,rng)));
+        }
+        return p;
+    }
+    function lerp(a, b, t) { return a + (b - a) * t; }
+    function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+    function clear(ctx, w, h) {
+        ctx.fillStyle = '#16213e';
+        ctx.fillRect(0, 0, w, h);
+    }
+    function drawGrid(ctx, x, y, w, h, nx, ny) {
+        ctx.strokeStyle = 'rgba(255,255,255,0.04)';
+        ctx.lineWidth = 1;
+        for (let i = 0; i <= nx; i++) {
+            const gx = x + (i / nx) * w;
+            ctx.beginPath(); ctx.moveTo(gx, y); ctx.lineTo(gx, y + h); ctx.stroke();
+        }
+        for (let i = 0; i <= ny; i++) {
+            const gy = y + (i / ny) * h;
+            ctx.beginPath(); ctx.moveTo(x, gy); ctx.lineTo(x + w, gy); ctx.stroke();
+        }
+    }
+    function mapX(val, min, max, x, w) { return x + ((val - min) / (max - min)) * w; }
+    function mapY(val, min, max, y, h) { return y + h - ((val - min) / (max - min)) * h; }
+    function drawLine(ctx, pts, color, lw) {
+        if (pts.length < 2) return;
+        ctx.strokeStyle = color;
+        ctx.lineWidth = lw || 2;
+        ctx.beginPath();
+        ctx.moveTo(pts[0][0], pts[0][1]);
+        for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+        ctx.stroke();
+    }
+    function fillBand(ctx, upper, lower, color) {
+        if (upper.length < 2) return;
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.moveTo(upper[0][0], upper[0][1]);
+        for (let i = 1; i < upper.length; i++) ctx.lineTo(upper[i][0], upper[i][1]);
+        for (let i = lower.length - 1; i >= 0; i--) ctx.lineTo(lower[i][0], lower[i][1]);
+        ctx.closePath();
+        ctx.fill();
+    }
+    function drawText(ctx, text, x, y, color, size, align) {
+        ctx.fillStyle = color || '#e0e0e0';
+        ctx.font = (size || 12) + 'px "Noto Sans SC", sans-serif';
+        ctx.textAlign = align || 'left';
+        ctx.fillText(text, x, y);
+    }
+    return { DPR, initCanvas, genPrices, lerp, clamp, clear, drawGrid, mapX, mapY, drawLine, fillBand, drawText };
+})();
+
+// ========== Section 1: LSTM 预测 ==========
+const LSTM = (() => {
+    let cv, ctx, W, H;
+    let prices, preds, gateValues;
+    let animFrame = 0, animRunning = false, animId = null;
+    let predWindow = 20;
+    const rng = AIQuantUtils.seededRandom(77);
+
+    function init() {
+        ({ c: cv, ctx, w: W, h: H } = U.initCanvas('cv-lstm'));
+        prices = U.genPrices(120, 42, 0.0002, 0.012);
+        generatePredictions();
+        draw();
+    }
+
+    function generatePredictions() {
+        const r = AIQuantUtils.seededRandom(88);
+        preds = [prices[0]];
+        gateValues = [];
+        for (let i = 1; i < prices.length; i++) {
+            const fg = AIQuantUtils.sigmoid(2 * (prices[i] - prices[i-1]) / prices[i-1] * 50 + AIQuantUtils.normalRandom(0, 0.3, r));
+            const ig = AIQuantUtils.sigmoid(-1 + 3 * Math.abs(prices[i] - prices[i-1]) / prices[i-1] * 30 + AIQuantUtils.normalRandom(0, 0.3, r));
+            const og = AIQuantUtils.sigmoid(1 + AIQuantUtils.normalRandom(0, 0.5, r));
+            gateValues.push({ f: fg, i: ig, o: og });
+            const lag = 0.88;
+            preds.push(preds[i-1] + lag * (prices[i] - preds[i-1]) + AIQuantUtils.normalRandom(0, 0.003 * prices[i], r));
+        }
+        updateMetrics();
+    }
+
+    function updateMetrics() {
+        const n = prices.length;
+        let mse = 0, mae = 0, dirCorrect = 0;
+        for (let i = 1; i < n; i++) {
+            const e = preds[i] - prices[i];
+            mse += e * e;
+            mae += Math.abs(e);
+            if ((prices[i] - prices[i-1]) * (preds[i] - preds[i-1]) > 0) dirCorrect++;
+        }
+        document.getElementById('m-lstm-mse').textContent = (mse / (n-1)).toFixed(4);
+        document.getElementById('m-lstm-mae').textContent = (mae / (n-1)).toFixed(4);
+        document.getElementById('m-lstm-dir').textContent = ((dirCorrect / (n-1)) * 100).toFixed(1) + '%';
+    }
+
+    function draw() {
+        U.clear(ctx, W, H);
+        const pad = { l: 60, r: 20, t: 20, b: 60 };
+        const archH = 180;
+        const chartTop = archH + 30;
+        const chartH = H - chartTop - pad.b;
+        const chartW = W - pad.l - pad.r;
+
+        // === LSTM Architecture Diagram ===
+        drawArchitecture(pad.l, 10, chartW, archH);
+
+        // === Price Chart ===
+        const showN = animRunning ? Math.min(animFrame + 1, prices.length) : prices.length;
+        const allVals = prices.slice(0, showN).concat(preds.slice(0, showN));
+        const yMin = Math.min(...allVals) * 0.995;
+        const yMax = Math.max(...allVals) * 1.005;
+
+        U.drawGrid(ctx, pad.l, chartTop, chartW, chartH, 10, 5);
+
+        // Confidence interval
+        const upperPts = [], lowerPts = [];
+        for (let i = 0; i < showN; i++) {
+            const x = U.mapX(i, 0, prices.length - 1, pad.l, chartW);
+            const spread = Math.abs(preds[i] - prices[i]) * 2.5 + prices[i] * 0.003;
+            upperPts.push([x, U.mapY(preds[i] + spread, yMin, yMax, chartTop, chartH)]);
+            lowerPts.push([x, U.mapY(preds[i] - spread, yMin, yMax, chartTop, chartH)]);
+        }
+        U.fillBand(ctx, upperPts, lowerPts, 'rgba(255,109,0,0.08)');
+
+        // Actual prices
+        const pricePts = [];
+        for (let i = 0; i < showN; i++) {
+            pricePts.push([U.mapX(i, 0, prices.length - 1, pad.l, chartW), U.mapY(prices[i], yMin, yMax, chartTop, chartH)]);
+        }
+        U.drawLine(ctx, pricePts, '#00e5ff', 2);
+
+        // Predictions
+        const predPts = [];
+        for (let i = 0; i < showN; i++) {
+            predPts.push([U.mapX(i, 0, prices.length - 1, pad.l, chartW), U.mapY(preds[i], yMin, yMax, chartTop, chartH)]);
+        }
+        U.drawLine(ctx, predPts, '#ff6d00', 2);
+
+        // Axes
+        AIQuantUtils.drawAxis(ctx, { x: pad.l, y: chartTop, w: chartW, h: chartH, xMin: 0, xMax: prices.length - 1, yMin, yMax, xLabel: '时间步', yLabel: '价格', ticks: 5 });
+
+        U.drawText(ctx, 'LSTM 价格预测', W / 2, H - 10, '#78909c', 11, 'center');
+    }
+
+    function drawArchitecture(x, y, w, h) {
+        const cx = x + w / 2;
+        const cy = y + h / 2;
+
+        // Cell state line
+        ctx.strokeStyle = '#00e5ff';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(cx - 180, cy - 40);
+        ctx.lineTo(cx + 180, cy - 40);
+        ctx.stroke();
+        U.drawText(ctx, '细胞状态 Ct', cx, cy - 52, '#00e5ff', 11, 'center');
+
+        // Gates
+        const gates = [
+            { label: '遗忘门', sub: 'ft', color: '#00e676', gx: cx - 120 },
+            { label: '输入门', sub: 'it', color: '#7c4dff', gx: cx },
+            { label: '输出门', sub: 'ot', color: '#ff1744', gx: cx + 120 }
+        ];
+
+        const gIdx = animRunning ? Math.min(animFrame, gateValues.length - 1) : Math.min(50, gateValues.length - 1);
+        const gv = gateValues[gIdx] || { f: 0.5, i: 0.5, o: 0.5 };
+        const vals = [gv.f, gv.i, gv.o];
+
+        gates.forEach((g, idx) => {
+            // Gate box
+            const bw = 70, bh = 50;
+            const gx = g.gx - bw / 2, gy = cy - 10;
+
+            ctx.fillStyle = g.color + '22';
+            ctx.strokeStyle = g.color;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.roundRect(gx, gy, bw, bh, 6);
+            ctx.fill();
+            ctx.stroke();
+
+            U.drawText(ctx, g.label, g.gx, gy + 20, g.color, 11, 'center');
+            U.drawText(ctx, vals[idx].toFixed(2), g.gx, gy + 38, '#e0e0e0', 13, 'center');
+
+            // Activation bar
+            const barW = bw - 10;
+            const barH = 6;
+            const barX = gx + 5;
+            const barY = gy + bh + 4;
+            ctx.fillStyle = '#2a2a4a';
+            ctx.fillRect(barX, barY, barW, barH);
+            ctx.fillStyle = g.color;
+            ctx.fillRect(barX, barY, barW * vals[idx], barH);
+
+            // Connection to cell state
+            ctx.strokeStyle = g.color + '66';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([3, 3]);
+            ctx.beginPath();
+            ctx.moveTo(g.gx, gy);
+            ctx.lineTo(g.gx, cy - 40);
+            ctx.stroke();
+            ctx.setLineDash([]);
+        });
+
+        // Input arrow
+        ctx.strokeStyle = '#78909c';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(cx - 180, cy + 60);
+        ctx.lineTo(cx - 120, cy + 60);
+        ctx.lineTo(cx - 120, cy + 40);
+        ctx.stroke();
+        U.drawText(ctx, 'xt', cx - 190, cy + 64, '#78909c', 11, 'right');
+
+        // Hidden state arrow
+        ctx.beginPath();
+        ctx.moveTo(cx + 120, cy + 40);
+        ctx.lineTo(cx + 120, cy + 60);
+        ctx.lineTo(cx + 180, cy + 60);
+        ctx.stroke();
+        U.drawText(ctx, 'ht', cx + 190, cy + 64, '#78909c', 11, 'left');
+
+        // Data flow animation
+        if (animRunning) {
+            const phase = (animFrame % 40) / 40;
+            const flowX = U.lerp(cx - 180, cx + 180, phase);
+            ctx.fillStyle = '#00e5ff';
+            ctx.beginPath();
+            ctx.arc(flowX, cy - 40, 5, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.shadowColor = '#00e5ff';
+            ctx.shadowBlur = 12;
+            ctx.fill();
+            ctx.shadowBlur = 0;
+        }
+    }
+
+    function toggleAnim() {
+        animRunning = !animRunning;
+        document.getElementById('btn-lstm-anim').textContent = animRunning ? '暂停' : '播放动画';
+        if (animRunning) tick();
+        else if (animId) cancelAnimationFrame(animId);
+    }
+
+    function tick() {
+        if (!animRunning) return;
+        animFrame++;
+        if (animFrame >= prices.length) animFrame = 0;
+        draw();
+        animId = requestAnimationFrame(tick);
+    }
+
+    function reset() {
+        animRunning = false;
+        animFrame = 0;
+        document.getElementById('btn-lstm-anim').textContent = '播放动画';
+        if (animId) cancelAnimationFrame(animId);
+        draw();
+    }
+
+    function setWindow(v) {
+        predWindow = parseInt(v);
+        document.getElementById('sv-lstm-window').textContent = v;
+        draw();
+    }
+
+    return { init, draw, toggleAnim, reset, setWindow };
+})();
+
+// ========== Section 2: Temporal CNN ==========
+const TCN = (() => {
+    let cv, ctx, W, H;
+    let series, kernelSize = 3, dilation = 1;
+    let animProgress = 0, animId = null;
+
+    function init() {
+        ({ c: cv, ctx, w: W, h: H } = U.initCanvas('cv-tcn'));
+        const rng = AIQuantUtils.seededRandom(55);
+        series = [];
+        for (let i = 0; i < 60; i++) {
+            series.push(Math.sin(i * 0.15) * 20 + Math.sin(i * 0.05) * 40 + AIQuantUtils.normalRandom(0, 3, rng));
+        }
+        draw();
+    }
+
+    function getKernelWeights() {
+        const rng = AIQuantUtils.seededRandom(kernelSize * 100 + dilation);
+        const w = [];
+        for (let i = 0; i < kernelSize; i++) {
+            w.push(0.3 + AIQuantUtils.normalRandom(0, 0.2, rng));
+        }
+        const s = w.reduce((a, b) => a + Math.abs(b), 0);
+        return w.map(v => v / s);
+    }
+
+    function convolve(input, kernel, dil) {
+        const out = [];
+        for (let i = 0; i < input.length; i++) {
+            let sum = 0, valid = true;
+            for (let k = 0; k < kernel.length; k++) {
+                const idx = i - k * dil;
+                if (idx < 0) { valid = false; break; }
+                sum += kernel[k] * input[idx];
+            }
+            out.push(valid ? sum : NaN);
+        }
+        return out;
+    }
+
+    function draw() {
+        U.clear(ctx, W, H);
+        const pad = { l: 60, r: 20, t: 30, b: 50 };
+
+        const kernel = getKernelWeights();
+        const convOut = convolve(series, kernel, dilation);
+        const rf = 1 + (kernelSize - 1) * dilation;
+
+        document.getElementById('m-tcn-rf').textContent = rf;
+        document.getElementById('m-tcn-params').textContent = kernelSize;
+        document.getElementById('m-tcn-pattern').textContent = kernelSize <= 3 ? '短期波动' : kernelSize <= 5 ? '中期趋势' : '长期模式';
+
+        const topH = 140;
+        const midY = topH + 60;
+        const botH = 140;
+        const chartW = W - pad.l - pad.r;
+
+        // === Top: Input series ===
+        U.drawText(ctx, '输入时间序列', pad.l, pad.t, '#00e5ff', 12);
+        const sMin = Math.min(...series) - 5, sMax = Math.max(...series) + 5;
+        U.drawGrid(ctx, pad.l, pad.t + 10, chartW, topH, 10, 4);
+
+        const inputPts = series.map((v, i) => [
+            U.mapX(i, 0, series.length - 1, pad.l, chartW),
+            U.mapY(v, sMin, sMax, pad.t + 10, topH)
+        ]);
+        U.drawLine(ctx, inputPts, '#00e5ff', 2);
+
+        // Highlight receptive field
+        const highlightIdx = animProgress > 0 ? Math.min(Math.floor(animProgress), series.length - 1) : series.length - 1;
+        if (highlightIdx >= (kernelSize - 1) * dilation) {
+            for (let k = 0; k < kernelSize; k++) {
+                const idx = highlightIdx - k * dilation;
+                if (idx >= 0 && idx < series.length) {
+                    const px = U.mapX(idx, 0, series.length - 1, pad.l, chartW);
+                    const py = U.mapY(series[idx], sMin, sMax, pad.t + 10, topH);
+                    ctx.fillStyle = '#7c4dff33';
+                    ctx.fillRect(px - 4, pad.t + 10, 8, topH);
+                    ctx.fillStyle = '#7c4dff';
+                    ctx.beginPath();
+                    ctx.arc(px, py, 5, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            }
+        }
+
+        // === Middle: Kernel visualization ===
+        U.drawText(ctx, '卷积核 (大小=' + kernelSize + ', 空洞率=' + dilation + ')', pad.l, midY - 10, '#7c4dff', 12);
+        const kBoxW = 50, kBoxH = 40, kGap = dilation * 20 + 10;
+        const kStartX = W / 2 - ((kernelSize - 1) * (kBoxW + kGap) / 2);
+
+        for (let k = 0; k < kernelSize; k++) {
+            const kx = kStartX + k * (kBoxW + kGap);
+            const intensity = Math.abs(kernel[k]);
+            ctx.fillStyle = `rgba(124,77,255,${0.2 + intensity * 0.6})`;
+            ctx.strokeStyle = '#7c4dff';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.roundRect(kx, midY, kBoxW, kBoxH, 6);
+            ctx.fill();
+            ctx.stroke();
+            U.drawText(ctx, kernel[k].toFixed(3), kx + kBoxW / 2, midY + 25, '#e0e0e0', 11, 'center');
+            U.drawText(ctx, 'w' + k, kx + kBoxW / 2, midY + kBoxH + 14, '#78909c', 10, 'center');
+
+            // Dilation spacing indicators
+            if (k < kernelSize - 1 && dilation > 1) {
+                const nextKx = kStartX + (k + 1) * (kBoxW + kGap);
+                ctx.strokeStyle = '#78909c44';
+                ctx.setLineDash([3, 3]);
+                ctx.beginPath();
+                ctx.moveTo(kx + kBoxW + 4, midY + kBoxH / 2);
+                ctx.lineTo(nextKx - 4, midY + kBoxH / 2);
+                ctx.stroke();
+                ctx.setLineDash([]);
+                U.drawText(ctx, 'd=' + dilation, (kx + kBoxW + nextKx) / 2, midY + kBoxH / 2 - 8, '#78909c', 9, 'center');
+            }
+        }
+
+        // === Bottom: Conv output ===
+        const botTop = midY + kBoxH + 40;
+        U.drawText(ctx, '卷积输出', pad.l, botTop, '#ff6d00', 12);
+        const validOut = convOut.filter(v => !isNaN(v));
+        const oMin = Math.min(...validOut) - 5, oMax = Math.max(...validOut) + 5;
+        U.drawGrid(ctx, pad.l, botTop + 10, chartW, botH, 10, 4);
+
+        const outPts = [];
+        const showN = animProgress > 0 ? Math.min(Math.floor(animProgress) + 1, series.length) : series.length;
+        for (let i = 0; i < showN; i++) {
+            if (!isNaN(convOut[i])) {
+                outPts.push([U.mapX(i, 0, series.length - 1, pad.l, chartW), U.mapY(convOut[i], oMin, oMax, botTop + 10, botH)]);
+            }
+        }
+        U.drawLine(ctx, outPts, '#ff6d00', 2);
+
+        // Axes
+        AIQuantUtils.drawAxis(ctx, { x: pad.l, y: pad.t + 10, w: chartW, h: topH, xMin: 0, xMax: series.length - 1, yMin: sMin, yMax: sMax, ticks: 5 });
+        AIQuantUtils.drawAxis(ctx, { x: pad.l, y: botTop + 10, w: chartW, h: botH, xMin: 0, xMax: series.length - 1, yMin: oMin, yMax: oMax, ticks: 5 });
+    }
+
+    function setKernel(k) {
+        kernelSize = k;
+        document.querySelectorAll('#sec-tcn [data-kernel]').forEach(b => b.classList.toggle('active', parseInt(b.dataset.kernel) === k));
+        draw();
+    }
+
+    function setDilation(d) {
+        dilation = parseInt(d);
+        document.getElementById('sv-dilation').textContent = d;
+        draw();
+    }
+
+    function animate() {
+        animProgress = 0;
+        if (animId) cancelAnimationFrame(animId);
+        function tick() {
+            animProgress += 0.5;
+            if (animProgress > series.length) { animProgress = 0; draw(); return; }
+            draw();
+            animId = requestAnimationFrame(tick);
+        }
+        tick();
+    }
+
+    return { init, draw, setKernel, setDilation, animate };
+})();
+
+// ========== Section 3: Transformer 预测 ==========
+const Transformer = (() => {
+    let cv, ctx, W, H;
+    let prices, nHeads = 2, seqLen = 12;
+    let attnWeights = [], predictions = [];
+    let animPhase = 0, animId = null;
+
+    function init() {
+        ({ c: cv, ctx, w: W, h: H } = U.initCanvas('cv-transformer'));
+        prices = U.genPrices(80, 99, 0.0002, 0.012);
+        compute();
+        draw();
+    }
+
+    function compute() {
+        const rng = AIQuantUtils.seededRandom(nHeads * 100 + seqLen);
+        const seq = prices.slice(0, seqLen);
+        const norm = AIQuantUtils.zscoreNormalize(seq);
+
+        // Create embedding-like features
+        const embeddings = norm.map((v, i) => {
+            const posEnc = [Math.sin(i / 4), Math.cos(i / 4), Math.sin(i / 8), Math.cos(i / 8)];
+            return [v, v * v, ...posEnc];
+        });
+
+        attnWeights = [];
+        for (let head = 0; head < nHeads; head++) {
+            const Q = embeddings.map(e => e.map(v => v + AIQuantUtils.normalRandom(0, 0.1, rng)));
+            const K = embeddings.map(e => e.map(v => v + AIQuantUtils.normalRandom(0, 0.1, rng)));
+            const V = embeddings.map(e => e.map(v => v + AIQuantUtils.normalRandom(0, 0.1, rng)));
+            const { weights } = AIQuantUtils.simpleAttention(Q, K, V);
+            attnWeights.push(weights);
+        }
+
+        // Generate predictions
+        predictions = [prices[0]];
+        const lag = 0.85 + 0.05 * nHeads;
+        for (let i = 1; i < prices.length; i++) {
+            predictions.push(predictions[i-1] + lag * (prices[i] - predictions[i-1]) + AIQuantUtils.normalRandom(0, 0.002 * prices[i], rng));
+        }
+
+        // Metrics
+        let mse = 0;
+        for (let i = 1; i < prices.length; i++) mse += (predictions[i] - prices[i]) ** 2;
+        document.getElementById('m-tf-mse').textContent = (mse / (prices.length - 1)).toFixed(4);
+
+        // Find strongest attention
+        let maxW = 0, maxI = 0, maxJ = 0;
+        attnWeights[0].forEach((row, i) => row.forEach((w, j) => { if (w > maxW) { maxW = w; maxI = i; maxJ = j; } }));
+        document.getElementById('m-tf-attn').textContent = `t${maxI}→t${maxJ}`;
+    }
+
+    function draw() {
+        U.clear(ctx, W, H);
+        const pad = { l: 60, r: 20, t: 20, b: 40 };
+        const chartW = W - pad.l - pad.r;
+
+        // === Attention Heatmap ===
+        const heatH = 200;
+        const headW = Math.min(220, (chartW - 40) / nHeads);
+
+        U.drawText(ctx, '自注意力权重热图', pad.l, pad.t + 10, '#7c4dff', 13);
+
+        for (let head = 0; head < nHeads; head++) {
+            const hx = pad.l + head * (headW + 20);
+            const hy = pad.t + 25;
+            U.drawText(ctx, `Head ${head + 1}`, hx + headW / 2, hy, '#b388ff', 11, 'center');
+
+            if (!attnWeights[head]) continue;
+            const n = attnWeights[head].length;
+            const cellW = Math.min(headW / n, 18);
+            const cellH = Math.min((heatH - 20) / n, 18);
+            const startX = hx + (headW - n * cellW) / 2;
+            const startY = hy + 10;
+
+            for (let i = 0; i < n; i++) {
+                for (let j = 0; j < n; j++) {
+                    const w = attnWeights[head][i][j];
+                    const alpha = Math.min(1, w * 2);
+                    ctx.fillStyle = `rgba(124,77,255,${alpha})`;
+                    ctx.fillRect(startX + j * cellW, startY + i * cellH, cellW - 1, cellH - 1);
+
+                    // Highlight animation
+                    if (animPhase > 0) {
+                        const targetRow = Math.floor(animPhase) % n;
+                        if (i === targetRow) {
+                            ctx.strokeStyle = '#ff6d00';
+                            ctx.lineWidth = 1.5;
+                            ctx.strokeRect(startX + j * cellW, startY + i * cellH, cellW - 1, cellH - 1);
+                        }
+                    }
+                }
+            }
+
+            // Labels
+            for (let i = 0; i < n; i++) {
+                U.drawText(ctx, 't' + i, startX - 4, startY + i * cellH + cellH / 2 + 3, '#78909c', 8, 'right');
+                U.drawText(ctx, 't' + i, startX + i * cellW + cellW / 2, startY + n * cellH + 10, '#78909c', 8, 'center');
+            }
+        }
+
+        // === Prediction Chart ===
+        const chartTop = heatH + pad.t + 50;
+        const chartH = H - chartTop - pad.b;
+        const allVals = prices.concat(predictions);
+        const yMin = Math.min(...allVals) * 0.998;
+        const yMax = Math.max(...allVals) * 1.002;
+
+        U.drawGrid(ctx, pad.l, chartTop, chartW, chartH, 10, 5);
+        U.drawText(ctx, 'Transformer 价格预测', pad.l, chartTop - 10, '#ff6d00', 12);
+
+        const pricePts = prices.map((v, i) => [U.mapX(i, 0, prices.length - 1, pad.l, chartW), U.mapY(v, yMin, yMax, chartTop, chartH)]);
+        const predPts = predictions.map((v, i) => [U.mapX(i, 0, prices.length - 1, pad.l, chartW), U.mapY(v, yMin, yMax, chartTop, chartH)]);
+
+        U.drawLine(ctx, pricePts, '#00e5ff', 2);
+        U.drawLine(ctx, predPts, '#ff6d00', 2);
+
+        // Attention connections from sequence to chart
+        if (animPhase > 0 && attnWeights[0]) {
+            const n = attnWeights[0].length;
+            const row = Math.floor(animPhase) % n;
+            for (let j = 0; j < n; j++) {
+                const w = attnWeights[0][row][j];
+                if (w > 0.05) {
+                    const fromX = U.mapX(row, 0, prices.length - 1, pad.l, chartW);
+                    const toX = U.mapX(j, 0, prices.length - 1, pad.l, chartW);
+                    ctx.strokeStyle = `rgba(124,77,255,${Math.min(1, w * 3)})`;
+                    ctx.lineWidth = w * 4;
+                    ctx.beginPath();
+                    ctx.moveTo(fromX, chartTop + 5);
+                    ctx.quadraticCurveTo((fromX + toX) / 2, chartTop - 15, toX, chartTop + 5);
+                    ctx.stroke();
+                }
+            }
+        }
+
+        AIQuantUtils.drawAxis(ctx, { x: pad.l, y: chartTop, w: chartW, h: chartH, xMin: 0, xMax: prices.length - 1, yMin, yMax, xLabel: '时间步', yLabel: '价格', ticks: 5 });
+    }
+
+    function setHeads(h) {
+        nHeads = parseInt(h);
+        document.getElementById('sv-heads').textContent = h;
+        compute();
+        draw();
+    }
+
+    function setSeqLen(s) {
+        seqLen = parseInt(s);
+        document.getElementById('sv-seqlen').textContent = s;
+        compute();
+        draw();
+    }
+
+    function animate() {
+        animPhase = 0;
+        if (animId) cancelAnimationFrame(animId);
+        function tick() {
+            animPhase += 0.08;
+            if (animPhase > seqLen * 2) { animPhase = 0; draw(); return; }
+            draw();
+            animId = requestAnimationFrame(tick);
+        }
+        tick();
+    }
+
+    return { init, draw, setHeads, setSeqLen, animate };
+})();
+
+// ========== Section 4: 序列到序列 ==========
+const Seq2Seq = (() => {
+    let cv, ctx, W, H;
+    let prices, predSteps = 5;
+    let animFrame = 0, animRunning = false, animId = null;
+    const histLen = 60;
+
+    function init() {
+        ({ c: cv, ctx, w: W, h: H } = U.initCanvas('cv-seq2seq'));
+        prices = U.genPrices(120, 123, 0.0002, 0.012);
+        computeMetrics();
+        draw();
+    }
+
+    function predict(history, steps, seed) {
+        const rng = AIQuantUtils.seededRandom(seed);
+        const preds = [];
+        let last = history[history.length - 1];
+        const trend = (history[history.length - 1] - history[history.length - 10]) / 10;
+        for (let s = 0; s < steps; s++) {
+            const decay = Math.exp(-s * 0.05);
+            const noise = AIQuantUtils.normalRandom(0, 0.005 * last * (1 + s * 0.15), rng);
+            last = last + trend * decay * 0.7 + noise;
+            preds.push(last);
+        }
+        return preds;
+    }
+
+    function computeMetrics() {
+        const hist = prices.slice(0, histLen);
+        const future = prices.slice(histLen);
+
+        [1, 5, 20].forEach(steps => {
+            const p = predict(hist, steps, 200 + steps);
+            let mse = 0;
+            const n = Math.min(steps, future.length);
+            for (let i = 0; i < n; i++) mse += (p[i] - future[i]) ** 2;
+            mse /= n;
+            const elId = `m-s2s-${steps}`;
+            const el = document.getElementById(elId);
+            if (el) el.textContent = mse.toFixed(4);
+        });
+
+        const mse1 = parseFloat(document.getElementById('m-s2s-1').textContent) || 1;
+        const mse20 = parseFloat(document.getElementById('m-s2s-20').textContent) || 1;
+        document.getElementById('m-s2s-deg').textContent = (mse20 / mse1).toFixed(1) + 'x';
+    }
+
+    function draw() {
+        U.clear(ctx, W, H);
+        const pad = { l: 60, r: 20, t: 30, b: 50 };
+        const chartW = W - pad.l - pad.r;
+
+        // Architecture diagram at top
+        const archH = 100;
+        drawEncoderDecoder(pad.l, pad.t, chartW, archH);
+
+        // Chart below
+        const chartTop = archH + pad.t + 30;
+        const chartH = H - chartTop - pad.b;
+
+        const hist = prices.slice(0, histLen);
+        const future = prices.slice(histLen, histLen + predSteps + 5);
+        const preds = predict(hist, predSteps, 200 + predSteps);
+
+        const allVals = hist.concat(future).concat(preds);
+        const yMin = Math.min(...allVals) * 0.995;
+        const yMax = Math.max(...allVals) * 1.005;
+        const totalLen = histLen + Math.max(future.length, predSteps);
+
+        U.drawGrid(ctx, pad.l, chartTop, chartW, chartH, 10, 5);
+
+        // Encode/decode separator
+        const sepX = U.mapX(histLen, 0, totalLen, pad.l, chartW);
+        ctx.strokeStyle = '#78909c44';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([5, 5]);
+        ctx.beginPath();
+        ctx.moveTo(sepX, chartTop);
+        ctx.lineTo(sepX, chartTop + chartH);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        U.drawText(ctx, '编码 ←', sepX - 10, chartTop + 15, '#00e5ff', 10, 'right');
+        U.drawText(ctx, '→ 解码', sepX + 10, chartTop + 15, '#ff6d00', 10, 'left');
+
+        // History
+        const showHist = animRunning ? Math.min(animFrame, histLen) : histLen;
+        const histPts = [];
+        for (let i = 0; i < showHist; i++) {
+            histPts.push([U.mapX(i, 0, totalLen, pad.l, chartW), U.mapY(hist[i], yMin, yMax, chartTop, chartH)]);
+        }
+        U.drawLine(ctx, histPts, '#00e5ff', 2);
+
+        // Future actual
+        if (!animRunning || animFrame > histLen) {
+            const futurePts = [];
+            for (let i = 0; i < future.length; i++) {
+                futurePts.push([U.mapX(histLen + i, 0, totalLen, pad.l, chartW), U.mapY(future[i], yMin, yMax, chartTop, chartH)]);
+            }
+            U.drawLine(ctx, futurePts, '#00e676', 2);
+        }
+
+        // Predictions
+        const showPred = animRunning ? Math.max(0, animFrame - histLen) : predSteps;
+        if (showPred > 0) {
+            // Error band
+            const upperPts = [], lowerPts = [];
+            for (let i = 0; i < Math.min(showPred, preds.length); i++) {
+                const x = U.mapX(histLen + i, 0, totalLen, pad.l, chartW);
+                const spread = Math.abs(preds[i] - (future[i] || preds[i])) * 2 + preds[i] * 0.002 * (i + 1);
+                upperPts.push([x, U.mapY(preds[i] + spread, yMin, yMax, chartTop, chartH)]);
+                lowerPts.push([x, U.mapY(preds[i] - spread, yMin, yMax, chartTop, chartH)]);
+            }
+            U.fillBand(ctx, upperPts, lowerPts, 'rgba(255,109,0,0.1)');
+
+            const predPts = [[U.mapX(histLen - 1, 0, totalLen, pad.l, chartW), U.mapY(hist[histLen - 1], yMin, yMax, chartTop, chartH)]];
+            for (let i = 0; i < Math.min(showPred, preds.length); i++) {
+                predPts.push([U.mapX(histLen + i, 0, totalLen, pad.l, chartW), U.mapY(preds[i], yMin, yMax, chartTop, chartH)]);
+            }
+            U.drawLine(ctx, predPts, '#ff6d00', 2.5);
+        }
+
+        AIQuantUtils.drawAxis(ctx, { x: pad.l, y: chartTop, w: chartW, h: chartH, xMin: 0, xMax: totalLen, yMin, yMax, xLabel: '时间步', yLabel: '价格', ticks: 5 });
+    }
+
+    function drawEncoderDecoder(x, y, w, h) {
+        const cx = x + w / 2;
+        const cy = y + h / 2;
+
+        // Encoder box
+        const bw = 140, bh = 60;
+        ctx.fillStyle = '#00e5ff15';
+        ctx.strokeStyle = '#00e5ff';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.roundRect(cx - bw - 40, cy - bh / 2, bw, bh, 8);
+        ctx.fill();
+        ctx.stroke();
+        U.drawText(ctx, '编码器', cx - bw / 2 - 40, cy - 5, '#00e5ff', 13, 'center');
+        U.drawText(ctx, 'Encoder', cx - bw / 2 - 40, cy + 14, '#78909c', 10, 'center');
+
+        // Context vector
+        ctx.fillStyle = '#ffea0033';
+        ctx.strokeStyle = '#ffea00';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(cx, cy, 18, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        U.drawText(ctx, 'h_T', cx, cy + 4, '#ffea00', 11, 'center');
+
+        // Decoder box
+        ctx.fillStyle = '#ff6d0015';
+        ctx.strokeStyle = '#ff6d00';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.roundRect(cx + 40, cy - bh / 2, bw, bh, 8);
+        ctx.fill();
+        ctx.stroke();
+        U.drawText(ctx, '解码器', cx + 40 + bw / 2, cy - 5, '#ff6d00', 13, 'center');
+        U.drawText(ctx, 'Decoder', cx + 40 + bw / 2, cy + 14, '#78909c', 10, 'center');
+
+        // Arrows
+        ctx.strokeStyle = '#78909c';
+        ctx.lineWidth = 1.5;
+        // Input arrow
+        ctx.beginPath();
+        ctx.moveTo(cx - bw - 80, cy);
+        ctx.lineTo(cx - bw - 40, cy);
+        ctx.stroke();
+        drawArrowHead(ctx, cx - bw - 40, cy, 0);
+        U.drawText(ctx, 'x₁...xₜ', cx - bw - 95, cy + 4, '#78909c', 10, 'right');
+
+        // Encoder to context
+        ctx.beginPath();
+        ctx.moveTo(cx - 40, cy);
+        ctx.lineTo(cx - 18, cy);
+        ctx.stroke();
+
+        // Context to decoder
+        ctx.beginPath();
+        ctx.moveTo(cx + 18, cy);
+        ctx.lineTo(cx + 40, cy);
+        ctx.stroke();
+
+        // Output arrow
+        ctx.beginPath();
+        ctx.moveTo(cx + 40 + bw, cy);
+        ctx.lineTo(cx + 40 + bw + 40, cy);
+        ctx.stroke();
+        drawArrowHead(ctx, cx + 40 + bw + 40, cy, 0);
+        U.drawText(ctx, 'ŷₜ₊₁...ŷₜ₊ₖ', cx + 40 + bw + 50, cy + 4, '#78909c', 10, 'left');
+
+        // Animation: flowing dot
+        if (animRunning) {
+            const phase = (animFrame % 80) / 80;
+            let dotX, dotColor;
+            if (phase < 0.4) {
+                dotX = U.lerp(cx - bw - 80, cx, phase / 0.4);
+                dotColor = '#00e5ff';
+            } else {
+                dotX = U.lerp(cx, cx + bw + 80, (phase - 0.4) / 0.6);
+                dotColor = '#ff6d00';
+            }
+            ctx.fillStyle = dotColor;
+            ctx.shadowColor = dotColor;
+            ctx.shadowBlur = 10;
+            ctx.beginPath();
+            ctx.arc(dotX, cy, 5, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.shadowBlur = 0;
+        }
+    }
+
+    function drawArrowHead(ctx, x, y, angle) {
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(angle);
+        ctx.fillStyle = ctx.strokeStyle;
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(-8, -4);
+        ctx.lineTo(-8, 4);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+    }
+
+    function setSteps(s) {
+        predSteps = s;
+        document.querySelectorAll('#sec-seq2seq [data-step]').forEach(b => b.classList.toggle('active', parseInt(b.dataset.step) === s));
+        draw();
+    }
+
+    function toggleAnim() {
+        animRunning = !animRunning;
+        document.getElementById('btn-s2s-anim').textContent = animRunning ? '暂停' : '播放动画';
+        if (animRunning) tick();
+        else if (animId) cancelAnimationFrame(animId);
+    }
+
+    function tick() {
+        if (!animRunning) return;
+        animFrame++;
+        if (animFrame > histLen + predSteps + 10) animFrame = 0;
+        draw();
+        animId = requestAnimationFrame(tick);
+    }
+
+    function reset() {
+        animRunning = false;
+        animFrame = 0;
+        document.getElementById('btn-s2s-anim').textContent = '播放动画';
+        if (animId) cancelAnimationFrame(animId);
+        draw();
+    }
+
+    return { init, draw, setSteps, toggleAnim, reset };
+})();
+
+// ========== Section 5: 模型对比 ==========
+const Compare = (() => {
+    let cv, ctx, W, H;
+    let dataset = 'trending';
+    let prices, predsLSTM, predsTCN, predsTF;
+
+    function init() {
+        ({ c: cv, ctx, w: W, h: H } = U.initCanvas('cv-compare'));
+        run();
+    }
+
+    function genDataset(type) {
+        const rng = AIQuantUtils.seededRandom(type === 'trending' ? 42 : type === 'volatile' ? 77 : 111);
+        const n = 100;
+        const p = [100];
+        for (let i = 1; i < n; i++) {
+            let drift, vol;
+            if (type === 'trending') { drift = 0.001; vol = 0.008; }
+            else if (type === 'volatile') { drift = 0; vol = 0.025; }
+            else { drift = i < 50 ? 0.002 : -0.002; vol = 0.012; }
+            p.push(p[i-1] * Math.exp(drift + vol * AIQuantUtils.normalRandom(0, 1, rng)));
+        }
+        return p;
+    }
+
+    function simulateModel(prices, modelType, seed) {
+        const rng = AIQuantUtils.seededRandom(seed);
+        const preds = [prices[0]];
+        let lag, noiseScale;
+        if (modelType === 'lstm') { lag = 0.87; noiseScale = 0.004; }
+        else if (modelType === 'tcn') { lag = 0.90; noiseScale = 0.003; }
+        else { lag = 0.85; noiseScale = 0.0035; }
+
+        for (let i = 1; i < prices.length; i++) {
+            const trend = i > 5 ? (prices[i-1] - prices[i-5]) / 5 : 0;
+            const momentum = modelType === 'tcn' ? trend * 0.3 : modelType === 'transformer' ? trend * 0.15 : trend * 0.2;
+            preds.push(preds[i-1] + lag * (prices[i] - preds[i-1]) + momentum + AIQuantUtils.normalRandom(0, noiseScale * prices[i], rng));
+        }
+        return preds;
+    }
+
+    function computeMetrics(actual, predicted) {
+        const n = actual.length;
+        let mse = 0, mae = 0, maxErr = 0, dirCorrect = 0;
+        const returns = [];
+        for (let i = 1; i < n; i++) {
+            const e = predicted[i] - actual[i];
+            mse += e * e;
+            mae += Math.abs(e);
+            maxErr = Math.max(maxErr, Math.abs(e));
+            if ((actual[i] - actual[i-1]) * (predicted[i] - predicted[i-1]) > 0) dirCorrect++;
+            returns.push((predicted[i] - predicted[i-1]) / predicted[i-1]);
+        }
+        mse /= (n - 1);
+        mae /= (n - 1);
+        const dir = dirCorrect / (n - 1);
+        const avgRet = AIQuantUtils.mean(returns);
+        const stdRet = AIQuantUtils.std(returns) || 0.001;
+        const sharpe = (avgRet / stdRet) * Math.sqrt(252);
+        return { mse, mae, maxErr, dir, sharpe };
+    }
+
+    function run() {
+        prices = genDataset(dataset);
+        predsLSTM = simulateModel(prices, 'lstm', 201);
+        predsTCN = simulateModel(prices, 'tcn', 301);
+        predsTF = simulateModel(prices, 'transformer', 401);
+
+        const mLSTM = computeMetrics(prices, predsLSTM);
+        const mTCN = computeMetrics(prices, predsTCN);
+        const mTF = computeMetrics(prices, predsTF);
+
+        // Update table
+        const models = [
+            { prefix: 'lstm', m: mLSTM },
+            { prefix: 'tcn', m: mTCN },
+            { prefix: 'tf', m: mTF }
+        ];
+
+        const metrics = ['mse', 'mae', 'dir', 'max', 'sharpe'];
+        const getters = {
+            mse: m => m.mse, mae: m => m.mae, dir: m => m.dir, max: m => m.maxErr, sharpe: m => m.sharpe
+        };
+        const formatters = {
+            mse: v => v.toFixed(4), mae: v => v.toFixed(4), dir: v => (v * 100).toFixed(1) + '%',
+            max: v => v.toFixed(4), sharpe: v => v.toFixed(2)
+        };
+        const bestIsLow = { mse: true, mae: true, dir: false, max: true, sharpe: false };
+
+        metrics.forEach(metric => {
+            const vals = models.map(m => getters[metric](m.m));
+            const bestIdx = bestIsLow[metric] ? vals.indexOf(Math.min(...vals)) : vals.indexOf(Math.max(...vals));
+            models.forEach((mod, idx) => {
+                const el = document.getElementById(`pt-${mod.prefix}-${metric}`);
+                if (el) {
+                    el.textContent = formatters[metric](vals[idx]);
+                    el.className = idx === bestIdx ? 'best-val' : '';
+                }
+            });
+        });
+
+        draw();
+    }
+
+    function draw() {
+        U.clear(ctx, W, H);
+        const pad = { l: 60, r: 20, t: 30, b: 50 };
+        const chartW = W - pad.l - pad.r;
+        const chartH = H - pad.t - pad.b;
+
+        const allVals = prices.concat(predsLSTM).concat(predsTCN).concat(predsTF);
+        const yMin = Math.min(...allVals) * 0.998;
+        const yMax = Math.max(...allVals) * 1.002;
+
+        U.drawGrid(ctx, pad.l, pad.t, chartW, chartH, 10, 5);
+
+        const datasetLabels = { trending: '趋势行情', volatile: '震荡行情', reversal: '反转行情' };
+        U.drawText(ctx, '模型对比 — ' + datasetLabels[dataset], pad.l, pad.t - 5, '#e0e0e0', 13);
+
+        // Actual
+        const pricePts = prices.map((v, i) => [U.mapX(i, 0, prices.length - 1, pad.l, chartW), U.mapY(v, yMin, yMax, pad.t, chartH)]);
+        U.drawLine(ctx, pricePts, '#e0e0e0', 2.5);
+
+        // LSTM
+        const lstmPts = predsLSTM.map((v, i) => [U.mapX(i, 0, prices.length - 1, pad.l, chartW), U.mapY(v, yMin, yMax, pad.t, chartH)]);
+        U.drawLine(ctx, lstmPts, '#00e5ff', 1.8);
+
+        // TCN
+        const tcnPts = predsTCN.map((v, i) => [U.mapX(i, 0, prices.length - 1, pad.l, chartW), U.mapY(v, yMin, yMax, pad.t, chartH)]);
+        U.drawLine(ctx, tcnPts, '#7c4dff', 1.8);
+
+        // Transformer
+        const tfPts = predsTF.map((v, i) => [U.mapX(i, 0, prices.length - 1, pad.l, chartW), U.mapY(v, yMin, yMax, pad.t, chartH)]);
+        U.drawLine(ctx, tfPts, '#ff6d00', 1.8);
+
+        AIQuantUtils.drawAxis(ctx, { x: pad.l, y: pad.t, w: chartW, h: chartH, xMin: 0, xMax: prices.length - 1, yMin, yMax, xLabel: '时间步', yLabel: '价格', ticks: 5 });
+    }
+
+    function setDataset(ds) {
+        dataset = ds;
+        document.querySelectorAll('#sec-compare [data-ds]').forEach(b => b.classList.toggle('active', b.dataset.ds === ds));
+        run();
+    }
+
+    return { init, draw, setDataset, run };
+})();
+
+// ========== Initialize all sections ==========
+window.addEventListener('DOMContentLoaded', () => {
+    LSTM.init();
+    TCN.init();
+    Transformer.init();
+    Seq2Seq.init();
+    Compare.init();
+
+    // Handle resize
+    let resizeTimer;
+    window.addEventListener('resize', () => {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(() => {
+            LSTM.init();
+            TCN.init();
+            Transformer.init();
+            Seq2Seq.init();
+            Compare.init();
+        }, 200);
+    });
+});
+</script>
+
+<!-- KaTeX auto-render -->
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    if (typeof renderMathInElement === 'function') {
+        renderMathInElement(document.body, {
+            delimiters: [
+                { left: '$$', right: '$$', display: true },
+                { left: '$', right: '$', display: false }
+            ],
+            throwOnError: false
+        });
+    } else {
+        const interval = setInterval(() => {
+            if (typeof renderMathInElement === 'function') {
+                clearInterval(interval);
+                renderMathInElement(document.body, {
+                    delimiters: [
+                        { left: '$$', right: '$$', display: true },
+                        { left: '$', right: '$', display: false }
+                    ],
+                    throwOnError: false
+                });
+            }
+        }, 100);
+        setTimeout(() => clearInterval(interval), 5000);
+    }
+});
+</script>
+</body>
+</html>

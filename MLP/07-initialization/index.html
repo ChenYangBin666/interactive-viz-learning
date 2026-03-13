@@ -1,0 +1,1355 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>07 - 权重初始化 | MLP 多层感知机</title>
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+    <style>
+        .canvas-container { position: relative; width: 100%; }
+        .canvas-container canvas {
+            width: 100%; height: 100%;
+            display: block; border-radius: var(--radius-md);
+        }
+        .control-row {
+            display: flex; align-items: center; gap: 1rem;
+            flex-wrap: wrap; margin-bottom: 1rem;
+        }
+        .control-row label {
+            font-size: 0.85rem; color: var(--text-secondary); white-space: nowrap;
+        }
+        .control-row select, .control-row input[type="range"] {
+            background: var(--bg-card); color: var(--text-primary);
+            border: 1px solid var(--border-color); border-radius: var(--radius-sm);
+            padding: 0.3rem 0.6rem; font-family: inherit; font-size: 0.85rem;
+        }
+        .control-row select { cursor: pointer; }
+        .hist-row {
+            display: flex; gap: 0.5rem; flex-wrap: wrap;
+            justify-content: center; margin-top: 0.5rem;
+        }
+        .hist-cell { text-align: center; }
+        .hist-cell canvas {
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border-color);
+        }
+        .hist-cell .layer-label {
+            font-size: 0.7rem; color: var(--text-muted);
+            margin-top: 0.2rem;
+        }
+        .legend-inline {
+            display: flex; gap: 1.2rem; font-size: 0.8rem;
+            color: var(--text-secondary); flex-wrap: wrap;
+        }
+        .legend-inline span {
+            display: flex; align-items: center; gap: 0.3rem;
+        }
+        .legend-inline .dot {
+            width: 10px; height: 10px; border-radius: 50%;
+            display: inline-block;
+        }
+        .side-by-side {
+            display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem;
+        }
+        @media (max-width: 768px) {
+            .side-by-side { grid-template-columns: 1fr; }
+        }
+        .side-panel {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md); padding: 1rem;
+        }
+        .side-panel h4 {
+            color: var(--accent-green); margin-bottom: 0.5rem;
+        }
+        .decision-table {
+            width: 100%; border-collapse: collapse;
+            font-size: 0.85rem; margin: 1rem 0;
+        }
+        .decision-table th, .decision-table td {
+            padding: 0.6rem 1rem;
+            border: 1px solid var(--border-color);
+            text-align: center;
+        }
+        .decision-table th {
+            background: var(--bg-card);
+            color: var(--accent-green); font-weight: 600;
+        }
+        .decision-table td { color: var(--text-secondary); }
+        .decision-table tr:hover td {
+            background: rgba(22, 199, 154, 0.05);
+        }
+        .metric-row {
+            display: flex; gap: 1.5rem; margin-top: 0.75rem;
+            font-size: 0.85rem; color: var(--text-secondary);
+            flex-wrap: wrap; align-items: center;
+        }
+        .metric-row .val {
+            color: var(--accent-green);
+            font-family: var(--font-mono);
+        }
+        .status-tag {
+            display: inline-block; padding: 0.15rem 0.5rem;
+            border-radius: 9999px; font-size: 0.75rem; font-weight: 600;
+        }
+        .status-good {
+            background: rgba(22, 199, 154, 0.15);
+            color: var(--accent-green);
+        }
+        .status-bad {
+            background: rgba(255, 82, 82, 0.15);
+            color: var(--accent-red);
+        }
+        .status-warn {
+            background: rgba(255, 171, 64, 0.15);
+            color: var(--accent-orange);
+        }
+        .explanation-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 1rem; margin: 1rem 0;
+        }
+        @media (max-width: 768px) {
+            .explanation-grid { grid-template-columns: 1fr; }
+        }
+        .explain-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1rem;
+        }
+        .explain-card h4 {
+            font-size: 0.9rem; margin-bottom: 0.4rem;
+        }
+        .explain-card p {
+            font-size: 0.82rem; margin-bottom: 0;
+        }
+        .explain-card.bad { border-left: 3px solid var(--accent-red); }
+        .explain-card.warn { border-left: 3px solid var(--accent-orange); }
+        .explain-card.good { border-left: 3px solid var(--accent-green); }
+        .variance-chart {
+            margin-top: 1rem;
+        }
+        .formula-box {
+            display: inline-block;
+            background: rgba(22, 199, 154, 0.08);
+            border: 1px solid rgba(22, 199, 154, 0.2);
+            border-radius: var(--radius-sm);
+            padding: 0.5rem 1rem; margin: 0.5rem 0;
+        }
+        .weight-dist-row {
+            display: flex; gap: 1rem; justify-content: center;
+            margin-top: 0.75rem; flex-wrap: wrap;
+        }
+        .weight-dist-cell { text-align: center; }
+        .weight-dist-cell canvas {
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border-color);
+        }
+        .weight-dist-cell .dist-label {
+            font-size: 0.7rem; color: var(--text-muted);
+            margin-top: 0.2rem;
+        }
+    </style>
+</head>
+<body>
+
+<div class="page-container">
+    <!-- ===== Header ===== -->
+    <h1>🎲 权重初始化 <span class="text-sm text-muted">Weight Initialization</span></h1>
+    <p>权重初始化决定了网络训练的起点。好的初始化让梯度在层间稳定流动，坏的初始化让网络根本无法学习。
+       本模块通过四个互动实验，帮助你直观理解为什么初始化如此关键，以及如何选择合适的策略。</p>
+
+    <!-- ========== Section 1: Why Init Matters ========== -->
+    <div class="section">
+        <div class="section-title">
+            <div class="icon">1</div>
+            <h2>为什么初始化很重要</h2>
+        </div>
+        <p>同一个网络架构 <code>[2, 16, 16, 1]</code>、同样的圆形分类数据，仅仅因为初始化方式不同，训练结果天差地别。
+           点击"开始训练"观察三种初始化的损失曲线如何分化。</p>
+
+        <div class="explanation-grid">
+            <div class="explain-card bad">
+                <h4 style="color:var(--accent-red)">全零初始化</h4>
+                <p>所有权重为 0，同一层所有神经元计算完全相同的输出和梯度。
+                   这就是<strong>对称性问题</strong> —— 神经元永远无法分化，网络等同于只有 1 个神经元。</p>
+            </div>
+            <div class="explain-card warn">
+                <h4 style="color:var(--accent-orange)">过大初始化 (std=5)</h4>
+                <p>权重过大导致激活值饱和（Sigmoid/Tanh 的平坦区）或激活值爆炸（ReLU），
+                   梯度要么接近 0（<strong>梯度消失</strong>），要么极大（<strong>梯度爆炸</strong>）。</p>
+            </div>
+            <div class="explain-card good">
+                <h4 style="color:var(--accent-green)">合适初始化 (Xavier)</h4>
+                <p>权重大小恰当，激活值分布在有效区域，梯度平稳回传。
+                   网络能够有效学习并收敛到较低损失。</p>
+            </div>
+        </div>
+
+        <div class="info-box warning">
+            <p><strong>核心洞察：</strong>初始化不是随意选择的 —— 它需要根据网络层的宽度和激活函数精心设计，
+               才能让信号和梯度在深层网络中稳定流动。</p>
+        </div>
+
+        <div class="control-row">
+            <button class="btn btn-primary" id="s1-run">开始训练</button>
+            <button class="btn" id="s1-reset">重置</button>
+            <span class="text-sm text-muted" id="s1-epoch">Epoch: 0 / 200</span>
+        </div>
+
+        <div class="card">
+            <div class="canvas-container">
+                <canvas id="s1-canvas" width="900" height="380"></canvas>
+            </div>
+            <div class="legend-inline mt-1">
+                <span><span class="dot" style="background:#ff5252"></span> 全零初始化 — 无法学习</span>
+                <span><span class="dot" style="background:#ffab40"></span> 过大初始化 (std=5) — 不稳定</span>
+                <span><span class="dot" style="background:#16c79a"></span> Xavier 初始化 — 稳定收敛</span>
+            </div>
+            <div class="metric-row" id="s1-metrics"></div>
+        </div>
+    </div>
+
+    <!-- ========== Section 2: Activation Distributions ========== -->
+    <div class="section">
+        <div class="section-title">
+            <div class="icon">2</div>
+            <h2>激活值分布</h2>
+        </div>
+        <p>一个 10 层深度网络（每层 256 个神经元），将随机输入传入后，观察每层激活值的直方图分布。
+           拖动滑块改变初始化标准差，观察分布如何在"消失"与"爆炸"之间变化。</p>
+
+        <div class="info-box">
+            <p><strong>目标：</strong>让每一层的激活值方差保持大致相同。方差逐层缩小 = 激活消失；方差逐层放大 = 激活爆炸。
+               两种情况都会导致梯度无法正常回传。</p>
+        </div>
+
+        <div class="control-row">
+            <label>初始化标准差:</label>
+            <input type="range" id="s2-std" min="0.01" max="3" step="0.01" value="1.0" style="width:220px">
+            <span class="slider-value" id="s2-std-val">1.00</span>
+            <button class="btn" id="s2-xavier" style="margin-left:0.5rem">一键 Xavier</button>
+            <button class="btn" id="s2-he" style="margin-left:0.25rem">一键 He</button>
+            <label style="margin-left:1rem">激活函数:</label>
+            <select id="s2-act">
+                <option value="tanh">Tanh</option>
+                <option value="sigmoid">Sigmoid</option>
+                <option value="relu">ReLU</option>
+            </select>
+        </div>
+
+        <div class="card">
+            <p class="text-sm text-muted" style="text-align:center;margin-bottom:0.25rem">各层激活值直方图</p>
+            <div id="s2-hists" class="hist-row"></div>
+            <div class="variance-chart">
+                <p class="text-sm text-muted" style="text-align:center;margin:0.5rem 0 0.25rem">各层方差变化趋势</p>
+                <canvas id="s2-variance-canvas" width="700" height="160" style="width:100%;border-radius:var(--radius-sm);border:1px solid var(--border-color)"></canvas>
+            </div>
+            <div class="metric-row" id="s2-metrics"></div>
+        </div>
+    </div>
+
+    <!-- ========== Section 3: Xavier vs He ========== -->
+    <div class="section">
+        <div class="section-title">
+            <div class="icon">3</div>
+            <h2>Xavier 与 He 初始化</h2>
+        </div>
+
+        <p>两种最经典的初始化策略，核心思想都是<strong>保持各层方差稳定</strong>，但针对不同的激活函数做了适配。</p>
+
+        <div class="side-by-side" style="margin-bottom:1rem">
+            <div class="info-box" style="margin:0">
+                <p><strong>Xavier (Glorot, 2010)：</strong></p>
+                <div class="formula-box">$$\text{Var}(w) = \frac{2}{n_{\text{in}}+n_{\text{out}}}$$</div>
+                <p class="text-sm mt-1">假设激活函数在 0 附近近似线性（如 Sigmoid、Tanh），
+                   同时平衡前向传播和反向传播的方差。</p>
+            </div>
+            <div class="info-box" style="margin:0">
+                <p><strong>He (Kaiming, 2015)：</strong></p>
+                <div class="formula-box">$$\text{Var}(w) = \frac{2}{n_{\text{in}}}$$</div>
+                <p class="text-sm mt-1">考虑到 ReLU 会将约一半的激活值置零，
+                   因此需要更大的方差来补偿，只依赖 $n_{\text{in}}$。</p>
+            </div>
+        </div>
+
+        <div class="control-row">
+            <label>激活函数:</label>
+            <select id="s3-act">
+                <option value="sigmoid">Sigmoid</option>
+                <option value="tanh">Tanh</option>
+                <option value="relu">ReLU</option>
+            </select>
+            <label>网络宽度 (每层):</label>
+            <input type="range" id="s3-width" min="32" max="256" step="32" value="128">
+            <span class="slider-value" id="s3-width-val">128</span>
+            <label>网络深度:</label>
+            <input type="range" id="s3-depth" min="4" max="12" step="1" value="8">
+            <span class="slider-value" id="s3-depth-val">8</span>
+        </div>
+
+        <div class="side-by-side">
+            <div class="side-panel">
+                <h4>Xavier 初始化</h4>
+                <div class="weight-dist-row" id="s3-xavier-wdist"></div>
+                <p class="text-sm text-muted" style="text-align:center;margin-top:0.5rem">权重分布 (前3层)</p>
+                <hr style="border-color:var(--border-color);margin:0.5rem 0">
+                <div id="s3-xavier-hists" class="hist-row"></div>
+                <p class="text-sm text-muted" style="text-align:center;margin-top:0.25rem">激活值分布</p>
+                <div class="metric-row" id="s3-xavier-metrics"></div>
+            </div>
+            <div class="side-panel">
+                <h4>He 初始化</h4>
+                <div class="weight-dist-row" id="s3-he-wdist"></div>
+                <p class="text-sm text-muted" style="text-align:center;margin-top:0.5rem">权重分布 (前3层)</p>
+                <hr style="border-color:var(--border-color);margin:0.5rem 0">
+                <div id="s3-he-hists" class="hist-row"></div>
+                <p class="text-sm text-muted" style="text-align:center;margin-top:0.25rem">激活值分布</p>
+                <div class="metric-row" id="s3-he-metrics"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========== Section 4: Strategy Summary ========== -->
+    <div class="section">
+        <div class="section-title">
+            <div class="icon">4</div>
+            <h2>初始化策略总结</h2>
+        </div>
+
+        <p>以下是常见激活函数与推荐初始化方法的对照表。关键原则：初始化方差应当与激活函数的特性匹配。</p>
+
+        <table class="decision-table">
+            <thead>
+                <tr>
+                    <th>激活函数</th>
+                    <th>推荐初始化</th>
+                    <th>方差公式</th>
+                    <th>标准差 (n=128)</th>
+                    <th>原因</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>Sigmoid</td>
+                    <td><span class="status-tag status-good">Xavier</span></td>
+                    <td>$\frac{2}{n_{in}+n_{out}}$</td>
+                    <td><code>0.0625</code></td>
+                    <td>保持前/反向传播方差一致</td>
+                </tr>
+                <tr>
+                    <td>Tanh</td>
+                    <td><span class="status-tag status-good">Xavier</span></td>
+                    <td>$\frac{2}{n_{in}+n_{out}}$</td>
+                    <td><code>0.0625</code></td>
+                    <td>零中心激活，与 Xavier 线性假设匹配</td>
+                </tr>
+                <tr>
+                    <td>ReLU</td>
+                    <td><span class="status-tag status-good">He</span></td>
+                    <td>$\frac{2}{n_{in}}$</td>
+                    <td><code>0.125</code></td>
+                    <td>补偿 ReLU 砍掉负半区的方差损失</td>
+                </tr>
+                <tr>
+                    <td>Leaky ReLU</td>
+                    <td><span class="status-tag status-good">He</span></td>
+                    <td>$\frac{2}{n_{in}}$</td>
+                    <td><code>0.125</code></td>
+                    <td>与 ReLU 类似的方差特性</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <div class="info-box success">
+            <p><strong>实验验证：</strong>选择不同的 "初始化 + 激活" 组合，点击训练，对比 100 步内的收敛速度。
+               正确组合（如 He + ReLU）通常比错误组合（如 Xavier + ReLU）收敛更快、最终 loss 更低。</p>
+        </div>
+
+        <div class="control-row">
+            <label>组合 A:</label>
+            <select id="s4-combo-a">
+                <option value="xavier-sigmoid">Xavier + Sigmoid</option>
+                <option value="xavier-tanh">Xavier + Tanh</option>
+                <option value="xavier-relu">Xavier + ReLU</option>
+                <option value="he-sigmoid">He + Sigmoid</option>
+                <option value="he-tanh">He + Tanh</option>
+                <option value="he-relu" selected>He + ReLU</option>
+            </select>
+            <label>组合 B:</label>
+            <select id="s4-combo-b">
+                <option value="xavier-sigmoid">Xavier + Sigmoid</option>
+                <option value="xavier-tanh">Xavier + Tanh</option>
+                <option value="xavier-relu" selected>Xavier + ReLU</option>
+                <option value="he-sigmoid">He + Sigmoid</option>
+                <option value="he-tanh">He + Tanh</option>
+                <option value="he-relu">He + ReLU</option>
+            </select>
+        </div>
+        <div class="control-row">
+            <button class="btn btn-primary" id="s4-run">开始训练</button>
+            <button class="btn" id="s4-reset">重置</button>
+            <span class="text-sm text-muted" id="s4-epoch">Epoch: 0 / 100</span>
+        </div>
+
+        <div class="card">
+            <div class="canvas-container">
+                <canvas id="s4-canvas" width="900" height="350"></canvas>
+            </div>
+            <div class="legend-inline mt-1" id="s4-legend"></div>
+            <div class="metric-row" id="s4-metrics"></div>
+        </div>
+    </div>
+</div>
+
+<script src="../shared/scripts/nav.js"></script>
+<script src="../shared/scripts/mlp-utils.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    renderMathInElement(document.body, {
+        delimiters: [
+            { left: '$$', right: '$$', display: true },
+            { left: '$', right: '$', display: false }
+        ]
+    });
+
+    const { seededRandom, sigmoid, tanh, relu } = MLPUtils;
+
+    /* ============ Shared Helpers ============ */
+
+    /** Box-Muller gaussian */
+    function gaussRandom(rng) {
+        let u, v, s;
+        do {
+            u = rng() * 2 - 1;
+            v = rng() * 2 - 1;
+            s = u * u + v * v;
+        } while (s >= 1 || s === 0);
+        return u * Math.sqrt(-2 * Math.log(s) / s);
+    }
+
+    /** Create weight matrix with given init method */
+    function initWeights(rows, cols, method, rng) {
+        const W = [];
+        let std;
+        if (method === 'zeros') std = 0;
+        else if (method === 'large') std = 5;
+        else if (method === 'xavier') std = Math.sqrt(2 / (rows + cols));
+        else if (method === 'he') std = Math.sqrt(2 / cols);
+        else std = parseFloat(method);
+
+        for (let i = 0; i < rows; i++) {
+            W[i] = [];
+            for (let j = 0; j < cols; j++) {
+                W[i][j] = method === 'zeros' ? 0 : gaussRandom(rng) * std;
+            }
+        }
+        return W;
+    }
+
+    /** Return activation function by name */
+    function getActFn(name) {
+        if (name === 'sigmoid') return sigmoid;
+        if (name === 'tanh') return tanh;
+        return relu;
+    }
+
+    /** Forward one layer: output = actFn(W * input + bias) */
+    function forwardLayer(input, W, bias, actFn) {
+        const out = [];
+        for (let i = 0; i < W.length; i++) {
+            let sum = bias[i];
+            for (let j = 0; j < input.length; j++) sum += W[i][j] * input[j];
+            out.push(actFn(sum));
+        }
+        return out;
+    }
+
+    /** Draw histogram on a small canvas */
+    function drawHistogram(canvas, values, color) {
+        const ctx = canvas.getContext('2d');
+        const w = canvas.width, h = canvas.height;
+        ctx.clearRect(0, 0, w, h);
+        ctx.fillStyle = 'rgba(22, 33, 62, 0.9)';
+        ctx.fillRect(0, 0, w, h);
+
+        if (!values || values.length === 0) {
+            ctx.fillStyle = '#6c6c7c';
+            ctx.font = '10px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('No data', w / 2, h / 2);
+            return;
+        }
+
+        const nBins = 25;
+        let min = Infinity, max = -Infinity;
+        for (const v of values) {
+            if (v < min) min = v;
+            if (v > max) max = v;
+        }
+        if (min === max) { max = min + 1; min = min - 1; }
+        const range = max - min;
+
+        const bins = new Array(nBins).fill(0);
+        for (const v of values) {
+            let idx = Math.floor((v - min) / range * nBins);
+            if (idx >= nBins) idx = nBins - 1;
+            if (idx < 0) idx = 0;
+            bins[idx]++;
+        }
+
+        const maxBin = Math.max(...bins, 1);
+        const barW = (w - 4) / nBins;
+        const pad = 2;
+
+        for (let i = 0; i < nBins; i++) {
+            const barH = (bins[i] / maxBin) * (h - 16);
+            ctx.fillStyle = color || 'rgba(22, 199, 154, 0.7)';
+            ctx.fillRect(pad + i * barW, h - 14 - barH, barW - 1, barH);
+        }
+
+        // Axis labels
+        ctx.fillStyle = '#6c6c7c';
+        ctx.font = '8px monospace';
+        ctx.textAlign = 'left';
+        ctx.fillText(min.toFixed(1), 2, h - 2);
+        ctx.textAlign = 'right';
+        ctx.fillText(max.toFixed(1), w - 2, h - 2);
+    }
+
+    /** Compute mean and variance of an array */
+    function meanVar(arr) {
+        if (!arr || arr.length === 0) return { mean: 0, variance: 0 };
+        const finite = arr.filter(v => isFinite(v));
+        if (finite.length === 0) return { mean: NaN, variance: NaN };
+        const mean = finite.reduce((a, b) => a + b, 0) / finite.length;
+        const variance = finite.reduce((a, b) => a + (b - mean) ** 2, 0) / finite.length;
+        return { mean, variance };
+    }
+
+    /** Get status label from variance */
+    function varianceStatus(variance, nanRatio) {
+        if (nanRatio > 0.3 || !isFinite(variance)) return { text: '爆炸 (NaN)', cls: 'status-bad' };
+        if (variance < 1e-8) return { text: '消失', cls: 'status-bad' };
+        if (variance > 50) return { text: '不稳定', cls: 'status-warn' };
+        return { text: '健康', cls: 'status-good' };
+    }
+
+
+    /* ============================================
+       Section 1: Why Initialization Matters
+       ============================================ */
+    (() => {
+        const canvas = document.getElementById('s1-canvas');
+        const ctx = canvas.getContext('2d');
+        const btnRun = document.getElementById('s1-run');
+        const btnReset = document.getElementById('s1-reset');
+        const epochLabel = document.getElementById('s1-epoch');
+        const metricsEl = document.getElementById('s1-metrics');
+        const EPOCHS = 200;
+        const arch = [2, 16, 16, 1];
+        let running = false, animId = null;
+
+        const data = MLPUtils.generateCircleData(100, 0.1, 7);
+
+        function buildNet(method) {
+            const rng = seededRandom(42);
+            const weights = [], biases = [];
+            for (let l = 0; l < arch.length - 1; l++) {
+                weights.push(initWeights(arch[l + 1], arch[l], method, rng));
+                biases.push(new Array(arch[l + 1]).fill(0.01));
+            }
+            return { weights, biases };
+        }
+
+        function trainStep(net, act, lr) {
+            let totalLoss = 0;
+            for (let i = 0; i < data.points.length; i++) {
+                const fwd = MLPUtils.forwardPass(net, data.points[i], act);
+                const target = [data.labels[i]];
+                const pred = fwd.activations[fwd.activations.length - 1];
+                const diff = pred[0] - target[0];
+                totalLoss += diff * diff;
+                const grads = MLPUtils.backwardPass(net, fwd, target, 'mse');
+                MLPUtils.updateWeights(net, grads, lr);
+            }
+            return totalLoss / data.points.length;
+        }
+
+        function drawLossCurves(curves, epoch) {
+            const w = canvas.width, h = canvas.height;
+            ctx.clearRect(0, 0, w, h);
+            ctx.fillStyle = '#16213e';
+            ctx.fillRect(0, 0, w, h);
+
+            const padL = 65, padR = 100, padT = 25, padB = 45;
+            const pw = w - padL - padR, ph = h - padT - padB;
+
+            // Horizontal grid lines
+            ctx.strokeStyle = 'rgba(42, 42, 74, 0.5)';
+            ctx.lineWidth = 1;
+            for (let i = 0; i <= 5; i++) {
+                const y = padT + (ph / 5) * i;
+                ctx.beginPath();
+                ctx.moveTo(padL, y);
+                ctx.lineTo(padL + pw, y);
+                ctx.stroke();
+            }
+
+            // Find max loss for scale (cap at 5)
+            let maxLoss = 0.5;
+            for (const c of curves) {
+                for (const v of c.losses) {
+                    if (isFinite(v) && v > maxLoss) maxLoss = Math.min(v, 5);
+                }
+            }
+            maxLoss = Math.min(maxLoss * 1.1, 5);
+
+            // Y-axis labels
+            ctx.fillStyle = '#6c6c7c';
+            ctx.font = '11px monospace';
+            ctx.textAlign = 'right';
+            for (let i = 0; i <= 5; i++) {
+                const val = (maxLoss * (5 - i) / 5).toFixed(2);
+                ctx.fillText(val, padL - 8, padT + (ph / 5) * i + 4);
+            }
+
+            // X-axis labels
+            ctx.textAlign = 'center';
+            ctx.fillText('Epoch', padL + pw / 2, h - 4);
+            const xTicks = [0, 50, 100, 150, 200];
+            for (const t of xTicks) {
+                if (t > epoch) continue;
+                const x = padL + (t / EPOCHS) * pw;
+                ctx.fillText(String(t), x, h - padB + 20);
+                ctx.strokeStyle = 'rgba(42, 42, 74, 0.3)';
+                ctx.beginPath();
+                ctx.moveTo(x, padT);
+                ctx.lineTo(x, padT + ph);
+                ctx.stroke();
+            }
+
+            // Y-axis title
+            ctx.save();
+            ctx.translate(14, padT + ph / 2);
+            ctx.rotate(-Math.PI / 2);
+            ctx.fillStyle = '#6c6c7c';
+            ctx.fillText('Loss (MSE)', 0, 0);
+            ctx.restore();
+
+            // Draw curves
+            const colors = ['#ff5252', '#ffab40', '#16c79a'];
+            const labels = ['全零', '过大', 'Xavier'];
+            for (let ci = 0; ci < curves.length; ci++) {
+                const losses = curves[ci].losses;
+                if (losses.length < 2) continue;
+                ctx.strokeStyle = colors[ci];
+                ctx.lineWidth = 2.5;
+                ctx.beginPath();
+                for (let i = 0; i < losses.length; i++) {
+                    const x = padL + (i / EPOCHS) * pw;
+                    const lv = Math.min(isFinite(losses[i]) ? losses[i] : maxLoss, maxLoss);
+                    const y = padT + ph - (lv / maxLoss) * ph;
+                    if (i === 0) ctx.moveTo(x, y);
+                    else ctx.lineTo(x, y);
+                }
+                ctx.stroke();
+
+                // End label
+                const lastIdx = losses.length - 1;
+                const lastLoss = losses[lastIdx];
+                const lx = padL + pw + 8;
+                const lv = Math.min(isFinite(lastLoss) ? lastLoss : maxLoss, maxLoss);
+                const ly = padT + ph - (lv / maxLoss) * ph;
+                ctx.fillStyle = colors[ci];
+                ctx.font = '12px sans-serif';
+                ctx.textAlign = 'left';
+                const lossStr = isFinite(lastLoss) ? lastLoss.toFixed(4) : 'NaN';
+                ctx.fillText(`${labels[ci]}: ${lossStr}`, lx, ly + 4);
+            }
+        }
+
+        let curves;
+        function reset() {
+            if (animId) cancelAnimationFrame(animId);
+            running = false;
+            curves = [
+                { net: buildNet('zeros'), losses: [] },
+                { net: buildNet('large'), losses: [] },
+                { net: buildNet('xavier'), losses: [] }
+            ];
+            drawLossCurves(curves, 0);
+            epochLabel.textContent = 'Epoch: 0 / 200';
+            btnRun.textContent = '开始训练';
+            metricsEl.innerHTML = '';
+        }
+
+        function runTraining() {
+            if (running) {
+                running = false;
+                btnRun.textContent = '继续训练';
+                return;
+            }
+            running = true;
+            btnRun.textContent = '暂停';
+            let epoch = curves[0].losses.length;
+
+            function step() {
+                if (!running || epoch >= EPOCHS) {
+                    running = false;
+                    btnRun.textContent = epoch >= EPOCHS ? '训练完成' : '继续训练';
+                    // Final metrics
+                    const names = ['全零', '过大 (std=5)', 'Xavier'];
+                    let html = '';
+                    for (let i = 0; i < 3; i++) {
+                        const l = curves[i].losses;
+                        const last = l.length > 0 ? l[l.length - 1] : NaN;
+                        html += `<span>${names[i]}: <span class="val">${isFinite(last) ? last.toFixed(4) : 'NaN'}</span></span>`;
+                    }
+                    metricsEl.innerHTML = html;
+                    return;
+                }
+                for (const c of curves) {
+                    const loss = trainStep(c.net, 'relu', 0.005);
+                    c.losses.push(loss);
+                }
+                epoch++;
+                epochLabel.textContent = `Epoch: ${epoch} / ${EPOCHS}`;
+                drawLossCurves(curves, epoch);
+                animId = requestAnimationFrame(step);
+            }
+            step();
+        }
+
+        btnRun.addEventListener('click', runTraining);
+        btnReset.addEventListener('click', reset);
+        reset();
+    })();
+
+
+    /* ============================================
+       Section 2: Activation Distributions
+       ============================================ */
+    (() => {
+        const stdSlider = document.getElementById('s2-std');
+        const stdVal = document.getElementById('s2-std-val');
+        const actSelect = document.getElementById('s2-act');
+        const histContainer = document.getElementById('s2-hists');
+        const metricsEl = document.getElementById('s2-metrics');
+        const varianceCanvas = document.getElementById('s2-variance-canvas');
+        const btnXavier = document.getElementById('s2-xavier');
+        const btnHe = document.getElementById('s2-he');
+        const LAYERS = 10;
+        const WIDTH = 256;
+        const N_SAMPLES = 500;
+
+        function simulate() {
+            const std = parseFloat(stdSlider.value);
+            stdVal.textContent = std.toFixed(2);
+            const actName = actSelect.value;
+            const actFn = getActFn(actName);
+            const rng = seededRandom(123);
+
+            histContainer.innerHTML = '';
+            const allActs = [];
+            const variances = [];
+
+            // Generate random inputs
+            let inputs = [];
+            for (let s = 0; s < N_SAMPLES; s++) {
+                const inp = [];
+                for (let j = 0; j < WIDTH; j++) inp.push(gaussRandom(rng));
+                inputs.push(inp);
+            }
+            // Input variance
+            const inputVals = [];
+            for (let s = 0; s < N_SAMPLES; s++) {
+                for (let d = 0; d < 3; d++) inputVals.push(inputs[s][d]);
+            }
+            allActs.push(inputVals);
+            variances.push(meanVar(inputVals).variance);
+
+            // Forward through layers
+            for (let l = 0; l < LAYERS; l++) {
+                const W = [];
+                for (let i = 0; i < WIDTH; i++) {
+                    W[i] = [];
+                    for (let j = 0; j < WIDTH; j++) {
+                        W[i][j] = gaussRandom(rng) * std;
+                    }
+                }
+                const bias = new Array(WIDTH).fill(0);
+                const nextInputs = [];
+                for (let s = 0; s < N_SAMPLES; s++) {
+                    nextInputs.push(forwardLayer(inputs[s], W, bias, actFn));
+                }
+                inputs = nextInputs;
+
+                const vals = [];
+                for (let s = 0; s < N_SAMPLES; s++) {
+                    for (let d = 0; d < Math.min(3, WIDTH); d++) {
+                        vals.push(inputs[s][d]);
+                    }
+                }
+                allActs.push(vals);
+                const mv = meanVar(vals.filter(v => isFinite(v)));
+                variances.push(isFinite(mv.variance) ? mv.variance : 1e6);
+            }
+
+            // Draw histograms for selected layers
+            const layersToShow = [0, 1, 2, 3, 5, 7, 9];
+            for (const li of layersToShow) {
+                const idx = li + 1;
+                const cell = document.createElement('div');
+                cell.className = 'hist-cell';
+                const c = document.createElement('canvas');
+                c.width = 90;
+                c.height = 65;
+                cell.appendChild(c);
+
+                const lbl = document.createElement('div');
+                lbl.className = 'layer-label';
+                lbl.textContent = li === 0 ? '输入' : `Layer ${li}`;
+                cell.appendChild(lbl);
+                histContainer.appendChild(cell);
+
+                const vals = allActs[idx] || [];
+                const mv = meanVar(vals);
+                const nanRatio = vals.filter(v => !isFinite(v)).length / Math.max(vals.length, 1);
+                const st = varianceStatus(mv.variance, nanRatio);
+                const colorMap = {
+                    'status-good': 'rgba(22, 199, 154, 0.7)',
+                    'status-bad': 'rgba(255, 82, 82, 0.7)',
+                    'status-warn': 'rgba(255, 171, 64, 0.7)'
+                };
+                drawHistogram(c, vals.filter(v => isFinite(v)), colorMap[st.cls]);
+            }
+
+            // Draw variance trend chart
+            const vctx = varianceCanvas.getContext('2d');
+            const vw = varianceCanvas.width, vh = varianceCanvas.height;
+            vctx.clearRect(0, 0, vw, vh);
+            vctx.fillStyle = 'rgba(22, 33, 62, 0.9)';
+            vctx.fillRect(0, 0, vw, vh);
+
+            const vPadL = 55, vPadR = 20, vPadT = 15, vPadB = 30;
+            const vpw = vw - vPadL - vPadR, vph = vh - vPadT - vPadB;
+
+            // Use log scale for variance
+            const logVars = variances.map(v => Math.log10(Math.max(v, 1e-12)));
+            let logMin = Math.min(...logVars, -6);
+            let logMax = Math.max(...logVars, 2);
+            logMin = Math.floor(logMin) - 0.5;
+            logMax = Math.ceil(logMax) + 0.5;
+            const logRange = logMax - logMin;
+
+            // Grid
+            vctx.strokeStyle = 'rgba(42, 42, 74, 0.5)';
+            vctx.lineWidth = 1;
+            for (let exp = Math.ceil(logMin); exp <= Math.floor(logMax); exp++) {
+                const y = vPadT + vph - ((exp - logMin) / logRange) * vph;
+                vctx.beginPath();
+                vctx.moveTo(vPadL, y);
+                vctx.lineTo(vPadL + vpw, y);
+                vctx.stroke();
+                vctx.fillStyle = '#6c6c7c';
+                vctx.font = '9px monospace';
+                vctx.textAlign = 'right';
+                vctx.fillText(`1e${exp}`, vPadL - 5, y + 3);
+            }
+
+            // Ideal line at variance = 1
+            const idealY = vPadT + vph - ((0 - logMin) / logRange) * vph;
+            vctx.strokeStyle = 'rgba(22, 199, 154, 0.3)';
+            vctx.setLineDash([4, 4]);
+            vctx.beginPath();
+            vctx.moveTo(vPadL, idealY);
+            vctx.lineTo(vPadL + vpw, idealY);
+            vctx.stroke();
+            vctx.setLineDash([]);
+            vctx.fillStyle = 'rgba(22, 199, 154, 0.5)';
+            vctx.font = '9px sans-serif';
+            vctx.textAlign = 'left';
+            vctx.fillText('Var=1 (ideal)', vPadL + vpw - 65, idealY - 4);
+
+            // Plot variance curve
+            vctx.strokeStyle = '#4fc3f7';
+            vctx.lineWidth = 2;
+            vctx.beginPath();
+            for (let i = 0; i < logVars.length; i++) {
+                const x = vPadL + (i / (logVars.length - 1)) * vpw;
+                const y = vPadT + vph - ((logVars[i] - logMin) / logRange) * vph;
+                if (i === 0) vctx.moveTo(x, y);
+                else vctx.lineTo(x, y);
+            }
+            vctx.stroke();
+
+            // Dots
+            for (let i = 0; i < logVars.length; i++) {
+                const x = vPadL + (i / (logVars.length - 1)) * vpw;
+                const y = vPadT + vph - ((logVars[i] - logMin) / logRange) * vph;
+                vctx.fillStyle = '#4fc3f7';
+                vctx.beginPath();
+                vctx.arc(x, y, 3, 0, Math.PI * 2);
+                vctx.fill();
+            }
+
+            // X labels
+            vctx.fillStyle = '#6c6c7c';
+            vctx.font = '9px monospace';
+            vctx.textAlign = 'center';
+            for (let i = 0; i <= LAYERS; i++) {
+                const x = vPadL + (i / LAYERS) * vpw;
+                vctx.fillText(i === 0 ? '输入' : `L${i}`, x, vh - 5);
+            }
+
+            // Metrics
+            const lastVals = allActs[LAYERS];
+            const lastMV = meanVar(lastVals);
+            const nanRatio = lastVals.filter(v => !isFinite(v)).length / lastVals.length;
+            const st = varianceStatus(lastMV.variance, nanRatio);
+            metricsEl.innerHTML = `
+                <span>输入方差: <span class="val">${variances[0].toFixed(4)}</span></span>
+                <span>最后一层方差: <span class="val">${isFinite(lastMV.variance) ? lastMV.variance.toFixed(4) : 'Inf'}</span></span>
+                <span>方差比 (L10/L1): <span class="val">${(variances[LAYERS] / Math.max(variances[0], 1e-12)).toExponential(2)}</span></span>
+                <span>状态: <span class="status-tag ${st.cls}">${st.text}</span></span>
+            `;
+        }
+
+        stdSlider.addEventListener('input', simulate);
+        actSelect.addEventListener('change', simulate);
+        btnXavier.addEventListener('click', () => {
+            stdSlider.value = Math.sqrt(2 / (WIDTH + WIDTH));
+            simulate();
+        });
+        btnHe.addEventListener('click', () => {
+            stdSlider.value = Math.sqrt(2 / WIDTH);
+            simulate();
+        });
+        simulate();
+    })();
+
+
+    /* ============================================
+       Section 3: Xavier vs He
+       ============================================ */
+    (() => {
+        const actSelect = document.getElementById('s3-act');
+        const widthSlider = document.getElementById('s3-width');
+        const widthVal = document.getElementById('s3-width-val');
+        const depthSlider = document.getElementById('s3-depth');
+        const depthVal = document.getElementById('s3-depth-val');
+        const N_SAMPLES = 400;
+
+        function simulate() {
+            const actName = actSelect.value;
+            const actFn = getActFn(actName);
+            const WIDTH = parseInt(widthSlider.value);
+            const LAYERS = parseInt(depthSlider.value);
+            widthVal.textContent = WIDTH;
+            depthVal.textContent = LAYERS;
+
+            const xavierStd = Math.sqrt(2 / (WIDTH + WIDTH));
+            const heStd = Math.sqrt(2 / WIDTH);
+
+            function runForward(std, seed) {
+                const rng = seededRandom(seed);
+                let inputs = [];
+                for (let s = 0; s < N_SAMPLES; s++) {
+                    const inp = [];
+                    for (let j = 0; j < WIDTH; j++) inp.push(gaussRandom(rng));
+                    inputs.push(inp);
+                }
+
+                const layerActs = [];
+                const weightSamples = []; // store weight samples for first 3 layers
+
+                for (let l = 0; l < LAYERS; l++) {
+                    const W = [];
+                    const wSamples = [];
+                    for (let i = 0; i < WIDTH; i++) {
+                        W[i] = [];
+                        for (let j = 0; j < WIDTH; j++) {
+                            const w = gaussRandom(rng) * std;
+                            W[i][j] = w;
+                            if (l < 3 && i < 10) wSamples.push(w);
+                        }
+                    }
+                    if (l < 3) weightSamples.push(wSamples);
+
+                    const bias = new Array(WIDTH).fill(0);
+                    const next = [];
+                    for (let s = 0; s < N_SAMPLES; s++) {
+                        next.push(forwardLayer(inputs[s], W, bias, actFn));
+                    }
+                    inputs = next;
+
+                    const vals = [];
+                    for (let s = 0; s < N_SAMPLES; s++) {
+                        for (let d = 0; d < Math.min(3, WIDTH); d++) {
+                            vals.push(inputs[s][d]);
+                        }
+                    }
+                    layerActs.push(vals);
+                }
+                return { layerActs, weightSamples };
+            }
+
+            const xavierResult = runForward(xavierStd, 77);
+            const heResult = runForward(heStd, 77);
+
+            function renderWeightDist(container, weightSamples, color) {
+                container.innerHTML = '';
+                for (let l = 0; l < weightSamples.length; l++) {
+                    const cell = document.createElement('div');
+                    cell.className = 'weight-dist-cell';
+                    const c = document.createElement('canvas');
+                    c.width = 75;
+                    c.height = 50;
+                    cell.appendChild(c);
+                    const lbl = document.createElement('div');
+                    lbl.className = 'dist-label';
+                    lbl.textContent = `W${l + 1}`;
+                    cell.appendChild(lbl);
+                    container.appendChild(cell);
+                    drawHistogram(c, weightSamples[l], color);
+                }
+            }
+
+            function renderHists(container, metricsEl, acts, color) {
+                container.innerHTML = '';
+                // Show evenly spaced layers
+                const step = Math.max(1, Math.floor(LAYERS / 5));
+                const show = [];
+                for (let i = 0; i < LAYERS; i += step) show.push(i);
+                if (show[show.length - 1] !== LAYERS - 1) show.push(LAYERS - 1);
+
+                for (const li of show) {
+                    if (!acts[li]) continue;
+                    const cell = document.createElement('div');
+                    cell.className = 'hist-cell';
+                    const c = document.createElement('canvas');
+                    c.width = 80;
+                    c.height = 55;
+                    cell.appendChild(c);
+                    const lbl = document.createElement('div');
+                    lbl.className = 'layer-label';
+                    lbl.textContent = `L${li + 1}`;
+                    cell.appendChild(lbl);
+                    container.appendChild(cell);
+                    drawHistogram(c, acts[li].filter(v => isFinite(v)), color);
+                }
+
+                const last = acts[acts.length - 1];
+                const finite = last.filter(v => isFinite(v));
+                const mv = meanVar(finite);
+                const nanRatio = (last.length - finite.length) / Math.max(last.length, 1);
+                const st = varianceStatus(mv.variance, nanRatio);
+
+                // Also compute first layer variance for comparison
+                const firstMV = meanVar(acts[0].filter(v => isFinite(v)));
+                const ratio = mv.variance / Math.max(firstMV.variance, 1e-12);
+
+                metricsEl.innerHTML = `
+                    <span>L1 方差: <span class="val">${firstMV.variance.toFixed(4)}</span></span>
+                    <span>L${LAYERS} 方差: <span class="val">${isFinite(mv.variance) ? mv.variance.toFixed(4) : 'Inf'}</span></span>
+                    <span>比值: <span class="val">${ratio.toExponential(1)}</span></span>
+                    <span class="status-tag ${st.cls}">${st.text}</span>
+                `;
+            }
+
+            renderWeightDist(
+                document.getElementById('s3-xavier-wdist'),
+                xavierResult.weightSamples,
+                'rgba(79, 195, 247, 0.6)'
+            );
+            renderWeightDist(
+                document.getElementById('s3-he-wdist'),
+                heResult.weightSamples,
+                'rgba(255, 171, 64, 0.6)'
+            );
+
+            renderHists(
+                document.getElementById('s3-xavier-hists'),
+                document.getElementById('s3-xavier-metrics'),
+                xavierResult.layerActs,
+                'rgba(79, 195, 247, 0.7)'
+            );
+            renderHists(
+                document.getElementById('s3-he-hists'),
+                document.getElementById('s3-he-metrics'),
+                heResult.layerActs,
+                'rgba(255, 171, 64, 0.7)'
+            );
+        }
+
+        actSelect.addEventListener('change', simulate);
+        widthSlider.addEventListener('input', simulate);
+        depthSlider.addEventListener('input', simulate);
+        simulate();
+    })();
+
+
+    /* ============================================
+       Section 4: Strategy Comparison Training
+       ============================================ */
+    (() => {
+        const canvas = document.getElementById('s4-canvas');
+        const ctx = canvas.getContext('2d');
+        const comboA = document.getElementById('s4-combo-a');
+        const comboB = document.getElementById('s4-combo-b');
+        const btnRun = document.getElementById('s4-run');
+        const btnReset = document.getElementById('s4-reset');
+        const epochLabel = document.getElementById('s4-epoch');
+        const legendEl = document.getElementById('s4-legend');
+        const metricsEl = document.getElementById('s4-metrics');
+        const EPOCHS = 100;
+        const arch = [2, 32, 32, 1];
+        let running = false, animId = null;
+
+        const data = MLPUtils.generateXORData(80, 0.15, 55);
+
+        function parseCombo(val) {
+            const parts = val.split('-');
+            return { init: parts[0], act: parts[1] };
+        }
+
+        function buildNet(initMethod) {
+            const rng = seededRandom(42);
+            const weights = [], biases = [];
+            for (let l = 0; l < arch.length - 1; l++) {
+                weights.push(initWeights(arch[l + 1], arch[l], initMethod, rng));
+                biases.push(new Array(arch[l + 1]).fill(0.01));
+            }
+            return { weights, biases };
+        }
+
+        function trainStep(net, act, lr) {
+            let totalLoss = 0;
+            let correct = 0;
+            for (let i = 0; i < data.points.length; i++) {
+                const fwd = MLPUtils.forwardPass(net, data.points[i], act);
+                const target = [data.labels[i]];
+                const pred = fwd.activations[fwd.activations.length - 1];
+                totalLoss += (pred[0] - target[0]) ** 2;
+                if ((pred[0] > 0.5 ? 1 : 0) === data.labels[i]) correct++;
+                const grads = MLPUtils.backwardPass(net, fwd, target, 'mse');
+                MLPUtils.updateWeights(net, grads, lr);
+            }
+            return {
+                loss: totalLoss / data.points.length,
+                acc: correct / data.points.length
+            };
+        }
+
+        function drawCurves(curvesData, epoch) {
+            const w = canvas.width, h = canvas.height;
+            ctx.clearRect(0, 0, w, h);
+            ctx.fillStyle = '#16213e';
+            ctx.fillRect(0, 0, w, h);
+
+            const padL = 60, padR = 110, padT = 25, padB = 45;
+            const pw = w - padL - padR, ph = h - padT - padB;
+
+            // Grid
+            ctx.strokeStyle = 'rgba(42, 42, 74, 0.5)';
+            ctx.lineWidth = 1;
+            for (let i = 0; i <= 5; i++) {
+                const y = padT + (ph / 5) * i;
+                ctx.beginPath();
+                ctx.moveTo(padL, y);
+                ctx.lineTo(padL + pw, y);
+                ctx.stroke();
+            }
+
+            // Vertical grid at epoch ticks
+            const xTicks = [0, 25, 50, 75, 100];
+            for (const t of xTicks) {
+                if (t > epoch) continue;
+                const x = padL + (t / EPOCHS) * pw;
+                ctx.strokeStyle = 'rgba(42, 42, 74, 0.3)';
+                ctx.beginPath();
+                ctx.moveTo(x, padT);
+                ctx.lineTo(x, padT + ph);
+                ctx.stroke();
+            }
+
+            // Find max loss
+            let maxLoss = 0.5;
+            for (const c of curvesData) {
+                for (const v of c.losses) {
+                    if (isFinite(v) && v > maxLoss) maxLoss = Math.min(v, 3);
+                }
+            }
+            maxLoss *= 1.1;
+
+            // Y-axis labels
+            ctx.fillStyle = '#6c6c7c';
+            ctx.font = '11px monospace';
+            ctx.textAlign = 'right';
+            for (let i = 0; i <= 5; i++) {
+                const val = (maxLoss * (5 - i) / 5).toFixed(2);
+                ctx.fillText(val, padL - 8, padT + (ph / 5) * i + 4);
+            }
+
+            // X-axis labels
+            ctx.textAlign = 'center';
+            ctx.fillText('Epoch', padL + pw / 2, h - 4);
+            for (const t of xTicks) {
+                if (t > epoch) continue;
+                const x = padL + (t / EPOCHS) * pw;
+                ctx.fillText(String(t), x, h - padB + 20);
+            }
+
+            // Y-axis title
+            ctx.save();
+            ctx.translate(14, padT + ph / 2);
+            ctx.rotate(-Math.PI / 2);
+            ctx.fillStyle = '#6c6c7c';
+            ctx.fillText('Loss (MSE)', 0, 0);
+            ctx.restore();
+
+            // Draw loss curves
+            const colors = ['#4fc3f7', '#ff80ab'];
+            const lLabels = ['A', 'B'];
+            for (let ci = 0; ci < curvesData.length; ci++) {
+                const losses = curvesData[ci].losses;
+                if (losses.length < 2) continue;
+                ctx.strokeStyle = colors[ci];
+                ctx.lineWidth = 2.5;
+                ctx.beginPath();
+                for (let i = 0; i < losses.length; i++) {
+                    const x = padL + (i / EPOCHS) * pw;
+                    const lv = Math.min(
+                        isFinite(losses[i]) ? losses[i] : maxLoss,
+                        maxLoss
+                    );
+                    const y = padT + ph - (lv / maxLoss) * ph;
+                    if (i === 0) ctx.moveTo(x, y);
+                    else ctx.lineTo(x, y);
+                }
+                ctx.stroke();
+
+                // End label
+                const lastIdx = losses.length - 1;
+                const lastLoss = losses[lastIdx];
+                const lx = padL + pw + 8;
+                const lv = Math.min(
+                    isFinite(lastLoss) ? lastLoss : maxLoss,
+                    maxLoss
+                );
+                const ly = padT + ph - (lv / maxLoss) * ph;
+                ctx.fillStyle = colors[ci];
+                ctx.font = '12px sans-serif';
+                ctx.textAlign = 'left';
+                const lStr = isFinite(lastLoss) ? lastLoss.toFixed(4) : 'NaN';
+                ctx.fillText(`${lLabels[ci]}: ${lStr}`, lx, ly + 4);
+            }
+
+            // Draw accuracy curves (dashed, same color, lighter)
+            for (let ci = 0; ci < curvesData.length; ci++) {
+                const accs = curvesData[ci].accs;
+                if (accs.length < 2) continue;
+                ctx.strokeStyle = colors[ci] + '80';
+                ctx.lineWidth = 1.5;
+                ctx.setLineDash([4, 3]);
+                ctx.beginPath();
+                for (let i = 0; i < accs.length; i++) {
+                    const x = padL + (i / EPOCHS) * pw;
+                    const y = padT + ph - accs[i] * ph;
+                    if (i === 0) ctx.moveTo(x, y);
+                    else ctx.lineTo(x, y);
+                }
+                ctx.stroke();
+                ctx.setLineDash([]);
+
+                // End accuracy label
+                const lastAcc = accs[accs.length - 1];
+                const lx2 = padL + pw + 8;
+                const ly2 = padT + ph - lastAcc * ph;
+                ctx.fillStyle = colors[ci] + '80';
+                ctx.font = '10px sans-serif';
+                ctx.textAlign = 'left';
+                ctx.fillText(`Acc: ${(lastAcc * 100).toFixed(0)}%`, lx2, ly2 + 14);
+            }
+        }
+
+        let curvesData;
+        function reset() {
+            if (animId) cancelAnimationFrame(animId);
+            running = false;
+            const a = parseCombo(comboA.value);
+            const b = parseCombo(comboB.value);
+            curvesData = [
+                { net: buildNet(a.init), act: a.act, losses: [], accs: [], label: comboA.value },
+                { net: buildNet(b.init), act: b.act, losses: [], accs: [], label: comboB.value }
+            ];
+            drawCurves(curvesData, 0);
+            epochLabel.textContent = 'Epoch: 0 / 100';
+            btnRun.textContent = '开始训练';
+            legendEl.innerHTML = `
+                <span><span class="dot" style="background:#4fc3f7"></span> A: ${comboA.options[comboA.selectedIndex].text}</span>
+                <span><span class="dot" style="background:#ff80ab"></span> B: ${comboB.options[comboB.selectedIndex].text}</span>
+                <span class="text-muted text-sm">(虚线 = 准确率)</span>
+            `;
+            metricsEl.innerHTML = '';
+        }
+
+        function runTraining() {
+            if (running) {
+                running = false;
+                btnRun.textContent = '继续训练';
+                return;
+            }
+            running = true;
+            btnRun.textContent = '暂停';
+            let epoch = curvesData[0].losses.length;
+
+            function step() {
+                if (!running || epoch >= EPOCHS) {
+                    running = false;
+                    btnRun.textContent = epoch >= EPOCHS ? '训练完成' : '继续训练';
+                    // Final metrics
+                    const lossA = curvesData[0].losses[curvesData[0].losses.length - 1];
+                    const lossB = curvesData[1].losses[curvesData[1].losses.length - 1];
+                    const accA = curvesData[0].accs[curvesData[0].accs.length - 1];
+                    const accB = curvesData[1].accs[curvesData[1].accs.length - 1];
+                    const betterLoss = (isFinite(lossA) && lossA < lossB) || !isFinite(lossB) ? 'A' : 'B';
+                    metricsEl.innerHTML = `
+                        <span>A Loss: <span class="val">${isFinite(lossA) ? lossA.toFixed(4) : 'NaN'}</span></span>
+                        <span>A Acc: <span class="val">${(accA * 100).toFixed(1)}%</span></span>
+                        <span>B Loss: <span class="val">${isFinite(lossB) ? lossB.toFixed(4) : 'NaN'}</span></span>
+                        <span>B Acc: <span class="val">${(accB * 100).toFixed(1)}%</span></span>
+                        <span class="status-tag status-good">组合 ${betterLoss} 更优</span>
+                    `;
+                    return;
+                }
+                for (const c of curvesData) {
+                    const lr = (c.act === 'sigmoid' || c.act === 'tanh') ? 0.1 : 0.01;
+                    const result = trainStep(c.net, c.act, lr);
+                    c.losses.push(result.loss);
+                    c.accs.push(result.acc);
+                }
+                epoch++;
+                epochLabel.textContent = `Epoch: ${epoch} / ${EPOCHS}`;
+                drawCurves(curvesData, epoch);
+                animId = requestAnimationFrame(step);
+            }
+            step();
+        }
+
+        btnRun.addEventListener('click', runTraining);
+        btnReset.addEventListener('click', reset);
+        comboA.addEventListener('change', reset);
+        comboB.addEventListener('change', reset);
+        reset();
+    })();
+});
+</script>
+</body>
+</html>

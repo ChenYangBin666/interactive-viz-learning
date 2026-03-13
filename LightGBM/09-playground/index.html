@@ -1,0 +1,1757 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>游乐场 — LightGBM</title>
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" defer>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" defer></script>
+    <script src="../shared/scripts/nav.js" defer></script>
+    <script src="../shared/scripts/lgbm-utils.js" defer></script>
+    <style>
+        /* ========== Playground Layout ========== */
+        .playground-container {
+            display: grid;
+            grid-template-columns: 280px 1fr 320px;
+            gap: 1rem;
+            min-height: calc(100vh - var(--header-height) - 6rem);
+            margin-top: 1rem;
+        }
+
+        .playground-header {
+            text-align: center;
+            padding: 0.5rem 0 0.25rem;
+        }
+
+        .playground-header h1 {
+            font-size: 1.6rem;
+            margin-bottom: 0.25rem;
+            background: linear-gradient(135deg, var(--accent-green), var(--accent-blue));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .playground-header p {
+            font-size: 0.9rem;
+            color: var(--text-muted);
+            margin-bottom: 0;
+        }
+
+        /* ========== Left Panel ========== */
+        .left-panel {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+            overflow-y: auto;
+            max-height: calc(100vh - var(--header-height) - 8rem);
+            padding-right: 0.5rem;
+        }
+
+        .panel-section {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1rem;
+        }
+
+        .panel-section h3 {
+            font-size: 0.9rem;
+            color: var(--accent-green);
+            margin-bottom: 0.75rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        /* Dataset thumbnails */
+        .dataset-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.5rem;
+        }
+
+        .dataset-thumb {
+            position: relative;
+            background: var(--bg-primary);
+            border: 2px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            padding: 0.4rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-align: center;
+        }
+
+        .dataset-thumb:hover {
+            border-color: var(--accent-blue);
+        }
+
+        .dataset-thumb.active {
+            border-color: var(--accent-green);
+            box-shadow: 0 0 12px rgba(22, 199, 154, 0.3);
+        }
+
+        .dataset-thumb canvas {
+            width: 100%;
+            height: 70px;
+            display: block;
+            border-radius: 4px;
+        }
+
+        .dataset-thumb .label {
+            font-size: 0.7rem;
+            color: var(--text-secondary);
+            margin-top: 0.25rem;
+        }
+
+        /* Param controls */
+        .param-row {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-bottom: 0.6rem;
+        }
+
+        .param-row label {
+            font-size: 0.78rem;
+            color: var(--text-secondary);
+            min-width: 90px;
+            flex-shrink: 0;
+        }
+
+        .param-row input[type="range"] {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .param-row .val {
+            font-family: var(--font-mono);
+            font-size: 0.78rem;
+            color: var(--accent-green);
+            min-width: 36px;
+            text-align: right;
+            flex-shrink: 0;
+        }
+
+        /* ========== Center Panel ========== */
+        .center-panel {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+
+        .main-viz-container {
+            position: relative;
+            flex: 1;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+            min-height: 450px;
+        }
+
+        .main-viz-container canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        .viz-overlay {
+            position: absolute;
+            top: 0.75rem;
+            left: 0.75rem;
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+            pointer-events: none;
+        }
+
+        .viz-overlay .stat-badge {
+            pointer-events: auto;
+            background: rgba(26, 26, 46, 0.85);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            padding: 0.25rem 0.6rem;
+            font-size: 0.75rem;
+            font-family: var(--font-mono);
+            color: var(--text-secondary);
+            backdrop-filter: blur(4px);
+        }
+
+        .viz-overlay .stat-badge .val {
+            color: var(--accent-green);
+            font-weight: 600;
+        }
+
+        .viz-legend {
+            position: absolute;
+            bottom: 0.75rem;
+            left: 0.75rem;
+            display: flex;
+            gap: 0.75rem;
+            background: rgba(26, 26, 46, 0.85);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            padding: 0.3rem 0.6rem;
+            font-size: 0.7rem;
+            color: var(--text-secondary);
+            backdrop-filter: blur(4px);
+        }
+
+        .viz-legend .legend-dot {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 4px;
+            vertical-align: middle;
+        }
+
+        .viz-legend .legend-dot.hollow {
+            background: none;
+            border: 2px solid;
+        }
+
+        /* Training controls bar */
+        .train-controls {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 0.6rem 1rem;
+        }
+
+        .train-controls .btn {
+            padding: 0.4rem 1rem;
+        }
+
+        .train-controls .tree-counter {
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            margin-left: auto;
+        }
+
+        .train-controls .tree-counter span {
+            color: var(--accent-green);
+            font-weight: 600;
+        }
+
+        .speed-control {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            font-size: 0.78rem;
+            color: var(--text-muted);
+        }
+
+        .speed-control select {
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            color: var(--text-primary);
+            font-family: var(--font-mono);
+            font-size: 0.75rem;
+            padding: 0.2rem 0.4rem;
+            cursor: pointer;
+        }
+
+        /* ========== Right Panel ========== */
+        .right-panel {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+            overflow-y: auto;
+            max-height: calc(100vh - var(--header-height) - 8rem);
+            padding-left: 0.25rem;
+        }
+
+        /* Metrics */
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.5rem;
+        }
+
+        .metric-card {
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            padding: 0.6rem;
+            text-align: center;
+        }
+
+        .metric-card .metric-label {
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            margin-bottom: 0.2rem;
+        }
+
+        .metric-card .metric-value {
+            font-family: var(--font-mono);
+            font-size: 1.1rem;
+            font-weight: 700;
+        }
+
+        .metric-card .metric-value.green { color: var(--accent-green); }
+        .metric-card .metric-value.blue { color: var(--accent-blue); }
+        .metric-card .metric-value.orange { color: var(--accent-orange); }
+        .metric-card .metric-value.red { color: var(--accent-red); }
+
+        /* Loss chart */
+        .loss-chart-container {
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            padding: 0.5rem;
+            height: 180px;
+            position: relative;
+        }
+
+        .loss-chart-container canvas {
+            width: 100%;
+            height: 100%;
+        }
+
+        .chart-legend {
+            position: absolute;
+            top: 0.4rem;
+            right: 0.4rem;
+            display: flex;
+            gap: 0.6rem;
+            font-size: 0.65rem;
+        }
+
+        .chart-legend span {
+            display: flex;
+            align-items: center;
+            gap: 3px;
+        }
+
+        .chart-legend .line-swatch {
+            width: 16px;
+            height: 2px;
+            border-radius: 1px;
+        }
+
+        /* Tree viewer */
+        .tree-selector {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+            max-height: 80px;
+            overflow-y: auto;
+            margin-bottom: 0.5rem;
+        }
+
+        .tree-btn {
+            width: 28px;
+            height: 24px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            background: var(--bg-primary);
+            color: var(--text-muted);
+            font-size: 0.65rem;
+            font-family: var(--font-mono);
+            cursor: pointer;
+            transition: all 0.15s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .tree-btn:hover {
+            border-color: var(--accent-blue);
+            color: var(--text-primary);
+        }
+
+        .tree-btn.active {
+            border-color: var(--accent-green);
+            background: rgba(22, 199, 154, 0.15);
+            color: var(--accent-green);
+        }
+
+        .tree-view-canvas {
+            width: 100%;
+            height: 200px;
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+        }
+
+        /* Feature importance */
+        .importance-bars {
+            display: flex;
+            flex-direction: column;
+            gap: 0.4rem;
+        }
+
+        .importance-row {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.75rem;
+        }
+
+        .importance-row .feat-name {
+            min-width: 30px;
+            color: var(--text-secondary);
+            font-family: var(--font-mono);
+        }
+
+        .importance-row .bar-track {
+            flex: 1;
+            height: 14px;
+            background: var(--bg-primary);
+            border-radius: 7px;
+            overflow: hidden;
+        }
+
+        .importance-row .bar-fill {
+            height: 100%;
+            border-radius: 7px;
+            transition: width 0.4s ease;
+        }
+
+        .importance-row .bar-val {
+            min-width: 30px;
+            text-align: right;
+            font-family: var(--font-mono);
+            font-size: 0.7rem;
+            color: var(--text-muted);
+        }
+
+        /* Ensemble formula */
+        .ensemble-box {
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            padding: 0.6rem;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            text-align: center;
+        }
+
+        .ensemble-box .katex {
+            font-size: 0.95em;
+        }
+
+        /* ========== Waiting state ========== */
+        .waiting-message {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            min-height: 200px;
+            color: var(--text-muted);
+            font-size: 0.85rem;
+            gap: 0.5rem;
+        }
+
+        .waiting-message .icon-large {
+            font-size: 2rem;
+            opacity: 0.4;
+        }
+
+        /* ========== Responsive ========== */
+        @media (max-width: 1200px) {
+            .playground-container {
+                grid-template-columns: 260px 1fr 280px;
+            }
+        }
+
+        @media (max-width: 1024px) {
+            .playground-container {
+                grid-template-columns: 1fr;
+                max-height: none;
+            }
+            .left-panel, .right-panel {
+                max-height: none;
+                overflow-y: visible;
+            }
+            .main-viz-container {
+                min-height: 400px;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .playground-container {
+                gap: 0.5rem;
+            }
+            .dataset-grid {
+                grid-template-columns: 1fr 1fr 1fr 1fr;
+            }
+            .metrics-grid {
+                grid-template-columns: 1fr 1fr 1fr 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="page-container">
+        <div class="playground-header">
+            <h1>LightGBM 游乐场</h1>
+            <p>调整参数，观察决策边界实时变化 — 理解 LightGBM 的行为模式</p>
+        </div>
+
+        <div class="playground-container">
+            <!-- ==================== LEFT PANEL ==================== -->
+            <div class="left-panel">
+                <!-- Dataset Selection -->
+                <div class="panel-section">
+                    <h3><span style="font-size:1rem">📊</span> 数据集选择</h3>
+                    <div class="dataset-grid">
+                        <div class="dataset-thumb active" data-dataset="circles">
+                            <canvas id="thumb-circles" width="120" height="70"></canvas>
+                            <div class="label">圆环</div>
+                        </div>
+                        <div class="dataset-thumb" data-dataset="moons">
+                            <canvas id="thumb-moons" width="120" height="70"></canvas>
+                            <div class="label">半月</div>
+                        </div>
+                        <div class="dataset-thumb" data-dataset="spiral">
+                            <canvas id="thumb-spiral" width="120" height="70"></canvas>
+                            <div class="label">螺旋</div>
+                        </div>
+                        <div class="dataset-thumb" data-dataset="xor">
+                            <canvas id="thumb-xor" width="120" height="70"></canvas>
+                            <div class="label">异或</div>
+                        </div>
+                    </div>
+
+                    <div style="margin-top: 0.75rem">
+                        <div class="param-row">
+                            <label>噪声</label>
+                            <input type="range" id="noise" min="0" max="0.5" step="0.01" value="0.15">
+                            <span class="val" id="noise-val">0.15</span>
+                        </div>
+                        <div class="param-row">
+                            <label>样本数</label>
+                            <input type="range" id="datasize" min="50" max="500" step="10" value="200">
+                            <span class="val" id="datasize-val">200</span>
+                        </div>
+                        <div class="param-row">
+                            <label>训练集比例</label>
+                            <input type="range" id="trainratio" min="0.5" max="0.9" step="0.05" value="0.75">
+                            <span class="val" id="trainratio-val">0.75</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Parameter Controls -->
+                <div class="panel-section">
+                    <h3><span style="font-size:1rem">🎛</span> 参数控制</h3>
+                    <div class="param-row">
+                        <label>num_leaves</label>
+                        <input type="range" id="numleaves" min="4" max="64" step="1" value="16">
+                        <span class="val" id="numleaves-val">16</span>
+                    </div>
+                    <div class="param-row">
+                        <label>max_depth</label>
+                        <input type="range" id="maxdepth" min="-1" max="10" step="1" value="5">
+                        <span class="val" id="maxdepth-val">5</span>
+                    </div>
+                    <div class="param-row">
+                        <label>learning_rate</label>
+                        <input type="range" id="learningrate" min="0.01" max="1.0" step="0.01" value="0.1">
+                        <span class="val" id="learningrate-val">0.10</span>
+                    </div>
+                    <div class="param-row">
+                        <label>n_estimators</label>
+                        <input type="range" id="nestimators" min="1" max="200" step="1" value="50">
+                        <span class="val" id="nestimators-val">50</span>
+                    </div>
+                    <div class="param-row">
+                        <label>min_child_samples</label>
+                        <input type="range" id="minchild" min="1" max="50" step="1" value="5">
+                        <span class="val" id="minchild-val">5</span>
+                    </div>
+                    <div class="param-row">
+                        <label>subsample</label>
+                        <input type="range" id="subsample" min="0.5" max="1.0" step="0.05" value="1.0">
+                        <span class="val" id="subsample-val">1.00</span>
+                    </div>
+                    <div class="param-row">
+                        <label>reg_lambda</label>
+                        <input type="range" id="reglambda" min="0" max="10" step="0.1" value="1.0">
+                        <span class="val" id="reglambda-val">1.0</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ==================== CENTER PANEL ==================== -->
+            <div class="center-panel">
+                <div class="main-viz-container">
+                    <canvas id="mainCanvas"></canvas>
+                    <div class="viz-overlay">
+                        <div class="stat-badge">树: <span class="val" id="overlay-trees">0</span>/<span id="overlay-total">50</span></div>
+                        <div class="stat-badge">训练准确率: <span class="val" id="overlay-train-acc">--</span></div>
+                        <div class="stat-badge">测试准确率: <span class="val" id="overlay-test-acc">--</span></div>
+                    </div>
+                    <div class="viz-legend">
+                        <span><span class="legend-dot" style="background:#ff6b6b"></span> 类别 0 (训练)</span>
+                        <span><span class="legend-dot" style="background:#4fc3f7"></span> 类别 1 (训练)</span>
+                        <span><span class="legend-dot hollow" style="border-color:#ff6b6b"></span> 类别 0 (测试)</span>
+                        <span><span class="legend-dot hollow" style="border-color:#4fc3f7"></span> 类别 1 (测试)</span>
+                    </div>
+                </div>
+
+                <div class="train-controls">
+                    <button class="btn btn-primary" id="btn-train" title="训练模型">▶ 训练</button>
+                    <button class="btn" id="btn-step" title="添加一棵树">+1 树</button>
+                    <button class="btn" id="btn-autoplay" title="自动逐步添加树">⏩ 自动</button>
+                    <button class="btn" id="btn-reset" title="重置">↺ 重置</button>
+                    <div class="speed-control">
+                        <span>速度</span>
+                        <select id="speed-select">
+                            <option value="500">慢</option>
+                            <option value="200" selected>中</option>
+                            <option value="50">快</option>
+                            <option value="10">极快</option>
+                        </select>
+                    </div>
+                    <div class="tree-counter">树: <span id="tree-count">0</span></div>
+                </div>
+            </div>
+
+            <!-- ==================== RIGHT PANEL ==================== -->
+            <div class="right-panel">
+                <!-- Metrics -->
+                <div class="panel-section">
+                    <h3><span style="font-size:1rem">📈</span> 训练指标</h3>
+                    <div class="metrics-grid">
+                        <div class="metric-card">
+                            <div class="metric-label">训练准确率</div>
+                            <div class="metric-value green" id="metric-train-acc">--</div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-label">测试准确率</div>
+                            <div class="metric-value blue" id="metric-test-acc">--</div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-label">训练损失</div>
+                            <div class="metric-value orange" id="metric-train-loss">--</div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-label">测试损失</div>
+                            <div class="metric-value red" id="metric-test-loss">--</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Loss curve -->
+                <div class="panel-section">
+                    <h3><span style="font-size:1rem">📉</span> 损失曲线</h3>
+                    <div class="loss-chart-container">
+                        <canvas id="lossCanvas"></canvas>
+                        <div class="chart-legend">
+                            <span><span class="line-swatch" style="background:var(--accent-orange)"></span> 训练</span>
+                            <span><span class="line-swatch" style="background:var(--accent-red)"></span> 测试</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tree viewer -->
+                <div class="panel-section">
+                    <h3><span style="font-size:1rem">🌲</span> 树结构查看</h3>
+                    <div id="tree-viewer-content">
+                        <div class="waiting-message">
+                            <div class="icon-large">🌲</div>
+                            <div>训练后可查看树结构</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Feature Importance -->
+                <div class="panel-section">
+                    <h3><span style="font-size:1rem">🎯</span> 特征重要性</h3>
+                    <div id="importance-content">
+                        <div class="waiting-message" style="min-height:60px">
+                            <div>训练后显示</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Ensemble formula -->
+                <div class="panel-section">
+                    <div class="ensemble-box" id="ensemble-box">
+                        集成预测: \(F(x) = \sum_{t=1}^{T} \eta \cdot f_t(x)\)
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // ========================================
+    // State
+    // ========================================
+    const state = {
+        dataset: 'circles',
+        noise: 0.15,
+        dataSize: 200,
+        trainRatio: 0.75,
+        numLeaves: 16,
+        maxDepth: 5,
+        learningRate: 0.1,
+        nEstimators: 50,
+        minChildSamples: 5,
+        subsample: 1.0,
+        regLambda: 1.0,
+        // Runtime
+        trainData: [], trainLabels: [],
+        testData: [], testLabels: [],
+        trees: [],
+        trainPredictions: [],
+        testPredictions: [],
+        trainLossHistory: [],
+        testLossHistory: [],
+        trainAccHistory: [],
+        testAccHistory: [],
+        autoplayTimer: null,
+        selectedTree: -1
+    };
+
+    const rng = LGBMUtils.seededRandom(42);
+
+    // ========================================
+    // Slider binding
+    // ========================================
+    function bindSlider(id, valId, stateKey, fmt) {
+        const slider = document.getElementById(id);
+        const valSpan = document.getElementById(valId);
+        slider.addEventListener('input', function() {
+            const v = parseFloat(this.value);
+            state[stateKey] = v;
+            valSpan.textContent = fmt ? fmt(v) : v;
+            saveSettings();
+        });
+    }
+
+    bindSlider('noise', 'noise-val', 'noise', v => v.toFixed(2));
+    bindSlider('datasize', 'datasize-val', 'dataSize', v => v.toString());
+    bindSlider('trainratio', 'trainratio-val', 'trainRatio', v => v.toFixed(2));
+    bindSlider('numleaves', 'numleaves-val', 'numLeaves', v => v.toString());
+    bindSlider('maxdepth', 'maxdepth-val', 'maxDepth', v => v === -1 ? '无限' : v.toString());
+    bindSlider('learningrate', 'learningrate-val', 'learningRate', v => v.toFixed(2));
+    bindSlider('nestimators', 'nestimators-val', 'nEstimators', v => v.toString());
+    bindSlider('minchild', 'minchild-val', 'minChildSamples', v => v.toString());
+    bindSlider('subsample', 'subsample-val', 'subsample', v => v.toFixed(2));
+    bindSlider('reglambda', 'reglambda-val', 'regLambda', v => v.toFixed(1));
+
+    // ========================================
+    // Dataset generation
+    // ========================================
+    function gaussianNoise(rng) {
+        const u1 = rng(), u2 = rng();
+        return Math.sqrt(-2 * Math.log(u1 + 1e-10)) * Math.cos(2 * Math.PI * u2);
+    }
+
+    function generateDataset(type, n, noise, seed) {
+        const r = LGBMUtils.seededRandom(seed);
+        const data = [], labels = [];
+
+        if (type === 'circles') {
+            for (let i = 0; i < n; i++) {
+                const label = i < n / 2 ? 0 : 1;
+                const radius = label === 0 ? 0.6 : 0.25;
+                const angle = r() * Math.PI * 2;
+                const nr = radius + gaussianNoise(r) * noise * 0.3;
+                data.push([Math.cos(angle) * nr, Math.sin(angle) * nr]);
+                labels.push(label);
+            }
+        } else if (type === 'moons') {
+            for (let i = 0; i < n; i++) {
+                const label = i < n / 2 ? 0 : 1;
+                const angle = (r() * Math.PI);
+                let x, y;
+                if (label === 0) {
+                    x = Math.cos(angle);
+                    y = Math.sin(angle);
+                } else {
+                    x = 1 - Math.cos(angle);
+                    y = 1 - Math.sin(angle) - 0.5;
+                }
+                data.push([x + gaussianNoise(r) * noise * 0.3, y + gaussianNoise(r) * noise * 0.3]);
+                labels.push(label);
+            }
+        } else if (type === 'spiral') {
+            const turns = 1.5;
+            for (let i = 0; i < n; i++) {
+                const label = i < n / 2 ? 0 : 1;
+                const idx = label === 0 ? i : (i - Math.floor(n / 2));
+                const count = Math.floor(n / 2);
+                const t = idx / count * turns * Math.PI * 2;
+                const radius = (idx / count) * 0.7 + 0.1;
+                const angleOff = label * Math.PI;
+                const x = Math.cos(t + angleOff) * radius + gaussianNoise(r) * noise * 0.2;
+                const y = Math.sin(t + angleOff) * radius + gaussianNoise(r) * noise * 0.2;
+                data.push([x, y]);
+                labels.push(label);
+            }
+        } else if (type === 'xor') {
+            for (let i = 0; i < n; i++) {
+                const x = r() * 2 - 1;
+                const y = r() * 2 - 1;
+                const label = (x * y > 0) ? 1 : 0;
+                data.push([x + gaussianNoise(r) * noise * 0.3, y + gaussianNoise(r) * noise * 0.3]);
+                labels.push(label);
+            }
+        }
+
+        return { data, labels };
+    }
+
+    function splitData() {
+        const seed = Math.floor(rng() * 100000);
+        const gen = generateDataset(state.dataset, state.dataSize, state.noise, seed);
+        const n = gen.data.length;
+        const nTrain = Math.round(n * state.trainRatio);
+
+        // Shuffle
+        const indices = Array.from({ length: n }, (_, i) => i);
+        const sr = LGBMUtils.seededRandom(seed + 1);
+        for (let i = n - 1; i > 0; i--) {
+            const j = Math.floor(sr() * (i + 1));
+            [indices[i], indices[j]] = [indices[j], indices[i]];
+        }
+
+        state.trainData = [];
+        state.trainLabels = [];
+        state.testData = [];
+        state.testLabels = [];
+
+        for (let i = 0; i < nTrain; i++) {
+            state.trainData.push(gen.data[indices[i]]);
+            state.trainLabels.push(gen.labels[indices[i]]);
+        }
+        for (let i = nTrain; i < n; i++) {
+            state.testData.push(gen.data[indices[i]]);
+            state.testLabels.push(gen.labels[indices[i]]);
+        }
+    }
+
+    // ========================================
+    // LightGBM-style tree building (leaf-wise)
+    // ========================================
+    function buildLeafWiseTree(data, targets, hessians, params) {
+        const maxLeaves = params.numLeaves || 16;
+        const maxDepth = params.maxDepth <= 0 ? 999 : params.maxDepth;
+        const minSamples = params.minChildSamples || 5;
+        const lambda = params.regLambda || 1;
+        const subsampleRate = params.subsample || 1.0;
+
+        // Subsample
+        let indices = Array.from({ length: data.length }, (_, i) => i);
+        if (subsampleRate < 1.0) {
+            const sr = LGBMUtils.seededRandom(Date.now());
+            indices = indices.filter(() => sr() < subsampleRate);
+            if (indices.length < 2) indices = [0, 1];
+        }
+
+        function meanVal(idx) {
+            if (idx.length === 0) return 0;
+            let sg = 0, sh = 0;
+            for (const i of idx) { sg += targets[i]; sh += hessians[i]; }
+            return -sg / (sh + lambda);
+        }
+
+        function calcGain(idx) {
+            let sg = 0, sh = 0;
+            for (const i of idx) { sg += targets[i]; sh += hessians[i]; }
+            return (sg * sg) / (sh + lambda);
+        }
+
+        function findBestSplit(idx, depth) {
+            if (idx.length < minSamples * 2 || depth >= maxDepth) return null;
+
+            const numF = data[0].length;
+            let bestGain = 0, bestF = -1, bestThresh = 0, bestLeft = null, bestRight = null;
+            const parentGain = calcGain(idx);
+
+            for (let f = 0; f < numF; f++) {
+                const sorted = idx.slice().sort((a, b) => data[a][f] - data[b][f]);
+                let leftG = 0, leftH = 0;
+                let totalG = 0, totalH = 0;
+                for (const i of sorted) { totalG += targets[i]; totalH += hessians[i]; }
+
+                for (let k = 0; k < sorted.length - 1; k++) {
+                    leftG += targets[sorted[k]];
+                    leftH += hessians[sorted[k]];
+                    if (k + 1 < minSamples || sorted.length - k - 1 < minSamples) continue;
+                    if (data[sorted[k]][f] === data[sorted[k + 1]][f]) continue;
+
+                    const rightG = totalG - leftG;
+                    const rightH = totalH - leftH;
+                    const gain = (leftG * leftG) / (leftH + lambda) +
+                                 (rightG * rightG) / (rightH + lambda) - parentGain;
+
+                    if (gain > bestGain) {
+                        bestGain = gain;
+                        bestF = f;
+                        bestThresh = (data[sorted[k]][f] + data[sorted[k + 1]][f]) / 2;
+                        bestLeft = sorted.slice(0, k + 1);
+                        bestRight = sorted.slice(k + 1);
+                    }
+                }
+            }
+
+            if (bestF === -1) return null;
+            return { gain: bestGain, feature: bestF, threshold: bestThresh, leftIdx: bestLeft, rightIdx: bestRight };
+        }
+
+        // Start with root
+        const root = { indices: indices, value: meanVal(indices), depth: 0, count: indices.length };
+        let leaves = [root];
+
+        while (leaves.length < maxLeaves) {
+            // Find best leaf to split
+            let bestLeaf = null, bestSplit = null, bestLeafIdx = -1;
+            for (let l = 0; l < leaves.length; l++) {
+                if (leaves[l].feature !== undefined) continue; // already split
+                const split = findBestSplit(leaves[l].indices, leaves[l].depth);
+                if (split && (!bestSplit || split.gain > bestSplit.gain)) {
+                    bestSplit = split;
+                    bestLeaf = leaves[l];
+                    bestLeafIdx = l;
+                }
+            }
+
+            if (!bestSplit) break;
+
+            // Split
+            bestLeaf.feature = bestSplit.feature;
+            bestLeaf.threshold = bestSplit.threshold;
+            bestLeaf.gain = bestSplit.gain;
+
+            const leftNode = {
+                indices: bestSplit.leftIdx,
+                value: meanVal(bestSplit.leftIdx),
+                depth: bestLeaf.depth + 1,
+                count: bestSplit.leftIdx.length
+            };
+            const rightNode = {
+                indices: bestSplit.rightIdx,
+                value: meanVal(bestSplit.rightIdx),
+                depth: bestLeaf.depth + 1,
+                count: bestSplit.rightIdx.length
+            };
+
+            bestLeaf.left = leftNode;
+            bestLeaf.right = rightNode;
+
+            leaves.splice(bestLeafIdx, 1, leftNode, rightNode);
+        }
+
+        // Clean indices from tree
+        function cleanTree(node) {
+            const result = { value: node.value, count: node.count };
+            if (node.feature !== undefined) {
+                result.feature = node.feature;
+                result.threshold = node.threshold;
+                result.gain = node.gain;
+                result.left = cleanTree(node.left);
+                result.right = cleanTree(node.right);
+            }
+            return result;
+        }
+
+        return cleanTree(root);
+    }
+
+    function predictSingleTree(tree, sample) {
+        if (tree.feature === undefined) return tree.value;
+        if (sample[tree.feature] <= tree.threshold) return predictSingleTree(tree.left, sample);
+        return predictSingleTree(tree.right, sample);
+    }
+
+    // ========================================
+    // Training logic
+    // ========================================
+    function resetTraining() {
+        stopAutoplay();
+        state.trees = [];
+        state.trainPredictions = new Array(state.trainData.length).fill(0);
+        state.testPredictions = new Array(state.testData.length).fill(0);
+        state.trainLossHistory = [];
+        state.testLossHistory = [];
+        state.trainAccHistory = [];
+        state.testAccHistory = [];
+        state.selectedTree = -1;
+        updateMetrics();
+        updateTreeViewer();
+        updateImportance();
+        drawMainViz();
+        drawLossChart();
+    }
+
+    function trainOneStep() {
+        if (state.trees.length >= state.nEstimators) return false;
+        if (state.trainData.length === 0) return false;
+
+        const n = state.trainData.length;
+        // Compute gradients (logloss for classification)
+        const gradients = new Array(n);
+        const hessians = new Array(n);
+        for (let i = 0; i < n; i++) {
+            const p = LGBMUtils.sigmoid(state.trainPredictions[i]);
+            gradients[i] = p - state.trainLabels[i];
+            hessians[i] = Math.max(p * (1 - p), 1e-6);
+        }
+
+        // Build tree
+        const tree = buildLeafWiseTree(state.trainData, gradients, hessians, {
+            numLeaves: state.numLeaves,
+            maxDepth: state.maxDepth,
+            minChildSamples: state.minChildSamples,
+            regLambda: state.regLambda,
+            subsample: state.subsample
+        });
+
+        state.trees.push(tree);
+
+        // Update predictions
+        const lr = state.learningRate;
+        for (let i = 0; i < n; i++) {
+            state.trainPredictions[i] += lr * predictSingleTree(tree, state.trainData[i]);
+        }
+        for (let i = 0; i < state.testData.length; i++) {
+            state.testPredictions[i] += lr * predictSingleTree(tree, state.testData[i]);
+        }
+
+        // Compute metrics
+        const trainLoss = computeLogloss(state.trainPredictions, state.trainLabels);
+        const testLoss = computeLogloss(state.testPredictions, state.testLabels);
+        const trainAcc = computeAccuracy(state.trainPredictions, state.trainLabels);
+        const testAcc = computeAccuracy(state.testPredictions, state.testLabels);
+
+        state.trainLossHistory.push(trainLoss);
+        state.testLossHistory.push(testLoss);
+        state.trainAccHistory.push(trainAcc);
+        state.testAccHistory.push(testAcc);
+
+        return true;
+    }
+
+    function trainAll() {
+        splitData();
+        resetTraining();
+        while (state.trees.length < state.nEstimators) {
+            if (!trainOneStep()) break;
+        }
+        updateMetrics();
+        updateTreeViewer();
+        updateImportance();
+        drawMainViz();
+        drawLossChart();
+    }
+
+    function computeLogloss(preds, labels) {
+        let loss = 0;
+        for (let i = 0; i < preds.length; i++) {
+            const p = LGBMUtils.sigmoid(preds[i]);
+            loss -= labels[i] * Math.log(p + 1e-15) + (1 - labels[i]) * Math.log(1 - p + 1e-15);
+        }
+        return loss / preds.length;
+    }
+
+    function computeAccuracy(preds, labels) {
+        let correct = 0;
+        for (let i = 0; i < preds.length; i++) {
+            const pred = LGBMUtils.sigmoid(preds[i]) >= 0.5 ? 1 : 0;
+            if (pred === labels[i]) correct++;
+        }
+        return correct / preds.length;
+    }
+
+    // ========================================
+    // Visualization: Main decision boundary
+    // ========================================
+    const mainCanvas = document.getElementById('mainCanvas');
+    const mainCtx = mainCanvas.getContext('2d');
+
+    function drawMainViz() {
+        const container = mainCanvas.parentElement;
+        const w = container.clientWidth;
+        const h = container.clientHeight;
+        const dpr = window.devicePixelRatio || 1;
+        mainCanvas.width = w * dpr;
+        mainCanvas.height = h * dpr;
+        mainCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+        // Determine data bounds
+        const allData = [...state.trainData, ...state.testData];
+        if (allData.length === 0) {
+            mainCtx.fillStyle = '#1a1a2e';
+            mainCtx.fillRect(0, 0, w, h);
+            mainCtx.fillStyle = '#6c6c7c';
+            mainCtx.font = '14px sans-serif';
+            mainCtx.textAlign = 'center';
+            mainCtx.fillText('点击 "训练" 开始', w / 2, h / 2);
+            return;
+        }
+
+        let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+        for (const d of allData) {
+            if (d[0] < minX) minX = d[0];
+            if (d[0] > maxX) maxX = d[0];
+            if (d[1] < minY) minY = d[1];
+            if (d[1] > maxY) maxY = d[1];
+        }
+        const padX = (maxX - minX) * 0.15 || 0.5;
+        const padY = (maxY - minY) * 0.15 || 0.5;
+        minX -= padX; maxX += padX;
+        minY -= padY; maxY += padY;
+
+        function toScreen(x, y) {
+            return [
+                (x - minX) / (maxX - minX) * w,
+                h - (y - minY) / (maxY - minY) * h
+            ];
+        }
+
+        // Draw decision boundary heatmap
+        const resolution = 80;
+        const cellW = w / resolution;
+        const cellH = h / resolution;
+
+        if (state.trees.length > 0) {
+            const imageData = mainCtx.createImageData(resolution, resolution);
+            for (let iy = 0; iy < resolution; iy++) {
+                for (let ix = 0; ix < resolution; ix++) {
+                    const px = minX + (ix + 0.5) / resolution * (maxX - minX);
+                    const py = maxY - (iy + 0.5) / resolution * (maxY - minY);
+                    const sample = [px, py];
+                    let pred = 0;
+                    for (const tree of state.trees) {
+                        pred += state.learningRate * predictSingleTree(tree, sample);
+                    }
+                    const prob = LGBMUtils.sigmoid(pred);
+
+                    // Color mapping: class0 = warm red-orange, class1 = cool blue
+                    const idx = (iy * resolution + ix) * 4;
+                    if (prob < 0.5) {
+                        const t = prob * 2; // 0->1 as prob goes 0->0.5
+                        imageData.data[idx]     = Math.round(180 - t * 50);  // R
+                        imageData.data[idx + 1] = Math.round(60 + t * 40);   // G
+                        imageData.data[idx + 2] = Math.round(60 + t * 40);   // B
+                        imageData.data[idx + 3] = 180;
+                    } else {
+                        const t = (prob - 0.5) * 2; // 0->1 as prob goes 0.5->1
+                        imageData.data[idx]     = Math.round(130 - t * 90);  // R
+                        imageData.data[idx + 1] = Math.round(100 + t * 50);  // G
+                        imageData.data[idx + 2] = Math.round(100 + t * 140); // B
+                        imageData.data[idx + 3] = 180;
+                    }
+                }
+            }
+
+            // Draw to offscreen, then scale up
+            const offscreen = document.createElement('canvas');
+            offscreen.width = resolution;
+            offscreen.height = resolution;
+            offscreen.getContext('2d').putImageData(imageData, 0, 0);
+
+            mainCtx.imageSmoothingEnabled = true;
+            mainCtx.imageSmoothingQuality = 'high';
+            mainCtx.drawImage(offscreen, 0, 0, w, h);
+        } else {
+            mainCtx.fillStyle = '#1a1a2e';
+            mainCtx.fillRect(0, 0, w, h);
+        }
+
+        // Draw grid lines (subtle)
+        mainCtx.strokeStyle = 'rgba(255,255,255,0.05)';
+        mainCtx.lineWidth = 0.5;
+        for (let i = 0; i <= 10; i++) {
+            const sx = w * i / 10;
+            const sy = h * i / 10;
+            mainCtx.beginPath();
+            mainCtx.moveTo(sx, 0); mainCtx.lineTo(sx, h);
+            mainCtx.stroke();
+            mainCtx.beginPath();
+            mainCtx.moveTo(0, sy); mainCtx.lineTo(w, sy);
+            mainCtx.stroke();
+        }
+
+        // Draw test points (hollow)
+        for (let i = 0; i < state.testData.length; i++) {
+            const [sx, sy] = toScreen(state.testData[i][0], state.testData[i][1]);
+            const color = state.testLabels[i] === 0 ? '#ff6b6b' : '#4fc3f7';
+            mainCtx.beginPath();
+            mainCtx.arc(sx, sy, 5, 0, Math.PI * 2);
+            mainCtx.strokeStyle = color;
+            mainCtx.lineWidth = 2;
+            mainCtx.fillStyle = 'rgba(26,26,46,0.6)';
+            mainCtx.fill();
+            mainCtx.stroke();
+        }
+
+        // Draw train points (solid)
+        for (let i = 0; i < state.trainData.length; i++) {
+            const [sx, sy] = toScreen(state.trainData[i][0], state.trainData[i][1]);
+            const color = state.trainLabels[i] === 0 ? '#ff6b6b' : '#4fc3f7';
+            mainCtx.beginPath();
+            mainCtx.arc(sx, sy, 4.5, 0, Math.PI * 2);
+            mainCtx.fillStyle = color;
+            mainCtx.fill();
+            mainCtx.strokeStyle = 'rgba(0,0,0,0.4)';
+            mainCtx.lineWidth = 1;
+            mainCtx.stroke();
+        }
+    }
+
+    // ========================================
+    // Loss chart
+    // ========================================
+    const lossCanvas = document.getElementById('lossCanvas');
+    const lossCtx = lossCanvas.getContext('2d');
+
+    function drawLossChart() {
+        const container = lossCanvas.parentElement;
+        const w = container.clientWidth - 10;
+        const h = container.clientHeight - 10;
+        const dpr = window.devicePixelRatio || 1;
+        lossCanvas.width = w * dpr;
+        lossCanvas.height = h * dpr;
+        lossCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+        lossCtx.fillStyle = 'var(--bg-primary)';
+        lossCtx.clearRect(0, 0, w, h);
+
+        const trainLoss = state.trainLossHistory;
+        const testLoss = state.testLossHistory;
+        if (trainLoss.length === 0) {
+            lossCtx.fillStyle = '#6c6c7c';
+            lossCtx.font = '12px sans-serif';
+            lossCtx.textAlign = 'center';
+            lossCtx.fillText('训练后显示损失曲线', w / 2, h / 2);
+            return;
+        }
+
+        const pad = { top: 20, right: 10, bottom: 25, left: 45 };
+        const chartW = w - pad.left - pad.right;
+        const chartH = h - pad.top - pad.bottom;
+
+        const allLoss = [...trainLoss, ...testLoss];
+        let minL = Math.min(...allLoss);
+        let maxL = Math.max(...allLoss);
+        if (maxL === minL) { maxL = minL + 1; }
+        const rangeL = maxL - minL;
+        minL -= rangeL * 0.05;
+        maxL += rangeL * 0.05;
+
+        function toChart(idx, val) {
+            const x = pad.left + (idx / (Math.max(trainLoss.length - 1, 1))) * chartW;
+            const y = pad.top + (1 - (val - minL) / (maxL - minL)) * chartH;
+            return [x, y];
+        }
+
+        // Axes
+        lossCtx.strokeStyle = 'rgba(255,255,255,0.1)';
+        lossCtx.lineWidth = 1;
+        lossCtx.beginPath();
+        lossCtx.moveTo(pad.left, pad.top);
+        lossCtx.lineTo(pad.left, pad.top + chartH);
+        lossCtx.lineTo(pad.left + chartW, pad.top + chartH);
+        lossCtx.stroke();
+
+        // Y labels
+        lossCtx.fillStyle = '#6c6c7c';
+        lossCtx.font = '10px monospace';
+        lossCtx.textAlign = 'right';
+        for (let i = 0; i <= 4; i++) {
+            const val = minL + (maxL - minL) * (1 - i / 4);
+            const y = pad.top + chartH * i / 4;
+            lossCtx.fillText(val.toFixed(3), pad.left - 5, y + 3);
+            lossCtx.strokeStyle = 'rgba(255,255,255,0.04)';
+            lossCtx.beginPath();
+            lossCtx.moveTo(pad.left, y);
+            lossCtx.lineTo(pad.left + chartW, y);
+            lossCtx.stroke();
+        }
+
+        // X label
+        lossCtx.fillStyle = '#6c6c7c';
+        lossCtx.textAlign = 'center';
+        lossCtx.fillText('树数量', pad.left + chartW / 2, h - 2);
+
+        // Draw lines
+        function drawLine(data, color) {
+            if (data.length < 2) return;
+            lossCtx.strokeStyle = color;
+            lossCtx.lineWidth = 2;
+            lossCtx.beginPath();
+            for (let i = 0; i < data.length; i++) {
+                const [x, y] = toChart(i, data[i]);
+                if (i === 0) lossCtx.moveTo(x, y);
+                else lossCtx.lineTo(x, y);
+            }
+            lossCtx.stroke();
+        }
+
+        drawLine(trainLoss, '#ffab40');
+        drawLine(testLoss, '#ff5252');
+    }
+
+    // ========================================
+    // Metrics display
+    // ========================================
+    function updateMetrics() {
+        const tc = state.trees.length;
+        document.getElementById('tree-count').textContent = tc;
+        document.getElementById('overlay-trees').textContent = tc;
+        document.getElementById('overlay-total').textContent = state.nEstimators;
+
+        if (tc === 0) {
+            ['metric-train-acc', 'metric-test-acc', 'metric-train-loss', 'metric-test-loss'].forEach(id =>
+                document.getElementById(id).textContent = '--');
+            document.getElementById('overlay-train-acc').textContent = '--';
+            document.getElementById('overlay-test-acc').textContent = '--';
+            return;
+        }
+
+        const tAcc = state.trainAccHistory[tc - 1];
+        const eAcc = state.testAccHistory[tc - 1];
+        const tLoss = state.trainLossHistory[tc - 1];
+        const eLoss = state.testLossHistory[tc - 1];
+
+        document.getElementById('metric-train-acc').textContent = (tAcc * 100).toFixed(1) + '%';
+        document.getElementById('metric-test-acc').textContent = (eAcc * 100).toFixed(1) + '%';
+        document.getElementById('metric-train-loss').textContent = tLoss.toFixed(4);
+        document.getElementById('metric-test-loss').textContent = eLoss.toFixed(4);
+        document.getElementById('overlay-train-acc').textContent = (tAcc * 100).toFixed(1) + '%';
+        document.getElementById('overlay-test-acc').textContent = (eAcc * 100).toFixed(1) + '%';
+    }
+
+    // ========================================
+    // Tree viewer
+    // ========================================
+    function updateTreeViewer() {
+        const container = document.getElementById('tree-viewer-content');
+        if (state.trees.length === 0) {
+            container.innerHTML = '<div class="waiting-message"><div class="icon-large">🌲</div><div>训练后可查看树结构</div></div>';
+            return;
+        }
+
+        let html = '<div class="tree-selector">';
+        for (let i = 0; i < state.trees.length; i++) {
+            const active = i === state.selectedTree ? ' active' : '';
+            html += `<button class="tree-btn${active}" data-tree="${i}">${i + 1}</button>`;
+        }
+        html += '</div>';
+        html += '<canvas id="treeViewCanvas" class="tree-view-canvas" width="300" height="200"></canvas>';
+        container.innerHTML = html;
+
+        // Bind tree buttons
+        container.querySelectorAll('.tree-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+                state.selectedTree = parseInt(this.dataset.tree);
+                container.querySelectorAll('.tree-btn').forEach(b => b.classList.remove('active'));
+                this.classList.add('active');
+                drawTreeDiagram();
+            });
+        });
+
+        // Auto-select last tree if none selected
+        if (state.selectedTree < 0 || state.selectedTree >= state.trees.length) {
+            state.selectedTree = state.trees.length - 1;
+            const btns = container.querySelectorAll('.tree-btn');
+            if (btns.length > 0) {
+                btns[btns.length - 1].classList.add('active');
+            }
+        }
+        drawTreeDiagram();
+    }
+
+    function drawTreeDiagram() {
+        const canvas = document.getElementById('treeViewCanvas');
+        if (!canvas || state.selectedTree < 0) return;
+
+        const tree = state.trees[state.selectedTree];
+        const nodes = [];
+        const edges = [];
+
+        // Flatten tree
+        let nextId = 0;
+        function flatten(node, depth, parentId) {
+            const id = nextId++;
+            const isLeaf = node.feature === undefined;
+            nodes.push({ id, depth, isLeaf, feature: node.feature, threshold: node.threshold, value: node.value, count: node.count, parentId });
+            if (!isLeaf) {
+                flatten(node.left, depth + 1, id);
+                flatten(node.right, depth + 1, id);
+            }
+        }
+        flatten(tree, 0, -1);
+
+        // Compute positions
+        const maxDepth = Math.max(...nodes.map(n => n.depth));
+        const w = canvas.parentElement.clientWidth - 2;
+        const h = 200;
+        const dpr = window.devicePixelRatio || 1;
+        canvas.width = w * dpr;
+        canvas.height = h * dpr;
+        canvas.style.width = w + 'px';
+        canvas.style.height = h + 'px';
+        const ctx = canvas.getContext('2d');
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        ctx.clearRect(0, 0, w, h);
+
+        if (nodes.length === 0) return;
+
+        // Assign x positions using in-order traversal
+        let xCounter = 0;
+        function assignX(node) {
+            const n = nodes[node];
+            if (n.isLeaf) {
+                n.x = xCounter++;
+                return;
+            }
+            // Find children
+            const children = nodes.filter(c => c.parentId === n.id);
+            if (children.length >= 1) assignX(children[0].id);
+            n.x = xCounter++;
+            if (children.length >= 2) assignX(children[1].id);
+        }
+        assignX(0);
+
+        const padX = 20, padY = 25;
+        const availW = w - padX * 2;
+        const availH = h - padY * 2;
+        const maxX = Math.max(...nodes.map(n => n.x));
+        const scaleX = maxX > 0 ? availW / maxX : 0;
+        const scaleY = maxDepth > 0 ? availH / maxDepth : 0;
+
+        nodes.forEach(n => {
+            n.px = padX + n.x * scaleX;
+            n.py = padY + n.depth * scaleY;
+        });
+
+        // Draw edges
+        ctx.strokeStyle = '#5a6a7a';
+        ctx.lineWidth = 1.2;
+        nodes.forEach(n => {
+            if (n.parentId >= 0) {
+                const parent = nodes[n.parentId];
+                ctx.beginPath();
+                ctx.moveTo(parent.px, parent.py);
+                ctx.lineTo(n.px, n.py);
+                ctx.stroke();
+            }
+        });
+
+        // Draw nodes
+        nodes.forEach(n => {
+            const radius = n.isLeaf ? 10 : 12;
+            ctx.beginPath();
+            ctx.arc(n.px, n.py, radius, 0, Math.PI * 2);
+            if (n.isLeaf) {
+                ctx.fillStyle = n.value > 0 ? 'rgba(79,195,247,0.3)' : 'rgba(255,107,107,0.3)';
+                ctx.strokeStyle = n.value > 0 ? '#4fc3f7' : '#ff6b6b';
+            } else {
+                ctx.fillStyle = 'rgba(22,199,154,0.2)';
+                ctx.strokeStyle = '#16c79a';
+            }
+            ctx.lineWidth = 1.5;
+            ctx.fill();
+            ctx.stroke();
+
+            // Label
+            ctx.fillStyle = '#e0e0e0';
+            ctx.font = '8px monospace';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            if (n.isLeaf) {
+                ctx.fillText(n.value.toFixed(2), n.px, n.py);
+            } else {
+                ctx.fillText('x' + n.feature, n.px, n.py - 3);
+                ctx.font = '7px monospace';
+                ctx.fillStyle = '#a8a8b8';
+                ctx.fillText(n.threshold.toFixed(2), n.px, n.py + 5);
+            }
+        });
+    }
+
+    // ========================================
+    // Feature importance
+    // ========================================
+    function updateImportance() {
+        const container = document.getElementById('importance-content');
+        if (state.trees.length === 0) {
+            container.innerHTML = '<div class="waiting-message" style="min-height:60px"><div>训练后显示</div></div>';
+            return;
+        }
+
+        // Count split frequency per feature
+        const importance = [0, 0]; // x0, x1
+        function countSplits(tree) {
+            if (tree.feature === undefined) return;
+            importance[tree.feature]++;
+            countSplits(tree.left);
+            countSplits(tree.right);
+        }
+        state.trees.forEach(countSplits);
+
+        const total = importance[0] + importance[1] || 1;
+        const names = ['x\u2080', 'x\u2081'];
+        const colors = ['var(--accent-blue)', 'var(--accent-orange)'];
+
+        let html = '<div class="importance-bars">';
+        for (let i = 0; i < 2; i++) {
+            const pct = (importance[i] / total * 100).toFixed(1);
+            html += `<div class="importance-row">
+                <span class="feat-name">${names[i]}</span>
+                <div class="bar-track">
+                    <div class="bar-fill" style="width:${pct}%;background:${colors[i]}"></div>
+                </div>
+                <span class="bar-val">${pct}%</span>
+            </div>`;
+        }
+        html += '</div>';
+        container.innerHTML = html;
+    }
+
+    // ========================================
+    // Dataset thumbnails
+    // ========================================
+    function drawThumbnails() {
+        const types = ['circles', 'moons', 'spiral', 'xor'];
+        types.forEach(type => {
+            const canvas = document.getElementById('thumb-' + type);
+            if (!canvas) return;
+            const ctx = canvas.getContext('2d');
+            const dpr = window.devicePixelRatio || 1;
+            const w = canvas.clientWidth;
+            const h = canvas.clientHeight;
+            canvas.width = w * dpr;
+            canvas.height = h * dpr;
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            ctx.fillStyle = '#0d0d1a';
+            ctx.fillRect(0, 0, w, h);
+
+            const gen = generateDataset(type, 80, 0.1, 123);
+            let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+            gen.data.forEach(d => {
+                if (d[0] < minX) minX = d[0];
+                if (d[0] > maxX) maxX = d[0];
+                if (d[1] < minY) minY = d[1];
+                if (d[1] > maxY) maxY = d[1];
+            });
+            const px = (maxX - minX) * 0.1 || 0.5;
+            const py = (maxY - minY) * 0.1 || 0.5;
+            minX -= px; maxX += px; minY -= py; maxY += py;
+
+            gen.data.forEach((d, i) => {
+                const sx = (d[0] - minX) / (maxX - minX) * w;
+                const sy = h - (d[1] - minY) / (maxY - minY) * h;
+                ctx.beginPath();
+                ctx.arc(sx, sy, 2.5, 0, Math.PI * 2);
+                ctx.fillStyle = gen.labels[i] === 0 ? '#ff6b6b' : '#4fc3f7';
+                ctx.fill();
+            });
+        });
+    }
+
+    // ========================================
+    // Dataset selection
+    // ========================================
+    document.querySelectorAll('.dataset-thumb').forEach(thumb => {
+        thumb.addEventListener('click', function() {
+            document.querySelectorAll('.dataset-thumb').forEach(t => t.classList.remove('active'));
+            this.classList.add('active');
+            state.dataset = this.dataset.dataset;
+            splitData();
+            resetTraining();
+            saveSettings();
+        });
+    });
+
+    // ========================================
+    // Button handlers
+    // ========================================
+    document.getElementById('btn-train').addEventListener('click', function() {
+        trainAll();
+    });
+
+    document.getElementById('btn-step').addEventListener('click', function() {
+        if (state.trainData.length === 0) {
+            splitData();
+            resetTraining();
+        }
+        if (trainOneStep()) {
+            updateMetrics();
+            updateTreeViewer();
+            updateImportance();
+            drawMainViz();
+            drawLossChart();
+        }
+    });
+
+    let autoplayRunning = false;
+    document.getElementById('btn-autoplay').addEventListener('click', function() {
+        if (autoplayRunning) {
+            stopAutoplay();
+            return;
+        }
+
+        if (state.trainData.length === 0) {
+            splitData();
+            resetTraining();
+        }
+
+        autoplayRunning = true;
+        this.textContent = '⏸ 暂停';
+        this.classList.add('btn-primary');
+
+        function step() {
+            if (!autoplayRunning) return;
+            if (trainOneStep()) {
+                updateMetrics();
+                updateTreeViewer();
+                updateImportance();
+                drawMainViz();
+                drawLossChart();
+                const speed = parseInt(document.getElementById('speed-select').value);
+                state.autoplayTimer = setTimeout(step, speed);
+            } else {
+                stopAutoplay();
+            }
+        }
+        step();
+    });
+
+    function stopAutoplay() {
+        autoplayRunning = false;
+        if (state.autoplayTimer) {
+            clearTimeout(state.autoplayTimer);
+            state.autoplayTimer = null;
+        }
+        const btn = document.getElementById('btn-autoplay');
+        btn.textContent = '⏩ 自动';
+        btn.classList.remove('btn-primary');
+    }
+
+    document.getElementById('btn-reset').addEventListener('click', function() {
+        splitData();
+        resetTraining();
+    });
+
+    // ========================================
+    // localStorage for settings
+    // ========================================
+    function saveSettings() {
+        try {
+            localStorage.setItem('lgbm-playground', JSON.stringify({
+                dataset: state.dataset,
+                noise: state.noise,
+                dataSize: state.dataSize,
+                trainRatio: state.trainRatio,
+                numLeaves: state.numLeaves,
+                maxDepth: state.maxDepth,
+                learningRate: state.learningRate,
+                nEstimators: state.nEstimators,
+                minChildSamples: state.minChildSamples,
+                subsample: state.subsample,
+                regLambda: state.regLambda
+            }));
+        } catch (e) {}
+    }
+
+    function loadSettings() {
+        try {
+            const s = JSON.parse(localStorage.getItem('lgbm-playground'));
+            if (!s) return;
+            const map = {
+                noise: ['noise', v => v.toFixed(2)],
+                dataSize: ['datasize', v => v.toString()],
+                trainRatio: ['trainratio', v => v.toFixed(2)],
+                numLeaves: ['numleaves', v => v.toString()],
+                maxDepth: ['maxdepth', v => v === -1 ? '无限' : v.toString()],
+                learningRate: ['learningrate', v => v.toFixed(2)],
+                nEstimators: ['nestimators', v => v.toString()],
+                minChildSamples: ['minchild', v => v.toString()],
+                subsample: ['subsample', v => v.toFixed(2)],
+                regLambda: ['reglambda', v => v.toFixed(1)]
+            };
+            for (const [key, [id, fmt]] of Object.entries(map)) {
+                if (s[key] !== undefined) {
+                    state[key] = s[key];
+                    const el = document.getElementById(id);
+                    if (el) el.value = s[key];
+                    const valEl = document.getElementById(id + '-val');
+                    if (valEl) valEl.textContent = fmt(s[key]);
+                }
+            }
+            if (s.dataset) {
+                state.dataset = s.dataset;
+                document.querySelectorAll('.dataset-thumb').forEach(t => {
+                    t.classList.toggle('active', t.dataset.dataset === s.dataset);
+                });
+            }
+        } catch (e) {}
+    }
+
+    // ========================================
+    // Resize handler
+    // ========================================
+    let resizeTimer;
+    window.addEventListener('resize', function() {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(function() {
+            drawMainViz();
+            drawLossChart();
+            drawThumbnails();
+            if (state.selectedTree >= 0) drawTreeDiagram();
+        }, 150);
+    });
+
+    // ========================================
+    // Init
+    // ========================================
+    loadSettings();
+    drawThumbnails();
+    splitData();
+    drawMainViz();
+    drawLossChart();
+
+    // Slider changes regenerate data + reset
+    ['noise', 'datasize', 'trainratio'].forEach(id => {
+        document.getElementById(id).addEventListener('change', function() {
+            splitData();
+            resetTraining();
+        });
+    });
+
+    // Parameter changes: just save (user re-trains manually)
+    ['numleaves', 'maxdepth', 'learningrate', 'nestimators', 'minchild', 'subsample', 'reglambda'].forEach(id => {
+        document.getElementById(id).addEventListener('change', function() {
+            document.getElementById('overlay-total').textContent = state.nEstimators;
+            saveSettings();
+        });
+    });
+});
+
+// KaTeX auto-render
+document.addEventListener('DOMContentLoaded', function() {
+    if (typeof renderMathInElement === 'function') {
+        renderMathInElement(document.body, {
+            delimiters: [
+                { left: '$$', right: '$$', display: true },
+                { left: '\\(', right: '\\)', display: false },
+                { left: '\\[', right: '\\]', display: true }
+            ],
+            throwOnError: false
+        });
+    }
+});
+</script>
+</body>
+</html>

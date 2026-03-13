@@ -1,0 +1,1204 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>回测框架 — 量化交易策略</title>
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+    <script defer src="../shared/scripts/nav.js"></script>
+    <script defer src="../shared/scripts/quant-utils.js"></script>
+    <style>
+        /* ========== Section-specific styles ========== */
+        .canvas-wrap { position: relative; width: 100%; border-radius: var(--radius-md); overflow: hidden; border: 1px solid var(--border-color); background: var(--bg-secondary); }
+        .canvas-wrap canvas { display: block; width: 100%; }
+        .controls-row { display: flex; flex-wrap: wrap; align-items: center; gap: 1rem; margin-bottom: 1rem; }
+        .controls-row label { font-size: 0.85rem; color: var(--text-secondary); }
+        .detail-panel { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 1rem 1.2rem; margin-top: 1rem; min-height: 80px; }
+        .detail-panel h4 { color: var(--accent-green); margin-bottom: 0.5rem; }
+        .detail-panel p { font-size: 0.88rem; margin-bottom: 0.4rem; }
+        .pseudocode { background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 1rem; font-family: var(--font-mono); font-size: 0.82rem; line-height: 1.8; color: var(--text-secondary); white-space: pre-wrap; overflow-x: auto; }
+        .pseudocode .kw { color: var(--accent-purple); }
+        .pseudocode .fn { color: var(--accent-blue); }
+        .pseudocode .cm { color: var(--text-muted); font-style: italic; }
+        .pseudocode .str { color: var(--accent-orange); }
+        .pseudocode .num { color: var(--accent-green); }
+        .metric-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 0.75rem; margin-bottom: 1rem; }
+        .metric-card { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 0.7rem 0.9rem; text-align: center; }
+        .metric-card .label { font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.3rem; }
+        .metric-card .value { font-family: var(--font-mono); font-size: 1.1rem; font-weight: 700; }
+        .metric-card .value.positive { color: var(--accent-green); }
+        .metric-card .value.negative { color: var(--accent-red); }
+        .metric-card .value.neutral { color: var(--accent-blue); }
+        .speed-bar { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.75rem; }
+        .speed-bar .bar-bg { flex: 1; height: 20px; background: var(--border-color); border-radius: 10px; overflow: hidden; }
+        .speed-bar .bar-fill { height: 100%; border-radius: 10px; transition: width 1.5s var(--anim-ease); }
+        .speed-bar .bar-label { font-family: var(--font-mono); font-size: 0.8rem; min-width: 60px; }
+        .pitfall-tabs { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1rem; }
+        .pitfall-tab { padding: 0.5rem 1rem; border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-secondary); color: var(--text-secondary); cursor: pointer; font-family: inherit; font-size: 0.85rem; transition: all 0.2s; }
+        .pitfall-tab:hover { border-color: var(--accent-orange); color: var(--accent-orange); }
+        .pitfall-tab.active { background: rgba(255,171,64,0.15); border-color: var(--accent-orange); color: var(--accent-orange); font-weight: 600; }
+        .heatmap-grid { display: grid; gap: 2px; font-family: var(--font-mono); font-size: 0.72rem; }
+        .heatmap-cell { display: flex; align-items: center; justify-content: center; border-radius: 3px; height: 32px; min-width: 40px; transition: transform 0.15s; cursor: default; }
+        .heatmap-cell:hover { transform: scale(1.15); z-index: 2; }
+        .heatmap-label { display: flex; align-items: center; justify-content: center; color: var(--text-muted); font-size: 0.72rem; font-weight: 600; }
+        .dashboard-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+        @media (max-width: 900px) { .dashboard-grid { grid-template-columns: 1fr; } }
+        .wf-timeline { position: relative; margin: 1rem 0; }
+        .formula-box { background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 0.8rem 1rem; margin: 0.75rem 0; }
+        .formula-box .formula-label { font-size: 0.78rem; color: var(--text-muted); margin-bottom: 0.4rem; }
+        .compare-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-top: 0.75rem; }
+        .compare-table th, .compare-table td { padding: 0.5rem 0.75rem; text-align: left; border-bottom: 1px solid var(--border-color); }
+        .compare-table th { color: var(--accent-green); font-weight: 600; font-size: 0.8rem; }
+        .compare-table td { color: var(--text-secondary); }
+        .compare-table tr:hover td { background: rgba(22, 199, 154, 0.05); }
+        .highlight-value { font-family: var(--font-mono); font-weight: 700; }
+        .canvas-tooltip { position: absolute; padding: 0.4rem 0.7rem; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-sm); font-size: 0.78rem; color: var(--text-primary); pointer-events: none; opacity: 0; transition: opacity 0.15s; white-space: nowrap; z-index: 10; }
+    </style>
+</head>
+<body>
+<div class="page-container">
+    <!-- ========== Header ========== -->
+    <h1>06 — 回测框架</h1>
+    <p>系统性地在历史数据上验证量化策略，识别常见陷阱，评估真实绩效。回测是量化策略开发的核心环节 — 在投入真金白银之前，我们需要在历史数据上充分验证策略的有效性和鲁棒性。</p>
+    <div class="info-box" style="margin-bottom:2rem">
+        <p><strong>本模块包含五个核心主题：</strong>回测流程可视化、两种回测架构对比、四大常见陷阱的交互式演示、完整绩效仪表盘，以及 Walk-Forward 滚动验证方法。每个部分都可交互操作。</p>
+    </div>
+
+    <!-- ===================== Section 1: 回测流程 ===================== -->
+    <div class="section" id="sec-pipeline">
+        <div class="section-title"><span class="icon">&#9881;</span><h2>回测流程</h2></div>
+        <p>点击流程中任一步骤查看详细说明。数据从左到右流经五个核心阶段。</p>
+        <div class="canvas-wrap"><canvas id="cvPipeline" height="220"></canvas></div>
+        <div class="detail-panel" id="pipelineDetail">
+            <h4>请点击上方的流程步骤</h4>
+            <p>点击流程图中的任意模块，查看该阶段的详细描述和关键要点。</p>
+        </div>
+    </div>
+
+    <!-- ===================== Section 2: 事件驱动 vs 向量化 ===================== -->
+    <div class="section" id="sec-comparison">
+        <div class="section-title"><span class="icon">&#8644;</span><h2>事件驱动 vs 向量化回测</h2></div>
+        <p>两种主流回测架构各有优劣。点击按钮切换对比视图。</p>
+        <div class="controls-row">
+            <button class="btn btn-primary" id="btnRunSpeed">运行速度对比动画</button>
+        </div>
+        <div class="compare-grid cols-2">
+            <div class="card">
+                <div class="card-header"><span class="badge badge-blue">向量化</span><h3>Vectorized Backtest</h3></div>
+                <div class="pseudocode" id="codeVec"><span class="cm"># 向量化回测 — 快速但简化</span>
+<span class="kw">def</span> <span class="fn">vectorized_backtest</span>(prices, window):
+    signals = <span class="fn">rolling_mean</span>(prices, window)
+    positions = <span class="fn">where</span>(prices > signals, <span class="num">1</span>, <span class="num">-1</span>)
+    returns = positions * <span class="fn">pct_change</span>(prices)
+    <span class="kw">return</span> <span class="fn">cumsum</span>(returns)
+
+<span class="cm"># 特点: 矩阵运算, 无循环</span>
+<span class="cm"># 优点: 速度快 (100x-1000x)</span>
+<span class="cm"># 缺点: 无法处理复杂逻辑</span></div>
+                <div class="speed-bar"><span class="bar-label" style="color:var(--accent-blue)">向量化</span><div class="bar-bg"><div class="bar-fill" id="barVec" style="width:0%;background:var(--accent-blue)"></div></div><span class="bar-label" id="barVecVal">0x</span></div>
+            </div>
+            <div class="card">
+                <div class="card-header"><span class="badge badge-purple">事件驱动</span><h3>Event-Driven Backtest</h3></div>
+                <div class="pseudocode" id="codeEvt"><span class="cm"># 事件驱动回测 — 真实但较慢</span>
+<span class="kw">def</span> <span class="fn">event_driven_backtest</span>(data_feed):
+    <span class="kw">while</span> data_feed.<span class="fn">has_next</span>():
+        event = data_feed.<span class="fn">next</span>()
+        signal = strategy.<span class="fn">on_bar</span>(event)
+        <span class="kw">if</span> signal:
+            order = portfolio.<span class="fn">generate_order</span>(signal)
+            broker.<span class="fn">execute</span>(order)
+            portfolio.<span class="fn">update</span>(broker.fill)
+
+<span class="cm"># 特点: 逐bar处理, 事件队列</span>
+<span class="cm"># 优点: 真实模拟, 处理复杂逻辑</span>
+<span class="cm"># 缺点: 速度慢 (1x)</span></div>
+                <div class="speed-bar"><span class="bar-label" style="color:var(--accent-purple)">事件驱动</span><div class="bar-bg"><div class="bar-fill" id="barEvt" style="width:0%;background:var(--accent-purple)"></div></div><span class="bar-label" id="barEvtVal">0x</span></div>
+            </div>
+        </div>
+        <div class="canvas-wrap" style="margin-top:1rem"><canvas id="cvComparison" height="200"></canvas></div>
+        <table class="compare-table" style="margin-top:1rem">
+            <thead><tr><th>特性</th><th style="color:var(--accent-blue)">向量化回测</th><th style="color:var(--accent-purple)">事件驱动回测</th></tr></thead>
+            <tbody>
+                <tr><td>执行速度</td><td class="highlight-value" style="color:var(--accent-green)">极快 (100x-1000x)</td><td class="highlight-value" style="color:var(--accent-orange)">较慢 (1x)</td></tr>
+                <tr><td>代码复杂度</td><td>低 — 几行向量操作</td><td>高 — 需要完整事件系统</td></tr>
+                <tr><td>真实度</td><td>低 — 无法模拟滑点、部分成交</td><td>高 — 可逼近实盘环境</td></tr>
+                <tr><td>适用场景</td><td>快速原型验证、因子筛选</td><td>最终策略验证、实盘前测试</td></tr>
+                <tr><td>调试难度</td><td>容易 — 一次性输出结果</td><td>较难 — 需要逐事件跟踪</td></tr>
+                <tr><td>内存使用</td><td>高 — 全量数据加载</td><td>低 — 逐事件流式处理</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- ===================== Section 3: 常见陷阱 ===================== -->
+    <div class="section" id="sec-pitfalls">
+        <div class="section-title"><span class="icon">&#9888;</span><h2>常见陷阱</h2></div>
+        <p>回测中最常见的四大偏差，点击标签交互式体验。每种偏差都会导致回测结果过于乐观，给实盘交易带来巨大风险。</p>
+        <div class="info-box warning" style="margin-bottom:1rem">
+            <p><strong>关键原则：</strong>回测绩效是策略真实表现的<em>上界</em>而非下界。任何方法论上的错误只会让回测看起来更好，而永远不会更差。因此识别并消除偏差至关重要。</p>
+        </div>
+        <div class="pitfall-tabs">
+            <button class="pitfall-tab active" data-pit="lookahead">前视偏差</button>
+            <button class="pitfall-tab" data-pit="survivor">幸存者偏差</button>
+            <button class="pitfall-tab" data-pit="overfit">过拟合</button>
+            <button class="pitfall-tab" data-pit="txcost">交易成本</button>
+        </div>
+        <div id="pitfallControls" class="controls-row"></div>
+        <div class="canvas-wrap"><canvas id="cvPitfall" height="340"></canvas></div>
+        <div class="detail-panel" id="pitfallDetail"></div>
+    </div>
+
+    <!-- ===================== Section 4: 绩效指标仪表盘 ===================== -->
+    <div class="section" id="sec-dashboard">
+        <div class="section-title"><span class="icon">&#128202;</span><h2>绩效指标仪表盘</h2></div>
+        <p>基于模拟均值回归策略的完整绩效分析。核心绩效公式如下：</p>
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-bottom:1rem;">
+            <div class="formula-box">
+                <div class="formula-label">夏普比率 (Sharpe Ratio)</div>
+                $$\text{Sharpe} = \frac{\bar{r} - r_f}{\sigma_r} \times \sqrt{252}$$
+            </div>
+            <div class="formula-box">
+                <div class="formula-label">索提诺比率 (Sortino Ratio)</div>
+                $$\text{Sortino} = \frac{\bar{r} - r_f}{\sigma_d} \times \sqrt{252}$$
+            </div>
+            <div class="formula-box">
+                <div class="formula-label">最大回撤 (Max Drawdown)</div>
+                $$\text{MDD} = \min_t \left(\frac{V_t - \max_{s \le t} V_s}{\max_{s \le t} V_s}\right)$$
+            </div>
+            <div class="formula-box">
+                <div class="formula-label">卡尔玛比率 (Calmar Ratio)</div>
+                $$\text{Calmar} = \frac{\text{CAGR}}{|\text{MDD}|}$$
+            </div>
+        </div>
+        <div class="metric-grid" id="metricsGrid"></div>
+        <div class="dashboard-grid">
+            <div class="canvas-wrap"><canvas id="cvEquity" height="260"></canvas></div>
+            <div class="canvas-wrap"><canvas id="cvHist" height="260"></canvas></div>
+            <div class="canvas-wrap"><canvas id="cvDrawdown" height="180"></canvas></div>
+            <div class="card" style="overflow:auto">
+                <h4 style="margin-bottom:0.75rem; color:var(--accent-green)">月度收益热力图 (%)</h4>
+                <div id="heatmapContainer"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===================== Section 5: Walk-Forward 优化 ===================== -->
+    <div class="section" id="sec-walkforward">
+        <div class="section-title"><span class="icon">&#128640;</span><h2>Walk-Forward 优化</h2></div>
+        <p>训练-测试滚动验证，揭示样本内与样本外绩效差异。</p>
+        <div class="controls-row">
+            <div class="slider-group">
+                <label>训练窗口:</label>
+                <input type="range" id="wfTrain" min="6" max="24" value="12" style="width:140px">
+                <span class="slider-value" id="wfTrainVal">12月</span>
+            </div>
+            <div class="slider-group">
+                <label>步进长度:</label>
+                <input type="range" id="wfStep" min="1" max="6" value="3" style="width:140px">
+                <span class="slider-value" id="wfStepVal">3月</span>
+            </div>
+            <button class="btn btn-primary" id="btnWFRun">运行 Walk-Forward</button>
+        </div>
+        <div class="canvas-wrap"><canvas id="cvWF" height="320"></canvas></div>
+        <div class="detail-panel" id="wfDetail">
+            <h4>Walk-Forward 分析</h4>
+            <p>调整训练窗口和步进长度参数，然后点击"运行"查看结果。观察样本内优化绩效与实际样本外表现之间的差距。</p>
+        </div>
+        <div class="info-box warning" style="margin-top:1rem">
+            <p><strong>为什么需要 Walk-Forward？</strong> 传统的样本内/样本外划分只提供一次测试机会。Walk-Forward 通过滚动窗口进行多次训练-测试循环，提供更稳健的策略评估。如果样本外绩效持续低于样本内，说明策略可能存在过拟合。</p>
+        </div>
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-top:1rem;">
+            <div class="formula-box">
+                <div class="formula-label">Walk-Forward 效率比</div>
+                $$\text{WFE} = \frac{\text{OOS Sharpe}}{\text{IS Sharpe}} \times 100\%$$
+            </div>
+            <div class="formula-box">
+                <div class="formula-label">理想范围</div>
+                <p style="font-size:0.85rem; color:var(--text-secondary); margin:0">WFE > 50% 表示策略具有良好的泛化能力。WFE < 30% 通常意味着严重过拟合。</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+/* ===========================================================================
+   回测框架可视化 — 全部 Canvas 2D
+   =========================================================================== */
+document.addEventListener('DOMContentLoaded', () => {
+
+/* ---------- Utility helpers ---------- */
+const $ = s => document.querySelector(s);
+const $$ = s => document.querySelectorAll(s);
+const PI2 = Math.PI * 2;
+const lerp = (a, b, t) => a + (b - a) * t;
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+
+function resizeCanvas(canvas, h) {
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.parentElement.getBoundingClientRect();
+    canvas.width = rect.width * dpr;
+    canvas.height = (h || rect.height) * dpr;
+    canvas.style.height = h + 'px';
+    const ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+    return { ctx, w: rect.width, h: h };
+}
+
+function getCSS(v) { return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); }
+const COL = {
+    green: '#16c79a', blue: '#4fc3f7', purple: '#b388ff', orange: '#ffab40',
+    red: '#ff5252', yellow: '#ffd740', pink: '#ff80ab', text: '#e8e8e8',
+    muted: '#6c6c7c', border: '#2a2a4a', bg: '#1a1a2e', bgSec: '#16213e', bgCard: '#0f3460'
+};
+
+/* Seeded random for reproducibility */
+function seededRandom(seed) { let s = seed; return () => { s = (s * 16807 + 0) % 2147483647; return (s - 1) / 2147483646; }; }
+
+/* Generate synthetic daily returns */
+function genReturns(n, mu, sigma, seed) {
+    const rng = seededRandom(seed || 42);
+    const r = [];
+    for (let i = 0; i < n; i++) {
+        const u1 = rng(), u2 = rng();
+        const z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(PI2 * u2);
+        r.push(mu + sigma * z);
+    }
+    return r;
+}
+
+function cumReturn(returns) {
+    const eq = [1];
+    for (let i = 0; i < returns.length; i++) eq.push(eq[i] * (1 + returns[i]));
+    return eq;
+}
+
+function drawdown(equity) {
+    const dd = [0];
+    let peak = equity[0];
+    for (let i = 1; i < equity.length; i++) {
+        peak = Math.max(peak, equity[i]);
+        dd.push((equity[i] - peak) / peak);
+    }
+    return dd;
+}
+
+/* ===================== Section 1: Pipeline ===================== */
+(function initPipeline() {
+    const canvas = $('#cvPipeline');
+    const steps = [
+        { label: '历史数据', desc: '历史行情数据（OHLCV）是回测的基础输入。数据质量直接决定回测结果的可信度。需要注意复权处理、缺失值填充、异常值过滤等问题。', color: COL.blue, icon: '📊' },
+        { label: '信号生成', desc: '根据策略逻辑（如均线交叉、RSI超卖等）在每个时间步生成交易信号：买入(+1)、卖出(-1)或持有(0)。这是策略的核心决策模块。', color: COL.green, icon: '📡' },
+        { label: '仓位管理', desc: '将信号转化为目标仓位大小。常见方法：等权重、风险平价、Kelly公式、波动率调整等。好的仓位管理能显著提升风险调整后收益。', color: COL.purple, icon: '⚖' },
+        { label: '模拟执行', desc: '模拟实际交易执行：包括滑点模型、成交量约束、手续费计算、涨跌停限制等。越真实的执行模型，回测结果越接近实盘。', color: COL.orange, icon: '🔄' },
+        { label: '绩效评估', desc: '计算策略的各项绩效指标：收益率、夏普比率、最大回撤、胜率等。通过多维度指标综合评价策略质量，避免单一指标误导。', color: COL.pink, icon: '📈' }
+    ];
+
+    let active = -1;
+    let animT = 0;
+    let boxes = [];
+    let particles = [];
+
+    function layout() {
+        const { ctx, w, h } = resizeCanvas(canvas, 220);
+        const pad = 30, boxW = (w - pad * 2 - 40 * (steps.length - 1)) / steps.length;
+        const boxH = 80, y0 = (h - boxH) / 2;
+        boxes = steps.map((s, i) => ({ x: pad + i * (boxW + 40), y: y0, w: boxW, h: boxH, step: s, idx: i }));
+        return { ctx, w, h };
+    }
+
+    function draw() {
+        const { ctx, w, h } = layout();
+        ctx.clearRect(0, 0, w, h);
+
+        /* Draw connectors with animated particles */
+        for (let i = 0; i < boxes.length - 1; i++) {
+            const a = boxes[i], b = boxes[i + 1];
+            const x1 = a.x + a.w, y1 = a.y + a.h / 2;
+            const x2 = b.x, y2 = b.y + b.h / 2;
+            ctx.beginPath();
+            ctx.moveTo(x1, y1); ctx.lineTo(x2, y2);
+            ctx.strokeStyle = COL.border; ctx.lineWidth = 2; ctx.stroke();
+            /* Arrow */
+            const ax = x2 - 8, ay = y2;
+            ctx.beginPath(); ctx.moveTo(x2, y2); ctx.lineTo(ax, ay - 5); ctx.lineTo(ax, ay + 5); ctx.closePath();
+            ctx.fillStyle = COL.muted; ctx.fill();
+        }
+
+        /* Animated particles along connectors */
+        for (let i = 0; i < boxes.length - 1; i++) {
+            const a = boxes[i], b = boxes[i + 1];
+            const x1 = a.x + a.w, y1 = a.y + a.h / 2;
+            const x2 = b.x, y2 = b.y + b.h / 2;
+            for (let p = 0; p < 3; p++) {
+                const t = ((animT * 0.8 + p * 0.33 + i * 0.15) % 1);
+                const px = lerp(x1, x2, t), py = lerp(y1, y2, t);
+                const alpha = Math.sin(t * Math.PI) * 0.8;
+                ctx.beginPath(); ctx.arc(px, py, 3, 0, PI2);
+                ctx.fillStyle = steps[i].color + Math.round(alpha * 255).toString(16).padStart(2, '0');
+                ctx.fill();
+            }
+        }
+
+        /* Draw boxes */
+        boxes.forEach((b, i) => {
+            const isActive = i === active;
+            const isHover = i === hoverIdx && !isActive;
+            const r = 10;
+
+            /* Glow on hover */
+            if (isHover) {
+                ctx.shadowColor = b.step.color;
+                ctx.shadowBlur = 12;
+            }
+
+            ctx.beginPath();
+            ctx.roundRect(b.x, b.y, b.w, b.h, r);
+            ctx.fillStyle = isActive ? b.step.color + '30' : (isHover ? b.step.color + '15' : COL.bgSec);
+            ctx.fill();
+            ctx.strokeStyle = isActive ? b.step.color : (isHover ? b.step.color + '88' : COL.border);
+            ctx.lineWidth = isActive ? 2.5 : (isHover ? 1.5 : 1);
+            ctx.stroke();
+            ctx.shadowBlur = 0;
+
+            /* Icon */
+            ctx.font = '20px serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(b.step.icon, b.x + b.w / 2, b.y + 30);
+            /* Label */
+            ctx.font = '600 13px "Noto Sans SC", sans-serif';
+            ctx.fillStyle = isActive ? b.step.color : COL.text;
+            ctx.fillText(b.step.label, b.x + b.w / 2, b.y + 55);
+            /* Step number */
+            ctx.font = '11px monospace';
+            ctx.fillStyle = COL.muted;
+            ctx.fillText('Step ' + (i + 1), b.x + b.w / 2, b.y + 72);
+        });
+    }
+
+    function animate() {
+        animT = (animT + 0.004) % 1;
+        draw();
+        requestAnimationFrame(animate);
+    }
+
+    canvas.addEventListener('click', e => {
+        const rect = canvas.getBoundingClientRect();
+        const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+        const hit = boxes.find(b => mx >= b.x && mx <= b.x + b.w && my >= b.y && my <= b.y + b.h);
+        if (hit) {
+            active = hit.idx;
+            const s = hit.step;
+            $('#pipelineDetail').innerHTML = `<h4 style="color:${s.color}">Step ${hit.idx + 1}: ${s.label}</h4><p>${s.desc}</p>`;
+        }
+    });
+
+    canvas.style.cursor = 'pointer';
+
+    /* Hover highlight */
+    let hoverIdx = -1;
+    canvas.addEventListener('mousemove', e => {
+        const rect = canvas.getBoundingClientRect();
+        const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+        const hit = boxes.findIndex(b => mx >= b.x && mx <= b.x + b.w && my >= b.y && my <= b.y + b.h);
+        if (hit !== hoverIdx) {
+            hoverIdx = hit;
+            canvas.style.cursor = hit >= 0 ? 'pointer' : 'default';
+        }
+    });
+    canvas.addEventListener('mouseleave', () => { hoverIdx = -1; });
+
+    animate();
+})();
+
+/* ===================== Section 2: Comparison Animation ===================== */
+(function initComparison() {
+    const canvas = $('#cvComparison');
+    let animating = false;
+
+    function drawComparison(vecProgress, evtProgress) {
+        const { ctx, w, h } = resizeCanvas(canvas, 200);
+        ctx.clearRect(0, 0, w, h);
+        const mid = w / 2, pad = 20;
+
+        /* Left: Vectorized — matrix multiplication visual */
+        ctx.font = '600 13px "Noto Sans SC", sans-serif';
+        ctx.fillStyle = COL.blue; ctx.textAlign = 'center';
+        ctx.fillText('向量化: 矩阵并行运算', mid / 2, 22);
+
+        const gridSize = 6, cellW = 18, cellH = 18, gx = mid / 2 - gridSize * cellW / 2, gy = 38;
+        for (let r = 0; r < gridSize; r++) {
+            for (let c = 0; c < gridSize; c++) {
+                const idx = r * gridSize + c;
+                const filled = idx / (gridSize * gridSize) < vecProgress;
+                ctx.fillStyle = filled ? COL.blue + 'cc' : COL.border;
+                ctx.fillRect(gx + c * cellW + 1, gy + r * cellH + 1, cellW - 2, cellH - 2);
+            }
+        }
+        if (vecProgress >= 1) {
+            ctx.font = '700 28px monospace'; ctx.fillStyle = COL.blue;
+            ctx.fillText('DONE', mid / 2, gy + gridSize * cellH + 40);
+        }
+
+        /* Divider */
+        ctx.beginPath(); ctx.moveTo(mid, 10); ctx.lineTo(mid, h - 10);
+        ctx.strokeStyle = COL.border; ctx.lineWidth = 1; ctx.setLineDash([4, 4]); ctx.stroke(); ctx.setLineDash([]);
+
+        /* Right: Event-driven — sequential bar processing */
+        ctx.font = '600 13px "Noto Sans SC", sans-serif';
+        ctx.fillStyle = COL.purple; ctx.textAlign = 'center';
+        ctx.fillText('事件驱动: 逐Bar处理', mid + mid / 2, 22);
+
+        const barCount = 30, barW = (mid - pad * 2) / barCount;
+        const bx0 = mid + pad, by0 = 45, barH = 90;
+        for (let i = 0; i < barCount; i++) {
+            const filled = i / barCount < evtProgress;
+            ctx.fillStyle = filled ? COL.purple + 'cc' : COL.border;
+            const bh = 20 + Math.sin(i * 0.7) * 15 + 30;
+            ctx.fillRect(bx0 + i * barW + 1, by0 + barH - bh, barW - 2, bh);
+        }
+        if (evtProgress >= 1) {
+            ctx.font = '700 28px monospace'; ctx.fillStyle = COL.purple;
+            ctx.fillText('DONE', mid + mid / 2, by0 + barH + 40);
+        }
+
+        /* Progress labels */
+        ctx.font = '12px monospace';
+        ctx.fillStyle = COL.text;
+        ctx.textAlign = 'center';
+        ctx.fillText(Math.round(vecProgress * 100) + '%', mid / 2, h - 10);
+        ctx.fillText(Math.round(evtProgress * 100) + '%', mid + mid / 2, h - 10);
+    }
+
+    drawComparison(0, 0);
+
+    $('#btnRunSpeed').addEventListener('click', () => {
+        if (animating) return;
+        animating = true;
+        let vec = 0, evt = 0;
+        const id = setInterval(() => {
+            vec = Math.min(1, vec + 0.05);
+            evt = Math.min(1, evt + 0.005);
+            drawComparison(vec, evt);
+            /* Speed bars */
+            $('#barVec').style.width = (vec * 100) + '%';
+            $('#barVecVal').textContent = Math.round(vec * 500) + 'x';
+            $('#barEvt').style.width = (evt * 100) + '%';
+            $('#barEvtVal').textContent = Math.max(1, Math.round(evt * 5)) + 'x';
+            if (vec >= 1 && evt >= 1) { clearInterval(id); animating = false; }
+        }, 30);
+    });
+})();
+
+/* ===================== Section 3: Pitfalls ===================== */
+(function initPitfalls() {
+    const canvas = $('#cvPitfall');
+    let currentPit = 'lookahead';
+    let pitState = { lookahead: true, survivor: true, overfitParam: 5, txcost: 0 };
+
+    const rng = seededRandom(123);
+    /* Generate base price data */
+    const N = 250;
+    const baseReturns = genReturns(N, 0.0003, 0.015, 55);
+    const baseEquity = cumReturn(baseReturns);
+
+    /* Lookahead: biased uses future info to inflate returns */
+    const laFair = baseEquity.slice();
+    const laBiased = (() => {
+        const eq = [1];
+        for (let i = 0; i < N; i++) {
+            const futureAvg = baseReturns.slice(i, Math.min(i + 5, N)).reduce((a, b) => a + b, 0) / 5;
+            const pos = futureAvg > 0 ? 1 : -1;
+            eq.push(eq[i] * (1 + pos * Math.abs(baseReturns[i]) * 1.8));
+        }
+        return eq;
+    })();
+
+    /* Survivorship: include dead stocks */
+    const survAll = baseEquity.slice();
+    const survSurvivors = (() => {
+        const eq = [1];
+        for (let i = 0; i < N; i++) {
+            eq.push(eq[i] * (1 + baseReturns[i] + 0.001));
+        }
+        return eq;
+    })();
+
+    /* Overfit: different param curves */
+    const overfitCurves = {};
+    for (let p = 1; p <= 10; p++) {
+        const inSample = [], outSample = [];
+        const rng2 = seededRandom(p * 7);
+        const overfit = p / 10;
+        for (let i = 0; i < 125; i++) {
+            const u1 = rng2(), u2 = rng2();
+            const z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(PI2 * u2);
+            inSample.push(0.0008 + overfit * 0.001 + 0.012 * z);
+        }
+        for (let i = 0; i < 125; i++) {
+            const u1 = rng2(), u2 = rng2();
+            const z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(PI2 * u2);
+            outSample.push(0.0003 - overfit * 0.0005 + 0.018 * z);
+        }
+        overfitCurves[p] = { is: cumReturn(inSample), oos: cumReturn(outSample) };
+    }
+
+    /* Transaction cost */
+    function txCostEquity(costBps) {
+        const eq = [1];
+        let prevPos = 0;
+        for (let i = 0; i < N; i++) {
+            const pos = baseReturns[i] > 0 ? 1 : -1;
+            const turnover = Math.abs(pos - prevPos);
+            const cost = turnover * costBps / 10000;
+            eq.push(eq[i] * (1 + baseReturns[i] - cost));
+            prevPos = pos;
+        }
+        return eq;
+    }
+
+    function renderControls() {
+        const ctr = $('#pitfallControls');
+        const det = $('#pitfallDetail');
+        if (currentPit === 'lookahead') {
+            ctr.innerHTML = `<label class="toggle"><input type="checkbox" id="laToggle" ${pitState.lookahead ? 'checked' : ''}><span class="track"></span></label><label style="font-size:0.85rem;color:var(--text-secondary)">启用前视偏差</label>`;
+            $('#laToggle').addEventListener('change', e => { pitState.lookahead = e.target.checked; drawPitfall(); });
+            det.innerHTML = `<h4 style="color:${COL.orange}">前视偏差 (Look-Ahead Bias)</h4><p>使用了在回测时点尚不可得的未来信息。例如：使用未来5天均值来决定今天的交易方向。开启偏差后收益大幅膨胀 — 这是虚假的绩效。</p><p style="color:var(--accent-green)">修复方法：严格确保每个时间步只使用当前及历史数据。</p>`;
+        } else if (currentPit === 'survivor') {
+            ctr.innerHTML = `<label class="toggle"><input type="checkbox" id="survToggle" ${pitState.survivor ? 'checked' : ''}><span class="track"></span></label><label style="font-size:0.85rem;color:var(--text-secondary)">仅含存活股票</label>`;
+            $('#survToggle').addEventListener('change', e => { pitState.survivor = e.target.checked; drawPitfall(); });
+            det.innerHTML = `<h4 style="color:${COL.orange}">幸存者偏差 (Survivorship Bias)</h4><p>仅使用当前仍在市场上交易的股票进行回测，忽略了已退市/倒闭的公司。存活股票天然表现更好，导致回测收益虚高。</p><p style="color:var(--accent-green)">修复方法：使用包含退市股票的全量数据库进行回测。</p>`;
+        } else if (currentPit === 'overfit') {
+            ctr.innerHTML = `<div class="slider-group"><label>参数复杂度:</label><input type="range" id="overfitSlider" min="1" max="10" value="${pitState.overfitParam}" style="width:180px"><span class="slider-value" id="overfitVal">${pitState.overfitParam}</span></div>`;
+            $('#overfitSlider').addEventListener('input', e => { pitState.overfitParam = +e.target.value; $('#overfitVal').textContent = e.target.value; drawPitfall(); });
+            det.innerHTML = `<h4 style="color:${COL.orange}">过拟合 (Overfitting)</h4><p>在样本内数据上过度优化参数，导致策略只能拟合历史噪声而无法泛化。参数复杂度越高，样本内外差距越大。</p><p style="color:var(--accent-green)">修复方法：使用 Walk-Forward 验证、减少参数数量、增加正则化约束。</p>`;
+        } else if (currentPit === 'txcost') {
+            ctr.innerHTML = `<div class="slider-group"><label>交易成本 (bps):</label><input type="range" id="txSlider" min="0" max="50" value="${pitState.txcost}" style="width:180px"><span class="slider-value" id="txVal">${pitState.txcost} bps</span></div>`;
+            $('#txSlider').addEventListener('input', e => { pitState.txcost = +e.target.value; $('#txVal').textContent = e.target.value + ' bps'; drawPitfall(); });
+            det.innerHTML = `<h4 style="color:${COL.orange}">交易成本忽略</h4><p>忽略手续费、滑点、市场冲击等成本。高换手策略在零成本下表现亮眼，但加入真实成本后收益可能转负。</p><p style="color:var(--accent-green)">修复方法：模型中加入真实的交易成本模型（手续费 + 滑点 + 冲击成本）。</p>`;
+        }
+    }
+
+    function drawLine(ctx, data, x0, y0, w, h, color, lineWidth) {
+        const minV = Math.min(...data), maxV = Math.max(...data);
+        const range = maxV - minV || 1;
+        ctx.beginPath();
+        data.forEach((v, i) => {
+            const x = x0 + (i / (data.length - 1)) * w;
+            const y = y0 + h - ((v - minV) / range) * h;
+            i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+        });
+        ctx.strokeStyle = color; ctx.lineWidth = lineWidth || 2; ctx.stroke();
+    }
+
+    function drawLineScaled(ctx, data, x0, y0, w, h, color, minV, maxV, lineWidth) {
+        const range = maxV - minV || 1;
+        ctx.beginPath();
+        data.forEach((v, i) => {
+            const x = x0 + (i / (data.length - 1)) * w;
+            const y = y0 + h - ((v - minV) / range) * h;
+            i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+        });
+        ctx.strokeStyle = color; ctx.lineWidth = lineWidth || 2; ctx.stroke();
+    }
+
+    function drawPitfall() {
+        const { ctx, w, h } = resizeCanvas(canvas, 340);
+        ctx.clearRect(0, 0, w, h);
+        const pad = { l: 60, r: 20, t: 40, b: 40 };
+        const cw = w - pad.l - pad.r, ch = h - pad.t - pad.b;
+
+        if (currentPit === 'lookahead') {
+            const d1 = laFair, d2 = pitState.lookahead ? laBiased : laFair;
+            const all = d1.concat(d2);
+            const minV = Math.min(...all), maxV = Math.max(...all);
+            /* Y axis */
+            ctx.font = '11px monospace'; ctx.fillStyle = COL.muted; ctx.textAlign = 'right';
+            for (let i = 0; i <= 4; i++) {
+                const v = minV + (maxV - minV) * (i / 4);
+                const y = pad.t + ch - (i / 4) * ch;
+                ctx.fillText(v.toFixed(2), pad.l - 8, y + 4);
+                ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(w - pad.r, y);
+                ctx.strokeStyle = COL.border; ctx.lineWidth = 0.5; ctx.stroke();
+            }
+            drawLineScaled(ctx, d1, pad.l, pad.t, cw, ch, COL.green, minV, maxV, 2);
+            if (pitState.lookahead) drawLineScaled(ctx, d2, pad.l, pad.t, cw, ch, COL.red, minV, maxV, 2);
+            /* Legend */
+            ctx.font = '12px "Noto Sans SC", sans-serif'; ctx.textAlign = 'left';
+            ctx.fillStyle = COL.green; ctx.fillText('● 正常回测', pad.l + 10, pad.t - 10);
+            if (pitState.lookahead) { ctx.fillStyle = COL.red; ctx.fillText('● 前视偏差', pad.l + 110, pad.t - 10); }
+            /* Title */
+            ctx.font = '600 14px "Noto Sans SC", sans-serif'; ctx.textAlign = 'center';
+            ctx.fillStyle = COL.text; ctx.fillText('前视偏差对收益曲线的影响', w / 2, 20);
+        } else if (currentPit === 'survivor') {
+            const d1 = survAll, d2 = pitState.survivor ? survSurvivors : survAll;
+            const all = d1.concat(d2);
+            const minV = Math.min(...all), maxV = Math.max(...all);
+            ctx.font = '11px monospace'; ctx.fillStyle = COL.muted; ctx.textAlign = 'right';
+            for (let i = 0; i <= 4; i++) {
+                const v = minV + (maxV - minV) * (i / 4);
+                const y = pad.t + ch - (i / 4) * ch;
+                ctx.fillText(v.toFixed(2), pad.l - 8, y + 4);
+                ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(w - pad.r, y);
+                ctx.strokeStyle = COL.border; ctx.lineWidth = 0.5; ctx.stroke();
+            }
+            drawLineScaled(ctx, d1, pad.l, pad.t, cw, ch, COL.blue, minV, maxV, 2);
+            if (pitState.survivor) drawLineScaled(ctx, d2, pad.l, pad.t, cw, ch, COL.red, minV, maxV, 2);
+            ctx.font = '12px "Noto Sans SC", sans-serif'; ctx.textAlign = 'left';
+            ctx.fillStyle = COL.blue; ctx.fillText('● 包含全部股票', pad.l + 10, pad.t - 10);
+            if (pitState.survivor) { ctx.fillStyle = COL.red; ctx.fillText('● 仅存活股票', pad.l + 130, pad.t - 10); }
+            ctx.font = '600 14px "Noto Sans SC", sans-serif'; ctx.textAlign = 'center';
+            ctx.fillStyle = COL.text; ctx.fillText('幸存者偏差对收益的影响', w / 2, 20);
+        } else if (currentPit === 'overfit') {
+            const p = pitState.overfitParam;
+            const oc = overfitCurves[p];
+            const allIS = oc.is, allOOS = oc.oos;
+            const all = allIS.concat(allOOS);
+            const minV = Math.min(...all), maxV = Math.max(...all);
+            ctx.font = '11px monospace'; ctx.fillStyle = COL.muted; ctx.textAlign = 'right';
+            for (let i = 0; i <= 4; i++) {
+                const v = minV + (maxV - minV) * (i / 4);
+                const y = pad.t + ch - (i / 4) * ch;
+                ctx.fillText(v.toFixed(2), pad.l - 8, y + 4);
+                ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(w - pad.r, y);
+                ctx.strokeStyle = COL.border; ctx.lineWidth = 0.5; ctx.stroke();
+            }
+            /* Divider at midpoint */
+            const midX = pad.l + cw / 2;
+            ctx.beginPath(); ctx.moveTo(midX, pad.t); ctx.lineTo(midX, pad.t + ch);
+            ctx.strokeStyle = COL.muted; ctx.lineWidth = 1; ctx.setLineDash([5, 5]); ctx.stroke(); ctx.setLineDash([]);
+            ctx.font = '11px "Noto Sans SC", sans-serif'; ctx.textAlign = 'center';
+            ctx.fillStyle = COL.muted;
+            ctx.fillText('样本内', pad.l + cw / 4, pad.t + ch + 20);
+            ctx.fillText('样本外', pad.l + 3 * cw / 4, pad.t + ch + 20);
+            /* In-sample */
+            drawLineScaled(ctx, allIS, pad.l, pad.t, cw / 2, ch, COL.green, minV, maxV, 2);
+            /* Out-of-sample */
+            drawLineScaled(ctx, allOOS, midX, pad.t, cw / 2, ch, COL.red, minV, maxV, 2);
+            ctx.font = '12px "Noto Sans SC", sans-serif'; ctx.textAlign = 'left';
+            ctx.fillStyle = COL.green; ctx.fillText('● 样本内', pad.l + 10, pad.t - 10);
+            ctx.fillStyle = COL.red; ctx.fillText('● 样本外', pad.l + 90, pad.t - 10);
+            ctx.fillStyle = COL.muted; ctx.fillText('复杂度: ' + p, pad.l + 170, pad.t - 10);
+            ctx.font = '600 14px "Noto Sans SC", sans-serif'; ctx.textAlign = 'center';
+            ctx.fillStyle = COL.text; ctx.fillText('过拟合: 样本内 vs 样本外', w / 2, 20);
+        } else if (currentPit === 'txcost') {
+            const d0 = txCostEquity(0), d1 = txCostEquity(pitState.txcost);
+            const all = d0.concat(d1);
+            const minV = Math.min(...all), maxV = Math.max(...all);
+            ctx.font = '11px monospace'; ctx.fillStyle = COL.muted; ctx.textAlign = 'right';
+            for (let i = 0; i <= 4; i++) {
+                const v = minV + (maxV - minV) * (i / 4);
+                const y = pad.t + ch - (i / 4) * ch;
+                ctx.fillText(v.toFixed(2), pad.l - 8, y + 4);
+                ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(w - pad.r, y);
+                ctx.strokeStyle = COL.border; ctx.lineWidth = 0.5; ctx.stroke();
+            }
+            drawLineScaled(ctx, d0, pad.l, pad.t, cw, ch, COL.green, minV, maxV, 2);
+            drawLineScaled(ctx, d1, pad.l, pad.t, cw, ch, COL.orange, minV, maxV, 2);
+            ctx.font = '12px "Noto Sans SC", sans-serif'; ctx.textAlign = 'left';
+            ctx.fillStyle = COL.green; ctx.fillText('● 零成本', pad.l + 10, pad.t - 10);
+            ctx.fillStyle = COL.orange; ctx.fillText('● 含成本 (' + pitState.txcost + ' bps)', pad.l + 90, pad.t - 10);
+            ctx.font = '600 14px "Noto Sans SC", sans-serif'; ctx.textAlign = 'center';
+            ctx.fillStyle = COL.text; ctx.fillText('交易成本对净收益的侵蚀', w / 2, 20);
+        }
+    }
+
+    $$('.pitfall-tab').forEach(btn => {
+        btn.addEventListener('click', () => {
+            $$('.pitfall-tab').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            currentPit = btn.dataset.pit;
+            renderControls();
+            drawPitfall();
+        });
+    });
+
+    renderControls();
+    drawPitfall();
+    window.addEventListener('resize', drawPitfall);
+})();
+
+/* ===================== Section 4: Dashboard ===================== */
+(function initDashboard() {
+    /* Generate 5 years of daily returns */
+    const dailyReturns = genReturns(252 * 5, 0.0004, 0.013, 77);
+    const equity = cumReturn(dailyReturns);
+    const dd = drawdown(equity);
+
+    /* Compute metrics */
+    const totalReturn = equity[equity.length - 1] / equity[0] - 1;
+    const years = dailyReturns.length / 252;
+    const cagr = Math.pow(equity[equity.length - 1], 1 / years) - 1;
+    const avgR = dailyReturns.reduce((a, b) => a + b, 0) / dailyReturns.length;
+    const stdR = Math.sqrt(dailyReturns.map(r => (r - avgR) ** 2).reduce((a, b) => a + b, 0) / dailyReturns.length);
+    const sharpe = (avgR / stdR) * Math.sqrt(252);
+    const downR = dailyReturns.filter(r => r < 0);
+    const downStd = Math.sqrt(downR.map(r => r ** 2).reduce((a, b) => a + b, 0) / downR.length);
+    const sortino = (avgR / downStd) * Math.sqrt(252);
+    const maxDD = Math.min(...dd);
+    const calmar = cagr / Math.abs(maxDD);
+    const wins = dailyReturns.filter(r => r > 0).length;
+    const winRate = wins / dailyReturns.length;
+    const grossProfit = dailyReturns.filter(r => r > 0).reduce((a, b) => a + b, 0);
+    const grossLoss = Math.abs(dailyReturns.filter(r => r < 0).reduce((a, b) => a + b, 0));
+    const profitFactor = grossProfit / grossLoss;
+
+    const metrics = [
+        { label: '总收益', value: (totalReturn * 100).toFixed(1) + '%', cls: 'positive' },
+        { label: 'CAGR', value: (cagr * 100).toFixed(1) + '%', cls: 'positive' },
+        { label: 'Sharpe', value: sharpe.toFixed(2), cls: 'neutral' },
+        { label: 'Sortino', value: sortino.toFixed(2), cls: 'neutral' },
+        { label: 'Calmar', value: calmar.toFixed(2), cls: 'neutral' },
+        { label: '最大回撤', value: (maxDD * 100).toFixed(1) + '%', cls: 'negative' },
+        { label: '胜率', value: (winRate * 100).toFixed(1) + '%', cls: 'positive' },
+        { label: '盈亏比', value: profitFactor.toFixed(2), cls: 'neutral' },
+    ];
+
+    $('#metricsGrid').innerHTML = metrics.map(m => `<div class="metric-card"><div class="label">${m.label}</div><div class="value ${m.cls}">${m.value}</div></div>`).join('');
+
+    /* Equity curve */
+    function drawEquity() {
+        const { ctx, w, h } = resizeCanvas($('#cvEquity'), 260);
+        ctx.clearRect(0, 0, w, h);
+        const pad = { l: 55, r: 15, t: 30, b: 30 };
+        const cw = w - pad.l - pad.r, ch = h - pad.t - pad.b;
+        const minV = Math.min(...equity), maxV = Math.max(...equity);
+
+        ctx.font = '600 13px "Noto Sans SC", sans-serif'; ctx.textAlign = 'center';
+        ctx.fillStyle = COL.text; ctx.fillText('权益曲线', w / 2, 18);
+
+        /* Grid */
+        ctx.font = '10px monospace'; ctx.fillStyle = COL.muted; ctx.textAlign = 'right';
+        for (let i = 0; i <= 5; i++) {
+            const v = minV + (maxV - minV) * (i / 5);
+            const y = pad.t + ch - (i / 5) * ch;
+            ctx.fillText(v.toFixed(2), pad.l - 6, y + 3);
+            ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(w - pad.r, y);
+            ctx.strokeStyle = COL.border; ctx.lineWidth = 0.5; ctx.stroke();
+        }
+
+        /* Fill under curve */
+        ctx.beginPath();
+        equity.forEach((v, i) => {
+            const x = pad.l + (i / (equity.length - 1)) * cw;
+            const y = pad.t + ch - ((v - minV) / (maxV - minV)) * ch;
+            i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+        });
+        ctx.lineTo(pad.l + cw, pad.t + ch); ctx.lineTo(pad.l, pad.t + ch); ctx.closePath();
+        const grad = ctx.createLinearGradient(0, pad.t, 0, pad.t + ch);
+        grad.addColorStop(0, COL.green + '40'); grad.addColorStop(1, COL.green + '05');
+        ctx.fillStyle = grad; ctx.fill();
+
+        /* Line */
+        ctx.beginPath();
+        equity.forEach((v, i) => {
+            const x = pad.l + (i / (equity.length - 1)) * cw;
+            const y = pad.t + ch - ((v - minV) / (maxV - minV)) * ch;
+            i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+        });
+        ctx.strokeStyle = COL.green; ctx.lineWidth = 1.5; ctx.stroke();
+
+        /* X axis labels */
+        ctx.font = '10px monospace'; ctx.fillStyle = COL.muted; ctx.textAlign = 'center';
+        for (let y = 0; y < 5; y++) {
+            const idx = Math.round(y * 252);
+            const x = pad.l + (idx / (equity.length - 1)) * cw;
+            ctx.fillText('Y' + (y + 1), x, h - 10);
+        }
+    }
+
+    /* Drawdown chart */
+    function drawDDChart() {
+        const { ctx, w, h } = resizeCanvas($('#cvDrawdown'), 180);
+        ctx.clearRect(0, 0, w, h);
+        const pad = { l: 55, r: 15, t: 25, b: 25 };
+        const cw = w - pad.l - pad.r, ch = h - pad.t - pad.b;
+        const minV = Math.min(...dd);
+
+        ctx.font = '600 13px "Noto Sans SC", sans-serif'; ctx.textAlign = 'center';
+        ctx.fillStyle = COL.text; ctx.fillText('回撤曲线', w / 2, 16);
+
+        ctx.font = '10px monospace'; ctx.fillStyle = COL.muted; ctx.textAlign = 'right';
+        for (let i = 0; i <= 3; i++) {
+            const v = minV * (1 - i / 3);
+            const y = pad.t + (i / 3) * ch;
+            ctx.fillText((v * 100).toFixed(1) + '%', pad.l - 6, y + 3);
+            ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(w - pad.r, y);
+            ctx.strokeStyle = COL.border; ctx.lineWidth = 0.5; ctx.stroke();
+        }
+
+        /* Fill */
+        ctx.beginPath();
+        dd.forEach((v, i) => {
+            const x = pad.l + (i / (dd.length - 1)) * cw;
+            const y = pad.t + (v / minV) * ch;
+            i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+        });
+        ctx.lineTo(pad.l + cw, pad.t); ctx.lineTo(pad.l, pad.t); ctx.closePath();
+        const grad = ctx.createLinearGradient(0, pad.t, 0, pad.t + ch);
+        grad.addColorStop(0, COL.red + '08'); grad.addColorStop(1, COL.red + '50');
+        ctx.fillStyle = grad; ctx.fill();
+
+        ctx.beginPath();
+        dd.forEach((v, i) => {
+            const x = pad.l + (i / (dd.length - 1)) * cw;
+            const y = pad.t + (v / minV) * ch;
+            i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+        });
+        ctx.strokeStyle = COL.red; ctx.lineWidth = 1.5; ctx.stroke();
+    }
+
+    /* Histogram */
+    function drawHistogram() {
+        const { ctx, w, h } = resizeCanvas($('#cvHist'), 260);
+        ctx.clearRect(0, 0, w, h);
+        const pad = { l: 50, r: 15, t: 30, b: 35 };
+        const cw = w - pad.l - pad.r, ch = h - pad.t - pad.b;
+
+        ctx.font = '600 13px "Noto Sans SC", sans-serif'; ctx.textAlign = 'center';
+        ctx.fillStyle = COL.text; ctx.fillText('日收益分布', w / 2, 18);
+
+        const bins = 40;
+        const minR = Math.min(...dailyReturns), maxR = Math.max(...dailyReturns);
+        const binW = (maxR - minR) / bins;
+        const counts = new Array(bins).fill(0);
+        dailyReturns.forEach(r => {
+            const idx = Math.min(bins - 1, Math.floor((r - minR) / binW));
+            counts[idx]++;
+        });
+        const maxCount = Math.max(...counts);
+
+        /* Bars */
+        const barW = cw / bins;
+        counts.forEach((c, i) => {
+            const barH = (c / maxCount) * ch;
+            const x = pad.l + i * barW;
+            const y = pad.t + ch - barH;
+            const mid = minR + (i + 0.5) * binW;
+            ctx.fillStyle = mid >= 0 ? COL.green + 'aa' : COL.red + 'aa';
+            ctx.fillRect(x + 1, y, barW - 2, barH);
+        });
+
+        /* Normal overlay */
+        ctx.beginPath();
+        for (let i = 0; i <= cw; i++) {
+            const r = minR + (i / cw) * (maxR - minR);
+            const z = (r - avgR) / stdR;
+            const pdf = Math.exp(-0.5 * z * z) / (stdR * Math.sqrt(2 * Math.PI));
+            const normH = pdf * binW * dailyReturns.length / maxCount * ch;
+            const x = pad.l + i;
+            const y = pad.t + ch - normH;
+            i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+        }
+        ctx.strokeStyle = COL.yellow; ctx.lineWidth = 2; ctx.stroke();
+
+        /* X axis */
+        ctx.font = '10px monospace'; ctx.fillStyle = COL.muted; ctx.textAlign = 'center';
+        for (let i = 0; i <= 4; i++) {
+            const v = minR + (maxR - minR) * (i / 4);
+            const x = pad.l + (i / 4) * cw;
+            ctx.fillText((v * 100).toFixed(1) + '%', x, h - 10);
+        }
+
+        /* Legend */
+        ctx.font = '11px "Noto Sans SC", sans-serif'; ctx.textAlign = 'right';
+        ctx.fillStyle = COL.yellow; ctx.fillText('— 正态拟合', w - pad.r, pad.t + 5);
+    }
+
+    /* Monthly heatmap */
+    function drawHeatmap() {
+        const container = $('#heatmapContainer');
+        const months = ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
+        const yearCount = 5;
+
+        /* Aggregate monthly returns */
+        const monthly = [];
+        for (let y = 0; y < yearCount; y++) {
+            const row = [];
+            for (let m = 0; m < 12; m++) {
+                const startDay = y * 252 + m * 21;
+                const endDay = Math.min(startDay + 21, dailyReturns.length);
+                let mr = 0;
+                for (let d = startDay; d < endDay; d++) {
+                    if (d < dailyReturns.length) mr += dailyReturns[d];
+                }
+                row.push(mr);
+            }
+            monthly.push(row);
+        }
+
+        const allMR = monthly.flat();
+        const maxAbs = Math.max(...allMR.map(Math.abs));
+
+        let html = `<div class="heatmap-grid" style="grid-template-columns: 50px repeat(12, 1fr);">`;
+        /* Header */
+        html += `<div class="heatmap-label"></div>`;
+        months.forEach(m => { html += `<div class="heatmap-label">${m}</div>`; });
+        /* Rows */
+        monthly.forEach((row, y) => {
+            html += `<div class="heatmap-label">Y${y + 1}</div>`;
+            row.forEach(v => {
+                const pct = (v / maxAbs);
+                let bg;
+                if (v >= 0) {
+                    const intensity = Math.round(clamp(pct, 0, 1) * 180);
+                    bg = `rgba(22, 199, 154, ${clamp(pct, 0.08, 0.85)})`;
+                } else {
+                    bg = `rgba(255, 82, 82, ${clamp(Math.abs(pct), 0.08, 0.85)})`;
+                }
+                html += `<div class="heatmap-cell" style="background:${bg}" title="${(v * 100).toFixed(2)}%">${(v * 100).toFixed(1)}</div>`;
+            });
+        });
+        html += '</div>';
+        container.innerHTML = html;
+    }
+
+    drawEquity();
+    drawDDChart();
+    drawHistogram();
+    drawHeatmap();
+
+    /* Equity curve crosshair tooltip */
+    const eqCanvas = $('#cvEquity');
+    const eqTooltip = document.createElement('div');
+    eqTooltip.className = 'canvas-tooltip';
+    eqCanvas.parentElement.style.position = 'relative';
+    eqCanvas.parentElement.appendChild(eqTooltip);
+
+    eqCanvas.addEventListener('mousemove', e => {
+        const rect = eqCanvas.getBoundingClientRect();
+        const mx = e.clientX - rect.left;
+        const padL = 55, padR = 15, padT = 30, padB = 30;
+        const cw = rect.width - padL - padR;
+        const t = clamp((mx - padL) / cw, 0, 1);
+        const idx = Math.round(t * (equity.length - 1));
+        if (idx >= 0 && idx < equity.length) {
+            const day = idx;
+            const val = equity[idx];
+            const ret = idx > 0 ? dailyReturns[idx - 1] : 0;
+            const ddVal = dd[idx];
+            eqTooltip.style.opacity = '1';
+            eqTooltip.style.left = mx + 'px';
+            eqTooltip.style.top = '5px';
+            eqTooltip.innerHTML = `Day ${day} | 净值: ${val.toFixed(4)} | 日收益: ${(ret * 100).toFixed(2)}% | 回撤: ${(ddVal * 100).toFixed(2)}%`;
+        }
+    });
+    eqCanvas.addEventListener('mouseleave', () => { eqTooltip.style.opacity = '0'; });
+
+    /* Drawdown crosshair tooltip */
+    const ddCanvas = $('#cvDrawdown');
+    const ddTooltip = document.createElement('div');
+    ddTooltip.className = 'canvas-tooltip';
+    ddCanvas.parentElement.style.position = 'relative';
+    ddCanvas.parentElement.appendChild(ddTooltip);
+
+    ddCanvas.addEventListener('mousemove', e => {
+        const rect = ddCanvas.getBoundingClientRect();
+        const mx = e.clientX - rect.left;
+        const padL = 55, padR = 15;
+        const cw = rect.width - padL - padR;
+        const t = clamp((mx - padL) / cw, 0, 1);
+        const idx = Math.round(t * (dd.length - 1));
+        if (idx >= 0 && idx < dd.length) {
+            ddTooltip.style.opacity = '1';
+            ddTooltip.style.left = mx + 'px';
+            ddTooltip.style.top = '3px';
+            ddTooltip.innerHTML = `Day ${idx} | 回撤: ${(dd[idx] * 100).toFixed(2)}%`;
+        }
+    });
+    ddCanvas.addEventListener('mouseleave', () => { ddTooltip.style.opacity = '0'; });
+
+    window.addEventListener('resize', () => { drawEquity(); drawDDChart(); drawHistogram(); });
+})();
+
+/* ===================== Section 5: Walk-Forward ===================== */
+(function initWalkForward() {
+    const canvas = $('#cvWF');
+    let wfTrain = 12, wfStep = 3;
+    let animProgress = 0;
+    let isAnimating = false;
+    let animFrame = null;
+
+    const totalMonths = 60; /* 5 years */
+
+    function computeWF() {
+        const windows = [];
+        let start = 0;
+        while (start + wfTrain + wfStep <= totalMonths) {
+            windows.push({
+                trainStart: start,
+                trainEnd: start + wfTrain,
+                testStart: start + wfTrain,
+                testEnd: start + wfTrain + wfStep
+            });
+            start += wfStep;
+        }
+        return windows;
+    }
+
+    function drawWF(progress) {
+        const { ctx, w, h } = resizeCanvas(canvas, 320);
+        ctx.clearRect(0, 0, w, h);
+        const pad = { l: 40, r: 20, t: 50, b: 80 };
+        const cw = w - pad.l - pad.r, ch = h - pad.t - pad.b;
+
+        ctx.font = '600 14px "Noto Sans SC", sans-serif'; ctx.textAlign = 'center';
+        ctx.fillStyle = COL.text; ctx.fillText('Walk-Forward 优化时间线', w / 2, 22);
+
+        const windows = computeWF();
+        if (windows.length === 0) return;
+
+        const rowH = Math.min(28, ch / windows.length);
+        const monthW = cw / totalMonths;
+        const visibleWindows = Math.ceil(progress * windows.length);
+
+        /* Month grid lines */
+        ctx.font = '9px monospace'; ctx.fillStyle = COL.muted; ctx.textAlign = 'center';
+        for (let m = 0; m <= totalMonths; m += 6) {
+            const x = pad.l + m * monthW;
+            ctx.beginPath(); ctx.moveTo(x, pad.t); ctx.lineTo(x, pad.t + windows.length * rowH);
+            ctx.strokeStyle = COL.border; ctx.lineWidth = 0.5; ctx.stroke();
+            ctx.fillText('M' + m, x, pad.t + windows.length * rowH + 14);
+        }
+
+        /* Draw windows */
+        let isPerfs = [], oosPerfs = [];
+        const rng = seededRandom(99);
+        windows.forEach((win, i) => {
+            if (i >= visibleWindows) return;
+            const y = pad.t + i * rowH;
+            /* Train block */
+            const tx = pad.l + win.trainStart * monthW;
+            const tw = (win.trainEnd - win.trainStart) * monthW;
+            ctx.fillStyle = COL.blue + '55';
+            ctx.fillRect(tx, y + 2, tw, rowH - 4);
+            ctx.strokeStyle = COL.blue; ctx.lineWidth = 1;
+            ctx.strokeRect(tx, y + 2, tw, rowH - 4);
+
+            /* Test block */
+            const sx = pad.l + win.testStart * monthW;
+            const sw = (win.testEnd - win.testStart) * monthW;
+            ctx.fillStyle = COL.orange + '55';
+            ctx.fillRect(sx, y + 2, sw, rowH - 4);
+            ctx.strokeStyle = COL.orange; ctx.lineWidth = 1;
+            ctx.strokeRect(sx, y + 2, sw, rowH - 4);
+
+            /* Generate IS/OOS sharpe */
+            const isSharpe = 1.5 + rng() * 1.5;
+            const oosSharpe = isSharpe * (0.3 + rng() * 0.4);
+            isPerfs.push(isSharpe);
+            oosPerfs.push(oosSharpe);
+        });
+
+        /* Legend */
+        const ly = pad.t + windows.length * rowH + 28;
+        ctx.font = '12px "Noto Sans SC", sans-serif'; ctx.textAlign = 'left';
+        ctx.fillStyle = COL.blue; ctx.fillRect(pad.l, ly, 14, 14); ctx.fillStyle = COL.text;
+        ctx.fillText('训练窗口', pad.l + 20, ly + 12);
+        ctx.fillStyle = COL.orange; ctx.fillRect(pad.l + 100, ly, 14, 14); ctx.fillStyle = COL.text;
+        ctx.fillText('测试窗口', pad.l + 124, ly + 12);
+
+        /* Performance comparison bar chart at bottom */
+        if (isPerfs.length > 0) {
+            const chartY = ly + 22;
+            const chartH = h - chartY - 10;
+            if (chartH > 30) {
+                const maxS = Math.max(...isPerfs, ...oosPerfs);
+                const barW2 = Math.min(20, (cw / isPerfs.length) * 0.35);
+                const gap = cw / isPerfs.length;
+                ctx.font = '10px monospace'; ctx.textAlign = 'center';
+                isPerfs.forEach((is, i) => {
+                    const x = pad.l + i * gap + gap / 2;
+                    const h1 = (is / maxS) * chartH;
+                    const h2 = (oosPerfs[i] / maxS) * chartH;
+                    ctx.fillStyle = COL.blue + 'bb';
+                    ctx.fillRect(x - barW2, chartY + chartH - h1, barW2, h1);
+                    ctx.fillStyle = COL.orange + 'bb';
+                    ctx.fillRect(x, chartY + chartH - h2, barW2, h2);
+                    /* Window label */
+                    ctx.fillStyle = COL.muted;
+                    ctx.font = '8px monospace';
+                    ctx.fillText('W' + (i + 1), x, chartY + chartH + 10);
+                });
+                ctx.font = '11px "Noto Sans SC", sans-serif';
+                ctx.fillStyle = COL.blue; ctx.fillText('样本内 Sharpe', pad.l + cw * 0.25, chartY - 2);
+                ctx.fillStyle = COL.orange; ctx.fillText('样本外 Sharpe', pad.l + cw * 0.7, chartY - 2);
+
+                /* Draw average lines */
+                const avgIS = isPerfs.reduce((a, b) => a + b, 0) / isPerfs.length;
+                const avgOOS = oosPerfs.reduce((a, b) => a + b, 0) / oosPerfs.length;
+                const avgISY = chartY + chartH - (avgIS / maxS) * chartH;
+                const avgOOSY = chartY + chartH - (avgOOS / maxS) * chartH;
+                ctx.setLineDash([4, 3]);
+                ctx.beginPath(); ctx.moveTo(pad.l, avgISY); ctx.lineTo(pad.l + cw, avgISY);
+                ctx.strokeStyle = COL.blue + '66'; ctx.lineWidth = 1; ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(pad.l, avgOOSY); ctx.lineTo(pad.l + cw, avgOOSY);
+                ctx.strokeStyle = COL.orange + '66'; ctx.lineWidth = 1; ctx.stroke();
+                ctx.setLineDash([]);
+            }
+        }
+
+        /* Update detail */
+        if (progress >= 1 && isPerfs.length > 0) {
+            const avgIS = isPerfs.reduce((a, b) => a + b, 0) / isPerfs.length;
+            const avgOOS = oosPerfs.reduce((a, b) => a + b, 0) / oosPerfs.length;
+            const degradation = ((avgIS - avgOOS) / avgIS * 100).toFixed(1);
+            const wfe = (avgOOS / avgIS * 100).toFixed(1);
+            const wfeColor = wfe >= 50 ? COL.green : (wfe >= 30 ? COL.orange : COL.red);
+            const wfeJudge = wfe >= 50 ? '良好 — 策略具有泛化能力' : (wfe >= 30 ? '一般 — 需要进一步验证' : '较差 — 可能存在严重过拟合');
+            const bestWin = isPerfs.indexOf(Math.max(...oosPerfs));
+            const worstWin = isPerfs.indexOf(Math.min(...oosPerfs));
+            $('#wfDetail').innerHTML = `<h4 style="color:var(--accent-blue)">Walk-Forward 结果</h4>
+                <p>共 <strong>${windows.length}</strong> 个滚动窗口 | 训练: ${wfTrain}个月 | 测试: ${wfStep}个月</p>
+                <p>平均样本内 Sharpe: <strong style="color:${COL.blue}">${avgIS.toFixed(2)}</strong> &nbsp;|&nbsp; 平均样本外 Sharpe: <strong style="color:${COL.orange}">${avgOOS.toFixed(2)}</strong></p>
+                <p>绩效衰减: <strong style="color:${COL.red}">${degradation}%</strong> &nbsp;|&nbsp; Walk-Forward 效率 (WFE): <strong style="color:${wfeColor}">${wfe}%</strong></p>
+                <p>WFE 评估: <strong style="color:${wfeColor}">${wfeJudge}</strong></p>
+                <p style="color:var(--text-muted);font-size:0.82rem">最佳窗口: W${bestWin + 1} (OOS Sharpe ${oosPerfs[bestWin]?.toFixed(2)}) | 最差窗口: W${worstWin + 1} (OOS Sharpe ${oosPerfs[worstWin]?.toFixed(2)})</p>`;
+        }
+    }
+
+    $('#wfTrain').addEventListener('input', e => {
+        wfTrain = +e.target.value;
+        $('#wfTrainVal').textContent = wfTrain + '月';
+    });
+    $('#wfStep').addEventListener('input', e => {
+        wfStep = +e.target.value;
+        $('#wfStepVal').textContent = wfStep + '月';
+    });
+
+    $('#btnWFRun').addEventListener('click', () => {
+        if (isAnimating) return;
+        isAnimating = true;
+        animProgress = 0;
+        function step() {
+            animProgress = Math.min(1, animProgress + 0.02);
+            drawWF(animProgress);
+            if (animProgress < 1) {
+                animFrame = requestAnimationFrame(step);
+            } else {
+                isAnimating = false;
+            }
+        }
+        step();
+    });
+
+    drawWF(0);
+    window.addEventListener('resize', () => drawWF(animProgress));
+})();
+
+/* ===================== KaTeX init ===================== */
+if (typeof renderMathInElement === 'function') {
+    renderMathInElement(document.body, {
+        delimiters: [
+            { left: '$$', right: '$$', display: true },
+            { left: '$', right: '$', display: false }
+        ]
+    });
+}
+
+}); /* end DOMContentLoaded */
+</script>
+</body>
+</html>

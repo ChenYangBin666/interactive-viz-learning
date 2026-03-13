@@ -1,0 +1,1290 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>配对交易 — 量化交易策略</title>
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" defer>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" defer></script>
+    <script src="../shared/scripts/nav.js" defer></script>
+    <script src="../shared/scripts/quant-utils.js" defer></script>
+    <style>
+        /* ========== Page-specific Styles ========== */
+        .canvas-wrap {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+            position: relative;
+        }
+        .canvas-wrap canvas {
+            display: block;
+            width: 100%;
+            cursor: crosshair;
+        }
+        .controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1rem;
+            align-items: center;
+            margin: 1rem 0;
+            padding: 0.8rem 1rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+        }
+        .controls label {
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .controls input[type="range"] {
+            width: 120px;
+            accent-color: var(--accent-green);
+        }
+        .controls .val {
+            color: var(--accent-green);
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            min-width: 3em;
+        }
+        .controls button, .btn {
+            padding: 0.4rem 1rem;
+            border: 1px solid var(--accent-green);
+            background: rgba(22, 199, 154, 0.1);
+            color: var(--accent-green);
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            font-size: 0.85rem;
+            transition: all 0.2s;
+        }
+        .controls button:hover, .btn:hover {
+            background: rgba(22, 199, 154, 0.25);
+        }
+        .info-box {
+            background: rgba(22, 199, 154, 0.08);
+            border-left: 3px solid var(--accent-green);
+            padding: 0.8rem 1rem;
+            margin: 0.75rem 0;
+            border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+        }
+        .warn-box {
+            background: rgba(255, 82, 82, 0.08);
+            border-left: 3px solid var(--accent-red);
+            padding: 0.8rem 1rem;
+            margin: 0.75rem 0;
+            border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+        }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+            gap: 0.75rem;
+            margin: 1rem 0;
+        }
+        .stat-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            padding: 0.6rem 0.8rem;
+            text-align: center;
+        }
+        .stat-card .stat-label {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            margin-bottom: 0.2rem;
+        }
+        .stat-card .stat-value {
+            font-family: var(--font-mono);
+            font-size: 1.1rem;
+            font-weight: 700;
+        }
+        .stat-green { color: var(--accent-green); }
+        .stat-blue { color: var(--accent-blue); }
+        .stat-red { color: var(--accent-red); }
+        .stat-orange { color: var(--accent-orange); }
+        .stat-purple { color: var(--accent-purple); }
+        .heatmap-wrap {
+            display: flex;
+            gap: 1.5rem;
+            align-items: flex-start;
+            flex-wrap: wrap;
+        }
+        .pair-detail {
+            flex: 1;
+            min-width: 300px;
+        }
+        .legend {
+            display: flex;
+            gap: 1rem;
+            flex-wrap: wrap;
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            margin: 0.5rem 0;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 0.3rem;
+        }
+        .legend-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+        .tooltip {
+            position: fixed;
+            background: rgba(15, 52, 96, 0.95);
+            border: 1px solid var(--accent-green);
+            border-radius: var(--radius-sm);
+            padding: 0.4rem 0.6rem;
+            font-size: 0.8rem;
+            color: var(--text-primary);
+            pointer-events: none;
+            z-index: 500;
+            display: none;
+            font-family: var(--font-mono);
+            white-space: nowrap;
+            box-shadow: var(--shadow);
+        }
+        .tooltip .tt-label {
+            color: var(--text-muted);
+            font-size: 0.7rem;
+        }
+        .summary-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 1rem 0;
+            font-size: 0.85rem;
+        }
+        .summary-table th {
+            background: var(--bg-card);
+            color: var(--accent-green);
+            padding: 0.6rem 0.8rem;
+            text-align: left;
+            border-bottom: 2px solid var(--border-color);
+            font-weight: 600;
+        }
+        .summary-table td {
+            padding: 0.5rem 0.8rem;
+            border-bottom: 1px solid var(--border-color);
+            color: var(--text-secondary);
+        }
+        .summary-table tr:hover td {
+            background: rgba(22, 199, 154, 0.05);
+        }
+    </style>
+</head>
+<body>
+<div class="page-container">
+    <h1>03 — 配对交易</h1>
+    <p>配对交易是一种市场中性策略，利用两只高度相关资产之间的价差回归特性进行交易。当价差偏离历史均值时建仓，回归时平仓获利。</p>
+    <p>该策略最早由摩根士丹利量化团队在1980年代开发，核心思想：找到两只价格"绑定"的股票，当价差异常扩大时做空强者、做多弱者，等待价差回归。</p>
+
+    <!-- ==================== Section 1: 协整关系 ==================== -->
+    <div class="section" id="sec-cointegration">
+        <div class="section-title">
+            <div class="icon">1</div>
+            <h2>协整关系</h2>
+        </div>
+        <div class="split-layout">
+            <div class="text-panel">
+                <h3>协整 vs 相关性</h3>
+                <p>相关性衡量两个序列的线性同步程度，而协整描述的是两个序列之间存在长期均衡关系——即使各自非平稳，它们的线性组合是平稳的。</p>
+                <div class="info-box">
+                    若 \(P_A\) 和 \(P_B\) 都是 \(I(1)\) 过程，但存在 \(\beta\) 使得：
+                    $$S_t = P_{A,t} - \beta \cdot P_{B,t} \sim I(0)$$
+                    则称 \(P_A\) 和 \(P_B\) 协整，\(S_t\) 为平稳价差。
+                </div>
+                <p>以中国石油与中国石化为例：两只股票价格各自有趋势（非平稳），但由于业务高度相似，它们的价差围绕均值波动。</p>
+                <div class="info-box">
+                    <strong>关键区别：</strong>两只股票可能相关性很高（短期同涨同跌），但不一定协整。协整意味着价差会回归——这才是配对交易的基础。
+                </div>
+                <p><strong>Engle-Granger 两步法检验：</strong></p>
+                <div class="info-box">
+                    1. 对 \(P_A\) 和 \(P_B\) 做 OLS 回归，得到残差 \(\hat{e}_t\)<br>
+                    2. 对残差 \(\hat{e}_t\) 做 ADF 单位根检验<br>
+                    若残差平稳（拒绝单位根），则两序列协整
+                </div>
+                <div class="controls">
+                    <button onclick="S1.regenerate()">重新生成数据</button>
+                </div>
+            </div>
+            <div class="viz-panel">
+                <div class="canvas-wrap">
+                    <canvas id="cvs1" width="700" height="500"></canvas>
+                </div>
+                <div class="legend">
+                    <div class="legend-item"><span class="legend-dot" style="background:#4fc3f7"></span> 中国石油</div>
+                    <div class="legend-item"><span class="legend-dot" style="background:#ff80ab"></span> 中国石化</div>
+                    <div class="legend-item"><span class="legend-dot" style="background:#16c79a"></span> 价差 (Spread)</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== Section 2: 配对选择 ==================== -->
+    <div class="section" id="sec-pair-selection">
+        <div class="section-title">
+            <div class="icon">2</div>
+            <h2>配对选择</h2>
+        </div>
+        <div class="split-layout">
+            <div class="text-panel">
+                <h3>相关性矩阵与距离法</h3>
+                <p>从候选股票池中筛选配对的常用方法：</p>
+                <p><strong>距离法：</strong>对每只股票做标准化后，计算两两之间的平方差之和：</p>
+                <div class="info-box">
+                    $$D_{ij} = \sum_{t=1}^{T} \left(\frac{P_{i,t} - \bar{P}_i}{\sigma_i} - \frac{P_{j,t} - \bar{P}_j}{\sigma_j}\right)^2$$
+                    \(D_{ij}\) 越小，两只股票走势越接近。
+                </div>
+                <p><strong>操作：</strong>点击热力图中的单元格查看该配对的价格比率和价差。绿色高亮为高相关+协整配对。</p>
+                <p><strong>筛选流程：</strong>先用距离法缩小范围（前20%最小距离），再对候选配对进行协整检验，最终选出既距离近、又协整的配对。</p>
+                <div class="controls">
+                    <button onclick="S2.regenerate()">重新生成</button>
+                </div>
+                <div id="pair-info" class="info-box" style="display:none"></div>
+            </div>
+            <div class="viz-panel">
+                <div class="heatmap-wrap">
+                    <div class="canvas-wrap">
+                        <canvas id="cvs2hm" width="360" height="360"></canvas>
+                    </div>
+                    <div class="pair-detail">
+                        <div class="canvas-wrap">
+                            <canvas id="cvs2detail" width="340" height="300"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== Section 3: 价差交易信号 ==================== -->
+    <div class="section" id="sec-signals">
+        <div class="section-title">
+            <div class="icon">3</div>
+            <h2>价差交易信号</h2>
+        </div>
+        <div class="split-layout">
+            <div class="text-panel">
+                <h3>交易规则</h3>
+                <p>计算价差 \(S_t = P_A - \beta \cdot P_B\)，其中 \(\beta\) 为对冲比率（回归系数）。</p>
+                <div class="info-box">
+                    <strong>入场信号：</strong><br>
+                    - 做空价差：\(S_t > \mu + k\sigma\)（卖A买B）<br>
+                    - 做多价差：\(S_t < \mu - k\sigma\)（买A卖B）<br>
+                    <strong>出场信号：</strong>价差穿越均值 \(\mu\)
+                </div>
+                <p>调整对冲比率和入场阈值，观察信号变化：</p>
+                <div class="controls">
+                    <label>对冲比率 β：<input type="range" id="hedgeRatio" min="0.5" max="2.0" step="0.05" value="1.0"><span class="val" id="hedgeVal">1.00</span></label>
+                    <label>阈值 k：<input type="range" id="kThreshold" min="1.0" max="3.0" step="0.1" value="2.0"><span class="val" id="kVal">2.0</span></label>
+                    <button onclick="S3.regenerate()">重新生成</button>
+                </div>
+            </div>
+            <div class="viz-panel">
+                <div class="canvas-wrap">
+                    <canvas id="cvs3" width="700" height="500"></canvas>
+                </div>
+                <div class="legend">
+                    <div class="legend-item"><span class="legend-dot" style="background:#16c79a"></span> 价差</div>
+                    <div class="legend-item"><span class="legend-dot" style="background:#ffd740"></span> 均值</div>
+                    <div class="legend-item"><span class="legend-dot" style="background:#ff5252"></span> +kσ / -kσ</div>
+                    <div class="legend-item"><span class="legend-dot" style="background:#4fc3f7;width:0;height:0;border-left:6px solid transparent;border-right:6px solid transparent;border-bottom:10px solid #4fc3f7;border-radius:0"></span> 做多</div>
+                    <div class="legend-item"><span class="legend-dot" style="background:#ff80ab;width:0;height:0;border-left:6px solid transparent;border-right:6px solid transparent;border-top:10px solid #ff80ab;border-radius:0"></span> 做空</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== Section 4: 回测与绩效 ==================== -->
+    <div class="section" id="sec-backtest">
+        <div class="section-title">
+            <div class="icon">4</div>
+            <h2>回测与绩效</h2>
+        </div>
+        <div class="split-layout">
+            <div class="text-panel">
+                <h3>策略回测</h3>
+                <p>基于价差均值回复策略进行历史回测，评估策略表现。回测使用500个交易日（约2年）的模拟数据。</p>
+                <div class="info-box">
+                    <strong>回测参数：</strong><br>
+                    - 入场阈值：价差偏离均值 \(k\sigma\)<br>
+                    - 止损阈值：价差继续偏离至 \(m\sigma\) 时止损<br>
+                    - 出场：价差回到均值附近
+                </div>
+                <div class="controls">
+                    <label>入场 kσ：<input type="range" id="btEntry" min="1.0" max="3.0" step="0.1" value="2.0"><span class="val" id="btEntryVal">2.0</span></label>
+                    <label>止损 mσ：<input type="range" id="btStop" min="2.5" max="5.0" step="0.1" value="3.5"><span class="val" id="btStopVal">3.5</span></label>
+                    <button onclick="S4.regenerate()">重新生成</button>
+                </div>
+                <div class="stats-grid" id="bt-stats"></div>
+            </div>
+            <div class="viz-panel">
+                <div class="canvas-wrap">
+                    <canvas id="cvs4" width="700" height="500"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== Section 5: 风险与实践 ==================== -->
+    <div class="section" id="sec-risk">
+        <div class="section-title">
+            <div class="icon">5</div>
+            <h2>风险与实践</h2>
+        </div>
+        <div class="split-layout">
+            <div class="text-panel">
+                <h3>结构性断裂风险</h3>
+                <p>协整关系并非永恒不变。政策变化、行业重组、公司基本面剧变等都可能导致协整关系崩溃（结构性断裂）。</p>
+                <div class="warn-box">
+                    <strong>风险场景：</strong>协整关系在某时点突然断裂，价差不再回归，持续扩大——原本的均值回复策略将面临巨大亏损。
+                </div>
+                <p>下图模拟：前半段协整有效（策略盈利），后半段发生断裂（价差持续偏离，策略亏损）。</p>
+                <div class="info-box">
+                    <strong>应对措施：</strong><br>
+                    - 滚动窗口协整检验，实时监控<br>
+                    - 严格止损机制<br>
+                    - 多配对分散风险<br>
+                    - 设定最大持仓时间
+                </div>
+                <div class="controls">
+                    <label>断裂位置：<input type="range" id="breakPoint" min="0.3" max="0.7" step="0.05" value="0.5"><span class="val" id="breakVal">50%</span></label>
+                    <label>断裂强度：<input type="range" id="breakStrength" min="0.5" max="3.0" step="0.1" value="1.5"><span class="val" id="breakStrVal">1.5</span></label>
+                    <button onclick="S5.regenerate()">重新生成</button>
+                </div>
+                <div class="warn-box">
+                    <strong>实战经验：</strong>在A股市场中，同行业龙头（如银行股之间）的协整关系相对稳定，但也会受到政策调控、利率变动等因素影响。建议每周重新检验协整关系，设定30-60日滚动窗口。
+                </div>
+            </div>
+            <div class="viz-panel">
+                <div class="canvas-wrap">
+                    <canvas id="cvs5" width="700" height="500"></canvas>
+                </div>
+                <div class="legend">
+                    <div class="legend-item"><span class="legend-dot" style="background:#16c79a"></span> 价差</div>
+                    <div class="legend-item"><span class="legend-dot" style="background:#ffab40"></span> 滚动协整p值</div>
+                    <div class="legend-item"><span class="legend-dot" style="background:#ff5252;width:2px;height:14px;border-radius:0"></span> 断裂点</div>
+                    <div class="legend-item"><span class="legend-dot" style="background:#b388ff"></span> 累计盈亏</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ==================== Summary ==================== -->
+    <div class="section" id="sec-summary">
+        <div class="section-title">
+            <div class="icon">S</div>
+            <h2>策略要点总结</h2>
+        </div>
+        <table class="summary-table">
+            <thead>
+                <tr><th>要素</th><th>说明</th><th>关键参数</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>配对筛选</td><td>距离法 + 协整检验，选择同行业、基本面相似的股票对</td><td>p值 &lt; 0.05</td></tr>
+                <tr><td>对冲比率</td><td>OLS回归系数 β，或 Johansen 检验的协整向量</td><td>β = Cov(A,B)/Var(B)</td></tr>
+                <tr><td>入场信号</td><td>价差偏离均值超过 kσ</td><td>k = 1.5 ~ 2.5</td></tr>
+                <tr><td>出场信号</td><td>价差回归均值附近</td><td>|S - μ| &lt; 0.5σ</td></tr>
+                <tr><td>止损</td><td>价差继续偏离至 mσ，强制止损</td><td>m = 3.0 ~ 4.0</td></tr>
+                <tr><td>监控</td><td>滚动窗口重新检验协整关系</td><td>窗口 = 30~60 日</td></tr>
+                <tr><td>仓位管理</td><td>根据价差波动率动态调整仓位</td><td>Kelly公式或固定比例</td></tr>
+            </tbody>
+        </table>
+        <div class="info-box">
+            <strong>适用场景：</strong>低波动、高流动性市场环境，同行业龙头股配对效果最佳。不适用于趋势剧烈的单边行情或流动性枯竭时期。
+        </div>
+    </div>
+</div>
+
+<div class="tooltip" id="tooltip"></div>
+
+<script>
+// ========== Utility Functions ==========
+const PI2 = Math.PI * 2;
+function randn() { let u=0,v=0; while(!u) u=Math.random(); while(!v) v=Math.random(); return Math.sqrt(-2*Math.log(u))*Math.cos(PI2*v); }
+function cumsum(arr) { let s=0; return arr.map(v=>(s+=v,s)); }
+function mean(arr) { return arr.reduce((a,b)=>a+b,0)/arr.length; }
+function std(arr) { const m=mean(arr); return Math.sqrt(arr.reduce((a,b)=>a+(b-m)**2,0)/arr.length); }
+function linspace(a,b,n) { const d=(b-a)/(n-1); return Array.from({length:n},(_,i)=>a+i*d); }
+function clamp(v,lo,hi) { return Math.max(lo,Math.min(hi,v)); }
+
+function drawAxes(ctx, x, y, w, h, xLabel, yLabel, xTicks, yTicks, color='#6c6c7c') {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(x, y); ctx.lineTo(x, y+h); ctx.lineTo(x+w, y+h);
+    ctx.stroke();
+    ctx.fillStyle = color;
+    ctx.font = '11px "Noto Sans SC", sans-serif';
+    ctx.textAlign = 'center';
+    if (xLabel) ctx.fillText(xLabel, x+w/2, y+h+32);
+    if (xTicks) {
+        for (const t of xTicks) {
+            const px = x + (t.pos) * w;
+            ctx.beginPath(); ctx.moveTo(px, y+h); ctx.lineTo(px, y+h+4); ctx.stroke();
+            ctx.fillText(t.label, px, y+h+16);
+        }
+    }
+    ctx.textAlign = 'right';
+    if (yLabel) { ctx.save(); ctx.translate(x-36, y+h/2); ctx.rotate(-Math.PI/2); ctx.textAlign='center'; ctx.fillText(yLabel, 0, 0); ctx.restore(); }
+    if (yTicks) {
+        for (const t of yTicks) {
+            const py = y + h - t.pos * h;
+            ctx.beginPath(); ctx.moveTo(x-4, py); ctx.lineTo(x, py); ctx.stroke();
+            ctx.fillText(t.label, x-6, py+4);
+        }
+    }
+}
+
+function makeYTicks(minV, maxV, count=5) {
+    const range = maxV - minV;
+    if (range === 0) return [];
+    const ticks = [];
+    for (let i = 0; i <= count; i++) {
+        const v = minV + (range * i / count);
+        ticks.push({ pos: i / count, label: v.toFixed(range < 1 ? 2 : (range < 10 ? 1 : 0)) });
+    }
+    return ticks;
+}
+
+function makeXTicks(n, count=5) {
+    const ticks = [];
+    for (let i = 0; i <= count; i++) {
+        const idx = Math.round((n-1)*i/count);
+        ticks.push({ pos: i/count, label: ''+idx });
+    }
+    return ticks;
+}
+
+function plotLine(ctx, data, x, y, w, h, minV, maxV, color, lineWidth=1.5) {
+    if (!data.length) return;
+    const range = maxV - minV || 1;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = lineWidth;
+    ctx.beginPath();
+    for (let i = 0; i < data.length; i++) {
+        const px = x + (i/(data.length-1))*w;
+        const py = y + h - ((data[i]-minV)/range)*h;
+        i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+    }
+    ctx.stroke();
+}
+
+function plotHLine(ctx, val, x, y, w, h, minV, maxV, color, dash=[5,5]) {
+    const range = maxV - minV || 1;
+    const py = y + h - ((val - minV)/range)*h;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1;
+    ctx.setLineDash(dash);
+    ctx.beginPath(); ctx.moveTo(x, py); ctx.lineTo(x+w, py); ctx.stroke();
+    ctx.setLineDash([]);
+}
+
+function plotArrow(ctx, idx, n, val, x, y, w, h, minV, maxV, up, color) {
+    const range = maxV - minV || 1;
+    const px = x + (idx/(n-1))*w;
+    const py = y + h - ((val-minV)/range)*h;
+    const sz = 6;
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    if (up) {
+        ctx.moveTo(px, py-sz*2);
+        ctx.lineTo(px-sz, py);
+        ctx.lineTo(px+sz, py);
+    } else {
+        ctx.moveTo(px, py+sz*2);
+        ctx.lineTo(px-sz, py);
+        ctx.lineTo(px+sz, py);
+    }
+    ctx.closePath();
+    ctx.fill();
+}
+
+function fillBand(ctx, data, upper, lower, x, y, w, h, minV, maxV, color) {
+    const range = maxV - minV || 1;
+    const n = data.length;
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    for (let i = 0; i < n; i++) {
+        const px = x + (i/(n-1))*w;
+        const py = y + h - ((upper-minV)/range)*h;
+        i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+    }
+    for (let i = n-1; i >= 0; i--) {
+        const px = x + (i/(n-1))*w;
+        const py = y + h - ((lower-minV)/range)*h;
+        ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.fill();
+}
+
+// ========== Section 1: 协整关系 ==========
+const S1 = (() => {
+    const canvas = document.getElementById('cvs1');
+    const ctx = canvas.getContext('2d');
+    let priceA, priceB, spread;
+    const N = 250;
+
+    function generate() {
+        const drift = 0.0003;
+        const vol = 0.015;
+        const meanRev = 0.05;
+        const spreadVol = 0.8;
+        priceA = [50]; priceB = [48];
+        const rawSpread = [priceA[0] - 1.0 * priceB[0]];
+        for (let i = 1; i < N; i++) {
+            const common = drift + vol * randn();
+            const eA = vol * 0.5 * randn();
+            const eB = vol * 0.5 * randn();
+            priceA.push(priceA[i-1] * (1 + common + eA));
+            priceB.push(priceB[i-1] * (1 + common + eB));
+            // Add mean-reverting spread
+            const sp = priceA[i] - priceB[i];
+            const target = 2;
+            const adj = meanRev * (target - sp) + spreadVol * randn() * 0.01;
+            priceA[i] += adj * 0.5;
+            priceB[i] -= adj * 0.5;
+        }
+        spread = priceA.map((v, i) => v - priceB[i]);
+    }
+
+    function draw() {
+        const dpr = window.devicePixelRatio || 1;
+        canvas.width = 700 * dpr; canvas.height = 500 * dpr;
+        ctx.scale(dpr, dpr);
+        ctx.clearRect(0, 0, 700, 500);
+
+        // Price chart (top)
+        const px = 60, py = 20, pw = 600, ph = 200;
+        const allP = [...priceA, ...priceB];
+        const pMin = Math.min(...allP) * 0.98, pMax = Math.max(...allP) * 1.02;
+        drawAxes(ctx, px, py, pw, ph, '', '价格', makeXTicks(N), makeYTicks(pMin, pMax));
+        // Grid lines
+        ctx.strokeStyle = 'rgba(255,255,255,0.05)'; ctx.lineWidth = 0.5;
+        for (let i = 1; i < 5; i++) {
+            const gy = py + ph * i / 5;
+            ctx.beginPath(); ctx.moveTo(px, gy); ctx.lineTo(px+pw, gy); ctx.stroke();
+        }
+        plotLine(ctx, priceA, px, py, pw, ph, pMin, pMax, '#4fc3f7', 2);
+        plotLine(ctx, priceB, px, py, pw, ph, pMin, pMax, '#ff80ab', 2);
+        // Labels
+        ctx.font = 'bold 12px "Noto Sans SC", sans-serif';
+        ctx.fillStyle = '#4fc3f7'; ctx.textAlign = 'left';
+        ctx.fillText('中国石油', px + 10, py + 20);
+        ctx.fillStyle = '#ff80ab';
+        ctx.fillText('中国石化', px + 10, py + 36);
+        ctx.fillStyle = '#a8a8b8'; ctx.font = '13px "Noto Sans SC", sans-serif';
+        ctx.fillText('两只股票价格各自有趋势（非平稳）', px + pw/2 - 100, py - 4);
+
+        // Spread chart (bottom)
+        const sx = 60, sy = 270, sw = 600, sh = 180;
+        const sMin = Math.min(...spread) - 0.5, sMax = Math.max(...spread) + 0.5;
+        const sMean = mean(spread);
+        drawAxes(ctx, sx, sy, sw, sh, '交易日', '价差', makeXTicks(N), makeYTicks(sMin, sMax));
+        ctx.strokeStyle = 'rgba(255,255,255,0.05)'; ctx.lineWidth = 0.5;
+        for (let i = 1; i < 5; i++) {
+            const gy = sy + sh * i / 5;
+            ctx.beginPath(); ctx.moveTo(sx, gy); ctx.lineTo(sx+sw, gy); ctx.stroke();
+        }
+        plotHLine(ctx, sMean, sx, sy, sw, sh, sMin, sMax, '#ffd740', [6,4]);
+        plotLine(ctx, spread, sx, sy, sw, sh, sMin, sMax, '#16c79a', 2);
+        ctx.fillStyle = '#16c79a'; ctx.font = 'bold 12px "Noto Sans SC", sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText('价差围绕均值波动（平稳）', sx + sw/2 - 80, sy - 4);
+        ctx.fillStyle = '#ffd740'; ctx.font = '11px "Noto Sans SC", sans-serif';
+        ctx.textAlign = 'right';
+        const meanY = sy + sh - ((sMean - sMin)/(sMax - sMin))*sh;
+        ctx.fillText('μ=' + sMean.toFixed(2), sx - 6, meanY + 4);
+    }
+
+    function regenerate() { generate(); draw(); }
+    generate();
+    setTimeout(draw, 100);
+    return { regenerate };
+})();
+
+// ========== Section 2: 配对选择 ==========
+const S2 = (() => {
+    const cvsHm = document.getElementById('cvs2hm');
+    const ctxHm = cvsHm.getContext('2d');
+    const cvsDet = document.getElementById('cvs2detail');
+    const ctxDet = cvsDet.getContext('2d');
+    const names = ['中石油','中石化','工行','建行','中行','平安','茅台','五粮液','宁德','比亚迪'];
+    const N = 150;
+    let prices = [], corrMatrix = [], cointPairs = [], selectedPair = null;
+
+    function generate() {
+        // Generate 10 correlated stock prices
+        const sectors = [[0,1],[2,3,4],[5],[6,7],[8,9]]; // sector grouping
+        const sectorDrifts = sectors.map(() => Array.from({length:N}, ()=>randn()*0.01));
+        prices = [];
+        for (let s = 0; s < sectors.length; s++) {
+            for (const idx of sectors[s]) {
+                const p = [30 + Math.random()*70];
+                for (let t = 1; t < N; t++) {
+                    const r = sectorDrifts[s][t] * 0.7 + randn()*0.01*0.3 + 0.0002;
+                    p.push(p[t-1]*(1+r));
+                }
+                prices[idx] = p;
+            }
+        }
+        // Correlation matrix
+        corrMatrix = [];
+        for (let i = 0; i < 10; i++) {
+            corrMatrix[i] = [];
+            for (let j = 0; j < 10; j++) {
+                if (i === j) { corrMatrix[i][j] = 1; continue; }
+                const mi = mean(prices[i]), mj = mean(prices[j]);
+                const si = std(prices[i]), sj = std(prices[j]);
+                let cov = 0;
+                for (let t = 0; t < N; t++) cov += (prices[i][t]-mi)*(prices[j][t]-mj);
+                corrMatrix[i][j] = cov / (N * si * sj);
+            }
+        }
+        // Identify cointegrated pairs (sector pairs with high corr)
+        cointPairs = [[0,1],[2,3],[2,4],[3,4],[6,7],[8,9]];
+        selectedPair = [0,1];
+    }
+
+    function drawHeatmap() {
+        const dpr = window.devicePixelRatio || 1;
+        cvsHm.width = 360 * dpr; cvsHm.height = 360 * dpr;
+        ctxHm.scale(dpr, dpr);
+        ctxHm.clearRect(0, 0, 360, 360);
+        const off = 50, sz = 28;
+        // Labels
+        ctxHm.font = '11px "Noto Sans SC", sans-serif';
+        ctxHm.textAlign = 'right';
+        for (let i = 0; i < 10; i++) {
+            ctxHm.fillStyle = '#a8a8b8';
+            ctxHm.fillText(names[i], off-4, off+i*sz+sz/2+4);
+            ctxHm.textAlign = 'center';
+            ctxHm.save();
+            ctxHm.translate(off+i*sz+sz/2, off-4);
+            ctxHm.rotate(-Math.PI/4);
+            ctxHm.fillText(names[i], 0, 0);
+            ctxHm.restore();
+            ctxHm.textAlign = 'right';
+        }
+        // Cells
+        for (let i = 0; i < 10; i++) {
+            for (let j = 0; j < 10; j++) {
+                const v = corrMatrix[i][j];
+                const x = off + j*sz, y = off + i*sz;
+                // Color: blue(low) -> green(high)
+                const t = clamp((v + 1) / 2, 0, 1);
+                const r = Math.round(20 + (1-t)*30);
+                const g = Math.round(40 + t*180);
+                const b = Math.round(80 + (1-t)*150);
+                ctxHm.fillStyle = `rgb(${r},${g},${b})`;
+                ctxHm.fillRect(x+1, y+1, sz-2, sz-2);
+                // Highlight coint pairs
+                const isCoint = cointPairs.some(p=>(p[0]===i&&p[1]===j)||(p[0]===j&&p[1]===i));
+                if (isCoint && i !== j) {
+                    ctxHm.strokeStyle = '#16c79a';
+                    ctxHm.lineWidth = 2;
+                    ctxHm.strokeRect(x+1, y+1, sz-2, sz-2);
+                }
+                // Selected
+                if (selectedPair && ((i===selectedPair[0]&&j===selectedPair[1])||(i===selectedPair[1]&&j===selectedPair[0]))) {
+                    ctxHm.strokeStyle = '#ffd740';
+                    ctxHm.lineWidth = 2;
+                    ctxHm.strokeRect(x, y, sz, sz);
+                }
+                // Corr value text
+                if (i !== j) {
+                    ctxHm.fillStyle = v > 0.7 ? '#fff' : '#a8a8b8';
+                    ctxHm.font = '9px monospace';
+                    ctxHm.textAlign = 'center';
+                    ctxHm.fillText(v.toFixed(1), x+sz/2, y+sz/2+3);
+                }
+            }
+        }
+        // Title
+        ctxHm.fillStyle = '#a8a8b8'; ctxHm.font = '12px "Noto Sans SC", sans-serif';
+        ctxHm.textAlign = 'center';
+        ctxHm.fillText('相关性矩阵（绿框=协整配对）', 180, 345);
+    }
+
+    function drawDetail() {
+        const dpr = window.devicePixelRatio || 1;
+        cvsDet.width = 340 * dpr; cvsDet.height = 300 * dpr;
+        ctxDet.scale(dpr, dpr);
+        ctxDet.clearRect(0, 0, 340, 300);
+        if (!selectedPair) return;
+        const [a, b] = selectedPair;
+        const pA = prices[a], pB = prices[b];
+        // Price ratio
+        const ratio = pA.map((v, i) => v / pB[i]);
+        const spread = pA.map((v, i) => v - pB[i]);
+        // Ratio chart (top)
+        const px = 50, py = 20, pw = 270, ph = 110;
+        const rMin = Math.min(...ratio)*0.98, rMax = Math.max(...ratio)*1.02;
+        drawAxes(ctxDet, px, py, pw, ph, '', '价格比', makeXTicks(N, 3), makeYTicks(rMin, rMax, 3));
+        plotLine(ctxDet, ratio, px, py, pw, ph, rMin, rMax, '#b388ff', 2);
+        const rMean = mean(ratio);
+        plotHLine(ctxDet, rMean, px, py, pw, ph, rMin, rMax, '#ffd740', [4,3]);
+        // Spread chart (bottom)
+        const sx = 50, sy = 170, sw = 270, sh = 100;
+        const sMin = Math.min(...spread)-1, sMax = Math.max(...spread)+1;
+        drawAxes(ctxDet, sx, sy, sw, sh, '交易日', '价差', makeXTicks(N, 3), makeYTicks(sMin, sMax, 3));
+        plotLine(ctxDet, spread, sx, sy, sw, sh, sMin, sMax, '#16c79a', 2);
+        const sMean = mean(spread);
+        plotHLine(ctxDet, sMean, sx, sy, sw, sh, sMin, sMax, '#ffd740', [4,3]);
+        // Title
+        ctxDet.fillStyle = '#e8e8e8'; ctxDet.font = 'bold 12px "Noto Sans SC", sans-serif';
+        ctxDet.textAlign = 'center';
+        ctxDet.fillText(`${names[a]} vs ${names[b]}`, 170, 14);
+        // Info
+        const isCoint = cointPairs.some(p=>(p[0]===a&&p[1]===b)||(p[0]===b&&p[1]===a));
+        const corr = corrMatrix[a][b];
+        const infoEl = document.getElementById('pair-info');
+        infoEl.style.display = 'block';
+        infoEl.innerHTML = `<strong>${names[a]} vs ${names[b]}</strong>：相关系数 = ${corr.toFixed(3)}，${isCoint ? '<span style="color:var(--accent-green)">通过协整检验 ✓</span>' : '<span style="color:var(--accent-red)">未通过协整检验 ✗</span>'}`;
+    }
+
+    // Click handler
+    cvsHm.addEventListener('click', e => {
+        const dpr = window.devicePixelRatio || 1;
+        const rect = cvsHm.getBoundingClientRect();
+        const mx = (e.clientX - rect.left) * (360 / rect.width);
+        const my = (e.clientY - rect.top) * (360 / rect.height);
+        const off = 50, sz = 28;
+        const col = Math.floor((mx - off) / sz);
+        const row = Math.floor((my - off) / sz);
+        if (col >= 0 && col < 10 && row >= 0 && row < 10 && row !== col) {
+            selectedPair = [Math.min(row,col), Math.max(row,col)];
+            drawHeatmap();
+            drawDetail();
+        }
+    });
+
+    function regenerate() { generate(); drawHeatmap(); drawDetail(); }
+    generate();
+    setTimeout(() => { drawHeatmap(); drawDetail(); }, 120);
+    return { regenerate };
+})();
+
+// ========== Section 3: 价差交易信号 ==========
+const S3 = (() => {
+    const canvas = document.getElementById('cvs3');
+    const ctx = canvas.getContext('2d');
+    const N = 300;
+    let priceA, priceB, baseSpread;
+
+    function generateBase() {
+        priceA = [50]; priceB = [48];
+        for (let i = 1; i < N; i++) {
+            const common = 0.0003 + 0.012 * randn();
+            priceA.push(priceA[i-1]*(1 + common + 0.006*randn()));
+            priceB.push(priceB[i-1]*(1 + common + 0.006*randn()));
+            // mean reverting spread
+            const sp = priceA[i] - priceB[i];
+            const adj = 0.05*(2 - sp) + 0.3*randn()*0.01;
+            priceA[i] += adj*0.5;
+            priceB[i] -= adj*0.5;
+        }
+    }
+
+    function draw() {
+        const beta = parseFloat(document.getElementById('hedgeRatio').value);
+        const k = parseFloat(document.getElementById('kThreshold').value);
+        document.getElementById('hedgeVal').textContent = beta.toFixed(2);
+        document.getElementById('kVal').textContent = k.toFixed(1);
+
+        const spread = priceA.map((v, i) => v - beta * priceB[i]);
+        const mu = mean(spread), sigma = std(spread);
+        const upper = mu + k * sigma, lower = mu - k * sigma;
+
+        // Detect signals
+        const signals = []; // {idx, type: 'long'|'short'|'exit'}
+        let pos = 0; // 0=flat, 1=long spread, -1=short spread
+        for (let i = 1; i < N; i++) {
+            if (pos === 0) {
+                if (spread[i] > upper) { signals.push({idx:i, type:'short', val:spread[i]}); pos = -1; }
+                else if (spread[i] < lower) { signals.push({idx:i, type:'long', val:spread[i]}); pos = 1; }
+            } else if (pos === 1) {
+                if (spread[i] >= mu) { signals.push({idx:i, type:'exit', val:spread[i]}); pos = 0; }
+            } else {
+                if (spread[i] <= mu) { signals.push({idx:i, type:'exit', val:spread[i]}); pos = 0; }
+            }
+        }
+
+        const dpr = window.devicePixelRatio || 1;
+        canvas.width = 700 * dpr; canvas.height = 500 * dpr;
+        ctx.scale(dpr, dpr);
+        ctx.clearRect(0, 0, 700, 500);
+
+        // Price chart (top, small)
+        const px=60, py=15, pw=600, ph=140;
+        const allP=[...priceA,...priceB.map(v=>v*beta)];
+        const pMin=Math.min(...allP)*0.98, pMax=Math.max(...allP)*1.02;
+        drawAxes(ctx, px, py, pw, ph, '', '价格', [], makeYTicks(pMin,pMax,3));
+        plotLine(ctx, priceA, px, py, pw, ph, pMin, pMax, '#4fc3f7', 1.5);
+        plotLine(ctx, priceB.map(v=>v*beta), px, py, pw, ph, pMin, pMax, '#ff80ab', 1.5);
+        ctx.fillStyle='#4fc3f7'; ctx.font='11px "Noto Sans SC",sans-serif'; ctx.textAlign='left';
+        ctx.fillText('股票A', px+8, py+16);
+        ctx.fillStyle='#ff80ab';
+        ctx.fillText('β×股票B', px+8, py+30);
+
+        // Spread chart (bottom)
+        const sx=60, sy=200, sw=600, sh=260;
+        const sArr = spread;
+        const sMin = Math.min(...sArr, lower) - sigma*0.5;
+        const sMax = Math.max(...sArr, upper) + sigma*0.5;
+        drawAxes(ctx, sx, sy, sw, sh, '交易日', '价差', makeXTicks(N), makeYTicks(sMin, sMax));
+        // Grid
+        ctx.strokeStyle='rgba(255,255,255,0.04)'; ctx.lineWidth=0.5;
+        for(let i=1;i<5;i++){const gy=sy+sh*i/5;ctx.beginPath();ctx.moveTo(sx,gy);ctx.lineTo(sx+sw,gy);ctx.stroke();}
+        // Band
+        fillBand(ctx, sArr, upper, lower, sx, sy, sw, sh, sMin, sMax, 'rgba(255,82,82,0.08)');
+        // Lines
+        plotHLine(ctx, mu, sx, sy, sw, sh, sMin, sMax, '#ffd740', [6,4]);
+        plotHLine(ctx, upper, sx, sy, sw, sh, sMin, sMax, '#ff5252', [4,3]);
+        plotHLine(ctx, lower, sx, sy, sw, sh, sMin, sMax, '#ff5252', [4,3]);
+        plotLine(ctx, sArr, sx, sy, sw, sh, sMin, sMax, '#16c79a', 2);
+        // Labels on bands
+        ctx.fillStyle='#ffd740';ctx.font='10px monospace';ctx.textAlign='left';
+        const muY=sy+sh-((mu-sMin)/(sMax-sMin))*sh;
+        ctx.fillText('μ='+mu.toFixed(2), sx+sw+4, muY+3);
+        ctx.fillStyle='#ff5252';
+        const upY=sy+sh-((upper-sMin)/(sMax-sMin))*sh;
+        const loY=sy+sh-((lower-sMin)/(sMax-sMin))*sh;
+        ctx.fillText('+'+k.toFixed(1)+'σ', sx+sw+4, upY+3);
+        ctx.fillText('-'+k.toFixed(1)+'σ', sx+sw+4, loY+3);
+        // Arrows
+        for (const s of signals) {
+            if (s.type === 'long') plotArrow(ctx, s.idx, N, s.val, sx, sy, sw, sh, sMin, sMax, true, '#4fc3f7');
+            else if (s.type === 'short') plotArrow(ctx, s.idx, N, s.val, sx, sy, sw, sh, sMin, sMax, false, '#ff80ab');
+            else {
+                // exit: small circle
+                const epx = sx + (s.idx/(N-1))*sw;
+                const epy = sy + sh - ((s.val-sMin)/(sMax-sMin))*sh;
+                ctx.beginPath(); ctx.arc(epx, epy, 4, 0, PI2); ctx.fillStyle='#ffd740'; ctx.fill();
+            }
+        }
+        // Signal count
+        const longs = signals.filter(s=>s.type==='long').length;
+        const shorts = signals.filter(s=>s.type==='short').length;
+        ctx.fillStyle='#a8a8b8'; ctx.font='12px "Noto Sans SC",sans-serif'; ctx.textAlign='right';
+        ctx.fillText(`做多信号: ${longs}  做空信号: ${shorts}`, sx+sw, sy-6);
+    }
+
+    // Tooltip on hover
+    const tooltip = document.getElementById('tooltip');
+    canvas.addEventListener('mousemove', e => {
+        const beta = parseFloat(document.getElementById('hedgeRatio').value);
+        const spread = priceA.map((v, i) => v - beta * priceB[i]);
+        const mu = mean(spread), sigma = std(spread);
+        const rect = canvas.getBoundingClientRect();
+        const mx = (e.clientX - rect.left) * (700 / rect.width);
+        const sx=60, sy=200, sw=600, sh=260;
+        if (mx >= sx && mx <= sx+sw) {
+            const idx = Math.round(((mx - sx) / sw) * (N-1));
+            if (idx >= 0 && idx < N) {
+                tooltip.style.display = 'block';
+                tooltip.style.left = (e.clientX + 12) + 'px';
+                tooltip.style.top = (e.clientY - 30) + 'px';
+                const zScore = (spread[idx] - mu) / sigma;
+                tooltip.innerHTML = `<div class="tt-label">Day ${idx}</div>` +
+                    `价差: ${spread[idx].toFixed(3)}<br>` +
+                    `z-score: ${zScore.toFixed(2)}σ<br>` +
+                    `A: ${priceA[idx].toFixed(2)} B: ${priceB[idx].toFixed(2)}`;
+                // Draw crosshair
+                draw();
+                const dpr = window.devicePixelRatio || 1;
+                ctx.save();
+                ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+                ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+                ctx.lineWidth = 1;
+                ctx.setLineDash([3,3]);
+                const px = sx + (idx/(N-1))*sw;
+                ctx.beginPath(); ctx.moveTo(px, sy); ctx.lineTo(px, sy+sh); ctx.stroke();
+                ctx.setLineDash([]);
+                // Dot on spread line
+                const sArr = spread;
+                const sMin = Math.min(...sArr, mu - parseFloat(document.getElementById('kThreshold').value)*sigma) - sigma*0.5;
+                const sMax = Math.max(...sArr, mu + parseFloat(document.getElementById('kThreshold').value)*sigma) + sigma*0.5;
+                const dotY = sy + sh - ((spread[idx]-sMin)/(sMax-sMin))*sh;
+                ctx.beginPath(); ctx.arc(px, dotY, 4, 0, PI2);
+                ctx.fillStyle = '#16c79a'; ctx.fill();
+                ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5; ctx.stroke();
+                ctx.restore();
+                return;
+            }
+        }
+        tooltip.style.display = 'none';
+    });
+    canvas.addEventListener('mouseleave', () => { tooltip.style.display = 'none'; });
+
+    document.getElementById('hedgeRatio').addEventListener('input', draw);
+    document.getElementById('kThreshold').addEventListener('input', draw);
+
+    function regenerate() { generateBase(); draw(); }
+    generateBase();
+    setTimeout(draw, 140);
+    return { regenerate };
+})();
+
+// ========== Section 4: 回测与绩效 ==========
+const S4 = (() => {
+    const canvas = document.getElementById('cvs4');
+    const ctx = canvas.getContext('2d');
+    const N = 500;
+    let priceA, priceB;
+
+    function generatePrices() {
+        priceA = [50]; priceB = [48];
+        for (let i = 1; i < N; i++) {
+            const common = 0.0002 + 0.01 * randn();
+            priceA.push(priceA[i-1]*(1 + common + 0.005*randn()));
+            priceB.push(priceB[i-1]*(1 + common + 0.005*randn()));
+            const sp = priceA[i] - priceB[i];
+            const adj = 0.04*(2 - sp) + 0.25*randn()*0.01;
+            priceA[i] += adj*0.5;
+            priceB[i] -= adj*0.5;
+        }
+    }
+
+    function draw() {
+        const entryK = parseFloat(document.getElementById('btEntry').value);
+        const stopK = parseFloat(document.getElementById('btStop').value);
+        document.getElementById('btEntryVal').textContent = entryK.toFixed(1);
+        document.getElementById('btStopVal').textContent = stopK.toFixed(1);
+
+        const spread = priceA.map((v, i) => v - priceB[i]);
+        const mu = mean(spread), sigma = std(spread);
+        const upper = mu + entryK*sigma, lower = mu - entryK*sigma;
+        const stopUp = mu + stopK*sigma, stopLo = mu - stopK*sigma;
+
+        // Backtest
+        let pos = 0, entrySpread = 0;
+        const pnl = [0]; // cumulative
+        const trades = [];
+        let wins = 0, losses = 0;
+        for (let i = 1; i < N; i++) {
+            let dailyPnl = 0;
+            if (pos === 1) { // long spread
+                dailyPnl = (spread[i] - spread[i-1]);
+                if (spread[i] >= mu || spread[i] < mu - stopK*sigma) {
+                    const tradePnl = spread[i] - entrySpread;
+                    trades.push(tradePnl);
+                    if (tradePnl > 0) wins++; else losses++;
+                    pos = 0;
+                }
+            } else if (pos === -1) { // short spread
+                dailyPnl = -(spread[i] - spread[i-1]);
+                if (spread[i] <= mu || spread[i] > mu + stopK*sigma) {
+                    const tradePnl = -(spread[i] - entrySpread);
+                    trades.push(tradePnl);
+                    if (tradePnl > 0) wins++; else losses++;
+                    pos = 0;
+                }
+            }
+            if (pos === 0) {
+                if (spread[i] > upper) { pos = -1; entrySpread = spread[i]; }
+                else if (spread[i] < lower) { pos = 1; entrySpread = spread[i]; }
+            }
+            pnl.push(pnl[i-1] + dailyPnl);
+        }
+
+        // Drawdown
+        let peak = 0;
+        const dd = pnl.map(v => { peak = Math.max(peak, v); return v - peak; });
+
+        // Stats
+        const totalRet = pnl[N-1];
+        const annualRet = totalRet / (N/252);
+        const dailyRets = pnl.slice(1).map((v,i) => v - pnl[i]);
+        const sharpe = mean(dailyRets) / (std(dailyRets)||0.001) * Math.sqrt(252);
+        const maxDD = Math.min(...dd);
+        const winRate = trades.length > 0 ? wins / trades.length : 0;
+
+        // Update stats display
+        document.getElementById('bt-stats').innerHTML = `
+            <div class="stat-card"><div class="stat-label">总收益</div><div class="stat-value ${totalRet>=0?'stat-green':'stat-red'}">${totalRet.toFixed(2)}</div></div>
+            <div class="stat-card"><div class="stat-label">年化收益</div><div class="stat-value stat-blue">${annualRet.toFixed(2)}</div></div>
+            <div class="stat-card"><div class="stat-label">夏普比率</div><div class="stat-value stat-purple">${sharpe.toFixed(2)}</div></div>
+            <div class="stat-card"><div class="stat-label">最大回撤</div><div class="stat-value stat-red">${maxDD.toFixed(2)}</div></div>
+            <div class="stat-card"><div class="stat-label">胜率</div><div class="stat-value stat-green">${(winRate*100).toFixed(1)}%</div></div>
+            <div class="stat-card"><div class="stat-label">交易次数</div><div class="stat-value stat-orange">${trades.length}</div></div>
+        `;
+
+        // Draw
+        const dpr = window.devicePixelRatio || 1;
+        canvas.width = 700 * dpr; canvas.height = 500 * dpr;
+        ctx.scale(dpr, dpr);
+        ctx.clearRect(0, 0, 700, 500);
+
+        // Equity curve (top)
+        const ex=60, ey=20, ew=600, eh=220;
+        const eMin = Math.min(...pnl, 0)-1, eMax = Math.max(...pnl)+1;
+        drawAxes(ctx, ex, ey, ew, eh, '', '累计盈亏', makeXTicks(N,5), makeYTicks(eMin,eMax));
+        ctx.strokeStyle='rgba(255,255,255,0.04)'; ctx.lineWidth=0.5;
+        for(let i=1;i<5;i++){const gy=ey+eh*i/5;ctx.beginPath();ctx.moveTo(ex,gy);ctx.lineTo(ex+ew,gy);ctx.stroke();}
+        plotHLine(ctx, 0, ex, ey, ew, eh, eMin, eMax, '#6c6c7c', [3,3]);
+        // Gradient fill under equity curve
+        const eRange = eMax - eMin;
+        for (let i = 1; i < N; i++) {
+            const x1 = ex + ((i-1)/(N-1))*ew;
+            const x2 = ex + (i/(N-1))*ew;
+            const y1 = ey + eh - ((pnl[i-1]-eMin)/eRange)*eh;
+            const y2 = ey + eh - ((pnl[i]-eMin)/eRange)*eh;
+            const zeroY = ey + eh - ((0-eMin)/eRange)*eh;
+            ctx.fillStyle = pnl[i] >= 0 ? 'rgba(22,199,154,0.15)' : 'rgba(255,82,82,0.15)';
+            ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.lineTo(x2,zeroY); ctx.lineTo(x1,zeroY); ctx.closePath(); ctx.fill();
+        }
+        plotLine(ctx, pnl, ex, ey, ew, eh, eMin, eMax, '#16c79a', 2);
+        ctx.fillStyle='#e8e8e8'; ctx.font='bold 12px "Noto Sans SC",sans-serif'; ctx.textAlign='left';
+        ctx.fillText('权益曲线', ex+8, ey+18);
+
+        // Drawdown (bottom)
+        const dx=60, dy=290, dw=600, dh=170;
+        const dMin = Math.min(...dd)-0.5, dMax = 0.5;
+        drawAxes(ctx, dx, dy, dw, dh, '交易日', '回撤', makeXTicks(N,5), makeYTicks(dMin,dMax,4));
+        // Fill drawdown
+        const dRange = dMax - dMin;
+        for (let i = 0; i < N; i++) {
+            const px = dx + (i/(N-1))*dw;
+            const py = dy + dh - ((dd[i]-dMin)/dRange)*dh;
+            const zy = dy + dh - ((0-dMin)/dRange)*dh;
+            ctx.fillStyle = 'rgba(255,82,82,0.3)';
+            ctx.fillRect(px, py, Math.max(dw/N, 1), zy-py);
+        }
+        plotLine(ctx, dd, dx, dy, dw, dh, dMin, dMax, '#ff5252', 1.5);
+        ctx.fillStyle='#ff5252'; ctx.font='bold 12px "Noto Sans SC",sans-serif'; ctx.textAlign='left';
+        ctx.fillText('回撤', dx+8, dy+18);
+    }
+
+    document.getElementById('btEntry').addEventListener('input', draw);
+    document.getElementById('btStop').addEventListener('input', draw);
+
+    function regenerate() { generatePrices(); draw(); }
+    generatePrices();
+    setTimeout(draw, 160);
+    return { regenerate };
+})();
+
+// ========== Section 5: 风险与实践 ==========
+const S5 = (() => {
+    const canvas = document.getElementById('cvs5');
+    const ctx = canvas.getContext('2d');
+    const N = 400;
+    let priceA, priceB;
+
+    function generatePrices() {
+        const bp = parseFloat(document.getElementById('breakPoint').value);
+        const bs = parseFloat(document.getElementById('breakStrength').value);
+        document.getElementById('breakVal').textContent = Math.round(bp*100)+'%';
+        document.getElementById('breakStrVal').textContent = bs.toFixed(1);
+        const breakIdx = Math.round(bp * N);
+
+        priceA = [50]; priceB = [48];
+        for (let i = 1; i < N; i++) {
+            const common = 0.0002 + 0.01 * randn();
+            priceA.push(priceA[i-1]*(1 + common + 0.005*randn()));
+            priceB.push(priceB[i-1]*(1 + common + 0.005*randn()));
+            if (i < breakIdx) {
+                // Mean reverting regime
+                const sp = priceA[i] - priceB[i];
+                const adj = 0.05*(2 - sp) + 0.3*randn()*0.01;
+                priceA[i] += adj*0.5;
+                priceB[i] -= adj*0.5;
+            } else {
+                // Broken regime: drift apart
+                priceA[i] += bs * 0.02 * (i - breakIdx)/N;
+                // Extra volatility
+                priceA[i] += randn() * 0.1;
+            }
+        }
+    }
+
+    function draw() {
+        const bp = parseFloat(document.getElementById('breakPoint').value);
+        const bs = parseFloat(document.getElementById('breakStrength').value);
+        document.getElementById('breakVal').textContent = Math.round(bp*100)+'%';
+        document.getElementById('breakStrVal').textContent = bs.toFixed(1);
+        const breakIdx = Math.round(bp * N);
+
+        const spread = priceA.map((v, i) => v - priceB[i]);
+
+        // Rolling cointegration proxy: rolling std of spread in window
+        const win = 40;
+        const rollingP = []; // simulated p-value (low = cointegrated)
+        for (let i = 0; i < N; i++) {
+            if (i < win) { rollingP.push(0.01); continue; }
+            const window = spread.slice(i-win, i);
+            const s = std(window);
+            const m = mean(window);
+            // Simulated ADF-like: higher std relative to mean reversion = higher p-value
+            const halfLife = Math.abs(window[win-1] - m) / (s || 0.01);
+            const p = clamp(halfLife * 0.15 + (i > breakIdx ? 0.3 + 0.5*(i-breakIdx)/N : 0), 0, 1);
+            rollingP.push(p);
+        }
+
+        // Backtest with break
+        let pos = 0, entrySpread = 0;
+        const pnl = [0];
+        const mu0 = mean(spread.slice(0, breakIdx));
+        const sigma0 = std(spread.slice(0, breakIdx));
+        for (let i = 1; i < N; i++) {
+            let dailyPnl = 0;
+            if (pos === 1) {
+                dailyPnl = spread[i] - spread[i-1];
+                if (spread[i] >= mu0) pos = 0;
+                else if (spread[i] < mu0 - 4*sigma0) pos = 0; // emergency stop
+            } else if (pos === -1) {
+                dailyPnl = -(spread[i] - spread[i-1]);
+                if (spread[i] <= mu0) pos = 0;
+                else if (spread[i] > mu0 + 4*sigma0) pos = 0;
+            }
+            if (pos === 0) {
+                if (spread[i] > mu0 + 2*sigma0) { pos = -1; entrySpread = spread[i]; }
+                else if (spread[i] < mu0 - 2*sigma0) { pos = 1; entrySpread = spread[i]; }
+            }
+            pnl.push(pnl[i-1] + dailyPnl);
+        }
+
+        const dpr = window.devicePixelRatio || 1;
+        canvas.width = 700 * dpr; canvas.height = 500 * dpr;
+        ctx.scale(dpr, dpr);
+        ctx.clearRect(0, 0, 700, 500);
+
+        // Three sub-charts
+        // 1. Spread (top)
+        const s1x=60, s1y=15, s1w=600, s1h=140;
+        const sMin = Math.min(...spread)-1, sMax = Math.max(...spread)+1;
+        drawAxes(ctx, s1x, s1y, s1w, s1h, '', '价差', [], makeYTicks(sMin,sMax,3));
+        ctx.strokeStyle='rgba(255,255,255,0.04)';ctx.lineWidth=0.5;
+        for(let i=1;i<4;i++){const gy=s1y+s1h*i/4;ctx.beginPath();ctx.moveTo(s1x,gy);ctx.lineTo(s1x+s1w,gy);ctx.stroke();}
+        plotHLine(ctx, mu0, s1x, s1y, s1w, s1h, sMin, sMax, '#ffd740', [4,3]);
+        plotHLine(ctx, mu0+2*sigma0, s1x, s1y, s1w, s1h, sMin, sMax, '#ff5252', [3,3]);
+        plotHLine(ctx, mu0-2*sigma0, s1x, s1y, s1w, s1h, sMin, sMax, '#ff5252', [3,3]);
+        plotLine(ctx, spread, s1x, s1y, s1w, s1h, sMin, sMax, '#16c79a', 2);
+        // Break line
+        const bpx = s1x + (breakIdx/(N-1))*s1w;
+        ctx.strokeStyle = '#ff5252'; ctx.lineWidth = 2; ctx.setLineDash([6,3]);
+        ctx.beginPath(); ctx.moveTo(bpx, s1y); ctx.lineTo(bpx, s1y+s1h); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = '#ff5252'; ctx.font = '11px "Noto Sans SC",sans-serif'; ctx.textAlign = 'center';
+        ctx.fillText('断裂点', bpx, s1y - 2);
+        ctx.fillStyle = '#e8e8e8'; ctx.font = 'bold 11px "Noto Sans SC",sans-serif'; ctx.textAlign = 'left';
+        ctx.fillText('价差', s1x+8, s1y+16);
+
+        // 2. Rolling p-value (middle)
+        const s2x=60, s2y=185, s2w=600, s2h=120;
+        drawAxes(ctx, s2x, s2y, s2w, s2h, '', 'p值', [], makeYTicks(0,1,4));
+        ctx.strokeStyle='rgba(255,255,255,0.04)';ctx.lineWidth=0.5;
+        for(let i=1;i<4;i++){const gy=s2y+s2h*i/4;ctx.beginPath();ctx.moveTo(s2x,gy);ctx.lineTo(s2x+s2w,gy);ctx.stroke();}
+        // 0.05 threshold
+        plotHLine(ctx, 0.05, s2x, s2y, s2w, s2h, 0, 1, '#ff5252', [3,3]);
+        ctx.fillStyle='#ff5252'; ctx.font='10px monospace'; ctx.textAlign='right';
+        const thY = s2y + s2h - (0.05)*s2h;
+        ctx.fillText('p=0.05', s2x-4, thY+3);
+        // Color code: green below 0.05, red above
+        for (let i = 1; i < N; i++) {
+            const x1 = s2x + ((i-1)/(N-1))*s2w;
+            const x2 = s2x + (i/(N-1))*s2w;
+            const py1 = s2y + s2h - rollingP[i-1]*s2h;
+            const py2 = s2y + s2h - rollingP[i]*s2h;
+            ctx.strokeStyle = rollingP[i] < 0.05 ? '#16c79a' : '#ffab40';
+            ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.moveTo(x1, py1); ctx.lineTo(x2, py2); ctx.stroke();
+        }
+        // Break line
+        ctx.strokeStyle = '#ff5252'; ctx.lineWidth = 2; ctx.setLineDash([6,3]);
+        ctx.beginPath(); ctx.moveTo(bpx, s2y); ctx.lineTo(bpx, s2y+s2h); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = '#e8e8e8'; ctx.font = 'bold 11px "Noto Sans SC",sans-serif'; ctx.textAlign = 'left';
+        ctx.fillText('滚动协整检验 p值', s2x+8, s2y+16);
+        // Region labels
+        ctx.fillStyle = 'rgba(22,199,154,0.15)';
+        ctx.fillRect(s2x, s2y, bpx-s2x, s2h);
+        ctx.fillStyle = 'rgba(255,82,82,0.1)';
+        ctx.fillRect(bpx, s2y, s2x+s2w-bpx, s2h);
+        ctx.fillStyle='#16c79a';ctx.font='11px "Noto Sans SC",sans-serif';ctx.textAlign='center';
+        ctx.fillText('协整有效', s2x+(bpx-s2x)/2, s2y+s2h-6);
+        ctx.fillStyle='#ff5252';
+        ctx.fillText('协整失效', bpx+(s2x+s2w-bpx)/2, s2y+s2h-6);
+
+        // 3. Cumulative PnL (bottom)
+        const s3x=60, s3y=340, s3w=600, s3h=130;
+        const pMin = Math.min(...pnl)-1, pMax = Math.max(...pnl)+1;
+        drawAxes(ctx, s3x, s3y, s3w, s3h, '交易日', '累计盈亏', makeXTicks(N,5), makeYTicks(pMin,pMax,3));
+        plotHLine(ctx, 0, s3x, s3y, s3w, s3h, pMin, pMax, '#6c6c7c', [3,3]);
+        // Color by before/after break
+        const pRange = pMax - pMin;
+        for (let i = 1; i < N; i++) {
+            const x1 = s3x+((i-1)/(N-1))*s3w;
+            const x2 = s3x+(i/(N-1))*s3w;
+            const y1 = s3y+s3h-((pnl[i-1]-pMin)/pRange)*s3h;
+            const y2 = s3y+s3h-((pnl[i]-pMin)/pRange)*s3h;
+            ctx.strokeStyle = i < breakIdx ? '#b388ff' : '#ff80ab';
+            ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
+        }
+        // Break line
+        ctx.strokeStyle = '#ff5252'; ctx.lineWidth = 2; ctx.setLineDash([6,3]);
+        ctx.beginPath(); ctx.moveTo(bpx, s3y); ctx.lineTo(bpx, s3y+s3h); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = '#e8e8e8'; ctx.font = 'bold 11px "Noto Sans SC",sans-serif'; ctx.textAlign = 'left';
+        ctx.fillText('累计盈亏', s3x+8, s3y+16);
+        // Label break impact
+        ctx.fillStyle='#b388ff';ctx.font='11px "Noto Sans SC",sans-serif';ctx.textAlign='center';
+        ctx.fillText('策略盈利', s3x+(bpx-s3x)/2, s3y-4);
+        ctx.fillStyle='#ff80ab';
+        ctx.fillText('断裂后亏损', bpx+(s3x+s3w-bpx)/2, s3y-4);
+    }
+
+    document.getElementById('breakPoint').addEventListener('input', () => { generatePrices(); draw(); });
+    document.getElementById('breakStrength').addEventListener('input', () => { generatePrices(); draw(); });
+
+    function regenerate() { generatePrices(); draw(); }
+    generatePrices();
+    setTimeout(draw, 180);
+    return { regenerate };
+})();
+
+// ========== KaTeX Auto-Render ==========
+document.addEventListener('DOMContentLoaded', () => {
+    if (typeof renderMathInElement === 'function') {
+        renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '\\(', right: '\\)', display: false},
+                {left: '\\[', right: '\\]', display: true}
+            ],
+            throwOnError: false
+        });
+    } else {
+        // Retry after KaTeX loads
+        setTimeout(() => {
+            if (typeof renderMathInElement === 'function') {
+                renderMathInElement(document.body, {
+                    delimiters: [
+                        {left: '$$', right: '$$', display: true},
+                        {left: '\\(', right: '\\)', display: false},
+                        {left: '\\[', right: '\\]', display: true}
+                    ],
+                    throwOnError: false
+                });
+            }
+        }, 1000);
+    }
+});
+</script>
+</body>
+</html>

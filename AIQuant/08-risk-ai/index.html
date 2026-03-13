@@ -1,0 +1,1300 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 风控 — AI 量化</title>
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script defer src="../shared/scripts/nav.js"></script>
+    <script defer src="../shared/scripts/aiquant-utils.js"></script>
+    <style>
+        .module-intro { margin-bottom: 2rem; }
+        .module-intro h1 span { color: var(--accent-green); }
+        .controls-row {
+            display: flex; flex-wrap: wrap; align-items: center;
+            gap: 0.75rem; margin-bottom: 1rem;
+        }
+        .toggle-btn {
+            padding: 0.35rem 0.8rem; border-radius: var(--radius-sm);
+            border: 1px solid var(--border-color); background: var(--bg-secondary);
+            color: var(--text-secondary); font-size: 0.8rem; cursor: pointer;
+            transition: all 0.2s; font-family: inherit;
+        }
+        .toggle-btn.active {
+            border-color: var(--accent-green); color: var(--accent-green);
+            background: rgba(22,199,154,0.15);
+        }
+        .toggle-btn:hover { border-color: var(--accent-green); }
+        canvas { display: block; border-radius: var(--radius-sm); }
+        .canvas-wrap {
+            background: var(--bg-secondary); border: 1px solid var(--border-color);
+            border-radius: var(--radius-md); padding: 1rem; position: relative;
+        }
+        .canvas-wrap canvas { width: 100%; }
+        .stat-grid {
+            display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+            gap: 0.5rem; margin-top: 0.75rem;
+        }
+        .stat-item {
+            background: var(--bg-card); border-radius: var(--radius-sm);
+            padding: 0.5rem 0.75rem; text-align: center;
+        }
+        .stat-item .label { font-size: 0.72rem; color: var(--text-muted); }
+        .stat-item .value {
+            font-family: var(--font-mono); font-size: 0.9rem;
+            color: var(--accent-green); font-weight: 600;
+        }
+        .select-wrap select {
+            background: var(--bg-secondary); color: var(--text-primary);
+            border: 1px solid var(--border-color); border-radius: var(--radius-sm);
+            padding: 0.35rem 0.6rem; font-size: 0.85rem; font-family: inherit;
+            cursor: pointer; outline: none;
+        }
+        .select-wrap select:focus { border-color: var(--accent-green); }
+        .meter-wrap {
+            display: flex; flex-direction: column; align-items: center; gap: 0.3rem;
+        }
+        .meter-label { font-size: 0.75rem; color: var(--text-muted); }
+        .meter-value {
+            font-family: var(--font-mono); font-size: 1.1rem; font-weight: 700;
+        }
+        .alert-log {
+            max-height: 180px; overflow-y: auto; font-size: 0.78rem;
+            font-family: var(--font-mono); background: rgba(0,0,0,0.3);
+            border-radius: var(--radius-sm); padding: 0.5rem 0.75rem;
+        }
+        .alert-log .alert-entry {
+            padding: 0.2rem 0; border-bottom: 1px solid rgba(255,255,255,0.04);
+        }
+        .alert-entry.critical { color: var(--accent-red); }
+        .alert-entry.warning { color: var(--accent-orange); }
+        .alert-entry.info { color: var(--accent-blue); }
+        .matrix-sm {
+            font-family: var(--font-mono); font-size: 0.78rem;
+            border-collapse: collapse; margin-top: 0.5rem;
+        }
+        .matrix-sm th, .matrix-sm td {
+            padding: 0.3rem 0.6rem; border: 1px solid var(--border-color);
+            text-align: center;
+        }
+        .matrix-sm th {
+            background: var(--bg-card); color: var(--accent-green); font-weight: 600;
+        }
+        .feature-sliders { display: flex; flex-direction: column; gap: 0.5rem; }
+        .arch-flow {
+            display: flex; align-items: center; gap: 0.3rem; flex-wrap: wrap;
+            margin-bottom: 1rem;
+        }
+        .arch-node {
+            padding: 0.4rem 0.8rem; border-radius: var(--radius-sm);
+            border: 1px solid var(--border-color); background: var(--bg-card);
+            font-size: 0.8rem; color: var(--text-secondary); white-space: nowrap;
+        }
+        .arch-node.active { border-color: var(--accent-green); color: var(--accent-green); }
+        .arch-arrow { color: var(--text-muted); font-size: 1rem; }
+    </style>
+</head>
+<body>
+<div class="page-container">
+    <div class="module-intro">
+        <h1><span>08</span> AI 风控</h1>
+        <p>利用机器学习和深度学习方法构建智能风险管理系统，包括异常检测、尾部风险预测、市场 regime 识别、信用评分和实时风控。</p>
+    </div>
+
+    <!-- ===== Section 1: 异常检测 ===== -->
+    <div class="section" id="sec-anomaly">
+        <div class="section-title"><div class="icon">🔍</div><h2>异常检测</h2></div>
+        <p>在正常收益率序列中注入异常点，比较 Z-score、Isolation Forest 和 Autoencoder 三种检测方法的效果。
+        异常交易检测是风控系统的第一道防线，能够在市场操纵、闪崩等事件中提前发出预警。</p>
+        <div class="info-box">
+            <p>$$\text{Z-score} = \frac{x - \mu}{\sigma}, \quad \text{异常条件:} |z| > \theta$$</p>
+            <p style="margin-top:0.5rem;">$$\text{Isolation Forest: } s(x, n) = 2^{-\frac{E[h(x)]}{c(n)}}, \quad \text{Autoencoder: } L = \|x - \hat{x}\|^2$$</p>
+        </div>
+        <div class="controls-row">
+            <div class="slider-group">
+                <label>阈值 \(\theta\):</label>
+                <input type="range" id="anomThreshold" min="1.5" max="4" step="0.1" value="2.5">
+                <span class="slider-value" id="anomThreshVal">2.5</span>
+            </div>
+            <button class="btn" id="anomRegenBtn">重新生成</button>
+            <div class="toggle-btn active" data-method="zscore" onclick="S1.toggleMethod(this)">Z-score</div>
+            <div class="toggle-btn" data-method="iforest" onclick="S1.toggleMethod(this)">Isolation Forest</div>
+            <div class="toggle-btn" data-method="autoencoder" onclick="S1.toggleMethod(this)">Autoencoder</div>
+        </div>
+        <div class="split-layout">
+            <div class="viz-panel">
+                <div class="canvas-wrap"><canvas id="anomCanvas" width="700" height="320"></canvas></div>
+                <div class="stat-grid" id="anomStats"></div>
+            </div>
+            <div class="viz-panel">
+                <h3>ROC 曲线</h3>
+                <div class="canvas-wrap"><canvas id="rocCanvas" width="350" height="320"></canvas></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== Section 2: 尾部风险预测 ===== -->
+    <div class="section" id="sec-tailrisk">
+        <div class="section-title"><div class="icon">📉</div><h2>尾部风险预测</h2></div>
+        <p>比较传统 VaR（历史模拟法）与 ML 增强 VaR（条件特征），观察危机期间的表现差异。
+        传统 VaR 假设收益率服从正态分布，在尾部事件中严重低估风险；ML 增强 VaR 利用波动率聚集、趋势动量等条件特征动态调整风险估计。</p>
+        <div class="info-box">
+            <p>$$\text{VaR}_\alpha = -\inf\{x : P(X \le x) \ge \alpha\}, \quad \text{CVaR}_\alpha = E[X | X \le -\text{VaR}_\alpha]$$</p>
+        </div>
+        <div class="controls-row">
+            <div class="slider-group">
+                <label>置信水平:</label>
+                <input type="range" id="varConf" min="90" max="99" step="1" value="95">
+                <span class="slider-value" id="varConfVal">95%</span>
+            </div>
+            <button class="btn" id="crisisBtn">注入危机</button>
+            <button class="btn" id="tailResetBtn">重置</button>
+        </div>
+        <div class="canvas-wrap"><canvas id="tailCanvas" width="900" height="360"></canvas></div>
+        <div class="stat-grid" id="tailStats"></div>
+    </div>
+
+    <!-- ===== Section 3: 市场 Regime 检测 ===== -->
+    <div class="section" id="sec-regime">
+        <div class="section-title"><div class="icon">🔄</div><h2>市场 Regime 检测</h2></div>
+        <p>使用隐马尔可夫模型 (HMM) 检测市场状态：牛市、熊市、高波动。不同 regime 以背景色区分。
+        Regime 检测帮助策略根据市场状态动态调整仓位和风险敞口，在高波动期降低杠杆，在牛市中增加持仓。</p>
+        <div class="info-box">
+            <p>$$P(S_t | S_{t-1}) = A_{ij}, \quad P(X_t | S_t = k) = \mathcal{N}(\mu_k, \sigma_k^2)$$</p>
+        </div>
+        <div class="controls-row">
+            <button class="btn" id="regimeRegenBtn">重新生成</button>
+        </div>
+        <div class="canvas-wrap"><canvas id="regimeCanvas" width="900" height="350"></canvas></div>
+        <div class="split-layout" style="margin-top:1rem;">
+            <div>
+                <h4>转移矩阵</h4>
+                <table class="matrix-sm" id="transMatrix"></table>
+            </div>
+            <div>
+                <h4>Regime 统计</h4>
+                <div class="stat-grid" id="regimeStats"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== Section 4: 信用风险评分 ===== -->
+    <div class="section" id="sec-credit">
+        <div class="section-title"><div class="icon">💳</div><h2>信用风险评分</h2></div>
+        <p>比较 Logistic 回归、XGBoost 和神经网络在违约预测中的表现。调整借款人特征观察评分变化。
+        信用评分模型是银行风控的核心，通过对借款人多维特征的综合评估来预测违约概率。</p>
+        <div class="info-box">
+            <p>$$P(\text{default}) = \sigma(\beta_0 + \sum_i \beta_i x_i), \quad \sigma(z) = \frac{1}{1+e^{-z}}$$</p>
+            <p style="margin-top:0.3rem;">$$\text{AUC} = \int_0^1 \text{TPR}(t)\,dt = P(\hat{y}_{+} > \hat{y}_{-})$$</p>
+        </div>
+        <div class="split-layout">
+            <div class="text-panel">
+                <h4>借款人特征</h4>
+                <div class="feature-sliders" id="creditSliders"></div>
+                <div class="stat-grid" id="creditScores" style="margin-top:1rem;"></div>
+                <h4 style="margin-top:1rem;">混淆矩阵（XGBoost）</h4>
+                <table class="matrix-sm" id="confMatrix"></table>
+            </div>
+            <div class="viz-panel">
+                <h4>ROC 曲线对比</h4>
+                <div class="canvas-wrap"><canvas id="creditRocCanvas" width="400" height="320"></canvas></div>
+                <h4 style="margin-top:1rem;">特征重要性</h4>
+                <div class="canvas-wrap"><canvas id="featureImpCanvas" width="400" height="220"></canvas></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== Section 5: 实时风控系统 ===== -->
+    <div class="section" id="sec-realtime">
+        <div class="section-title"><div class="icon">🛡</div><h2>实时风控系统</h2></div>
+        <p>模拟流式风控架构：数据流 → 特征计算 → 模型推理 → 预警。监控仪表盘展示实时风险指标。
+        系统综合波动率、最大回撤、相关性等多维度风险因子，动态计算综合风险评分，当风险超过阈值时自动触发预警。</p>
+        <div class="arch-flow">
+            <div class="arch-node" id="archStream">数据流</div>
+            <div class="arch-arrow">→</div>
+            <div class="arch-node" id="archFeature">特征计算</div>
+            <div class="arch-arrow">→</div>
+            <div class="arch-node" id="archInfer">模型推理</div>
+            <div class="arch-arrow">→</div>
+            <div class="arch-node" id="archAlert">预警引擎</div>
+        </div>
+        <div class="controls-row">
+            <button class="btn btn-primary" id="rtStartBtn">启动监控</button>
+            <button class="btn" id="rtStopBtn">停止</button>
+            <button class="btn" id="rtShockBtn" style="border-color:var(--accent-red);color:var(--accent-red);">注入市场冲击</button>
+        </div>
+        <div class="split-layout">
+            <div class="viz-panel">
+                <div class="canvas-wrap"><canvas id="rtCanvas" width="500" height="280"></canvas></div>
+                <div class="stat-grid" id="rtMeters" style="margin-top:0.75rem;"></div>
+            </div>
+            <div class="viz-panel">
+                <h4>预警日志</h4>
+                <div class="alert-log" id="alertLog"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    // KaTeX
+    if (typeof renderMathInElement === 'function') {
+        renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '\\(', right: '\\)', display: false}
+            ]
+        });
+    }
+
+    const U = typeof AIQuantUtils !== 'undefined' ? AIQuantUtils : null;
+    const C = U ? U.AIQUANT_COLORS : {
+        primary:'#00e5ff', secondary:'#7c4dff', accent:'#ff6d00',
+        positive:'#00e676', negative:'#ff1744', neutral:'#78909c',
+        bg:'#0a0e17', panel:'#121929', grid:'rgba(255,255,255,0.06)',
+        text:'#e0e0e0', textDim:'#78909c',
+        series:['#00e5ff','#7c4dff','#ff6d00','#00e676','#ff1744','#ffea00']
+    };
+
+    function rng() { return Math.random(); }
+    function nrand(mu=0, s=1) {
+        if (U) return U.normalRandom(mu, s);
+        const u1 = Math.random(), u2 = Math.random();
+        return mu + s * Math.sqrt(-2*Math.log(u1||1e-15)) * Math.cos(2*Math.PI*u2);
+    }
+    function mean(a) { return U ? U.mean(a) : a.reduce((s,v)=>s+v,0)/(a.length||1); }
+    function std(a) { return U ? U.std(a) : Math.sqrt(a.reduce((s,v)=>s+(v-mean(a))**2,0)/(a.length||1)); }
+    function sigmoid(x) { return 1/(1+Math.exp(-Math.max(-500,Math.min(500,x)))); }
+    function clamp(v,lo,hi) { return Math.max(lo,Math.min(hi,v)); }
+
+    function drawGrid(ctx, x, y, w, h, color) {
+        ctx.save(); ctx.strokeStyle = color || C.grid; ctx.lineWidth = 0.5;
+        for (let i=0; i<=5; i++) {
+            const yy = y + (i/5)*h;
+            ctx.beginPath(); ctx.moveTo(x,yy); ctx.lineTo(x+w,yy); ctx.stroke();
+        }
+        for (let i=0; i<=10; i++) {
+            const xx = x + (i/10)*w;
+            ctx.beginPath(); ctx.moveTo(xx,y); ctx.lineTo(xx,y+h); ctx.stroke();
+        }
+        ctx.restore();
+    }
+
+    function drawLine(ctx, pts, x0, y0, w, h, xMin, xMax, yMin, yMax, color, lw) {
+        ctx.save(); ctx.strokeStyle = color; ctx.lineWidth = lw||1.5;
+        ctx.beginPath();
+        for (let i=0; i<pts.length; i++) {
+            const px = x0 + ((i-xMin)/(xMax-xMin))*w;
+            const py = y0 + h - ((pts[i]-yMin)/(yMax-yMin))*h;
+            i===0 ? ctx.moveTo(px,py) : ctx.lineTo(px,py);
+        }
+        ctx.stroke(); ctx.restore();
+    }
+
+    // ================ SECTION 1: ANOMALY DETECTION ================
+    const S1 = (() => {
+        let returns = [], labels = [], method = 'zscore';
+        let iforestSeeds = [], aeSeeds = []; // stable random seeds per point
+        const canvas = document.getElementById('anomCanvas');
+        const rocCanvas = document.getElementById('rocCanvas');
+        const ctx = canvas.getContext('2d');
+        const rctx = rocCanvas.getContext('2d');
+        const threshSlider = document.getElementById('anomThreshold');
+        const threshVal = document.getElementById('anomThreshVal');
+
+        function generate() {
+            returns = []; labels = []; iforestSeeds = []; aeSeeds = [];
+            // Generate 250 normal returns with ~8% anomaly injection
+            for (let i=0; i<250; i++) {
+                const isAnom = rng() < 0.08;
+                labels.push(isAnom ? 1 : 0);
+                if (isAnom) {
+                    // Anomalies: large moves, fat tails
+                    const direction = rng() > 0.5 ? 1 : -1;
+                    const magnitude = 0.06 + rng() * 0.08;
+                    returns.push(direction * magnitude + nrand(0, 0.01));
+                } else {
+                    returns.push(nrand(0.0005, 0.015));
+                }
+                // Pre-generate stable noise for iforest & autoencoder
+                iforestSeeds.push(rng());
+                aeSeeds.push(rng());
+            }
+            draw();
+        }
+
+        function getScores() {
+            const mu = mean(returns), sd = std(returns) || 0.01;
+            if (method === 'zscore') {
+                return returns.map(r => Math.abs((r - mu) / sd));
+            } else if (method === 'iforest') {
+                // Isolation Forest: path length approximation
+                // Shorter path = more isolated = higher anomaly score
+                return returns.map((r, i) => {
+                    const z = Math.abs((r - mu) / sd);
+                    // Simulate isolation: anomalies get shorter paths
+                    const pathNoise = iforestSeeds[i] * 0.4;
+                    const isoScore = z * 0.8 + pathNoise;
+                    // Non-linear transform to mimic real isolation forest
+                    return Math.pow(isoScore, 0.9) + 0.1;
+                });
+            } else {
+                // Autoencoder: reconstruction error
+                // Normal data reconstructs well, anomalies have high error
+                return returns.map((r, i) => {
+                    const z = Math.abs((r - mu) / sd);
+                    const reconNoise = aeSeeds[i] * 0.15;
+                    // Quadratic scaling: large deviations cause disproportionate error
+                    return z * z * 0.25 + z * 0.1 + reconNoise;
+                });
+            }
+        }
+
+        function computeMetrics(scores, th) {
+            let tp=0, fp=0, fn=0, tn=0;
+            for (let i=0; i<scores.length; i++) {
+                const pred = scores[i] > th ? 1 : 0;
+                if (pred===1 && labels[i]===1) tp++;
+                else if (pred===1 && labels[i]===0) fp++;
+                else if (pred===0 && labels[i]===1) fn++;
+                else tn++;
+            }
+            const prec = tp/(tp+fp||1);
+            const rec = tp/(tp+fn||1);
+            const f1 = 2*prec*rec/(prec+rec||1);
+            return {tp,fp,fn,tn,prec,rec,f1};
+        }
+
+        function computeROC(scores) {
+            const pts = [];
+            for (let th=0; th<=6; th+=0.1) {
+                const m = computeMetrics(scores, th);
+                const fpr = m.fp/(m.fp+m.tn||1);
+                const tpr = m.tp/(m.tp+m.fn||1);
+                pts.push({fpr, tpr});
+            }
+            pts.sort((a,b)=>a.fpr-b.fpr);
+            return pts;
+        }
+
+        function draw() {
+            const dpr = window.devicePixelRatio||1;
+            canvas.width = canvas.clientWidth*dpr;
+            canvas.height = 320*dpr;
+            ctx.setTransform(dpr,0,0,dpr,0,0);
+            const W = canvas.clientWidth, H = 320;
+
+            const th = parseFloat(threshSlider.value);
+            const scores = getScores();
+            const metrics = computeMetrics(scores, th);
+
+            ctx.fillStyle = C.bg; ctx.fillRect(0,0,W,H);
+            const pad = {l:50, r:20, t:30, b:40};
+            const gw = W-pad.l-pad.r, gh = H-pad.t-pad.b;
+            drawGrid(ctx, pad.l, pad.t, gw, gh);
+
+            // Axis
+            const yMin=-0.18, yMax=0.18;
+            if (U) U.drawAxis(ctx, {x:pad.l,y:pad.t,w:gw,h:gh,
+                xMin:0,xMax:returns.length,yMin:yMin,yMax:yMax,
+                xLabel:'时间步',yLabel:'收益率'});
+
+            // Threshold bands (for z-score visualization)
+            if (method === 'zscore') {
+                const mu = mean(returns), sd = std(returns) || 0.01;
+                const upperTh = mu + th * sd;
+                const lowerTh = mu - th * sd;
+                const yU = pad.t + gh - ((upperTh-yMin)/(yMax-yMin))*gh;
+                const yL = pad.t + gh - ((lowerTh-yMin)/(yMax-yMin))*gh;
+                ctx.fillStyle = 'rgba(255,23,68,0.05)';
+                ctx.fillRect(pad.l, pad.t, gw, yU - pad.t);
+                ctx.fillRect(pad.l, yL, gw, pad.t+gh-yL);
+                ctx.strokeStyle = 'rgba(255,23,68,0.3)'; ctx.lineWidth = 1;
+                ctx.setLineDash([4,4]);
+                ctx.beginPath(); ctx.moveTo(pad.l,yU); ctx.lineTo(pad.l+gw,yU); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(pad.l,yL); ctx.lineTo(pad.l+gw,yL); ctx.stroke();
+                ctx.setLineDash([]);
+                ctx.fillStyle = 'rgba(255,23,68,0.5)'; ctx.font = '9px monospace';
+                ctx.fillText(`+${th}σ`, pad.l+gw-30, yU-3);
+                ctx.fillText(`-${th}σ`, pad.l+gw-30, yL+10);
+            }
+
+            // Draw returns as scatter points with classification coloring
+            for (let i=0; i<returns.length; i++) {
+                const px = pad.l + (i/returns.length)*gw;
+                const py = pad.t + gh - ((returns[i]-yMin)/(yMax-yMin))*gh;
+                const detected = scores[i] > th;
+                const isTrue = labels[i] === 1;
+
+                if (detected && isTrue) {
+                    // True positive: red with ring
+                    ctx.fillStyle = C.negative; ctx.globalAlpha = 1;
+                    ctx.beginPath(); ctx.arc(px,py,5,0,Math.PI*2); ctx.fill();
+                    ctx.strokeStyle = '#ff5252'; ctx.lineWidth = 1.5;
+                    ctx.beginPath(); ctx.arc(px,py,8,0,Math.PI*2); ctx.stroke();
+                } else if (detected && !isTrue) {
+                    // False positive: orange triangle
+                    ctx.fillStyle = '#ff6d00'; ctx.globalAlpha = 0.9;
+                    ctx.beginPath();
+                    ctx.moveTo(px,py-5); ctx.lineTo(px-4,py+4); ctx.lineTo(px+4,py+4);
+                    ctx.closePath(); ctx.fill();
+                } else if (!detected && isTrue) {
+                    // False negative: purple diamond
+                    ctx.fillStyle = C.secondary; ctx.globalAlpha = 0.8;
+                    ctx.beginPath();
+                    ctx.moveTo(px,py-4); ctx.lineTo(px+4,py); ctx.lineTo(px,py+4); ctx.lineTo(px-4,py);
+                    ctx.closePath(); ctx.fill();
+                } else {
+                    // True negative: normal dot
+                    ctx.fillStyle = C.primary; ctx.globalAlpha = 0.35;
+                    ctx.beginPath(); ctx.arc(px,py,2,0,Math.PI*2); ctx.fill();
+                }
+            }
+            ctx.globalAlpha = 1;
+
+            // Legend with shapes
+            ctx.font = '11px sans-serif';
+            const legends = [
+                {c:C.primary, t:'正常 (TN)', shape:'circle'},
+                {c:C.negative, t:'检出真异常 (TP)', shape:'ring'},
+                {c:'#ff6d00', t:'误报 (FP)', shape:'triangle'},
+                {c:C.secondary, t:'漏报 (FN)', shape:'diamond'}
+            ];
+            let lx = pad.l;
+            for (const l of legends) {
+                ctx.fillStyle = l.c;
+                if (l.shape==='circle'||l.shape==='ring') {
+                    ctx.beginPath(); ctx.arc(lx+6,14,4,0,Math.PI*2); ctx.fill();
+                } else if (l.shape==='triangle') {
+                    ctx.beginPath(); ctx.moveTo(lx+6,10); ctx.lineTo(lx+2,18); ctx.lineTo(lx+10,18); ctx.closePath(); ctx.fill();
+                } else {
+                    ctx.beginPath(); ctx.moveTo(lx+6,10); ctx.lineTo(lx+10,14); ctx.lineTo(lx+6,18); ctx.lineTo(lx+2,14); ctx.closePath(); ctx.fill();
+                }
+                ctx.fillStyle = C.text; ctx.fillText(l.t, lx+14, 18);
+                lx += ctx.measureText(l.t).width + 28;
+            }
+
+            // Method label
+            const methodNames = {zscore:'Z-Score 检测', iforest:'Isolation Forest', autoencoder:'Autoencoder'};
+            ctx.fillStyle = C.primary; ctx.font = 'bold 12px sans-serif';
+            ctx.textAlign = 'right';
+            ctx.fillText(methodNames[method], pad.l+gw, pad.t+14);
+            ctx.textAlign = 'left';
+
+            // Stats
+            const acc = (metrics.tp+metrics.tn)/(metrics.tp+metrics.tn+metrics.fp+metrics.fn||1);
+            document.getElementById('anomStats').innerHTML = [
+                {l:'精确率 (Precision)',v:(metrics.prec*100).toFixed(1)+'%'},
+                {l:'召回率 (Recall)',v:(metrics.rec*100).toFixed(1)+'%'},
+                {l:'F1 分数',v:(metrics.f1*100).toFixed(1)+'%'},
+                {l:'准确率 (Accuracy)',v:(acc*100).toFixed(1)+'%'},
+                {l:'TP / FP / FN / TN',v:`${metrics.tp} / ${metrics.fp} / ${metrics.fn} / ${metrics.tn}`}
+            ].map(s=>`<div class="stat-item"><div class="label">${s.l}</div><div class="value">${s.v}</div></div>`).join('');
+
+            drawROC(scores);
+        }
+
+        function drawROC(scores) {
+            const dpr = window.devicePixelRatio||1;
+            rocCanvas.width = rocCanvas.clientWidth*dpr;
+            rocCanvas.height = 320*dpr;
+            rctx.setTransform(dpr,0,0,dpr,0,0);
+            const W = rocCanvas.clientWidth, H = 320;
+            rctx.fillStyle = C.bg; rctx.fillRect(0,0,W,H);
+            const pad = {l:50,r:20,t:30,b:40};
+            const gw = W-pad.l-pad.r, gh = H-pad.t-pad.b;
+            drawGrid(rctx,pad.l,pad.t,gw,gh);
+
+            if (U) U.drawAxis(rctx,{x:pad.l,y:pad.t,w:gw,h:gh,xMin:0,xMax:1,yMin:0,yMax:1,
+                xLabel:'FPR',yLabel:'TPR'});
+
+            // Diagonal
+            rctx.strokeStyle = C.textDim; rctx.setLineDash([4,4]); rctx.lineWidth=1;
+            rctx.beginPath(); rctx.moveTo(pad.l,pad.t+gh); rctx.lineTo(pad.l+gw,pad.t); rctx.stroke();
+            rctx.setLineDash([]);
+
+            // ROC for all 3 methods
+            const methods = ['zscore','iforest','autoencoder'];
+            const colors = [C.primary, C.secondary, C.accent];
+            const oldMethod = method;
+            let auc_vals = [];
+            methods.forEach((m,mi) => {
+                method = m;
+                const sc = getScores(2.5);
+                const roc = computeROC(sc);
+                rctx.strokeStyle = colors[mi]; rctx.lineWidth = 2;
+                rctx.beginPath();
+                let area = 0;
+                for (let i=0; i<roc.length; i++) {
+                    const px = pad.l + roc[i].fpr*gw;
+                    const py = pad.t + gh - roc[i].tpr*gh;
+                    i===0 ? rctx.moveTo(px,py) : rctx.lineTo(px,py);
+                    if (i>0) area += (roc[i].fpr-roc[i-1].fpr)*(roc[i].tpr+roc[i-1].tpr)/2;
+                }
+                rctx.stroke();
+                auc_vals.push(area);
+            });
+            method = oldMethod;
+
+            // Legend
+            rctx.font = '11px sans-serif';
+            methods.forEach((m,i) => {
+                const ly = pad.t + 10 + i*16;
+                rctx.fillStyle = colors[i];
+                rctx.fillRect(pad.l+gw-130, ly-4, 10, 3);
+                rctx.fillStyle = C.text;
+                rctx.fillText(`${m} (AUC=${auc_vals[i].toFixed(2)})`, pad.l+gw-115, ly);
+            });
+        }
+
+        function toggleMethod(el) {
+            document.querySelectorAll('#sec-anomaly .toggle-btn').forEach(b=>b.classList.remove('active'));
+            el.classList.add('active');
+            method = el.dataset.method;
+            draw();
+        }
+
+        threshSlider.oninput = () => { threshVal.textContent = threshSlider.value; draw(); };
+        document.getElementById('anomRegenBtn').onclick = generate;
+        generate();
+        return { toggleMethod };
+    })();
+    window.S1 = S1;
+
+    // ================ SECTION 2: TAIL RISK ================
+    (() => {
+        let prices = [], returns = [], hasCrisis = false;
+        const canvas = document.getElementById('tailCanvas');
+        const ctx = canvas.getContext('2d');
+        const confSlider = document.getElementById('varConf');
+        const confVal = document.getElementById('varConfVal');
+
+        function generate(crisis) {
+            hasCrisis = crisis;
+            const data = U ? U.generateStockData({length:300, seed:77, vol:0.018}) : null;
+            prices = data ? data.close : [];
+            if (!prices.length) {
+                prices = [100];
+                for (let i=1;i<300;i++) prices.push(prices[i-1]*Math.exp(nrand(0.0003,0.018)));
+            }
+            if (crisis) {
+                for (let i=180; i<210; i++) {
+                    prices[i] = prices[i-1] * Math.exp(nrand(-0.025, 0.05));
+                }
+                for (let i=210; i<300; i++) {
+                    prices[i] = prices[i-1] * Math.exp(nrand(0.001, 0.02));
+                }
+            }
+            returns = [];
+            for (let i=1; i<prices.length; i++) returns.push(Math.log(prices[i]/prices[i-1]));
+            draw();
+        }
+
+        function historicalVaR(rets, conf) {
+            const sorted = rets.slice().sort((a,b)=>a-b);
+            const idx = Math.floor((1-conf/100)*sorted.length);
+            return -sorted[idx];
+        }
+
+        function mlVaR(rets, conf, i) {
+            // ML-enhanced: uses rolling vol and trend
+            const lookback = Math.min(i, 30);
+            const window = rets.slice(Math.max(0,i-lookback), i);
+            const vol = std(window) || 0.01;
+            const trend = mean(window);
+            const base = historicalVaR(rets.slice(0,i+1), conf);
+            return base * (1 + vol*5 + Math.abs(trend)*20);
+        }
+
+        function draw() {
+            const dpr = window.devicePixelRatio||1;
+            canvas.width = canvas.clientWidth*dpr;
+            canvas.height = 360*dpr;
+            ctx.setTransform(dpr,0,0,dpr,0,0);
+            const W = canvas.clientWidth, H = 360;
+            ctx.fillStyle = C.bg; ctx.fillRect(0,0,W,H);
+
+            const pad = {l:55,r:20,t:30,b:40};
+            const gw = W-pad.l-pad.r, gh = (H-pad.t-pad.b)/2 - 10;
+            const conf = parseFloat(confSlider.value);
+
+            // Top: Price chart with crisis highlight
+            drawGrid(ctx, pad.l, pad.t, gw, gh);
+            const pMin = Math.min(...prices)*0.98, pMax = Math.max(...prices)*1.02;
+            if (U) U.drawAxis(ctx,{x:pad.l,y:pad.t,w:gw,h:gh,xMin:0,xMax:prices.length,yMin:pMin,yMax:pMax,yLabel:'价格'});
+
+            if (hasCrisis) {
+                const x1 = pad.l + (180/prices.length)*gw;
+                const x2 = pad.l + (210/prices.length)*gw;
+                ctx.fillStyle = 'rgba(255,23,68,0.1)';
+                ctx.fillRect(x1, pad.t, x2-x1, gh);
+                ctx.fillStyle = C.negative; ctx.font = '11px sans-serif';
+                ctx.fillText('危机期', x1+4, pad.t+14);
+            }
+
+            drawLine(ctx, prices, pad.l, pad.t, gw, gh, 0, prices.length, pMin, pMax, C.primary, 1.5);
+
+            // Bottom: VaR comparison
+            const y2 = pad.t + gh + 30;
+            drawGrid(ctx, pad.l, y2, gw, gh);
+
+            const hVaRs = [], mVaRs = [], actualLosses = [];
+            const window = 60;
+            for (let i=window; i<returns.length; i++) {
+                const subset = returns.slice(i-window, i);
+                hVaRs.push(historicalVaR(subset, conf));
+                mVaRs.push(mlVaR(returns, conf, i));
+                actualLosses.push(-returns[i]);
+            }
+
+            const allV = [...hVaRs, ...mVaRs, ...actualLosses];
+            const vMin = Math.min(...allV)-0.005, vMax = Math.max(...allV)+0.005;
+            if (U) U.drawAxis(ctx,{x:pad.l,y:y2,w:gw,h:gh,xMin:0,xMax:hVaRs.length,yMin:vMin,yMax:vMax,yLabel:'VaR / Loss'});
+
+            // VaR breach highlights
+            let hBreaches=0, mBreaches=0;
+            for (let i=0; i<actualLosses.length; i++) {
+                if (actualLosses[i] > hVaRs[i]) hBreaches++;
+                if (actualLosses[i] > mVaRs[i]) mBreaches++;
+            }
+
+            drawLine(ctx, hVaRs, pad.l, y2, gw, gh, 0, hVaRs.length, vMin, vMax, C.accent, 2);
+            drawLine(ctx, mVaRs, pad.l, y2, gw, gh, 0, hVaRs.length, vMin, vMax, C.positive, 2);
+
+            // Actual losses as dots
+            for (let i=0; i<actualLosses.length; i++) {
+                const px = pad.l + (i/hVaRs.length)*gw;
+                const py = y2 + gh - ((actualLosses[i]-vMin)/(vMax-vMin))*gh;
+                ctx.fillStyle = actualLosses[i] > mVaRs[i] ? C.negative : 'rgba(255,255,255,0.2)';
+                ctx.beginPath(); ctx.arc(px,py,1.5,0,Math.PI*2); ctx.fill();
+            }
+
+            // Legend
+            ctx.font = '11px sans-serif';
+            [{c:C.accent,t:'传统 VaR'},{c:C.positive,t:'ML VaR'},{c:'rgba(255,255,255,0.4)',t:'实际损失'}].forEach((l,i) => {
+                ctx.fillStyle = l.c; ctx.fillRect(pad.l + i*100, y2-12, 14, 3);
+                ctx.fillStyle = C.text; ctx.fillText(l.t, pad.l + i*100+18, y2-8);
+            });
+
+            updateTailInfo(hBreaches, mBreaches);
+        }
+
+        confSlider.oninput = () => { confVal.textContent = confSlider.value+'%'; draw(); };
+        document.getElementById('crisisBtn').onclick = () => generate(true);
+        document.getElementById('tailResetBtn').onclick = () => generate(false);
+
+        function updateTailInfo(hBreaches, mBreaches) {
+            const conf = parseFloat(confSlider.value);
+            const sortedRet = returns.slice().sort((a,b)=>a-b);
+            const n = sortedRet.length;
+            const cutIdx = Math.floor((1-conf/100)*n);
+            // Compute excess kurtosis to show fat tails
+            const mu = mean(returns), sd = std(returns);
+            let kurt = 0;
+            for (let i=0; i<n; i++) kurt += Math.pow((returns[i]-mu)/(sd||1), 4);
+            kurt = kurt/n - 3;
+            // Skewness
+            let skew = 0;
+            for (let i=0; i<n; i++) skew += Math.pow((returns[i]-mu)/(sd||1), 3);
+            skew = skew/n;
+
+            const hVar = historicalVaR(returns, conf);
+            const tailReturns = sortedRet.slice(0, cutIdx);
+            const cvar = tailReturns.length ? -mean(tailReturns) : 0;
+
+            document.getElementById('tailStats').innerHTML = [
+                {l:`传统 VaR(${conf}%)`, v:(hVar*100).toFixed(2)+'%'},
+                {l:'CVaR (条件VaR)', v:(cvar*100).toFixed(2)+'%'},
+                {l:'传统突破', v:`${hBreaches}次`},
+                {l:'ML突破', v:`${mBreaches}次`},
+                {l:'偏度 (Skewness)', v:skew.toFixed(3)},
+                {l:'峰度 (Kurtosis)', v:kurt.toFixed(2)}
+            ].map(s=>`<div class="stat-item"><div class="label">${s.l}</div><div class="value">${s.v}</div></div>`).join('');
+        }
+
+        generate(false);
+    })();
+
+    // ================ SECTION 3: REGIME DETECTION ================
+    (() => {
+        const canvas = document.getElementById('regimeCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // Regime params: bull, bear, volatile
+        const regimeParams = [
+            {mu: 0.001, sigma: 0.01, name: '牛市', color: 'rgba(0,230,118,0.15)'},
+            {mu: -0.002, sigma: 0.015, name: '熊市', color: 'rgba(255,23,68,0.15)'},
+            {mu: 0.0, sigma: 0.035, name: '高波动', color: 'rgba(124,77,255,0.15)'}
+        ];
+        const transProb = [
+            [0.95, 0.03, 0.02],
+            [0.04, 0.93, 0.03],
+            [0.05, 0.05, 0.90]
+        ];
+
+        let prices = [], regimes = [];
+
+        function generate() {
+            prices = [100]; regimes = [0];
+            let state = 0;
+            for (let i=1; i<300; i++) {
+                const r = rng();
+                let cum = 0;
+                for (let j=0; j<3; j++) {
+                    cum += transProb[state][j];
+                    if (r < cum) { state = j; break; }
+                }
+                regimes.push(state);
+                const p = regimeParams[state];
+                prices.push(prices[i-1] * Math.exp(nrand(p.mu, p.sigma)));
+            }
+            draw();
+        }
+
+        function draw() {
+            const dpr = window.devicePixelRatio||1;
+            canvas.width = canvas.clientWidth*dpr;
+            canvas.height = 350*dpr;
+            ctx.setTransform(dpr,0,0,dpr,0,0);
+            const W = canvas.clientWidth, H = 350;
+            ctx.fillStyle = C.bg; ctx.fillRect(0,0,W,H);
+
+            const pad = {l:55,r:20,t:30,b:40};
+            const gw = W-pad.l-pad.r, gh = (H-pad.t-pad.b)*0.65;
+            const pMin = Math.min(...prices)*0.98, pMax = Math.max(...prices)*1.02;
+
+            // Regime backgrounds on price chart
+            for (let i=0; i<regimes.length; i++) {
+                const x1 = pad.l + (i/regimes.length)*gw;
+                const x2 = pad.l + ((i+1)/regimes.length)*gw;
+                ctx.fillStyle = regimeParams[regimes[i]].color;
+                ctx.fillRect(x1, pad.t, x2-x1, gh);
+            }
+
+            drawGrid(ctx, pad.l, pad.t, gw, gh);
+            if (U) U.drawAxis(ctx,{x:pad.l,y:pad.t,w:gw,h:gh,xMin:0,xMax:prices.length,yMin:pMin,yMax:pMax,yLabel:'价格'});
+            drawLine(ctx, prices, pad.l, pad.t, gw, gh, 0, prices.length, pMin, pMax, C.text, 1.5);
+
+            // Bottom: Regime state indicator strip
+            const stripY = pad.t + gh + 8;
+            const stripH = 20;
+            ctx.fillStyle = C.textDim; ctx.font = '9px sans-serif';
+            ctx.fillText('Regime:', pad.l-45, stripY+14);
+            for (let i=0; i<regimes.length; i++) {
+                const x1 = pad.l + (i/regimes.length)*gw;
+                const w2 = gw/regimes.length;
+                const regColor = [C.positive, C.negative, C.secondary][regimes[i]];
+                ctx.fillStyle = regColor;
+                ctx.globalAlpha = 0.7;
+                ctx.fillRect(x1, stripY, w2+0.5, stripH);
+            }
+            ctx.globalAlpha = 1;
+
+            // Returns distribution by regime (bottom area)
+            const distY = stripY + stripH + 15;
+            const distH = H - distY - 10;
+            if (distH > 30) {
+                // Compute returns per regime
+                const retsByRegime = [[],[],[]];
+                for (let i=1; i<prices.length; i++) {
+                    retsByRegime[regimes[i]].push(Math.log(prices[i]/prices[i-1]));
+                }
+                // Mini histogram for each regime
+                const histW = gw/3 - 10;
+                const regimeColors = [C.positive, C.negative, C.secondary];
+                retsByRegime.forEach((rets, ri) => {
+                    if (rets.length < 2) return;
+                    const hx = pad.l + ri*(histW+10);
+                    const bins = 15;
+                    const rMin = -0.08, rMax = 0.08;
+                    const counts = new Array(bins).fill(0);
+                    rets.forEach(r => {
+                        const bi = Math.floor((clamp(r,rMin,rMax)-rMin)/(rMax-rMin)*bins);
+                        counts[Math.min(bi,bins-1)]++;
+                    });
+                    const maxC = Math.max(...counts, 1);
+                    const barW = histW/bins;
+                    for (let b=0; b<bins; b++) {
+                        const barH2 = (counts[b]/maxC)*distH*0.85;
+                        ctx.fillStyle = regimeColors[ri];
+                        ctx.globalAlpha = 0.5;
+                        ctx.fillRect(hx+b*barW, distY+distH-barH2, barW-1, barH2);
+                    }
+                    ctx.globalAlpha = 1;
+                    ctx.fillStyle = regimeColors[ri]; ctx.font = '10px sans-serif';
+                    ctx.fillText(`${regimeParams[ri].name} (μ=${(mean(rets)*100).toFixed(2)}%, σ=${(std(rets)*100).toFixed(2)}%)`,
+                        hx, distY-2);
+                });
+            }
+
+            // Legend
+            ctx.font = '11px sans-serif';
+            regimeParams.forEach((rp,i) => {
+                const lx = pad.l + i*90;
+                ctx.fillStyle = rp.color.replace('0.15','0.6');
+                ctx.fillRect(lx, pad.t-18, 12, 12);
+                ctx.fillStyle = C.text;
+                ctx.fillText(rp.name, lx+16, pad.t-8);
+            });
+
+            // Transition matrix
+            const tbl = document.getElementById('transMatrix');
+            let html = '<tr><th></th>' + regimeParams.map(r=>`<th>${r.name}</th>`).join('') + '</tr>';
+            for (let i=0; i<3; i++) {
+                html += `<tr><th>${regimeParams[i].name}</th>`;
+                for (let j=0; j<3; j++) {
+                    const v = transProb[i][j];
+                    const bg = `rgba(22,199,154,${v*0.5})`;
+                    html += `<td style="background:${bg}">${(v*100).toFixed(0)}%</td>`;
+                }
+                html += '</tr>';
+            }
+            tbl.innerHTML = html;
+
+            // Regime stats
+            const counts = [0,0,0];
+            regimes.forEach(r => counts[r]++);
+            document.getElementById('regimeStats').innerHTML = regimeParams.map((rp,i) =>
+                `<div class="stat-item"><div class="label">${rp.name} 占比</div><div class="value">${(counts[i]/regimes.length*100).toFixed(1)}%</div></div>`
+            ).join('') + `<div class="stat-item"><div class="label">总天数</div><div class="value">${regimes.length}</div></div>`;
+        }
+
+        document.getElementById('regimeRegenBtn').onclick = generate;
+        generate();
+    })();
+
+    // ================ SECTION 4: CREDIT RISK ================
+    (() => {
+        const features = [
+            {name:'收入(万)', min:2, max:50, val:15, key:'income'},
+            {name:'负债率(%)', min:0, max:100, val:40, key:'debtRatio'},
+            {name:'信用历史(年)', min:0, max:30, val:5, key:'creditYears'},
+            {name:'逾期次数', min:0, max:10, val:1, key:'latePayments'},
+            {name:'贷款金额(万)', min:1, max:100, val:20, key:'loanAmount'}
+        ];
+
+        const featureImportance = [0.25, 0.22, 0.18, 0.20, 0.15];
+        const featureNames = features.map(f=>f.name);
+
+        // Generate synthetic dataset
+        const N = 500;
+        let dataset = [];
+        function genDataset() {
+            dataset = [];
+            for (let i=0; i<N; i++) {
+                const f = features.map(ft => ft.min + rng()*(ft.max-ft.min));
+                // Default probability based on features
+                const score = -2 + f[0]*(-0.05) + f[1]*0.04 + f[2]*(-0.1) + f[3]*0.5 + f[4]*0.02;
+                const prob = sigmoid(score + nrand(0,0.5));
+                dataset.push({features:f, defaulted: prob > 0.5 ? 1 : 0, prob});
+            }
+        }
+        genDataset();
+
+        // Model predictions (simulated with different complexities)
+        function logisticPredict(f) {
+            // Linear model: simple weighted sum + bias
+            const w = [-0.03, 0.03, -0.08, 0.4, 0.015];
+            let s = -1.5;
+            for (let i=0; i<f.length; i++) s += w[i]*f[i];
+            return sigmoid(s);
+        }
+        function xgbPredict(f) {
+            // Gradient boosted trees: captures non-linear interactions
+            const base = logisticPredict(f);
+            // Tree-like splits: interaction effects
+            const highDebt = f[1] > 60 ? 0.12 : 0;
+            const manyLate = f[3] > 3 ? 0.18 : (f[3] > 1 ? 0.05 : 0);
+            const shortHistory = f[2] < 2 ? 0.12 : (f[2] < 5 ? 0.04 : 0);
+            const highIncome = f[0] > 30 ? -0.12 : (f[0] > 20 ? -0.05 : 0);
+            const largeLoan = f[4] > 50 ? 0.08 : 0;
+            // Interaction: high debt + many late payments
+            const interaction = (f[1] > 50 && f[3] > 2) ? 0.1 : 0;
+            return clamp(base + highDebt + manyLate + shortHistory + highIncome + largeLoan + interaction, 0, 1);
+        }
+        function nnPredict(f) {
+            // Neural network: deeper non-linear mapping
+            // Simulated 2-layer network with ReLU
+            const h1 = [
+                Math.max(0, -0.02*f[0] + 0.03*f[1] - 0.05*f[2] + 0.3*f[3] + 0.01*f[4] - 0.5),
+                Math.max(0, 0.01*f[0] - 0.02*f[1] + 0.04*f[2] - 0.15*f[3] + 0.02*f[4] + 0.3),
+                Math.max(0, -0.03*f[0] + 0.04*f[1] - 0.03*f[2] + 0.2*f[3] - 0.01*f[4] - 0.2),
+                Math.max(0, 0.015*f[0] - 0.01*f[1] + 0.06*f[2] - 0.25*f[3] + 0.005*f[4] + 0.1)
+            ];
+            const output = -0.8 + 0.6*h1[0] - 0.4*h1[1] + 0.5*h1[2] - 0.3*h1[3];
+            return clamp(sigmoid(output), 0, 1);
+        }
+
+        // Build sliders
+        const slidersDiv = document.getElementById('creditSliders');
+        features.forEach((ft,i) => {
+            const row = document.createElement('div');
+            row.className = 'slider-group';
+            row.innerHTML = `<label style="min-width:100px">${ft.name}</label>
+                <input type="range" min="${ft.min}" max="${ft.max}" step="${(ft.max-ft.min)/100}" value="${ft.val}" data-idx="${i}">
+                <span class="slider-value">${ft.val}</span>`;
+            row.querySelector('input').oninput = function() {
+                features[i].val = parseFloat(this.value);
+                row.querySelector('.slider-value').textContent = parseFloat(this.value).toFixed(1);
+                updateScores();
+            };
+            slidersDiv.appendChild(row);
+        });
+
+        function updateScores() {
+            const f = features.map(ft=>ft.val);
+            const lp = logisticPredict(f), xp = xgbPredict(f), np = nnPredict(f);
+            document.getElementById('creditScores').innerHTML = [
+                {l:'Logistic', v:(lp*100).toFixed(1)+'%', c: lp>0.5?'var(--accent-red)':'var(--accent-green)'},
+                {l:'XGBoost', v:(xp*100).toFixed(1)+'%', c: xp>0.5?'var(--accent-red)':'var(--accent-green)'},
+                {l:'神经网络', v:(np*100).toFixed(1)+'%', c: np>0.5?'var(--accent-red)':'var(--accent-green)'}
+            ].map(s=>`<div class="stat-item"><div class="label">${s.l}</div><div class="value" style="color:${s.c}">${s.v}</div></div>`).join('');
+
+            drawConfMatrix();
+            drawCreditROC();
+            drawFeatureImp();
+        }
+
+        function drawConfMatrix() {
+            let tp=0,fp=0,fn=0,tn=0;
+            dataset.forEach(d => {
+                const pred = xgbPredict(d.features) > 0.5 ? 1 : 0;
+                if (pred===1&&d.defaulted===1) tp++;
+                else if (pred===1&&d.defaulted===0) fp++;
+                else if (pred===0&&d.defaulted===1) fn++;
+                else tn++;
+            });
+            document.getElementById('confMatrix').innerHTML =
+                `<tr><th></th><th>预测正</th><th>预测负</th></tr>
+                 <tr><th>实际正</th><td style="background:rgba(0,230,118,0.15)">${tp}</td><td style="background:rgba(255,23,68,0.1)">${fn}</td></tr>
+                 <tr><th>实际负</th><td style="background:rgba(255,23,68,0.1)">${fp}</td><td style="background:rgba(0,230,118,0.15)">${tn}</td></tr>`;
+        }
+
+        function drawCreditROC() {
+            const canvas = document.getElementById('creditRocCanvas');
+            const ctx2 = canvas.getContext('2d');
+            const dpr = window.devicePixelRatio||1;
+            canvas.width = canvas.clientWidth*dpr;
+            canvas.height = 320*dpr;
+            ctx2.setTransform(dpr,0,0,dpr,0,0);
+            const W = canvas.clientWidth, H = 320;
+            ctx2.fillStyle = C.bg; ctx2.fillRect(0,0,W,H);
+            const pad = {l:50,r:20,t:25,b:40};
+            const gw = W-pad.l-pad.r, gh = H-pad.t-pad.b;
+            drawGrid(ctx2,pad.l,pad.t,gw,gh);
+            if (U) U.drawAxis(ctx2,{x:pad.l,y:pad.t,w:gw,h:gh,xMin:0,xMax:1,yMin:0,yMax:1,xLabel:'FPR',yLabel:'TPR'});
+
+            ctx2.strokeStyle = C.textDim; ctx2.setLineDash([4,4]); ctx2.lineWidth=1;
+            ctx2.beginPath(); ctx2.moveTo(pad.l,pad.t+gh); ctx2.lineTo(pad.l+gw,pad.t); ctx2.stroke();
+            ctx2.setLineDash([]);
+
+            const models = [
+                {name:'Logistic', fn:logisticPredict, color:C.primary},
+                {name:'XGBoost', fn:xgbPredict, color:C.accent},
+                {name:'NN', fn:nnPredict, color:C.secondary}
+            ];
+
+            models.forEach(model => {
+                const scores = dataset.map(d => ({score: model.fn(d.features), label: d.defaulted}));
+                const pts = [];
+                for (let th=0; th<=1.01; th+=0.02) {
+                    let tp=0,fp=0,fn2=0,tn=0;
+                    scores.forEach(s => {
+                        const pred = s.score>th?1:0;
+                        if(pred===1&&s.label===1) tp++;
+                        else if(pred===1&&s.label===0) fp++;
+                        else if(pred===0&&s.label===1) fn2++;
+                        else tn++;
+                    });
+                    pts.push({fpr:fp/(fp+tn||1), tpr:tp/(tp+fn2||1)});
+                }
+                pts.sort((a,b)=>a.fpr-b.fpr);
+
+                ctx2.strokeStyle = model.color; ctx2.lineWidth = 2;
+                ctx2.beginPath();
+                let auc = 0;
+                pts.forEach((p,i) => {
+                    const px = pad.l+p.fpr*gw, py = pad.t+gh-p.tpr*gh;
+                    i===0?ctx2.moveTo(px,py):ctx2.lineTo(px,py);
+                    if(i>0) auc += (p.fpr-pts[i-1].fpr)*(p.tpr+pts[i-1].tpr)/2;
+                });
+                ctx2.stroke();
+
+                // Label
+                const idx = models.indexOf(model);
+                ctx2.fillStyle = model.color;
+                ctx2.font = '11px sans-serif';
+                ctx2.fillText(`${model.name} (AUC=${auc.toFixed(2)})`, pad.l+gw-130, pad.t+14+idx*15);
+            });
+        }
+
+        function drawFeatureImp() {
+            const canvas = document.getElementById('featureImpCanvas');
+            const ctx2 = canvas.getContext('2d');
+            const dpr = window.devicePixelRatio||1;
+            canvas.width = canvas.clientWidth*dpr;
+            canvas.height = 220*dpr;
+            ctx2.setTransform(dpr,0,0,dpr,0,0);
+            const W = canvas.clientWidth, H = 220;
+            ctx2.fillStyle = C.bg; ctx2.fillRect(0,0,W,H);
+
+            const pad = {l:100,r:20,t:15,b:15};
+            const gw = W-pad.l-pad.r, gh = H-pad.t-pad.b;
+            const barH = gh/features.length - 6;
+            const maxImp = Math.max(...featureImportance);
+
+            featureImportance.forEach((imp,i) => {
+                const y = pad.t + i*(barH+6);
+                const bw = (imp/maxImp)*gw;
+                const t = imp/maxImp;
+                ctx2.fillStyle = `rgba(22,199,154,${0.3+t*0.7})`;
+                ctx2.fillRect(pad.l, y, bw, barH);
+                ctx2.fillStyle = C.text; ctx2.font = '11px sans-serif';
+                ctx2.textAlign = 'right';
+                ctx2.fillText(featureNames[i], pad.l-8, y+barH/2+4);
+                ctx2.textAlign = 'left';
+                ctx2.fillStyle = C.primary;
+                ctx2.fillText((imp*100).toFixed(0)+'%', pad.l+bw+6, y+barH/2+4);
+            });
+        }
+
+        updateScores();
+    })();
+
+    // ================ SECTION 5: REAL-TIME RISK ================
+    (() => {
+        const canvas = document.getElementById('rtCanvas');
+        const ctx = canvas.getContext('2d');
+        let running = false, timer = null, shocked = false;
+        let priceHistory = [100], volHistory = [0.01], varHistory = [0.02];
+        let riskLevel = 0.2, alertEntries = [];
+        const archNodes = ['archStream','archFeature','archInfer','archAlert'];
+        let activeArch = -1;
+
+        function addAlert(msg, level) {
+            const time = new Date().toLocaleTimeString();
+            alertEntries.unshift({time, msg, level});
+            if (alertEntries.length > 50) alertEntries.pop();
+            renderAlerts();
+        }
+
+        function renderAlerts() {
+            const log = document.getElementById('alertLog');
+            log.innerHTML = alertEntries.map(a =>
+                `<div class="alert-entry ${a.level}">[${a.time}] ${a.msg}</div>`
+            ).join('');
+        }
+
+        let tickCount = 0;
+        let maxDrawdown = 0, peakPrice = 100;
+        let positionRisk = 0, correlationRisk = 0;
+
+        function tick() {
+            tickCount++;
+            // Animate architecture flow with pulse effect
+            activeArch = (activeArch + 1) % 4;
+            archNodes.forEach((id,i) => {
+                const el = document.getElementById(id);
+                el.classList.toggle('active', i===activeArch);
+                if (i===activeArch) {
+                    el.style.boxShadow = '0 0 12px rgba(22,199,154,0.4)';
+                } else {
+                    el.style.boxShadow = 'none';
+                }
+            });
+
+            const lastP = priceHistory[priceHistory.length-1];
+            // Market microstructure: mean-reverting with regime shifts
+            let drift = 0.0003, vol = 0.015;
+            if (shocked) {
+                drift = -0.015 - rng()*0.02;
+                vol = 0.035 + rng()*0.03;
+            }
+            // Add autocorrelation in vol (GARCH-like)
+            const prevVol = volHistory.length > 0 ? volHistory[volHistory.length-1] : 0.01;
+            const adaptVol = 0.7 * prevVol + 0.3 * vol;
+            const shockMul = nrand(drift, adaptVol);
+            const newP = lastP * Math.exp(shockMul);
+            priceHistory.push(newP);
+            if (priceHistory.length > 120) priceHistory.shift();
+
+            // Track peak and drawdown
+            if (newP > peakPrice) peakPrice = newP;
+            const dd = (peakPrice - newP) / peakPrice;
+            if (dd > maxDrawdown) maxDrawdown = dd;
+
+            // Rolling volatility (20-period)
+            const recent = priceHistory.slice(-20);
+            const rets = [];
+            for (let i=1; i<recent.length; i++) rets.push(Math.log(recent[i]/recent[i-1]));
+            const currentVol = std(rets);
+            volHistory.push(currentVol);
+            if (volHistory.length > 120) volHistory.shift();
+
+            // VaR estimate (Cornish-Fisher expansion for fat tails)
+            const skew = rets.length > 3 ? rets.reduce((s,r)=>s+Math.pow((r-mean(rets))/(std(rets)||1),3),0)/rets.length : 0;
+            const z95 = 1.645;
+            const cfAdj = z95 + (z95*z95-1)*skew/6;
+            const varEst = currentVol * Math.abs(cfAdj);
+            varHistory.push(varEst);
+            if (varHistory.length > 120) varHistory.shift();
+
+            // Composite risk score from multiple factors
+            const volRisk = clamp(currentVol / 0.04, 0, 1);
+            const ddRisk = clamp(dd / 0.15, 0, 1);
+            positionRisk = clamp(positionRisk + (rng()-0.5)*0.1, 0, 1);
+            correlationRisk = clamp(0.3 + (shocked?0.5:0) + (rng()-0.5)*0.15, 0, 1);
+            riskLevel = clamp(volRisk*0.35 + ddRisk*0.25 + positionRisk*0.2 + correlationRisk*0.2, 0, 1);
+
+            // Intelligent alert generation
+            if (riskLevel > 0.85) {
+                addAlert(`[严重] 综合风险=${(riskLevel*100).toFixed(0)}% 波动率=${(currentVol*100).toFixed(2)}% 回撤=${(dd*100).toFixed(1)}%`, 'critical');
+            } else if (riskLevel > 0.6) {
+                addAlert(`[警告] 风险升高 VaR(95%)=${(varEst*100).toFixed(2)}% 波动率=${(currentVol*100).toFixed(2)}%`, 'warning');
+            } else if (tickCount % 5 === 0) {
+                addAlert(`[监控] 价格=${newP.toFixed(2)} 波动率=${(currentVol*100).toFixed(2)}% 状态正常`, 'info');
+            }
+
+            if (shocked) {
+                if (dd > 0.08 && rng()<0.3) addAlert('[熔断] 回撤超过8%，建议降低仓位!', 'critical');
+                if (currentVol > 0.04 && rng()<0.2) addAlert('[异常] 波动率飙升，可能发生尾部事件', 'critical');
+            }
+
+            // Drawdown reset after recovery
+            if (!shocked && dd < 0.01) maxDrawdown *= 0.95;
+
+            draw();
+            updateMeters();
+        }
+
+        function draw() {
+            const dpr = window.devicePixelRatio||1;
+            canvas.width = canvas.clientWidth*dpr;
+            canvas.height = 280*dpr;
+            ctx.setTransform(dpr,0,0,dpr,0,0);
+            const W = canvas.clientWidth, H = 280;
+            ctx.fillStyle = C.bg; ctx.fillRect(0,0,W,H);
+
+            const pad = {l:50,r:20,t:25,b:35};
+            const gw = W-pad.l-pad.r, gh = (H-pad.t-pad.b)/2-5;
+
+            // Price chart
+            drawGrid(ctx, pad.l, pad.t, gw, gh);
+            if (priceHistory.length > 1) {
+                const pMin = Math.min(...priceHistory)*0.99, pMax = Math.max(...priceHistory)*1.01;
+                drawLine(ctx, priceHistory, pad.l, pad.t, gw, gh, 0, priceHistory.length, pMin, pMax, C.primary, 1.5);
+            }
+            ctx.fillStyle = C.text; ctx.font = '10px sans-serif';
+            ctx.fillText('价格', pad.l+4, pad.t+12);
+
+            // Volatility chart
+            const y2 = pad.t + gh + 15;
+            drawGrid(ctx, pad.l, y2, gw, gh);
+            if (volHistory.length > 1) {
+                const vMin = 0, vMax = Math.max(...volHistory)*1.2 || 0.05;
+                drawLine(ctx, volHistory, pad.l, y2, gw, gh, 0, volHistory.length, vMin, vMax, C.accent, 1.5);
+                drawLine(ctx, varHistory, pad.l, y2, gw, gh, 0, varHistory.length, vMin, vMax, C.negative, 1);
+            }
+            ctx.fillStyle = C.text; ctx.fillText('波动率 / VaR', pad.l+4, y2+12);
+
+            // Risk indicator bar at bottom
+            const barX = pad.l, barY = H-12, barW = gw;
+            ctx.fillStyle = 'rgba(255,255,255,0.05)';
+            ctx.fillRect(barX, barY, barW, 8);
+            // Gradient risk bar: green → yellow → red
+            const grad = ctx.createLinearGradient(barX, 0, barX+barW, 0);
+            grad.addColorStop(0, C.positive);
+            grad.addColorStop(0.4, '#ffea00');
+            grad.addColorStop(0.7, C.accent);
+            grad.addColorStop(1, C.negative);
+            ctx.fillStyle = grad;
+            ctx.fillRect(barX, barY, barW*riskLevel, 8);
+            // Risk level indicator triangle
+            const triX = barX + barW*riskLevel;
+            ctx.fillStyle = C.text;
+            ctx.beginPath();
+            ctx.moveTo(triX-4, barY-2);
+            ctx.lineTo(triX+4, barY-2);
+            ctx.lineTo(triX, barY+3);
+            ctx.closePath();
+            ctx.fill();
+            // Labels
+            ctx.font = '8px sans-serif';
+            ctx.fillStyle = C.textDim;
+            ctx.textAlign = 'left';
+            ctx.fillText('低', barX, barY-3);
+            ctx.textAlign = 'center';
+            ctx.fillText('中', barX+barW*0.5, barY-3);
+            ctx.textAlign = 'right';
+            ctx.fillText('高', barX+barW, barY-3);
+            ctx.textAlign = 'left';
+        }
+
+        function updateMeters() {
+            const lastVol = volHistory[volHistory.length-1] || 0;
+            const lastVaR = varHistory[varHistory.length-1] || 0;
+            const lastP = priceHistory[priceHistory.length-1] || 100;
+            const dd = peakPrice > 0 ? ((peakPrice - lastP) / peakPrice) : 0;
+            const riskColor = riskLevel < 0.3 ? 'var(--accent-green)' : riskLevel < 0.6 ? 'var(--accent-orange)' : 'var(--accent-red)';
+            const riskLabel = riskLevel < 0.3 ? '低风险' : riskLevel < 0.6 ? '中等风险' : riskLevel < 0.8 ? '高风险' : '极高风险';
+
+            document.getElementById('rtMeters').innerHTML = [
+                {l:'当前价格', v:lastP.toFixed(2), c:'var(--accent-blue)'},
+                {l:'波动率(20d)', v:(lastVol*100).toFixed(2)+'%', c:'var(--accent-orange)'},
+                {l:'VaR(95%)', v:(lastVaR*100).toFixed(2)+'%', c:'var(--accent-purple)'},
+                {l:'最大回撤', v:(maxDrawdown*100).toFixed(1)+'%', c: maxDrawdown>0.05?'var(--accent-red)':'var(--accent-green)'},
+                {l:'相关性风险', v:(correlationRisk*100).toFixed(0)+'%', c:'var(--accent-blue)'},
+                {l:riskLabel, v:(riskLevel*100).toFixed(0)+'%', c:riskColor}
+            ].map(s=>`<div class="stat-item"><div class="label">${s.l}</div><div class="value" style="color:${s.c}">${s.v}</div></div>`).join('');
+        }
+
+        document.getElementById('rtStartBtn').onclick = () => {
+            if (running) return;
+            running = true;
+            addAlert('风控系统启动', 'info');
+            timer = setInterval(tick, 500);
+        };
+        document.getElementById('rtStopBtn').onclick = () => {
+            running = false; shocked = false;
+            if (timer) clearInterval(timer);
+            archNodes.forEach(id => document.getElementById(id).classList.remove('active'));
+            addAlert('风控系统停止', 'info');
+        };
+        document.getElementById('rtShockBtn').onclick = () => {
+            if (!running) return;
+            shocked = true;
+            addAlert('>>> 市场冲击已注入! <<<', 'critical');
+            setTimeout(() => { shocked = false; addAlert('冲击结束，市场恢复中...', 'warning'); }, 8000);
+        };
+
+        draw();
+        updateMeters();
+    })();
+});
+</script>
+
+<script>
+// Deferred KaTeX init
+document.addEventListener('DOMContentLoaded', () => {
+    function tryRender() {
+        if (typeof renderMathInElement === 'function') {
+            renderMathInElement(document.body, {
+                delimiters: [
+                    {left: '$$', right: '$$', display: true},
+                    {left: '\\(', right: '\\)', display: false}
+                ]
+            });
+        } else {
+            setTimeout(tryRender, 200);
+        }
+    }
+    tryRender();
+});
+</script>
+</body>
+</html>

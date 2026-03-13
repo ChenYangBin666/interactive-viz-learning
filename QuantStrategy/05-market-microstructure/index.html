@@ -1,0 +1,1203 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>市场微观结构 — 量化交易策略</title>
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" defer>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" defer></script>
+    <script src="../shared/scripts/nav.js" defer></script>
+    <style>
+        .canvas-wrap { position: relative; width: 100%; border-radius: var(--radius-md); overflow: hidden; border: 1px solid var(--border-color); background: var(--bg-secondary); }
+        .canvas-wrap canvas { display: block; width: 100%; }
+        .controls-row { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; margin: 0.75rem 0; }
+        .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 0.5rem; margin: 0.75rem 0; }
+        .stat-box { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 0.5rem 0.75rem; text-align: center; }
+        .stat-box .stat-label { font-size: 0.75rem; color: var(--text-muted); }
+        .stat-box .stat-val { font-family: var(--font-mono); font-size: 1.1rem; color: var(--accent-green); font-weight: 700; }
+        .spread-bar-container { display: flex; align-items: center; gap: 0.5rem; margin: 0.5rem 0; }
+        .spread-bar { flex: 1; height: 24px; border-radius: 4px; overflow: hidden; display: flex; }
+        .spread-bar .seg { height: 100%; display: flex; align-items: center; justify-content: center; font-size: 0.7rem; color: #fff; font-weight: 600; transition: flex 0.3s; }
+        .pnl-positive { color: var(--accent-green); }
+        .pnl-negative { color: var(--accent-red); }
+        .mm-log { max-height: 150px; overflow-y: auto; font-family: var(--font-mono); font-size: 0.75rem; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 0.5rem; margin-top: 0.5rem; }
+        .mm-log div { padding: 1px 0; border-bottom: 1px solid rgba(42,42,74,0.3); }
+    </style>
+</head>
+<body>
+<div class="page-container">
+    <h1>模块 05：市场微观结构</h1>
+    <p>市场微观结构研究交易过程中的价格形成机制、订单簿动态、买卖价差和市场冲击等核心问题。理解微观结构是设计高频和执行策略的基础。</p>
+
+    <!-- ============================================================ -->
+    <!-- Section 1: 订单簿可视化 -->
+    <!-- ============================================================ -->
+    <div class="section">
+        <div class="section-title"><div class="icon">📋</div><h2>订单簿可视化</h2></div>
+        <p>订单簿（Order Book）记录了市场上所有未成交的限价订单。左侧绿色为买单（Bid），右侧红色为卖单（Ask）。中间的差值即为买卖价差（Spread）。</p>
+        <p>$$\text{Spread} = P_{\text{ask}}^{(1)} - P_{\text{bid}}^{(1)}$$</p>
+        <div class="controls-row">
+            <button class="btn btn-primary" id="ob-start">开始模拟</button>
+            <button class="btn" id="ob-reset">重置</button>
+            <div class="slider-group" style="flex:1;min-width:200px;">
+                <label>订单速率</label>
+                <input type="range" id="ob-rate" min="1" max="10" value="5">
+                <span class="slider-value" id="ob-rate-val">5</span>
+            </div>
+        </div>
+        <div class="stat-grid" id="ob-stats">
+            <div class="stat-box"><div class="stat-label">最优买价</div><div class="stat-val" id="ob-best-bid">—</div></div>
+            <div class="stat-box"><div class="stat-label">最优卖价</div><div class="stat-val" id="ob-best-ask">—</div></div>
+            <div class="stat-box"><div class="stat-label">价差</div><div class="stat-val" id="ob-spread">—</div></div>
+            <div class="stat-box"><div class="stat-label">中间价</div><div class="stat-val" id="ob-mid">—</div></div>
+        </div>
+        <div class="canvas-wrap"><canvas id="cvs-ob" height="420"></canvas></div>
+        <div class="info-box mt-2">
+            <p><strong>深度图（Depth Chart）</strong>显示在每个价位上的累计挂单量。曲线越陡，表示该价位附近的流动性越集中。</p>
+        </div>
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- Section 2: 买卖价差 -->
+    <!-- ============================================================ -->
+    <div class="section">
+        <div class="section-title"><div class="icon">↔</div><h2>买卖价差分解</h2></div>
+        <p>买卖价差由三部分成本构成：</p>
+        <p>$$S = S_{\text{逆向选择}} + S_{\text{存货}} + S_{\text{订单处理}}$$</p>
+        <ul style="color:var(--text-secondary);margin:0.5rem 0 1rem 1.5rem;font-size:0.9rem;">
+            <li><strong>逆向选择成本</strong>：做市商面对知情交易者的信息劣势</li>
+            <li><strong>存货成本</strong>：持有头寸的风险补偿</li>
+            <li><strong>订单处理成本</strong>：运营和交易基础设施成本</li>
+        </ul>
+        <div class="controls-row">
+            <div class="slider-group" style="flex:1;min-width:180px;">
+                <label>逆向选择</label>
+                <input type="range" id="sp-adverse" min="1" max="50" value="15">
+                <span class="slider-value" id="sp-adverse-val">15</span>
+            </div>
+            <div class="slider-group" style="flex:1;min-width:180px;">
+                <label>存货成本</label>
+                <input type="range" id="sp-inventory" min="1" max="50" value="10">
+                <span class="slider-value" id="sp-inventory-val">10</span>
+            </div>
+            <div class="slider-group" style="flex:1;min-width:180px;">
+                <label>订单处理</label>
+                <input type="range" id="sp-processing" min="1" max="50" value="5">
+                <span class="slider-value" id="sp-processing-val">5</span>
+            </div>
+        </div>
+        <div class="stat-grid">
+            <div class="stat-box"><div class="stat-label">总价差 (bps)</div><div class="stat-val" id="sp-total">30</div></div>
+            <div class="stat-box"><div class="stat-label">逆向选择占比</div><div class="stat-val" id="sp-adv-pct">50%</div></div>
+        </div>
+        <div class="spread-bar-container">
+            <span style="font-size:0.8rem;color:var(--text-muted);">价差构成</span>
+            <div class="spread-bar" id="sp-bar">
+                <div class="seg" id="sp-seg-adv" style="background:var(--accent-red);flex:15;">逆向选择</div>
+                <div class="seg" id="sp-seg-inv" style="background:var(--accent-orange);flex:10;">存货</div>
+                <div class="seg" id="sp-seg-proc" style="background:var(--accent-blue);flex:5;">处理</div>
+            </div>
+        </div>
+        <div class="canvas-wrap"><canvas id="cvs-spread" height="340"></canvas></div>
+        <p class="text-sm text-muted mt-1">图示：价差如何随波动率和交易量变化。高波动率和低交易量环境下价差显著扩大。</p>
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- Section 3: 市场冲击 -->
+    <!-- ============================================================ -->
+    <div class="section">
+        <div class="section-title"><div class="icon">💥</div><h2>市场冲击模型</h2></div>
+        <p>大额订单会消耗订单簿中的流动性，导致价格向不利方向移动。市场冲击分为：</p>
+        <ul style="color:var(--text-secondary);margin:0.5rem 0 1rem 1.5rem;font-size:0.9rem;">
+            <li><strong>临时冲击</strong>：执行过程中的短暂偏离，随后回复</li>
+            <li><strong>永久冲击</strong>：订单传递的信息导致的持久价格变化</li>
+        </ul>
+        <p>平方根定律：$$\Delta P \approx \sigma \cdot \sqrt{\frac{Q}{V}}$$</p>
+        <p style="font-size:0.85rem;">其中 \(\sigma\) 为波动率，\(Q\) 为订单量，\(V\) 为日均成交量。</p>
+        <div class="controls-row">
+            <div class="slider-group" style="flex:1;min-width:200px;">
+                <label>订单大小 (占日均量%)</label>
+                <input type="range" id="mi-size" min="1" max="50" value="5">
+                <span class="slider-value" id="mi-size-val">5%</span>
+            </div>
+            <div class="slider-group" style="flex:1;min-width:180px;">
+                <label>波动率 (%)</label>
+                <input type="range" id="mi-vol" min="5" max="60" value="20">
+                <span class="slider-value" id="mi-vol-val">20%</span>
+            </div>
+        </div>
+        <div class="stat-grid">
+            <div class="stat-box"><div class="stat-label">临时冲击 (bps)</div><div class="stat-val" id="mi-temp">—</div></div>
+            <div class="stat-box"><div class="stat-label">永久冲击 (bps)</div><div class="stat-val" id="mi-perm">—</div></div>
+            <div class="stat-box"><div class="stat-label">总冲击 (bps)</div><div class="stat-val" id="mi-total">—</div></div>
+        </div>
+        <div class="canvas-wrap"><canvas id="cvs-impact" height="360"></canvas></div>
+        <div class="info-box mt-2">
+            <p>小订单几乎不产生冲击，但当订单量达到日均成交量的较大比例时，冲击以平方根速度增长。这是量化执行策略的核心考量。</p>
+        </div>
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- Section 4: 高频数据特征 -->
+    <!-- ============================================================ -->
+    <div class="section">
+        <div class="section-title"><div class="icon">⚡</div><h2>高频数据特征</h2></div>
+        <p>高频逐笔数据具有独特的统计特征：时间间隔不规则、价格离散化、买卖弹跳（bid-ask bounce）。这些微观结构噪声在低频采样时被平滑，但在高频下严重影响波动率估计。</p>
+        <p><strong>波动率签名图（Volatility Signature Plot）</strong>展示了不同采样频率下的已实现波动率：</p>
+        <p>$$RV_{\Delta} = \sum_{i=1}^{n} r_{t_i}^2, \quad r_{t_i} = \ln P_{t_i} - \ln P_{t_{i-1}}$$</p>
+        <div class="controls-row">
+            <button class="btn btn-primary" id="hf-gen">生成新数据</button>
+            <div class="slider-group" style="flex:1;min-width:200px;">
+                <label>真实波动率 (%)</label>
+                <input type="range" id="hf-truevol" min="10" max="50" value="25">
+                <span class="slider-value" id="hf-truevol-val">25%</span>
+            </div>
+            <div class="slider-group" style="flex:1;min-width:200px;">
+                <label>噪声水平</label>
+                <input type="range" id="hf-noise" min="0" max="50" value="20">
+                <span class="slider-value" id="hf-noise-val">20</span>
+            </div>
+        </div>
+        <div class="canvas-wrap"><canvas id="cvs-hf" height="400"></canvas></div>
+        <p class="text-sm text-muted mt-1">上图：逐笔价格序列（含微观噪声与真实价格）。下图：波动率签名图——高频采样时噪声导致波动率被高估。</p>
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- Section 5: 做市策略简介 -->
+    <!-- ============================================================ -->
+    <div class="section">
+        <div class="section-title"><div class="icon">🏦</div><h2>做市策略简介</h2></div>
+        <p>做市商通过同时挂出买单和卖单提供流动性，赚取价差收益。核心挑战是<strong>存货风险</strong>和<strong>逆向选择风险</strong>。</p>
+        <p>Avellaneda-Stoikov 最优报价模型：</p>
+        <p>$$\delta^{\pm} = \frac{1}{\gamma}\ln\left(1+\frac{\gamma}{k}\right) \pm \frac{q \cdot \gamma \sigma^2 (T-t)}{2}$$</p>
+        <p style="font-size:0.85rem;">其中 \(\gamma\) 为风险厌恶参数，\(k\) 为订单到达强度，\(q\) 为当前库存，\(\sigma\) 为波动率。</p>
+        <div class="controls-row">
+            <button class="btn btn-primary" id="mm-start">开始模拟</button>
+            <button class="btn" id="mm-reset">重置</button>
+            <div class="slider-group" style="flex:1;min-width:180px;">
+                <label>报价宽度 (bps)</label>
+                <input type="range" id="mm-width" min="5" max="40" value="15">
+                <span class="slider-value" id="mm-width-val">15</span>
+            </div>
+            <div class="slider-group" style="flex:1;min-width:180px;">
+                <label>风险厌恶 γ</label>
+                <input type="range" id="mm-gamma" min="1" max="20" value="5">
+                <span class="slider-value" id="mm-gamma-val">0.5</span>
+            </div>
+        </div>
+        <div class="stat-grid">
+            <div class="stat-box"><div class="stat-label">当前库存</div><div class="stat-val" id="mm-inv">0</div></div>
+            <div class="stat-box"><div class="stat-label">已成交笔数</div><div class="stat-val" id="mm-trades">0</div></div>
+            <div class="stat-box"><div class="stat-label">累计盈亏</div><div class="stat-val" id="mm-pnl">0.00</div></div>
+            <div class="stat-box"><div class="stat-label">报价 Bid / Ask</div><div class="stat-val" id="mm-quotes">— / —</div></div>
+        </div>
+        <div class="canvas-wrap"><canvas id="cvs-mm" height="380"></canvas></div>
+        <div class="mm-log" id="mm-log"></div>
+        <div class="info-box mt-2 warning">
+            <p>注意：做市策略的盈亏看似稳定，但存货集中时若遭遇不利价格变动，可能产生较大亏损。风险管理至关重要。</p>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    if (typeof renderMathInElement === 'function') {
+        renderMathInElement(document.body, {
+            delimiters: [
+                { left: '$$', right: '$$', display: true },
+                { left: '\\(', right: '\\)', display: false }
+            ]
+        });
+    }
+});
+
+/* ================================================================
+   Utility helpers
+   ================================================================ */
+const $ = s => document.querySelector(s);
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+const lerp = (a, b, t) => a + (b - a) * t;
+const randn = () => { let u=0,v=0; while(!u) u=Math.random(); while(!v) v=Math.random(); return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v); };
+
+function initCanvas(id) {
+    const c = document.getElementById(id);
+    const dpr = window.devicePixelRatio || 1;
+    const rect = c.getBoundingClientRect();
+    c.width = rect.width * dpr;
+    c.height = c.height * dpr;
+    const ctx = c.getContext('2d');
+    ctx.scale(dpr, dpr);
+    return { c, ctx, w: rect.width, h: c.height / dpr };
+}
+
+const COLORS = {
+    green: '#16c79a', red: '#ff5252', blue: '#4fc3f7', orange: '#ffab40',
+    purple: '#b388ff', yellow: '#ffd740', text: '#e8e8e8', muted: '#6c6c7c',
+    grid: 'rgba(42,42,74,0.5)', bg: '#16213e'
+};
+
+/* ================================================================
+   Section 1: Order Book
+   ================================================================ */
+(() => {
+    const { c, ctx, w, h } = initCanvas('cvs-ob');
+    const midPrice = 100;
+    let bids = [], asks = [];
+    let running = false, animId = null;
+    const tickSize = 0.05;
+    const numLevels = 15;
+
+    function initBook() {
+        bids = []; asks = [];
+        for (let i = 0; i < numLevels; i++) {
+            bids.push({ price: midPrice - (i + 1) * tickSize, vol: 50 + Math.random() * 200 });
+            asks.push({ price: midPrice + (i + 1) * tickSize, vol: 50 + Math.random() * 200 });
+        }
+        bids.sort((a, b) => b.price - a.price);
+        asks.sort((a, b) => a.price - b.price);
+    }
+
+    function updateBook() {
+        const rate = +$('#ob-rate').value;
+        for (let r = 0; r < rate; r++) {
+            const side = Math.random() < 0.5 ? 'bid' : 'ask';
+            const action = Math.random();
+            if (action < 0.4) {
+                // new order
+                const lvl = Math.floor(Math.random() * numLevels);
+                if (side === 'bid' && bids[lvl]) bids[lvl].vol += 10 + Math.random() * 40;
+                else if (asks[lvl]) asks[lvl].vol += 10 + Math.random() * 40;
+            } else if (action < 0.7) {
+                // cancel
+                const lvl = Math.floor(Math.random() * numLevels);
+                if (side === 'bid' && bids[lvl]) bids[lvl].vol = Math.max(5, bids[lvl].vol - 10 - Math.random() * 30);
+                else if (asks[lvl]) asks[lvl].vol = Math.max(5, asks[lvl].vol - 10 - Math.random() * 30);
+            } else {
+                // market order — eats top level
+                if (side === 'bid' && asks.length) {
+                    asks[0].vol -= 20 + Math.random() * 40;
+                    if (asks[0].vol <= 0) {
+                        asks.shift();
+                        asks.push({ price: asks[asks.length - 1].price + tickSize, vol: 50 + Math.random() * 100 });
+                    }
+                } else if (bids.length) {
+                    bids[0].vol -= 20 + Math.random() * 40;
+                    if (bids[0].vol <= 0) {
+                        bids.shift();
+                        bids.push({ price: bids[bids.length - 1].price - tickSize, vol: 50 + Math.random() * 100 });
+                    }
+                }
+            }
+        }
+        bids.sort((a, b) => b.price - a.price);
+        asks.sort((a, b) => a.price - b.price);
+    }
+
+    function draw() {
+        ctx.clearRect(0, 0, w, h);
+        const bookH = h * 0.55;
+        const depthH = h - bookH - 20;
+        const depthY = bookH + 20;
+        const maxVol = Math.max(...bids.map(b => b.vol), ...asks.map(a => a.vol), 1);
+        const halfW = w / 2 - 30;
+        const barH = Math.min(20, bookH / numLevels - 2);
+
+        // Title labels
+        ctx.font = '12px sans-serif';
+        ctx.fillStyle = COLORS.muted;
+        ctx.textAlign = 'center';
+        ctx.fillText('买单 (Bids)', w * 0.25, 16);
+        ctx.fillText('卖单 (Asks)', w * 0.75, 16);
+
+        // Bids (right-aligned bars going left)
+        for (let i = 0; i < Math.min(bids.length, numLevels); i++) {
+            const y = 24 + i * (barH + 2);
+            const bw = (bids[i].vol / maxVol) * halfW;
+            ctx.fillStyle = 'rgba(22,199,154,0.25)';
+            ctx.fillRect(w / 2 - 30 - bw, y, bw, barH);
+            ctx.fillStyle = COLORS.green;
+            ctx.textAlign = 'right';
+            ctx.font = '11px monospace';
+            ctx.fillText(bids[i].price.toFixed(2), w / 2 - 34 - bw, y + barH - 4);
+            ctx.fillStyle = COLORS.text;
+            ctx.textAlign = 'left';
+            ctx.fillText(Math.round(bids[i].vol).toString(), w / 2 - 28 - bw + bw + 36, y + barH - 4);
+        }
+
+        // Center spread line
+        ctx.strokeStyle = COLORS.muted;
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath();
+        ctx.moveTo(w / 2, 20);
+        ctx.lineTo(w / 2, bookH);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Asks (left-aligned bars going right)
+        for (let i = 0; i < Math.min(asks.length, numLevels); i++) {
+            const y = 24 + i * (barH + 2);
+            const bw = (asks[i].vol / maxVol) * halfW;
+            ctx.fillStyle = 'rgba(255,82,82,0.25)';
+            ctx.fillRect(w / 2 + 30, y, bw, barH);
+            ctx.fillStyle = COLORS.red;
+            ctx.textAlign = 'left';
+            ctx.font = '11px monospace';
+            ctx.fillText(asks[i].price.toFixed(2), w / 2 + 34 + bw, y + barH - 4);
+            ctx.fillStyle = COLORS.text;
+            ctx.textAlign = 'right';
+            ctx.fillText(Math.round(asks[i].vol).toString(), w / 2 + 26, y + barH - 4);
+        }
+
+        // Depth chart
+        ctx.fillStyle = COLORS.muted;
+        ctx.font = '11px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('深度图 (Depth Chart)', w / 2, depthY - 4);
+
+        // Compute cumulative volumes
+        let cumBids = [], cumAsks = [], cumB = 0, cumA = 0;
+        for (let i = 0; i < bids.length; i++) { cumB += bids[i].vol; cumBids.push({ price: bids[i].price, cum: cumB }); }
+        for (let i = 0; i < asks.length; i++) { cumA += asks[i].vol; cumAsks.push({ price: asks[i].price, cum: cumA }); }
+        const maxCum = Math.max(cumB, cumA, 1);
+        const priceMin = bids.length ? bids[bids.length - 1].price : midPrice - 1;
+        const priceMax = asks.length ? asks[asks.length - 1].price : midPrice + 1;
+        const priceRange = priceMax - priceMin || 1;
+
+        function px(price) { return 20 + ((price - priceMin) / priceRange) * (w - 40); }
+        function py(cum) { return depthY + depthH - (cum / maxCum) * (depthH - 10); }
+
+        // Grid
+        ctx.strokeStyle = COLORS.grid;
+        ctx.lineWidth = 0.5;
+        for (let i = 0; i <= 4; i++) {
+            const gy = depthY + (depthH / 4) * i;
+            ctx.beginPath(); ctx.moveTo(20, gy); ctx.lineTo(w - 20, gy); ctx.stroke();
+        }
+
+        // Bid depth
+        ctx.beginPath();
+        ctx.moveTo(px(cumBids[cumBids.length - 1].price), depthY + depthH);
+        for (let i = cumBids.length - 1; i >= 0; i--) {
+            ctx.lineTo(px(cumBids[i].price), py(cumBids[i].cum));
+            if (i > 0) ctx.lineTo(px(cumBids[i - 1].price), py(cumBids[i].cum));
+        }
+        ctx.lineTo(px(cumBids[0].price), depthY + depthH);
+        ctx.closePath();
+        ctx.fillStyle = 'rgba(22,199,154,0.15)';
+        ctx.fill();
+        ctx.strokeStyle = COLORS.green;
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+
+        // Ask depth
+        ctx.beginPath();
+        ctx.moveTo(px(cumAsks[0].price), depthY + depthH);
+        for (let i = 0; i < cumAsks.length; i++) {
+            ctx.lineTo(px(cumAsks[i].price), py(cumAsks[i].cum));
+            if (i < cumAsks.length - 1) ctx.lineTo(px(cumAsks[i + 1].price), py(cumAsks[i].cum));
+        }
+        ctx.lineTo(px(cumAsks[cumAsks.length - 1].price), depthY + depthH);
+        ctx.closePath();
+        ctx.fillStyle = 'rgba(255,82,82,0.15)';
+        ctx.fill();
+        ctx.strokeStyle = COLORS.red;
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+
+        // Update stats
+        if (bids.length && asks.length) {
+            const bb = bids[0].price, ba = asks[0].price;
+            $('#ob-best-bid').textContent = bb.toFixed(2);
+            $('#ob-best-ask').textContent = ba.toFixed(2);
+            $('#ob-spread').textContent = (ba - bb).toFixed(3);
+            $('#ob-mid').textContent = ((ba + bb) / 2).toFixed(3);
+        }
+    }
+
+    function step() {
+        updateBook();
+        draw();
+        if (running) animId = requestAnimationFrame(step);
+    }
+
+    initBook();
+    draw();
+
+    $('#ob-start').addEventListener('click', () => {
+        running = !running;
+        $('#ob-start').textContent = running ? '暂停' : '开始模拟';
+        if (running) step();
+    });
+    $('#ob-reset').addEventListener('click', () => {
+        running = false;
+        $('#ob-start').textContent = '开始模拟';
+        if (animId) cancelAnimationFrame(animId);
+        initBook(); draw();
+    });
+    $('#ob-rate').addEventListener('input', e => { $('#ob-rate-val').textContent = e.target.value; });
+})();
+
+/* ================================================================
+   Section 2: Bid-Ask Spread Decomposition
+   ================================================================ */
+(() => {
+    const { c, ctx, w, h } = initCanvas('cvs-spread');
+
+    function updateSpread() {
+        const adv = +$('#sp-adverse').value;
+        const inv = +$('#sp-inventory').value;
+        const proc = +$('#sp-processing').value;
+        const total = adv + inv + proc;
+
+        $('#sp-adverse-val').textContent = adv;
+        $('#sp-inventory-val').textContent = inv;
+        $('#sp-processing-val').textContent = proc;
+        $('#sp-total').textContent = total;
+        $('#sp-adv-pct').textContent = Math.round(adv / total * 100) + '%';
+
+        $('#sp-seg-adv').style.flex = adv;
+        $('#sp-seg-inv').style.flex = inv;
+        $('#sp-seg-proc').style.flex = proc;
+
+        drawSpreadChart(adv, inv, proc);
+    }
+
+    function drawSpreadChart(adv, inv, proc) {
+        ctx.clearRect(0, 0, w, h);
+        const padL = 60, padR = 30, padT = 30, padB = 50;
+        const chartW = w - padL - padR;
+        const chartH = h - padT - padB;
+
+        // Two sub-charts side by side
+        const halfW = chartW / 2 - 20;
+
+        // Left: Spread vs Volatility
+        ctx.fillStyle = COLORS.muted;
+        ctx.font = '11px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('价差 vs 波动率', padL + halfW / 2, padT - 8);
+
+        const baseSpread = adv + inv + proc;
+        const volPoints = [];
+        for (let vol = 5; vol <= 60; vol += 1) {
+            const spread = baseSpread * (0.5 + (vol / 60) * 1.2) * (1 + 0.3 * Math.pow(vol / 60, 2));
+            volPoints.push({ x: vol, y: spread });
+        }
+        const maxSpreadV = Math.max(...volPoints.map(p => p.y));
+
+        // Grid
+        ctx.strokeStyle = COLORS.grid;
+        ctx.lineWidth = 0.5;
+        for (let i = 0; i <= 4; i++) {
+            const gy = padT + chartH - (chartH / 4) * i;
+            ctx.beginPath(); ctx.moveTo(padL, gy); ctx.lineTo(padL + halfW, gy); ctx.stroke();
+            ctx.fillStyle = COLORS.muted;
+            ctx.textAlign = 'right';
+            ctx.font = '10px monospace';
+            ctx.fillText((maxSpreadV / 4 * i).toFixed(0), padL - 6, gy + 4);
+        }
+
+        // Axis labels
+        ctx.fillStyle = COLORS.muted;
+        ctx.font = '10px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('波动率 (%)', padL + halfW / 2, h - 8);
+        for (let v = 10; v <= 60; v += 10) {
+            const lx = padL + ((v - 5) / 55) * halfW;
+            ctx.fillText(v.toString(), lx, padT + chartH + 16);
+        }
+
+        // Line
+        ctx.beginPath();
+        ctx.strokeStyle = COLORS.blue;
+        ctx.lineWidth = 2;
+        volPoints.forEach((p, i) => {
+            const lx = padL + ((p.x - 5) / 55) * halfW;
+            const ly = padT + chartH - (p.y / maxSpreadV) * chartH;
+            i === 0 ? ctx.moveTo(lx, ly) : ctx.lineTo(lx, ly);
+        });
+        ctx.stroke();
+
+        // Area fill
+        ctx.lineTo(padL + halfW, padT + chartH);
+        ctx.lineTo(padL, padT + chartH);
+        ctx.closePath();
+        ctx.fillStyle = 'rgba(79,195,247,0.1)';
+        ctx.fill();
+
+        // Right: Spread vs Volume
+        const rightX = padL + halfW + 40;
+        ctx.fillStyle = COLORS.muted;
+        ctx.font = '11px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('价差 vs 交易量', rightX + halfW / 2, padT - 8);
+
+        const volmPoints = [];
+        for (let vol = 10; vol <= 200; vol += 2) {
+            const spread = baseSpread * (2.0 - 1.2 * Math.sqrt(vol / 200));
+            volmPoints.push({ x: vol, y: spread });
+        }
+        const maxSpreadM = Math.max(...volmPoints.map(p => p.y));
+
+        // Grid
+        for (let i = 0; i <= 4; i++) {
+            const gy = padT + chartH - (chartH / 4) * i;
+            ctx.strokeStyle = COLORS.grid;
+            ctx.lineWidth = 0.5;
+            ctx.beginPath(); ctx.moveTo(rightX, gy); ctx.lineTo(rightX + halfW, gy); ctx.stroke();
+            ctx.fillStyle = COLORS.muted;
+            ctx.textAlign = 'right';
+            ctx.font = '10px monospace';
+            ctx.fillText((maxSpreadM / 4 * i).toFixed(0), rightX - 6, gy + 4);
+        }
+
+        ctx.fillStyle = COLORS.muted;
+        ctx.font = '10px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('交易量 (相对)', rightX + halfW / 2, h - 8);
+
+        // Line
+        ctx.beginPath();
+        ctx.strokeStyle = COLORS.orange;
+        ctx.lineWidth = 2;
+        volmPoints.forEach((p, i) => {
+            const lx = rightX + ((p.x - 10) / 190) * halfW;
+            const ly = padT + chartH - (p.y / maxSpreadM) * chartH;
+            i === 0 ? ctx.moveTo(lx, ly) : ctx.lineTo(lx, ly);
+        });
+        ctx.stroke();
+
+        ctx.lineTo(rightX + halfW, padT + chartH);
+        ctx.lineTo(rightX, padT + chartH);
+        ctx.closePath();
+        ctx.fillStyle = 'rgba(255,171,64,0.1)';
+        ctx.fill();
+
+        // Y-axis label
+        ctx.save();
+        ctx.translate(14, padT + chartH / 2);
+        ctx.rotate(-Math.PI / 2);
+        ctx.fillStyle = COLORS.muted;
+        ctx.font = '10px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('价差 (bps)', 0, 0);
+        ctx.restore();
+    }
+
+    ['sp-adverse', 'sp-inventory', 'sp-processing'].forEach(id => {
+        $('#' + id).addEventListener('input', updateSpread);
+    });
+    updateSpread();
+})();
+
+/* ================================================================
+   Section 3: Market Impact
+   ================================================================ */
+(() => {
+    const { c, ctx, w, h } = initCanvas('cvs-impact');
+
+    function update() {
+        const size = +$('#mi-size').value;
+        const vol = +$('#mi-vol').value;
+        $('#mi-size-val').textContent = size + '%';
+        $('#mi-vol-val').textContent = vol + '%';
+
+        const qv = size / 100;
+        const sigma = vol / 100;
+        const permImpact = sigma * Math.sqrt(qv) * 10000 * 0.5;
+        const tempImpact = sigma * Math.sqrt(qv) * 10000 * 0.3;
+        const totalImpact = permImpact + tempImpact;
+
+        $('#mi-temp').textContent = tempImpact.toFixed(1);
+        $('#mi-perm').textContent = permImpact.toFixed(1);
+        $('#mi-total').textContent = totalImpact.toFixed(1);
+
+        drawImpact(sigma);
+    }
+
+    function drawImpact(sigma) {
+        ctx.clearRect(0, 0, w, h);
+        const padL = 60, padR = 30, padT = 30, padB = 50;
+        const chartW = w - padL - padR;
+        const chartH = h - padT - padB;
+
+        // Title
+        ctx.fillStyle = COLORS.muted;
+        ctx.font = '11px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('市场冲击 vs 订单大小 (平方根定律)', w / 2, padT - 8);
+
+        // Compute curves
+        const maxQ = 0.5;
+        const nPts = 100;
+        const points = [];
+        for (let i = 0; i <= nPts; i++) {
+            const q = (i / nPts) * maxQ;
+            const perm = sigma * Math.sqrt(q) * 10000 * 0.5;
+            const temp = sigma * Math.sqrt(q) * 10000 * 0.3;
+            points.push({ q, perm, temp, total: perm + temp });
+        }
+        const maxImp = Math.max(...points.map(p => p.total), 1);
+
+        // Grid
+        ctx.strokeStyle = COLORS.grid;
+        ctx.lineWidth = 0.5;
+        for (let i = 0; i <= 5; i++) {
+            const gy = padT + chartH - (chartH / 5) * i;
+            ctx.beginPath(); ctx.moveTo(padL, gy); ctx.lineTo(padL + chartW, gy); ctx.stroke();
+            ctx.fillStyle = COLORS.muted;
+            ctx.textAlign = 'right';
+            ctx.font = '10px monospace';
+            ctx.fillText((maxImp / 5 * i).toFixed(0), padL - 6, gy + 4);
+        }
+        for (let q = 0; q <= 50; q += 10) {
+            const gx = padL + (q / 50) * chartW;
+            ctx.beginPath(); ctx.moveTo(gx, padT); ctx.lineTo(gx, padT + chartH); ctx.stroke();
+            ctx.fillStyle = COLORS.muted;
+            ctx.textAlign = 'center';
+            ctx.font = '10px monospace';
+            ctx.fillText(q + '%', gx, padT + chartH + 16);
+        }
+
+        // Axis labels
+        ctx.fillStyle = COLORS.muted;
+        ctx.font = '10px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('订单大小 (占日均成交量 %)', w / 2, h - 8);
+        ctx.save();
+        ctx.translate(14, padT + chartH / 2);
+        ctx.rotate(-Math.PI / 2);
+        ctx.fillText('价格冲击 (bps)', 0, 0);
+        ctx.restore();
+
+        function drawCurve(key, color) {
+            ctx.beginPath();
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 2;
+            points.forEach((p, i) => {
+                const px = padL + (p.q / maxQ) * chartW;
+                const py = padT + chartH - (p[key] / maxImp) * chartH;
+                i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+            });
+            ctx.stroke();
+        }
+
+        // Area for total
+        ctx.beginPath();
+        points.forEach((p, i) => {
+            const px = padL + (p.q / maxQ) * chartW;
+            const py = padT + chartH - (p.total / maxImp) * chartH;
+            i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+        });
+        ctx.lineTo(padL + chartW, padT + chartH);
+        ctx.lineTo(padL, padT + chartH);
+        ctx.closePath();
+        ctx.fillStyle = 'rgba(179,136,255,0.08)';
+        ctx.fill();
+
+        drawCurve('total', COLORS.purple);
+        drawCurve('perm', COLORS.red);
+        drawCurve('temp', COLORS.orange);
+
+        // Current position marker
+        const curSize = +$('#mi-size').value / 100;
+        const curX = padL + (curSize / maxQ) * chartW;
+        const curTotal = sigma * Math.sqrt(curSize) * 10000 * 0.8;
+        const curY = padT + chartH - (curTotal / maxImp) * chartH;
+
+        ctx.beginPath();
+        ctx.arc(curX, curY, 6, 0, Math.PI * 2);
+        ctx.fillStyle = COLORS.purple;
+        ctx.fill();
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        // Legend
+        const legX = padL + 20, legY = padT + 15;
+        [['总冲击', COLORS.purple], ['永久冲击', COLORS.red], ['临时冲击', COLORS.orange]].forEach(([label, color], i) => {
+            const ly = legY + i * 18;
+            ctx.fillStyle = color;
+            ctx.fillRect(legX, ly - 5, 14, 3);
+            ctx.fillStyle = COLORS.text;
+            ctx.font = '11px sans-serif';
+            ctx.textAlign = 'left';
+            ctx.fillText(label, legX + 20, ly);
+        });
+    }
+
+    ['mi-size', 'mi-vol'].forEach(id => {
+        $('#' + id).addEventListener('input', update);
+    });
+    update();
+})();
+
+/* ================================================================
+   Section 4: High-Frequency Data Characteristics
+   ================================================================ */
+(() => {
+    const { c, ctx, w, h } = initCanvas('cvs-hf');
+
+    function generate() {
+        const trueVol = +$('#hf-truevol').value / 100;
+        const noiseLevel = +$('#hf-noise').value / 1000;
+        $('#hf-truevol-val').textContent = $('#hf-truevol').value + '%';
+        $('#hf-noise-val').textContent = $('#hf-noise').value;
+
+        const n = 500;
+        const dt = 1 / (252 * 6.5 * 3600); // ~1 second
+        const truePrice = [100];
+        const obsPrice = [100 + noiseLevel * randn()];
+        const times = [0];
+
+        for (let i = 1; i < n; i++) {
+            const interval = 0.5 + Math.random() * 2.5; // irregular intervals
+            times.push(times[i - 1] + interval);
+            const drift = trueVol * Math.sqrt(interval * dt) * randn();
+            truePrice.push(truePrice[i - 1] * Math.exp(drift));
+            // Discrete price + noise (bid-ask bounce)
+            const noise = noiseLevel * (Math.random() < 0.5 ? 1 : -1) + noiseLevel * 0.3 * randn();
+            const tick = 0.01;
+            const obs = Math.round((truePrice[i] + noise * truePrice[i]) / tick) * tick;
+            obsPrice.push(obs);
+        }
+
+        // Volatility signature plot: RV at different sampling frequencies
+        const freqs = [];
+        for (let skip = 1; skip <= 80; skip++) {
+            let sumSqRet = 0, count = 0;
+            for (let i = skip; i < n; i += skip) {
+                const ret = Math.log(obsPrice[i] / obsPrice[i - skip]);
+                sumSqRet += ret * ret;
+                count++;
+            }
+            const rv = Math.sqrt(sumSqRet * 252 * 6.5 * 3600 / (times[n - 1] || 1)) * 100;
+            freqs.push({ skip, rv });
+        }
+
+        drawHF(times, truePrice, obsPrice, freqs, trueVol * 100);
+    }
+
+    function drawHF(times, truePrice, obsPrice, freqs, trueVolPct) {
+        ctx.clearRect(0, 0, w, h);
+        const padL = 55, padR = 20, padT = 20, padB = 10;
+        const topH = (h - 30) * 0.5;
+        const botH = (h - 30) * 0.5;
+        const botY = topH + 30;
+        const chartW = w - padL - padR;
+
+        // === Top: Price series ===
+        ctx.fillStyle = COLORS.muted;
+        ctx.font = '11px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('逐笔价格序列 (蓝=观测价格, 绿=真实价格)', w / 2, padT);
+
+        const minP = Math.min(...obsPrice, ...truePrice) * 0.999;
+        const maxP = Math.max(...obsPrice, ...truePrice) * 1.001;
+        const maxT = times[times.length - 1];
+
+        function px(t) { return padL + (t / maxT) * chartW; }
+        function py(p) { return padT + 14 + (1 - (p - minP) / (maxP - minP)) * (topH - 24); }
+
+        // Grid
+        ctx.strokeStyle = COLORS.grid;
+        ctx.lineWidth = 0.5;
+        for (let i = 0; i <= 4; i++) {
+            const gy = padT + 14 + (topH - 24) / 4 * i;
+            ctx.beginPath(); ctx.moveTo(padL, gy); ctx.lineTo(padL + chartW, gy); ctx.stroke();
+            const pv = maxP - (maxP - minP) / 4 * i;
+            ctx.fillStyle = COLORS.muted;
+            ctx.textAlign = 'right';
+            ctx.font = '10px monospace';
+            ctx.fillText(pv.toFixed(2), padL - 4, gy + 4);
+        }
+
+        // True price
+        ctx.beginPath();
+        ctx.strokeStyle = COLORS.green;
+        ctx.lineWidth = 1.5;
+        ctx.globalAlpha = 0.7;
+        truePrice.forEach((p, i) => {
+            i === 0 ? ctx.moveTo(px(times[i]), py(p)) : ctx.lineTo(px(times[i]), py(p));
+        });
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+
+        // Observed price (dots)
+        ctx.fillStyle = COLORS.blue;
+        obsPrice.forEach((p, i) => {
+            ctx.beginPath();
+            ctx.arc(px(times[i]), py(p), 1.5, 0, Math.PI * 2);
+            ctx.fill();
+        });
+
+        // === Bottom: Volatility Signature Plot ===
+        ctx.fillStyle = COLORS.muted;
+        ctx.font = '11px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('波动率签名图 (Volatility Signature Plot)', w / 2, botY);
+
+        const maxRV = Math.max(...freqs.map(f => f.rv), trueVolPct * 1.5);
+        const minRV = 0;
+        const maxSkip = Math.max(...freqs.map(f => f.skip));
+
+        function bpx(skip) { return padL + (skip / maxSkip) * chartW; }
+        function bpy(rv) { return botY + 14 + (1 - (rv - minRV) / (maxRV - minRV)) * (botH - 24); }
+
+        // Grid
+        for (let i = 0; i <= 4; i++) {
+            const gy = botY + 14 + (botH - 24) / 4 * i;
+            ctx.strokeStyle = COLORS.grid;
+            ctx.lineWidth = 0.5;
+            ctx.beginPath(); ctx.moveTo(padL, gy); ctx.lineTo(padL + chartW, gy); ctx.stroke();
+            const rv = maxRV - (maxRV - minRV) / 4 * i;
+            ctx.fillStyle = COLORS.muted;
+            ctx.textAlign = 'right';
+            ctx.font = '10px monospace';
+            ctx.fillText(rv.toFixed(0) + '%', padL - 4, gy + 4);
+        }
+
+        // RV curve
+        ctx.beginPath();
+        ctx.strokeStyle = COLORS.purple;
+        ctx.lineWidth = 2;
+        freqs.forEach((f, i) => {
+            i === 0 ? ctx.moveTo(bpx(f.skip), bpy(f.rv)) : ctx.lineTo(bpx(f.skip), bpy(f.rv));
+        });
+        ctx.stroke();
+
+        // True volatility line
+        ctx.setLineDash([6, 4]);
+        ctx.strokeStyle = COLORS.green;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(padL, bpy(trueVolPct));
+        ctx.lineTo(padL + chartW, bpy(trueVolPct));
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Label
+        ctx.fillStyle = COLORS.green;
+        ctx.font = '10px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText('真实波动率 ' + trueVolPct.toFixed(0) + '%', padL + 6, bpy(trueVolPct) - 6);
+
+        // X-axis label
+        ctx.fillStyle = COLORS.muted;
+        ctx.font = '10px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('采样间隔 (tick 数)', w / 2, botY + botH - 2);
+
+        // Legend for top
+        ctx.font = '10px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillStyle = COLORS.green;
+        ctx.fillRect(padL + 10, padT + 20, 14, 3);
+        ctx.fillText('真实价格', padL + 30, padT + 24);
+        ctx.fillStyle = COLORS.blue;
+        ctx.beginPath(); ctx.arc(padL + 17, padT + 38, 3, 0, Math.PI * 2); ctx.fill();
+        ctx.fillText('观测价格 (含噪声)', padL + 30, padT + 42);
+    }
+
+    $('#hf-gen').addEventListener('click', generate);
+    ['hf-truevol', 'hf-noise'].forEach(id => {
+        $('#' + id).addEventListener('input', () => {
+            $('#hf-truevol-val').textContent = $('#hf-truevol').value + '%';
+            $('#hf-noise-val').textContent = $('#hf-noise').value;
+            generate();
+        });
+    });
+    generate();
+})();
+
+/* ================================================================
+   Section 5: Market Making Strategy
+   ================================================================ */
+(() => {
+    const { c, ctx, w, h } = initCanvas('cvs-mm');
+    let running = false, animId = null;
+
+    // State
+    let midPrice, inventory, pnl, cashPnl, trades, bidQuote, askQuote;
+    let priceHistory, pnlHistory, invHistory, tradeLog;
+    let step = 0;
+
+    function reset() {
+        midPrice = 100;
+        inventory = 0;
+        pnl = 0;
+        cashPnl = 0;
+        trades = 0;
+        priceHistory = [midPrice];
+        pnlHistory = [0];
+        invHistory = [0];
+        tradeLog = [];
+        step = 0;
+        updateQuotes();
+        updateStats();
+        draw();
+        clearLog();
+    }
+
+    function updateQuotes() {
+        const width = +$('#mm-width').value / 10000;
+        const gamma = +$('#mm-gamma').value / 10;
+        const sigma = 0.002; // local volatility
+        const T = 1;
+        const t = step / 1000;
+
+        // Avellaneda-Stoikov inspired
+        const reservationPrice = midPrice - inventory * gamma * sigma * sigma * Math.max(T - t, 0.01);
+        const halfSpread = width * midPrice / 2;
+        bidQuote = reservationPrice - halfSpread;
+        askQuote = reservationPrice + halfSpread;
+    }
+
+    function tick() {
+        step++;
+        // Price random walk
+        midPrice *= Math.exp(0.002 * randn());
+
+        updateQuotes();
+
+        // Simulate incoming market orders
+        const lambda = 0.3;
+        // Buy market order hits our ask
+        if (Math.random() < lambda) {
+            if (Math.random() < 0.5) {
+                // Buy MO -> we sell at askQuote
+                inventory -= 1;
+                cashPnl += askQuote;
+                trades++;
+                addLog('卖出', askQuote);
+            } else {
+                // Sell MO -> we buy at bidQuote
+                inventory += 1;
+                cashPnl -= bidQuote;
+                trades++;
+                addLog('买入', bidQuote);
+            }
+        }
+
+        // Adverse selection: occasionally informed trader
+        if (Math.random() < 0.05) {
+            const direction = Math.random() < 0.5 ? 1 : -1;
+            midPrice *= Math.exp(direction * 0.005);
+            if (direction > 0) {
+                // Price going up, informed buys from us (we sell at ask)
+                inventory -= 2;
+                cashPnl += askQuote * 2;
+                trades += 2;
+                addLog('知情买入(逆选)', askQuote);
+            } else {
+                inventory += 2;
+                cashPnl -= bidQuote * 2;
+                trades += 2;
+                addLog('知情卖出(逆选)', bidQuote);
+            }
+        }
+
+        pnl = cashPnl + inventory * midPrice;
+        priceHistory.push(midPrice);
+        pnlHistory.push(pnl);
+        invHistory.push(inventory);
+
+        // Keep history manageable
+        if (priceHistory.length > 600) {
+            priceHistory.shift();
+            pnlHistory.shift();
+            invHistory.shift();
+        }
+
+        updateStats();
+        draw();
+    }
+
+    function addLog(action, price) {
+        const logEl = $('#mm-log');
+        const color = action.includes('买') ? COLORS.green : COLORS.red;
+        const div = document.createElement('div');
+        div.innerHTML = `<span style="color:${COLORS.muted}">[${step}]</span> <span style="color:${color}">${action}</span> @ <span style="color:${COLORS.text}">${price.toFixed(3)}</span> | 库存: ${inventory}`;
+        logEl.prepend(div);
+        if (logEl.children.length > 50) logEl.removeChild(logEl.lastChild);
+    }
+
+    function clearLog() { $('#mm-log').innerHTML = ''; }
+
+    function updateStats() {
+        $('#mm-inv').textContent = inventory;
+        $('#mm-inv').style.color = inventory > 0 ? COLORS.green : inventory < 0 ? COLORS.red : COLORS.text;
+        $('#mm-trades').textContent = trades;
+        const pnlEl = $('#mm-pnl');
+        pnlEl.textContent = (pnl - inventory * 100).toFixed(2);
+        pnlEl.className = 'stat-val ' + ((pnl - inventory * 100) >= 0 ? 'pnl-positive' : 'pnl-negative');
+        $('#mm-quotes').textContent = (bidQuote || 0).toFixed(3) + ' / ' + (askQuote || 0).toFixed(3);
+        $('#mm-width-val').textContent = $('#mm-width').value;
+        $('#mm-gamma-val').textContent = (+$('#mm-gamma').value / 10).toFixed(1);
+    }
+
+    function draw() {
+        ctx.clearRect(0, 0, w, h);
+        if (priceHistory.length < 2) return;
+
+        const padL = 55, padR = 55, padT = 20, padB = 30;
+        const chartW = w - padL - padR;
+        const chartH = h - padT - padB;
+
+        const n = priceHistory.length;
+        const minP = Math.min(...priceHistory) * 0.9995;
+        const maxP = Math.max(...priceHistory) * 1.0005;
+
+        function px(i) { return padL + (i / Math.max(n - 1, 1)) * chartW; }
+        function pyP(p) { return padT + (1 - (p - minP) / (maxP - minP || 1)) * chartH; }
+
+        // Grid
+        ctx.strokeStyle = COLORS.grid;
+        ctx.lineWidth = 0.5;
+        for (let i = 0; i <= 4; i++) {
+            const gy = padT + (chartH / 4) * i;
+            ctx.beginPath(); ctx.moveTo(padL, gy); ctx.lineTo(padL + chartW, gy); ctx.stroke();
+        }
+
+        // Price line
+        ctx.beginPath();
+        ctx.strokeStyle = COLORS.text;
+        ctx.lineWidth = 1.5;
+        priceHistory.forEach((p, i) => {
+            i === 0 ? ctx.moveTo(px(i), pyP(p)) : ctx.lineTo(px(i), pyP(p));
+        });
+        ctx.stroke();
+
+        // Bid/Ask quotes current
+        if (bidQuote && askQuote) {
+            const lastX = px(n - 1);
+            // Bid line
+            ctx.setLineDash([4, 3]);
+            ctx.strokeStyle = COLORS.green;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(lastX - 40, pyP(bidQuote));
+            ctx.lineTo(lastX + 10, pyP(bidQuote));
+            ctx.stroke();
+            // Ask line
+            ctx.strokeStyle = COLORS.red;
+            ctx.beginPath();
+            ctx.moveTo(lastX - 40, pyP(askQuote));
+            ctx.lineTo(lastX + 10, pyP(askQuote));
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            // Labels
+            ctx.font = '10px monospace';
+            ctx.fillStyle = COLORS.green;
+            ctx.textAlign = 'left';
+            ctx.fillText('B ' + bidQuote.toFixed(2), lastX + 12, pyP(bidQuote) + 4);
+            ctx.fillStyle = COLORS.red;
+            ctx.fillText('A ' + askQuote.toFixed(2), lastX + 12, pyP(askQuote) + 4);
+        }
+
+        // PnL on right axis
+        const minPnl = Math.min(...pnlHistory);
+        const maxPnl = Math.max(...pnlHistory);
+        const pnlRange = maxPnl - minPnl || 1;
+
+        function pyPnl(v) { return padT + (1 - (v - minPnl) / pnlRange) * chartH; }
+
+        ctx.beginPath();
+        ctx.strokeStyle = COLORS.yellow;
+        ctx.lineWidth = 1.5;
+        ctx.globalAlpha = 0.7;
+        pnlHistory.forEach((p, i) => {
+            i === 0 ? ctx.moveTo(px(i), pyPnl(p)) : ctx.lineTo(px(i), pyPnl(p));
+        });
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+
+        // Inventory bar at bottom
+        const invMax = Math.max(Math.abs(Math.min(...invHistory)), Math.abs(Math.max(...invHistory)), 1);
+        ctx.globalAlpha = 0.4;
+        invHistory.forEach((inv, i) => {
+            const bx = px(i);
+            const barW = Math.max(chartW / n, 1);
+            const barH2 = (Math.abs(inv) / invMax) * 20;
+            ctx.fillStyle = inv >= 0 ? COLORS.green : COLORS.red;
+            ctx.fillRect(bx, padT + chartH - barH2, barW, barH2);
+        });
+        ctx.globalAlpha = 1;
+
+        // Labels
+        ctx.font = '10px sans-serif';
+        ctx.fillStyle = COLORS.muted;
+        ctx.textAlign = 'right';
+        ctx.fillText(maxP.toFixed(2), padL - 4, padT + 10);
+        ctx.fillText(minP.toFixed(2), padL - 4, padT + chartH);
+
+        // Right axis PnL labels
+        ctx.textAlign = 'left';
+        ctx.fillStyle = COLORS.yellow;
+        ctx.fillText('PnL', w - padR + 4, padT + 6);
+
+        // Legend
+        ctx.textAlign = 'left';
+        ctx.font = '10px sans-serif';
+        const lx = padL + 8, ly = padT + 10;
+        ctx.fillStyle = COLORS.text;
+        ctx.fillRect(lx, ly - 2, 12, 2);
+        ctx.fillText('中间价', lx + 16, ly + 2);
+        ctx.fillStyle = COLORS.yellow;
+        ctx.fillRect(lx, ly + 14, 12, 2);
+        ctx.fillText('累计盈亏', lx + 16, ly + 18);
+        ctx.fillStyle = COLORS.green;
+        ctx.fillText('Bid', lx + 100, ly + 2);
+        ctx.fillStyle = COLORS.red;
+        ctx.fillText('Ask', lx + 130, ly + 2);
+    }
+
+    function loop() {
+        tick();
+        if (running) animId = setTimeout(loop, 80);
+    }
+
+    reset();
+
+    $('#mm-start').addEventListener('click', () => {
+        running = !running;
+        $('#mm-start').textContent = running ? '暂停' : '开始模拟';
+        if (running) loop();
+    });
+    $('#mm-reset').addEventListener('click', () => {
+        running = false;
+        $('#mm-start').textContent = '开始模拟';
+        if (animId) clearTimeout(animId);
+        reset();
+    });
+    ['mm-width', 'mm-gamma'].forEach(id => {
+        $('#' + id).addEventListener('input', () => {
+            updateQuotes();
+            updateStats();
+        });
+    });
+})();
+</script>
+
+<script>
+// KaTeX auto-render (retry if not loaded yet)
+function tryRenderKatex() {
+    if (typeof renderMathInElement === 'function') {
+        renderMathInElement(document.body, {
+            delimiters: [
+                { left: '$$', right: '$$', display: true },
+                { left: '\\(', right: '\\)', display: false }
+            ]
+        });
+    } else {
+        setTimeout(tryRenderKatex, 200);
+    }
+}
+tryRenderKatex();
+</script>
+</body>
+</html>

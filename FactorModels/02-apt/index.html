@@ -1,0 +1,1440 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>APT — 因子模型</title>
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" defer>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" defer></script>
+    <script src="../shared/scripts/nav.js" defer></script>
+    <style>
+        /* ===== Page-specific styles ===== */
+        .hero {
+            text-align: center;
+            padding: 2rem 0 1.5rem;
+        }
+        .hero h1 { font-size: 2.2rem; margin-bottom: 0.5rem; }
+        .hero p { color: var(--text-secondary); font-size: 1.05rem; max-width: 700px; margin: 0 auto; }
+
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            padding: 1.5rem;
+            margin-bottom: 1rem;
+        }
+        .card:hover { border-color: var(--border-active); }
+
+        canvas {
+            display: block;
+            width: 100%;
+            border-radius: var(--radius-md);
+            background: rgba(0,0,0,0.2);
+        }
+
+        /* Controls */
+        .controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1rem;
+            margin: 1rem 0;
+            align-items: center;
+        }
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+        }
+        .control-group label {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+        .control-group .val {
+            font-family: var(--font-mono);
+            color: var(--accent-green);
+            font-size: 0.85rem;
+            min-width: 40px;
+            text-align: right;
+        }
+        .slider-row {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        input[type="range"] {
+            -webkit-appearance: none;
+            appearance: none;
+            height: 6px;
+            background: var(--border-color);
+            border-radius: 3px;
+            outline: none;
+            width: 140px;
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 16px; height: 16px;
+            border-radius: 50%;
+            background: var(--accent-green);
+            cursor: pointer;
+        }
+
+        /* Buttons */
+        .btn {
+            padding: 0.5rem 1.2rem;
+            border: 1px solid var(--border-color);
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            font-size: 0.85rem;
+            transition: all 0.2s;
+        }
+        .btn:hover { border-color: var(--accent-green); color: var(--accent-green); }
+        .btn.active { background: rgba(22,199,154,0.2); border-color: var(--accent-green); color: var(--accent-green); }
+
+        /* Tables */
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.85rem;
+            margin: 1rem 0;
+        }
+        .data-table th, .data-table td {
+            padding: 0.5rem 0.75rem;
+            border: 1px solid var(--border-color);
+            text-align: center;
+        }
+        .data-table th {
+            background: var(--bg-secondary);
+            color: var(--accent-blue);
+            font-weight: 600;
+        }
+        .data-table td { color: var(--text-secondary); }
+        .data-table tr:hover td { background: var(--bg-hover); }
+
+        /* Comparison columns */
+        .compare-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5rem;
+        }
+        .compare-col { }
+        .compare-col h4 {
+            text-align: center;
+            padding: 0.5rem;
+            border-radius: var(--radius-sm);
+            margin-bottom: 1rem;
+        }
+        .compare-col.capm h4 { background: rgba(79,195,247,0.15); color: var(--accent-blue); }
+        .compare-col.apt h4 { background: rgba(22,199,154,0.15); color: var(--accent-green); }
+
+        .formula-box {
+            background: rgba(0,0,0,0.25);
+            border-radius: var(--radius-md);
+            padding: 1rem;
+            margin: 0.75rem 0;
+            text-align: center;
+        }
+
+        /* Stats readout */
+        .stat-row {
+            display: flex;
+            gap: 1.5rem;
+            flex-wrap: wrap;
+            margin: 0.75rem 0;
+        }
+        .stat-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .stat-item .stat-label { font-size: 0.75rem; color: var(--text-muted); }
+        .stat-item .stat-val { font-family: var(--font-mono); color: var(--accent-green); font-size: 1rem; }
+
+        /* Arbitrage highlight */
+        .arb-exists { background: rgba(255,82,82,0.15) !important; }
+        .arb-none { background: rgba(22,199,154,0.1) !important; }
+        .arb-badge {
+            display: inline-block;
+            padding: 0.3rem 0.8rem;
+            border-radius: var(--radius-sm);
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+        .arb-badge.exists { background: rgba(255,82,82,0.2); color: var(--accent-red); }
+        .arb-badge.none { background: rgba(22,199,154,0.15); color: var(--accent-green); }
+
+        /* Editable cells */
+        .editable {
+            cursor: pointer;
+            position: relative;
+            color: var(--accent-orange) !important;
+            font-weight: 600;
+        }
+        .editable:hover { background: rgba(255,171,64,0.15) !important; }
+        .editable input {
+            width: 60px;
+            background: var(--bg-primary);
+            border: 1px solid var(--accent-orange);
+            color: var(--accent-orange);
+            text-align: center;
+            border-radius: 4px;
+            padding: 2px;
+            font-size: 0.85rem;
+            font-family: var(--font-mono);
+        }
+
+        /* Step indicator */
+        .steps {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+            margin: 1rem 0;
+        }
+        .step {
+            padding: 0.5rem 0.75rem;
+            border-left: 3px solid var(--border-color);
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            transition: all 0.3s;
+        }
+        .step.active {
+            border-left-color: var(--accent-green);
+            color: var(--text-primary);
+            background: rgba(22,199,154,0.05);
+        }
+
+        /* Animate bar */
+        .anim-controls {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            margin: 1rem 0;
+        }
+        .period-display {
+            font-family: var(--font-mono);
+            color: var(--accent-blue);
+            font-size: 0.9rem;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .compare-grid { grid-template-columns: 1fr; }
+            input[type="range"] { width: 100px; }
+        }
+    </style>
+</head>
+<body>
+<div class="page-container">
+
+    <!-- Hero -->
+    <div class="hero">
+        <h1>APT 套利定价理论</h1>
+        <p>Arbitrage Pricing Theory — 从单因子到多因子的定价框架</p>
+    </div>
+
+    <!-- ===== Section 1: APT vs CAPM ===== -->
+    <div class="section" id="sec-compare">
+        <div class="section-title">
+            <div class="icon">1</div>
+            <h2>APT vs CAPM 对比</h2>
+        </div>
+        <p>CAPM 仅依赖市场因子，而 APT 允许多个系统性风险因子共同定价资产收益。</p>
+
+        <div class="compare-grid">
+            <div class="compare-col capm">
+                <h4>CAPM 资本资产定价模型</h4>
+                <div class="formula-box">
+                    $$E(R_i) = R_f + \beta_i [E(R_m) - R_f]$$
+                </div>
+                <canvas id="cvCapm" height="280"></canvas>
+                <p class="text-sm mt-1" style="text-align:center;color:var(--text-muted);">单因子线性回归：市场超额收益</p>
+            </div>
+            <div class="compare-col apt">
+                <h4>APT 套利定价理论</h4>
+                <div class="formula-box">
+                    $$E(R_i) = R_f + \beta_{i1}\lambda_1 + \beta_{i2}\lambda_2 + \cdots + \beta_{ik}\lambda_k$$
+                </div>
+                <canvas id="cvApt" height="280"></canvas>
+                <p class="text-sm mt-1" style="text-align:center;color:var(--text-muted);">多因子空间：资产在因子维度上的投影</p>
+            </div>
+        </div>
+
+        <table class="data-table mt-2">
+            <thead>
+                <tr><th>维度</th><th>CAPM</th><th>APT</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>因子数量</td><td>1（市场组合）</td><td>K 个系统性因子</td></tr>
+                <tr><td>核心假设</td><td>均值-方差优化、市场组合有效</td><td>无套利条件</td></tr>
+                <tr><td>均衡条件</td><td>所有投资者持有市场组合</td><td>充分分散化消除特异风险</td></tr>
+                <tr><td>因子来源</td><td>理论推导（市场收益）</td><td>不指定具体因子</td></tr>
+                <tr><td>适用性</td><td>简洁但过于简化</td><td>灵活但需确定因子</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- ===== Section 2: Multi-Factor Regression ===== -->
+    <div class="section" id="sec-regression">
+        <div class="section-title">
+            <div class="icon">2</div>
+            <h2>多因子回归</h2>
+        </div>
+        <p>资产收益由多个因子的线性组合加上噪声决定。调节因子敏感度观察预测收益和拟合优度的变化。</p>
+        <div class="formula-box">
+            $$R_i = \alpha + \beta_1 F_1 + \beta_2 F_2 + \beta_3 F_3 + \varepsilon$$
+        </div>
+
+        <div class="split-layout">
+            <div class="text-panel">
+                <div class="card">
+                    <h4>因子敏感度调节</h4>
+                    <div class="controls" style="flex-direction:column;align-items:stretch;">
+                        <div class="control-group">
+                            <label>$\beta_1$（市场）</label>
+                            <div class="slider-row">
+                                <input type="range" id="slBeta1" min="-1" max="2" step="0.05" value="1.0">
+                                <span class="val" id="valBeta1">1.00</span>
+                            </div>
+                        </div>
+                        <div class="control-group">
+                            <label>$\beta_2$（规模）</label>
+                            <div class="slider-row">
+                                <input type="range" id="slBeta2" min="-1" max="2" step="0.05" value="0.5">
+                                <span class="val" id="valBeta2">0.50</span>
+                            </div>
+                        </div>
+                        <div class="control-group">
+                            <label>$\beta_3$（价值）</label>
+                            <div class="slider-row">
+                                <input type="range" id="slBeta3" min="-1" max="2" step="0.05" value="0.3">
+                                <span class="val" id="valBeta3">0.30</span>
+                            </div>
+                        </div>
+                        <div class="control-group">
+                            <label>$\alpha$（截距）</label>
+                            <div class="slider-row">
+                                <input type="range" id="slAlpha" min="-5" max="5" step="0.1" value="0.5">
+                                <span class="val" id="valAlpha">0.50</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="stat-row" style="justify-content:space-around;margin-top:1rem;">
+                        <div class="stat-item">
+                            <span class="stat-label">R²（单因子）</span>
+                            <span class="stat-val" id="r2single">—</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">R²（三因子）</span>
+                            <span class="stat-val" id="r2multi">—</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">预测收益</span>
+                            <span class="stat-val" id="predRet">—</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="viz-panel">
+                <canvas id="cvRegression" height="420"></canvas>
+                <p class="text-sm mt-1 text-center text-muted">横轴：因子1, 纵轴：因子2, 颜色：实际收益, 圆圈大小：残差</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== Section 3: Arbitrage Detection ===== -->
+    <div class="section" id="sec-arbitrage">
+        <div class="section-title">
+            <div class="icon">3</div>
+            <h2>套利机会检测</h2>
+        </div>
+        <p>APT 的核心逻辑：如果存在无成本、无风险但有正收益的组合，则市场存在套利机会。点击表格中的<span style="color:var(--accent-orange);">预期收益</span>可以修改，观察套利机会的出现与消失。</p>
+
+        <div class="split-layout">
+            <div class="text-panel">
+                <div class="card">
+                    <h4>资产因子暴露与定价</h4>
+                    <table class="data-table" id="arbTable">
+                        <thead>
+                            <tr>
+                                <th>资产</th>
+                                <th>$\beta_1$</th>
+                                <th>$\beta_2$</th>
+                                <th>E(R) 预期</th>
+                                <th>E(R) 均衡</th>
+                            </tr>
+                        </thead>
+                        <tbody id="arbBody"></tbody>
+                    </table>
+                    <div style="margin-top:0.75rem;">
+                        <span>套利状态：</span>
+                        <span class="arb-badge" id="arbBadge">检测中...</span>
+                    </div>
+                    <div class="steps" id="arbSteps"></div>
+                    <div class="controls">
+                        <button class="btn" id="btnArbReset">重置</button>
+                    </div>
+                </div>
+            </div>
+            <div class="viz-panel">
+                <canvas id="cvArbitrage" height="420"></canvas>
+                <p class="text-sm mt-1 text-center text-muted">安全市场线：均衡收益 vs 实际预期收益</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== Section 4: Factor Risk Premium Estimation ===== -->
+    <div class="section" id="sec-premium">
+        <div class="section-title">
+            <div class="icon">4</div>
+            <h2>因子风险溢价估计</h2>
+        </div>
+        <p>Fama-MacBeth 两步法：每期横截面回归得到因子风险溢价 $\hat\lambda_t$，再对时间序列取平均。</p>
+        <div class="formula-box">
+            $$\text{第 t 期：} R_{i,t} = \hat\lambda_{0,t} + \hat\lambda_{1,t}\hat\beta_{i1} + \hat\lambda_{2,t}\hat\beta_{i2} + \eta_{i,t}$$
+        </div>
+
+        <div class="split-layout">
+            <div class="text-panel">
+                <div class="card">
+                    <h4>动画控制</h4>
+                    <div class="anim-controls">
+                        <button class="btn" id="btnPlayPause">▶ 播放</button>
+                        <button class="btn" id="btnStepFwd">下一期</button>
+                        <button class="btn" id="btnResetPrem">重置</button>
+                    </div>
+                    <div class="period-display">当前期：<span id="curPeriod">0</span> / <span id="totalPeriod">24</span></div>
+                    <div class="stat-row mt-2" style="justify-content:space-around;">
+                        <div class="stat-item">
+                            <span class="stat-label">$\bar\lambda_1$（市场）</span>
+                            <span class="stat-val" id="avgLam1">—</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">$\bar\lambda_2$（规模）</span>
+                            <span class="stat-val" id="avgLam2">—</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">$\bar\lambda_0$（截距）</span>
+                            <span class="stat-val" id="avgLam0">—</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="viz-panel">
+                <canvas id="cvPremium" height="420"></canvas>
+                <p class="text-sm mt-1 text-center text-muted">柱状图：各因子的平均风险溢价与置信区间</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== Section 5: APT to Empirical Factor Models ===== -->
+    <div class="section" id="sec-bridge">
+        <div class="section-title">
+            <div class="icon">5</div>
+            <h2>从 APT 到实证因子模型</h2>
+        </div>
+        <p>APT 说"多因子定价"，但没有指定哪些因子。找到因子的两条路径：统计方法（PCA）和经济直觉（规模、价值等）。</p>
+
+        <div class="split-layout">
+            <div class="text-panel">
+                <div class="card">
+                    <h4>PCA 交互演示</h4>
+                    <p class="text-sm text-muted">对收益率协方差矩阵做特征值分解，提取主成分因子。</p>
+                    <div class="controls" style="flex-direction:column;align-items:stretch;">
+                        <div class="control-group">
+                            <label>资产数量</label>
+                            <div class="slider-row">
+                                <input type="range" id="slAssets" min="5" max="30" step="1" value="15">
+                                <span class="val" id="valAssets">15</span>
+                            </div>
+                        </div>
+                        <div class="control-group">
+                            <label>因子间相关性</label>
+                            <div class="slider-row">
+                                <input type="range" id="slCorr" min="0" max="0.9" step="0.05" value="0.3">
+                                <span class="val" id="valCorr">0.30</span>
+                            </div>
+                        </div>
+                        <button class="btn" id="btnRegenPCA">重新生成数据</button>
+                    </div>
+
+                    <div class="mt-2">
+                        <h4>实证因子模型预览</h4>
+                        <table class="data-table">
+                            <thead><tr><th>因子</th><th>来源</th><th>含义</th></tr></thead>
+                            <tbody>
+                                <tr><td style="color:var(--accent-blue)">MKT</td><td>市场</td><td>市场超额收益</td></tr>
+                                <tr><td style="color:var(--accent-green)">SMB</td><td>规模</td><td>小市值 - 大市值</td></tr>
+                                <tr><td style="color:var(--accent-orange)">HML</td><td>价值</td><td>高B/M - 低B/M</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            <div class="viz-panel">
+                <canvas id="cvPCA" height="420"></canvas>
+                <p class="text-sm mt-1 text-center text-muted">碎石图（Scree Plot）：主成分解释方差比</p>
+            </div>
+        </div>
+    </div>
+
+</div><!-- /page-container -->
+
+<script>
+// ============================================================
+//  Utility helpers
+// ============================================================
+function randn() {
+    let u = 0, v = 0;
+    while (u === 0) u = Math.random();
+    while (v === 0) v = Math.random();
+    return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+}
+function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+function fmt(v, d = 2) { return v.toFixed(d); }
+
+function resizeCanvas(cv) {
+    const dpr = window.devicePixelRatio || 1;
+    const rect = cv.getBoundingClientRect();
+    cv.width = rect.width * dpr;
+    cv.height = rect.height * dpr;
+    const ctx = cv.getContext('2d');
+    ctx.scale(dpr, dpr);
+    return { w: rect.width, h: rect.height, ctx };
+}
+
+const C = {
+    bg: '#0d1b2a',
+    grid: '#1b2d45',
+    text: '#a8a8b8',
+    green: '#16c79a',
+    blue: '#4fc3f7',
+    purple: '#b388ff',
+    orange: '#ffab40',
+    red: '#ff5252',
+    yellow: '#ffd740',
+    pink: '#ff80ab',
+    white: '#e8e8e8'
+};
+
+// ============================================================
+//  Section 1: CAPM vs APT visuals
+// ============================================================
+(function drawCompare() {
+    function drawCAPM() {
+        const cv = document.getElementById('cvCapm');
+        const { w, h, ctx } = resizeCanvas(cv);
+        const pad = 40;
+
+        ctx.fillStyle = C.bg; ctx.fillRect(0, 0, w, h);
+
+        // Axes
+        ctx.strokeStyle = C.grid; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(pad, h - pad); ctx.lineTo(w - 10, h - pad); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(pad, h - pad); ctx.lineTo(pad, 10); ctx.stroke();
+
+        ctx.fillStyle = C.text; ctx.font = '11px sans-serif';
+        ctx.fillText('β (市场)', w / 2, h - 8);
+        ctx.save(); ctx.translate(12, h / 2); ctx.rotate(-Math.PI / 2);
+        ctx.fillText('E(R)', 0, 0); ctx.restore();
+
+        // SML line
+        const rf = 0.03, erp = 0.06;
+        const x0 = pad, y0 = h - pad - (rf / 0.15) * (h - 2 * pad);
+        const x1 = w - 20, beta1 = (x1 - pad) / (w - pad - 20) * 2;
+        const y1 = h - pad - ((rf + beta1 * erp) / 0.15) * (h - 2 * pad);
+
+        ctx.strokeStyle = C.blue; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+
+        // Scatter points
+        const pts = [];
+        for (let i = 0; i < 25; i++) {
+            const beta = 0.2 + Math.random() * 1.6;
+            const ret = rf + beta * erp + randn() * 0.015;
+            pts.push({ beta, ret });
+        }
+        pts.forEach(p => {
+            const px = pad + (p.beta / 2) * (w - pad - 20);
+            const py = h - pad - (p.ret / 0.15) * (h - 2 * pad);
+            ctx.beginPath(); ctx.arc(px, clamp(py, 5, h - pad), 4, 0, Math.PI * 2);
+            ctx.fillStyle = C.blue + '99'; ctx.fill();
+        });
+
+        ctx.fillStyle = C.blue; ctx.font = 'bold 11px sans-serif';
+        ctx.fillText('SML（证券市场线）', w / 2 - 40, y1 - 10);
+    }
+
+    function drawAPT() {
+        const cv = document.getElementById('cvApt');
+        const { w, h, ctx } = resizeCanvas(cv);
+        const pad = 40;
+
+        ctx.fillStyle = C.bg; ctx.fillRect(0, 0, w, h);
+
+        // Axes
+        ctx.strokeStyle = C.grid; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(pad, h - pad); ctx.lineTo(w - 10, h - pad); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(pad, h - pad); ctx.lineTo(pad, 10); ctx.stroke();
+
+        ctx.fillStyle = C.text; ctx.font = '11px sans-serif';
+        ctx.fillText('因子1 暴露', w / 2 - 20, h - 8);
+        ctx.save(); ctx.translate(12, h / 2); ctx.rotate(-Math.PI / 2);
+        ctx.fillText('因子2 暴露', 0, 0); ctx.restore();
+
+        // Generate points with multiple factor exposures
+        const pts = [];
+        for (let i = 0; i < 40; i++) {
+            const b1 = 0.1 + Math.random() * 1.8;
+            const b2 = 0.1 + Math.random() * 1.8;
+            const ret = 0.03 + b1 * 0.04 + b2 * 0.025 + randn() * 0.005;
+            pts.push({ b1, b2, ret });
+        }
+
+        // Color map by return
+        const rets = pts.map(p => p.ret);
+        const rMin = Math.min(...rets), rMax = Math.max(...rets);
+        pts.forEach(p => {
+            const px = pad + (p.b1 / 2) * (w - pad - 20);
+            const py = h - pad - (p.b2 / 2) * (h - 2 * pad);
+            const t = (p.ret - rMin) / (rMax - rMin + 1e-9);
+            const r = Math.round(lerp(79, 22, t));
+            const g = Math.round(lerp(195, 199, t));
+            const b = Math.round(lerp(247, 154, t));
+            ctx.beginPath(); ctx.arc(px, py, 5 + t * 4, 0, Math.PI * 2);
+            ctx.fillStyle = `rgba(${r},${g},${b},0.8)`; ctx.fill();
+        });
+
+        // Factor hyperplane hint (dashed lines)
+        ctx.setLineDash([4, 4]); ctx.strokeStyle = C.green + '66'; ctx.lineWidth = 1;
+        for (let v = 0.2; v <= 1.6; v += 0.35) {
+            const x1 = pad + (v / 2) * (w - pad - 20);
+            ctx.beginPath(); ctx.moveTo(x1, h - pad); ctx.lineTo(x1, 10); ctx.stroke();
+        }
+        for (let v = 0.2; v <= 1.6; v += 0.35) {
+            const y1 = h - pad - (v / 2) * (h - 2 * pad);
+            ctx.beginPath(); ctx.moveTo(pad, y1); ctx.lineTo(w - 10, y1); ctx.stroke();
+        }
+        ctx.setLineDash([]);
+
+        ctx.fillStyle = C.green; ctx.font = 'bold 11px sans-serif';
+        ctx.fillText('多因子定价超平面', w / 2 - 40, 25);
+    }
+
+    drawCAPM();
+    drawAPT();
+    window.addEventListener('resize', () => { drawCAPM(); drawAPT(); });
+})();
+
+// ============================================================
+//  Section 2: Multi-Factor Regression
+// ============================================================
+const Regression = (() => {
+    const N = 60;
+    let factors = [], returns = [];
+    // True betas for data generation
+    const trueB = [1.0, 0.5, 0.3];
+    const trueAlpha = 0.5;
+
+    function genData() {
+        factors = []; returns = [];
+        for (let i = 0; i < N; i++) {
+            const f1 = randn() * 3;
+            const f2 = randn() * 2.5;
+            const f3 = randn() * 2;
+            const ret = trueAlpha + trueB[0] * f1 + trueB[1] * f2 + trueB[2] * f3 + randn() * 1.5;
+            factors.push([f1, f2, f3]);
+            returns.push(ret);
+        }
+    }
+    genData();
+
+    function computeR2(betas, alpha) {
+        const pred = factors.map(f => alpha + betas[0] * f[0] + betas[1] * f[1] + betas[2] * f[2]);
+        const mean = returns.reduce((a, b) => a + b, 0) / N;
+        const ssTot = returns.reduce((s, r) => s + (r - mean) ** 2, 0);
+        const ssRes = returns.reduce((s, r, i) => s + (r - pred[i]) ** 2, 0);
+        return 1 - ssRes / ssTot;
+    }
+
+    function computeR2single(beta1, alpha) {
+        const pred = factors.map(f => alpha + beta1 * f[0]);
+        const mean = returns.reduce((a, b) => a + b, 0) / N;
+        const ssTot = returns.reduce((s, r) => s + (r - mean) ** 2, 0);
+        const ssRes = returns.reduce((s, r, i) => s + (r - pred[i]) ** 2, 0);
+        return 1 - ssRes / ssTot;
+    }
+
+    function draw() {
+        const cv = document.getElementById('cvRegression');
+        const { w, h, ctx } = resizeCanvas(cv);
+        const pad = 50;
+
+        const b1 = parseFloat(document.getElementById('slBeta1').value);
+        const b2 = parseFloat(document.getElementById('slBeta2').value);
+        const b3 = parseFloat(document.getElementById('slBeta3').value);
+        const alpha = parseFloat(document.getElementById('slAlpha').value);
+
+        document.getElementById('valBeta1').textContent = fmt(b1);
+        document.getElementById('valBeta2').textContent = fmt(b2);
+        document.getElementById('valBeta3').textContent = fmt(b3);
+        document.getElementById('valAlpha').textContent = fmt(alpha);
+
+        const r2m = computeR2([b1, b2, b3], alpha);
+        const r2s = computeR2single(b1, alpha);
+        const predR = alpha + b1 * 1 + b2 * 0.5 + b3 * 0.3;
+
+        document.getElementById('r2single').textContent = fmt(Math.max(0, r2s), 3);
+        document.getElementById('r2multi').textContent = fmt(Math.max(0, r2m), 3);
+        document.getElementById('predRet').textContent = fmt(predR) + '%';
+
+        ctx.fillStyle = C.bg; ctx.fillRect(0, 0, w, h);
+
+        // Axes
+        const xMin = -8, xMax = 8, yMin = -7, yMax = 7;
+        function sx(v) { return pad + (v - xMin) / (xMax - xMin) * (w - 2 * pad); }
+        function sy(v) { return h - pad - (v - yMin) / (yMax - yMin) * (h - 2 * pad); }
+
+        ctx.strokeStyle = C.grid; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(pad, h - pad); ctx.lineTo(w - pad, h - pad); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(pad, h - pad); ctx.lineTo(pad, pad); ctx.stroke();
+
+        ctx.fillStyle = C.text; ctx.font = '11px sans-serif';
+        ctx.fillText('因子1 (F₁)', w / 2, h - 8);
+        ctx.save(); ctx.translate(14, h / 2); ctx.rotate(-Math.PI / 2);
+        ctx.fillText('因子2 (F₂)', 0, 0); ctx.restore();
+
+        // Predicted returns for coloring
+        const preds = factors.map(f => alpha + b1 * f[0] + b2 * f[1] + b3 * f[2]);
+        const residuals = returns.map((r, i) => Math.abs(r - preds[i]));
+        const retMin = Math.min(...returns), retMax = Math.max(...returns);
+
+        // Draw points
+        for (let i = 0; i < N; i++) {
+            const px = sx(factors[i][0]);
+            const py = sy(factors[i][1]);
+            if (px < pad || px > w - pad || py < pad || py > h - pad) continue;
+
+            const t = (returns[i] - retMin) / (retMax - retMin + 1e-9);
+            const radius = 3 + clamp(residuals[i] / 3, 0, 8);
+
+            // Color by actual return
+            const r = Math.round(lerp(79, 255, t));
+            const g = Math.round(lerp(195, 171, t));
+            const b = Math.round(lerp(247, 64, t));
+            ctx.beginPath(); ctx.arc(px, py, radius, 0, Math.PI * 2);
+            ctx.fillStyle = `rgba(${r},${g},${b},0.7)`; ctx.fill();
+
+            // Residual line
+            ctx.strokeStyle = `rgba(255,82,82,${clamp(residuals[i] / 6, 0.1, 0.5)})`;
+            ctx.lineWidth = 1;
+            const predY = sy(factors[i][1]);
+            ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(px, py - residuals[i] * 3 * (returns[i] > preds[i] ? -1 : 1)); ctx.stroke();
+        }
+
+        // Legend
+        ctx.fillStyle = C.text; ctx.font = '11px sans-serif';
+        const lx = w - pad - 120, ly = pad + 10;
+        ctx.fillText('颜色 → 实际收益', lx, ly);
+        ctx.fillText('圈大小 → 残差', lx, ly + 16);
+
+        // Color bar
+        const barW = 80, barH = 8;
+        for (let i = 0; i < barW; i++) {
+            const t = i / barW;
+            const r = Math.round(lerp(79, 255, t));
+            const g = Math.round(lerp(195, 171, t));
+            const b = Math.round(lerp(247, 64, t));
+            ctx.fillStyle = `rgb(${r},${g},${b})`;
+            ctx.fillRect(lx + i, ly + 22, 1, barH);
+        }
+        ctx.fillStyle = C.text; ctx.font = '9px sans-serif';
+        ctx.fillText('低', lx, ly + 42);
+        ctx.fillText('高', lx + barW - 10, ly + 42);
+    }
+
+    ['slBeta1', 'slBeta2', 'slBeta3', 'slAlpha'].forEach(id => {
+        document.getElementById(id).addEventListener('input', draw);
+    });
+
+    draw();
+    window.addEventListener('resize', draw);
+    return { draw };
+})();
+
+// ============================================================
+//  Section 3: Arbitrage Detection
+// ============================================================
+const Arbitrage = (() => {
+    const lambda = [0.04, 0.025]; // factor risk premiums
+    const rf = 0.03;
+
+    const defaultAssets = [
+        { name: 'A', b1: 1.0, b2: 0.5, er: null },
+        { name: 'B', b1: 0.5, b2: 1.2, er: null },
+        { name: 'C', b1: 1.5, b2: 0.3, er: null },
+        { name: 'D', b1: 0.8, b2: 0.8, er: null },
+        { name: 'E', b1: 1.2, b2: 1.0, er: null },
+    ];
+
+    let assets = [];
+
+    function eqReturn(a) {
+        return rf + a.b1 * lambda[0] + a.b2 * lambda[1];
+    }
+
+    function resetAssets() {
+        assets = defaultAssets.map(a => ({
+            ...a,
+            er: parseFloat((eqReturn(a)).toFixed(4))
+        }));
+    }
+    resetAssets();
+
+    function detectArbitrage() {
+        // Check for mispriced asset: er != equilibrium
+        let mispricedIdx = -1;
+        let maxDev = 0;
+        assets.forEach((a, i) => {
+            const dev = a.er - eqReturn(a);
+            if (Math.abs(dev) > maxDev) {
+                maxDev = Math.abs(dev);
+                mispricedIdx = i;
+            }
+        });
+
+        if (maxDev < 0.001) return { exists: false, idx: -1, dev: 0 };
+        return { exists: true, idx: mispricedIdx, dev: assets[mispricedIdx].er - eqReturn(assets[mispricedIdx]) };
+    }
+
+    function buildSteps(arb) {
+        const stepsEl = document.getElementById('arbSteps');
+        if (!arb.exists) {
+            stepsEl.innerHTML = '<div class="step active">所有资产均在均衡定价线上，不存在套利机会。</div>';
+            return;
+        }
+        const a = assets[arb.idx];
+        const dir = arb.dev > 0 ? '高估' : '低估';
+        const action = arb.dev > 0 ? '买入' : '卖空';
+        const hedge = arb.dev > 0 ? '卖空' : '买入';
+        stepsEl.innerHTML = `
+            <div class="step active">1. 发现资产 ${a.name} 预期收益偏离均衡值 ${fmt(arb.dev * 100, 2)}%（${dir}）</div>
+            <div class="step active">2. ${action}资产 ${a.name}</div>
+            <div class="step active">3. ${hedge}因子复制组合（β₁=${fmt(a.b1)}, β₂=${fmt(a.b2)}）对冲因子风险</div>
+            <div class="step active">4. 获得无风险套利利润 ≈ ${fmt(Math.abs(arb.dev) * 100, 2)}%</div>
+        `;
+    }
+
+    function renderTable() {
+        const tbody = document.getElementById('arbBody');
+        tbody.innerHTML = '';
+        assets.forEach((a, i) => {
+            const eq = eqReturn(a);
+            const tr = document.createElement('tr');
+            const mispriced = Math.abs(a.er - eq) > 0.001;
+            if (mispriced) tr.classList.add('arb-exists');
+
+            tr.innerHTML = `
+                <td style="color:var(--accent-blue);font-weight:600">${a.name}</td>
+                <td>${fmt(a.b1)}</td>
+                <td>${fmt(a.b2)}</td>
+                <td class="editable" data-idx="${i}">${fmt(a.er * 100, 2)}%</td>
+                <td>${fmt(eq * 100, 2)}%</td>
+            `;
+            tbody.appendChild(tr);
+        });
+
+        // Make editable
+        document.querySelectorAll('#arbBody .editable').forEach(td => {
+            td.addEventListener('click', function () {
+                if (this.querySelector('input')) return;
+                const idx = parseInt(this.dataset.idx);
+                const val = assets[idx].er * 100;
+                this.innerHTML = `<input type="number" step="0.1" value="${fmt(val, 2)}">`;
+                const inp = this.querySelector('input');
+                inp.focus();
+                inp.select();
+
+                const commit = () => {
+                    const nv = parseFloat(inp.value);
+                    if (!isNaN(nv)) assets[idx].er = nv / 100;
+                    update();
+                };
+                inp.addEventListener('blur', commit);
+                inp.addEventListener('keydown', e => { if (e.key === 'Enter') commit(); });
+            });
+        });
+    }
+
+    function drawViz() {
+        const cv = document.getElementById('cvArbitrage');
+        const { w, h, ctx } = resizeCanvas(cv);
+        const pad = 55;
+
+        ctx.fillStyle = C.bg; ctx.fillRect(0, 0, w, h);
+
+        // Composite beta axis: β_c = β1 * λ1 + β2 * λ2
+        const betas = assets.map(a => a.b1 * lambda[0] + a.b2 * lambda[1]);
+        const bMin = 0, bMax = Math.max(...betas) * 1.3 + 0.01;
+        const rMin = rf * 0.5, rMax = rf + bMax * 1.3;
+
+        function sx(v) { return pad + (v - bMin) / (bMax - bMin) * (w - 2 * pad); }
+        function sy(v) { return h - pad - (v - rMin) / (rMax - rMin) * (h - 2 * pad); }
+
+        // Axes
+        ctx.strokeStyle = C.grid; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(pad, h - pad); ctx.lineTo(w - 10, h - pad); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(pad, h - pad); ctx.lineTo(pad, 10); ctx.stroke();
+
+        ctx.fillStyle = C.text; ctx.font = '11px sans-serif';
+        ctx.fillText('因子暴露综合 (Σβλ)', w / 2 - 40, h - 8);
+        ctx.save(); ctx.translate(14, h / 2); ctx.rotate(-Math.PI / 2);
+        ctx.fillText('E(R)', 0, 0); ctx.restore();
+
+        // APT line (equilibrium)
+        ctx.strokeStyle = C.green; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(sx(0), sy(rf)); ctx.lineTo(sx(bMax), sy(rf + bMax)); ctx.stroke();
+
+        ctx.fillStyle = C.green + '88'; ctx.font = '11px sans-serif';
+        ctx.fillText('APT 均衡线', sx(bMax * 0.6), sy(rf + bMax * 0.6) - 12);
+
+        // Plot assets
+        const colors = [C.blue, C.purple, C.orange, C.pink, C.yellow];
+        assets.forEach((a, i) => {
+            const bc = a.b1 * lambda[0] + a.b2 * lambda[1];
+            const px = sx(bc);
+            const pyActual = sy(a.er);
+            const pyEq = sy(eqReturn(a));
+
+            // Deviation line
+            if (Math.abs(a.er - eqReturn(a)) > 0.001) {
+                ctx.strokeStyle = C.red + '88'; ctx.lineWidth = 2;
+                ctx.setLineDash([4, 3]);
+                ctx.beginPath(); ctx.moveTo(px, pyEq); ctx.lineTo(px, pyActual); ctx.stroke();
+                ctx.setLineDash([]);
+            }
+
+            // Equilibrium point (hollow)
+            ctx.beginPath(); ctx.arc(px, pyEq, 6, 0, Math.PI * 2);
+            ctx.strokeStyle = colors[i]; ctx.lineWidth = 2; ctx.stroke();
+
+            // Actual point (filled)
+            ctx.beginPath(); ctx.arc(px, pyActual, 7, 0, Math.PI * 2);
+            ctx.fillStyle = colors[i]; ctx.fill();
+
+            // Label
+            ctx.fillStyle = colors[i]; ctx.font = 'bold 12px sans-serif';
+            ctx.fillText(a.name, px + 10, pyActual + 4);
+        });
+
+        // Legend
+        ctx.fillStyle = C.text; ctx.font = '10px sans-serif';
+        ctx.fillText('● 实际预期收益', w - pad - 100, pad + 15);
+        ctx.fillText('○ 均衡预期收益', w - pad - 100, pad + 30);
+    }
+
+    function update() {
+        const arb = detectArbitrage();
+        const badge = document.getElementById('arbBadge');
+        if (arb.exists) {
+            badge.textContent = '存在套利机会！';
+            badge.className = 'arb-badge exists';
+        } else {
+            badge.textContent = '无套利（均衡）';
+            badge.className = 'arb-badge none';
+        }
+        buildSteps(arb);
+        renderTable();
+        drawViz();
+    }
+
+    document.getElementById('btnArbReset').addEventListener('click', () => {
+        resetAssets();
+        update();
+    });
+
+    update();
+    window.addEventListener('resize', () => drawViz());
+    return { update };
+})();
+
+// ============================================================
+//  Section 4: Factor Risk Premium Estimation (Fama-MacBeth)
+// ============================================================
+const Premium = (() => {
+    const T = 24; // periods
+    const nAssets = 20;
+    const trueLambda = [0.05, 0.03]; // true factor premiums
+    const trueL0 = 0.01;
+
+    // Generate betas for assets (fixed)
+    const betas = [];
+    for (let i = 0; i < nAssets; i++) {
+        betas.push([0.3 + Math.random() * 1.4, 0.2 + Math.random() * 1.2]);
+    }
+
+    // Generate cross-sectional returns each period
+    const periodReturns = [];
+    const periodLambdas = [];
+    for (let t = 0; t < T; t++) {
+        const lam1 = trueLambda[0] + randn() * 0.03;
+        const lam2 = trueLambda[1] + randn() * 0.025;
+        const l0 = trueL0 + randn() * 0.01;
+        periodLambdas.push([l0, lam1, lam2]);
+        const rets = [];
+        for (let i = 0; i < nAssets; i++) {
+            rets.push(l0 + lam1 * betas[i][0] + lam2 * betas[i][1] + randn() * 0.02);
+        }
+        periodReturns.push(rets);
+    }
+
+    // Cross-sectional OLS for one period
+    function crossSectionalOLS(rets, t) {
+        // R = lambda0 + lambda1*b1 + lambda2*b2
+        // Using normal equations: X'X inv X'Y
+        let XtX = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+        let XtY = [0, 0, 0];
+        for (let i = 0; i < nAssets; i++) {
+            const x = [1, betas[i][0], betas[i][1]];
+            for (let j = 0; j < 3; j++) {
+                for (let k = 0; k < 3; k++) XtX[j][k] += x[j] * x[k];
+                XtY[j] += x[j] * rets[i];
+            }
+        }
+        // Solve 3x3 via Cramer's rule
+        const m = XtX;
+        const det = m[0][0]*(m[1][1]*m[2][2]-m[1][2]*m[2][1])
+                   -m[0][1]*(m[1][0]*m[2][2]-m[1][2]*m[2][0])
+                   +m[0][2]*(m[1][0]*m[2][1]-m[1][1]*m[2][0]);
+        const inv = [
+            [(m[1][1]*m[2][2]-m[1][2]*m[2][1])/det, (m[0][2]*m[2][1]-m[0][1]*m[2][2])/det, (m[0][1]*m[1][2]-m[0][2]*m[1][1])/det],
+            [(m[1][2]*m[2][0]-m[1][0]*m[2][2])/det, (m[0][0]*m[2][2]-m[0][2]*m[2][0])/det, (m[0][2]*m[1][0]-m[0][0]*m[1][2])/det],
+            [(m[1][0]*m[2][1]-m[1][1]*m[2][0])/det, (m[0][1]*m[2][0]-m[0][0]*m[2][1])/det, (m[0][0]*m[1][1]-m[0][1]*m[1][0])/det]
+        ];
+        const lam = [0, 0, 0];
+        for (let j = 0; j < 3; j++) {
+            for (let k = 0; k < 3; k++) lam[j] += inv[j][k] * XtY[k];
+        }
+        return lam;
+    }
+
+    let curPeriod = 0;
+    let estimatedLambdas = [];
+    let playing = false;
+    let timer = null;
+
+    document.getElementById('totalPeriod').textContent = T;
+
+    function step() {
+        if (curPeriod >= T) { pause(); return; }
+        const lam = crossSectionalOLS(periodReturns[curPeriod], curPeriod);
+        estimatedLambdas.push(lam);
+        curPeriod++;
+        document.getElementById('curPeriod').textContent = curPeriod;
+        updateStats();
+        draw();
+    }
+
+    function play() {
+        playing = true;
+        document.getElementById('btnPlayPause').textContent = '⏸ 暂停';
+        timer = setInterval(step, 400);
+    }
+    function pause() {
+        playing = false;
+        document.getElementById('btnPlayPause').textContent = '▶ 播放';
+        clearInterval(timer);
+    }
+
+    function updateStats() {
+        if (estimatedLambdas.length === 0) {
+            document.getElementById('avgLam0').textContent = '—';
+            document.getElementById('avgLam1').textContent = '—';
+            document.getElementById('avgLam2').textContent = '—';
+            return;
+        }
+        const n = estimatedLambdas.length;
+        const avg = [0, 0, 0];
+        estimatedLambdas.forEach(l => { avg[0] += l[0]; avg[1] += l[1]; avg[2] += l[2]; });
+        avg[0] /= n; avg[1] /= n; avg[2] /= n;
+        document.getElementById('avgLam0').textContent = fmt(avg[0] * 100, 2) + '%';
+        document.getElementById('avgLam1').textContent = fmt(avg[1] * 100, 2) + '%';
+        document.getElementById('avgLam2').textContent = fmt(avg[2] * 100, 2) + '%';
+    }
+
+    function draw() {
+        const cv = document.getElementById('cvPremium');
+        const { w, h, ctx } = resizeCanvas(cv);
+        const pad = 60;
+
+        ctx.fillStyle = C.bg; ctx.fillRect(0, 0, w, h);
+
+        const factors = ['λ₀ (截距)', 'λ₁ (市场)', 'λ₂ (规模)'];
+        const colors = [C.purple, C.blue, C.green];
+        const trueVals = [trueL0, trueLambda[0], trueLambda[1]];
+
+        if (estimatedLambdas.length === 0) {
+            ctx.fillStyle = C.text; ctx.font = '14px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('点击"播放"或"下一期"开始估计', w / 2, h / 2);
+            ctx.textAlign = 'left';
+            return;
+        }
+
+        const n = estimatedLambdas.length;
+        const avg = [0, 0, 0], std = [0, 0, 0];
+        estimatedLambdas.forEach(l => { for (let j = 0; j < 3; j++) avg[j] += l[j]; });
+        for (let j = 0; j < 3; j++) avg[j] /= n;
+        estimatedLambdas.forEach(l => { for (let j = 0; j < 3; j++) std[j] += (l[j] - avg[j]) ** 2; });
+        for (let j = 0; j < 3; j++) std[j] = Math.sqrt(std[j] / Math.max(1, n - 1));
+        const se = std.map(s => s / Math.sqrt(n));
+
+        // Bar chart
+        const barCount = 3;
+        const barGroupW = (w - 2 * pad) / barCount;
+        const barW = barGroupW * 0.5;
+
+        const yMin = -0.03, yMax = 0.10;
+        function sy(v) { return h - pad - (v - yMin) / (yMax - yMin) * (h - 2 * pad); }
+
+        // Y axis
+        ctx.strokeStyle = C.grid; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(pad, pad); ctx.lineTo(pad, h - pad); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(pad, h - pad); ctx.lineTo(w - 10, h - pad); ctx.stroke();
+
+        // Y gridlines
+        ctx.fillStyle = C.text; ctx.font = '10px sans-serif'; ctx.textAlign = 'right';
+        for (let v = -0.02; v <= 0.09; v += 0.02) {
+            const y = sy(v);
+            ctx.strokeStyle = C.grid;
+            ctx.beginPath(); ctx.moveTo(pad, y); ctx.lineTo(w - 10, y); ctx.stroke();
+            ctx.fillStyle = C.text;
+            ctx.fillText(fmt(v * 100, 1) + '%', pad - 5, y + 3);
+        }
+
+        // Zero line
+        ctx.strokeStyle = C.text + '44'; ctx.lineWidth = 1;
+        const y0 = sy(0);
+        ctx.beginPath(); ctx.moveTo(pad, y0); ctx.lineTo(w - 10, y0); ctx.stroke();
+
+        ctx.textAlign = 'center';
+        for (let j = 0; j < barCount; j++) {
+            const cx = pad + barGroupW * (j + 0.5);
+            const barTop = sy(avg[j]);
+            const barBot = sy(0);
+
+            // Bar
+            ctx.fillStyle = colors[j] + 'cc';
+            const bx = cx - barW / 2;
+            const by = Math.min(barTop, barBot);
+            const bh = Math.abs(barTop - barBot);
+            ctx.fillRect(bx, by, barW, bh);
+
+            // Confidence interval (±1.96 SE)
+            const ciHi = avg[j] + 1.96 * se[j];
+            const ciLo = avg[j] - 1.96 * se[j];
+            ctx.strokeStyle = C.white; ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(cx, sy(ciHi)); ctx.lineTo(cx, sy(ciLo));
+            ctx.stroke();
+            // Whiskers
+            ctx.beginPath(); ctx.moveTo(cx - 6, sy(ciHi)); ctx.lineTo(cx + 6, sy(ciHi)); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(cx - 6, sy(ciLo)); ctx.lineTo(cx + 6, sy(ciLo)); ctx.stroke();
+
+            // True value marker
+            ctx.fillStyle = C.red;
+            ctx.beginPath(); ctx.arc(cx + barW / 2 + 8, sy(trueVals[j]), 4, 0, Math.PI * 2); ctx.fill();
+
+            // Label
+            ctx.fillStyle = colors[j]; ctx.font = 'bold 11px sans-serif';
+            ctx.fillText(factors[j], cx, h - pad + 18);
+
+            // Value
+            ctx.fillStyle = C.white; ctx.font = '10px sans-serif';
+            ctx.fillText(fmt(avg[j] * 100, 2) + '%', cx, Math.min(barTop, barBot) - 8);
+        }
+
+        // Legend
+        ctx.textAlign = 'left';
+        ctx.fillStyle = C.red; ctx.font = '11px sans-serif';
+        ctx.beginPath(); ctx.arc(w - pad - 80, pad + 10, 4, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = C.text;
+        ctx.fillText('真实值', w - pad - 70, pad + 14);
+        ctx.fillText(`样本期：${n}/${T}`, w - pad - 90, pad + 30);
+    }
+
+    document.getElementById('btnPlayPause').addEventListener('click', () => {
+        if (playing) pause(); else play();
+    });
+    document.getElementById('btnStepFwd').addEventListener('click', step);
+    document.getElementById('btnResetPrem').addEventListener('click', () => {
+        pause();
+        curPeriod = 0;
+        estimatedLambdas = [];
+        document.getElementById('curPeriod').textContent = 0;
+        updateStats();
+        draw();
+    });
+
+    draw();
+    window.addEventListener('resize', draw);
+    return { draw };
+})();
+
+// ============================================================
+//  Section 5: PCA / Bridge to Empirical Models
+// ============================================================
+const PCA = (() => {
+    let eigenvalues = [];
+
+    function generateData() {
+        const nAssets = parseInt(document.getElementById('slAssets').value);
+        const corr = parseFloat(document.getElementById('slCorr').value);
+
+        document.getElementById('valAssets').textContent = nAssets;
+        document.getElementById('valCorr').textContent = fmt(corr);
+
+        // Simulate a covariance matrix via factor model
+        // 3 true factors + noise
+        const T = 120;
+        const factorReturns = [];
+        for (let t = 0; t < T; t++) {
+            factorReturns.push([randn(), randn(), randn()]);
+        }
+
+        // Loadings with some correlation
+        const loadings = [];
+        for (let i = 0; i < nAssets; i++) {
+            loadings.push([
+                0.5 + Math.random() * 1.0 + corr * randn() * 0.3,
+                0.3 + Math.random() * 0.7 + corr * randn() * 0.3,
+                0.1 + Math.random() * 0.5 + corr * randn() * 0.2
+            ]);
+        }
+
+        // Generate returns
+        const returns = [];
+        for (let t = 0; t < T; t++) {
+            const row = [];
+            for (let i = 0; i < nAssets; i++) {
+                let r = 0;
+                for (let k = 0; k < 3; k++) r += loadings[i][k] * factorReturns[t][k];
+                r += randn() * (0.5 + (1 - corr) * 1.5); // idiosyncratic noise
+                row.push(r);
+            }
+            returns.push(row);
+        }
+
+        // Compute covariance matrix
+        const means = new Array(nAssets).fill(0);
+        for (let t = 0; t < T; t++) {
+            for (let i = 0; i < nAssets; i++) means[i] += returns[t][i];
+        }
+        for (let i = 0; i < nAssets; i++) means[i] /= T;
+
+        const cov = Array.from({ length: nAssets }, () => new Array(nAssets).fill(0));
+        for (let t = 0; t < T; t++) {
+            for (let i = 0; i < nAssets; i++) {
+                for (let j = i; j < nAssets; j++) {
+                    cov[i][j] += (returns[t][i] - means[i]) * (returns[t][j] - means[j]);
+                }
+            }
+        }
+        for (let i = 0; i < nAssets; i++) {
+            for (let j = i; j < nAssets; j++) {
+                cov[i][j] /= (T - 1);
+                cov[j][i] = cov[i][j];
+            }
+        }
+
+        // Power iteration to find eigenvalues (simplified)
+        eigenvalues = powerIterationAllEigenvalues(cov, nAssets);
+        draw();
+    }
+
+    // Simple power iteration for all eigenvalues via deflation
+    function powerIterationAllEigenvalues(mat, n) {
+        const A = mat.map(r => [...r]);
+        const eigs = [];
+        for (let k = 0; k < Math.min(n, 10); k++) {
+            let v = Array.from({ length: n }, () => randn());
+            let norm = Math.sqrt(v.reduce((s, x) => s + x * x, 0));
+            v = v.map(x => x / norm);
+
+            let eigenval = 0;
+            for (let iter = 0; iter < 100; iter++) {
+                const Av = new Array(n).fill(0);
+                for (let i = 0; i < n; i++) {
+                    for (let j = 0; j < n; j++) Av[i] += A[i][j] * v[j];
+                }
+                eigenval = Av.reduce((s, x, i) => s + x * v[i], 0);
+                norm = Math.sqrt(Av.reduce((s, x) => s + x * x, 0));
+                if (norm < 1e-12) break;
+                v = Av.map(x => x / norm);
+            }
+            eigs.push(Math.max(0, eigenval));
+
+            // Deflate
+            for (let i = 0; i < n; i++) {
+                for (let j = 0; j < n; j++) {
+                    A[i][j] -= eigenval * v[i] * v[j];
+                }
+            }
+        }
+        return eigs.sort((a, b) => b - a);
+    }
+
+    function draw() {
+        const cv = document.getElementById('cvPCA');
+        const { w, h, ctx } = resizeCanvas(cv);
+        const pad = 60;
+
+        ctx.fillStyle = C.bg; ctx.fillRect(0, 0, w, h);
+
+        if (eigenvalues.length === 0) {
+            ctx.fillStyle = C.text; ctx.font = '14px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('点击"重新生成数据"开始', w / 2, h / 2);
+            ctx.textAlign = 'left';
+            return;
+        }
+
+        const total = eigenvalues.reduce((a, b) => a + b, 0);
+        const pcts = eigenvalues.map(e => e / total);
+        const cumPcts = [];
+        let cum = 0;
+        pcts.forEach(p => { cum += p; cumPcts.push(cum); });
+
+        const nBars = eigenvalues.length;
+        const barGroupW = (w - 2 * pad) / nBars;
+        const barW = Math.min(barGroupW * 0.6, 35);
+
+        // Y axis 0-100%
+        function sy(v) { return h - pad - v * (h - 2 * pad); }
+
+        // Axes
+        ctx.strokeStyle = C.grid; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(pad, pad); ctx.lineTo(pad, h - pad); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(pad, h - pad); ctx.lineTo(w - 10, h - pad); ctx.stroke();
+
+        // Y gridlines
+        ctx.fillStyle = C.text; ctx.font = '10px sans-serif'; ctx.textAlign = 'right';
+        for (let v = 0; v <= 1; v += 0.2) {
+            const y = sy(v);
+            ctx.strokeStyle = C.grid;
+            ctx.beginPath(); ctx.moveTo(pad, y); ctx.lineTo(w - 10, y); ctx.stroke();
+            ctx.fillStyle = C.text;
+            ctx.fillText(fmt(v * 100, 0) + '%', pad - 5, y + 3);
+        }
+
+        ctx.textAlign = 'center';
+
+        // Bars (variance explained)
+        for (let i = 0; i < nBars; i++) {
+            const cx = pad + barGroupW * (i + 0.5);
+            const barTop = sy(pcts[i]);
+            const barBot = sy(0);
+
+            const t = i / (nBars - 1 || 1);
+            const r = Math.round(lerp(79, 179, t));
+            const g = Math.round(lerp(195, 136, t));
+            const b = Math.round(lerp(247, 255, t));
+
+            ctx.fillStyle = `rgba(${r},${g},${b},0.8)`;
+            ctx.fillRect(cx - barW / 2, barTop, barW, barBot - barTop);
+
+            // Label
+            if (nBars <= 15 || i % 2 === 0) {
+                ctx.fillStyle = C.text; ctx.font = '9px sans-serif';
+                ctx.fillText('PC' + (i + 1), cx, h - pad + 15);
+            }
+
+            // Percentage on top
+            if (pcts[i] > 0.03) {
+                ctx.fillStyle = C.white; ctx.font = '9px sans-serif';
+                ctx.fillText(fmt(pcts[i] * 100, 1) + '%', cx, barTop - 5);
+            }
+        }
+
+        // Cumulative line
+        ctx.strokeStyle = C.orange; ctx.lineWidth = 2;
+        ctx.beginPath();
+        for (let i = 0; i < nBars; i++) {
+            const cx = pad + barGroupW * (i + 0.5);
+            const y = sy(cumPcts[i]);
+            if (i === 0) ctx.moveTo(cx, y); else ctx.lineTo(cx, y);
+        }
+        ctx.stroke();
+
+        // Dots on cumulative
+        for (let i = 0; i < nBars; i++) {
+            const cx = pad + barGroupW * (i + 0.5);
+            const y = sy(cumPcts[i]);
+            ctx.beginPath(); ctx.arc(cx, y, 3, 0, Math.PI * 2);
+            ctx.fillStyle = C.orange; ctx.fill();
+        }
+
+        // 80% threshold line
+        ctx.setLineDash([6, 4]); ctx.strokeStyle = C.red + '88'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(pad, sy(0.8)); ctx.lineTo(w - 10, sy(0.8)); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = C.red; ctx.font = '10px sans-serif'; ctx.textAlign = 'left';
+        ctx.fillText('80% 阈值', pad + 5, sy(0.8) - 5);
+
+        // Find how many PCs reach 80%
+        let nFor80 = cumPcts.findIndex(c => c >= 0.8) + 1;
+        if (nFor80 === 0) nFor80 = nBars;
+
+        // Legend
+        ctx.textAlign = 'left';
+        ctx.fillStyle = C.orange; ctx.font = '11px sans-serif';
+        ctx.fillText('● 累计解释方差', w - pad - 120, pad + 15);
+        ctx.fillStyle = C.green; ctx.font = 'bold 12px sans-serif';
+        ctx.fillText(`前 ${nFor80} 个主成分解释 ≥80% 方差`, pad + 10, pad + 15);
+
+        // X axis label
+        ctx.fillStyle = C.text; ctx.font = '11px sans-serif'; ctx.textAlign = 'center';
+        ctx.fillText('主成分编号', w / 2, h - 5);
+    }
+
+    document.getElementById('slAssets').addEventListener('input', generateData);
+    document.getElementById('slCorr').addEventListener('input', generateData);
+    document.getElementById('btnRegenPCA').addEventListener('click', generateData);
+
+    generateData();
+    window.addEventListener('resize', draw);
+    return { draw, generateData };
+})();
+
+// ============================================================
+//  KaTeX auto-render
+// ============================================================
+document.addEventListener('DOMContentLoaded', () => {
+    if (typeof renderMathInElement !== 'undefined') {
+        renderMathInElement(document.body, {
+            delimiters: [
+                { left: '$$', right: '$$', display: true },
+                { left: '$', right: '$', display: false },
+            ],
+            throwOnError: false
+        });
+    }
+});
+// Fallback: wait for KaTeX to load
+window.addEventListener('load', () => {
+    if (typeof renderMathInElement !== 'undefined') {
+        renderMathInElement(document.body, {
+            delimiters: [
+                { left: '$$', right: '$$', display: true },
+                { left: '$', right: '$', display: false },
+            ],
+            throwOnError: false
+        });
+    }
+});
+</script>
+</body>
+</html>

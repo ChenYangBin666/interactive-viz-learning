@@ -1,0 +1,1686 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>风险管理 — 量化交易策略</title>
+<link rel="stylesheet" href="../shared/styles/common.css">
+<link rel="stylesheet" href="../shared/styles/components.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" defer>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" defer></script>
+<script src="../shared/scripts/nav.js" defer></script>
+<script src="../shared/scripts/quant-utils.js" defer></script>
+<style>
+    .canvas-wrap {
+        position: relative;
+        width: 100%;
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-md);
+        overflow: hidden;
+    }
+    .canvas-wrap canvas {
+        display: block;
+        width: 100%;
+        height: 100%;
+    }
+    .controls-row {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.75rem;
+        margin-bottom: 1rem;
+    }
+    .metric-box {
+        display: inline-flex;
+        flex-direction: column;
+        padding: 0.5rem 0.8rem;
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-sm);
+        min-width: 100px;
+    }
+    .metric-box .label {
+        font-size: 0.7rem;
+        color: var(--text-muted);
+        margin-bottom: 0.15rem;
+    }
+    .metric-box .value {
+        font-family: var(--font-mono);
+        font-size: 0.95rem;
+        color: var(--accent-green);
+        font-weight: 600;
+    }
+    .metric-box .value.red { color: var(--accent-red); }
+    .metric-box .value.blue { color: var(--accent-blue); }
+    .metric-box .value.orange { color: var(--accent-orange); }
+    .metric-box .value.purple { color: var(--accent-purple); }
+    .metrics-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        margin-top: 0.75rem;
+    }
+    .dash-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1rem;
+    }
+    .dash-cell {
+        background: var(--bg-secondary);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-md);
+        padding: 1rem;
+        min-height: 260px;
+        position: relative;
+    }
+    .dash-cell h4 {
+        margin-bottom: 0.75rem;
+        color: var(--accent-blue);
+        font-size: 0.9rem;
+    }
+    .stress-row {
+        display: flex;
+        gap: 0.75rem;
+        flex-wrap: wrap;
+        margin-top: 0.75rem;
+    }
+    .stress-card {
+        flex: 1;
+        min-width: 120px;
+        padding: 0.75rem;
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-sm);
+        text-align: center;
+        transition: border-color 0.3s, transform 0.2s;
+    }
+    .stress-card:hover {
+        border-color: var(--accent-red);
+        transform: translateY(-2px);
+    }
+    .stress-card .scenario {
+        font-size: 0.8rem;
+        color: var(--text-muted);
+        margin-bottom: 0.25rem;
+    }
+    .stress-card .pnl {
+        font-family: var(--font-mono);
+        font-size: 1.1rem;
+        font-weight: 700;
+    }
+    .stress-card .pnl.loss { color: var(--accent-red); }
+    .stress-card .pnl.gain { color: var(--accent-green); }
+    .formula-note {
+        font-size: 0.85rem;
+        color: var(--text-secondary);
+        margin: 0.5rem 0 1rem;
+        line-height: 1.6;
+    }
+    .toggle-row {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        margin-right: 1rem;
+    }
+    .toggle-row .text-sm {
+        cursor: default;
+    }
+    select.styled {
+        padding: 0.4rem 0.7rem;
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-sm);
+        color: var(--text-primary);
+        font-family: inherit;
+        font-size: 0.85rem;
+        cursor: pointer;
+    }
+    @media (max-width: 768px) {
+        .dash-grid { grid-template-columns: 1fr; }
+    }
+</style>
+</head>
+<body>
+<div class="page-container">
+
+<h1>07 — 风险管理</h1>
+<p>量化交易的核心不是收益最大化，而是风险管理。本模块通过交互式可视化展示VaR在险价值、条件VaR(Expected Shortfall)、头寸管理(Kelly公式)、止损策略对比以及组合风险监控仪表盘。</p>
+
+<!-- ============================================================ -->
+<!-- Section 1: VaR 在险价值                                       -->
+<!-- ============================================================ -->
+<div class="section" id="sec-var">
+    <div class="section-title">
+        <div class="icon">📊</div>
+        <h2>VaR 在险价值</h2>
+    </div>
+    <p>VaR(Value at Risk)回答一个核心问题：在给定置信水平下，投资组合在未来一段时间内的最大可能损失是多少？</p>
+    <div class="info-box">
+        $$\text{VaR}_\alpha = -\inf\{x : P(X \le x) > 1-\alpha\}$$
+        <p>其中 \(\alpha\) 为置信水平(如95%或99%)，\(X\) 为收益率分布。VaR是一个分位数概念。</p>
+    </div>
+    <p class="formula-note">
+        <strong>三种计算方法：</strong>
+        历史模拟法直接使用历史收益率排序取分位数；
+        参数法假设收益率服从正态分布 \(\text{VaR} = \mu - z_\alpha \cdot \sigma\)；
+        蒙特卡洛法通过随机模拟生成大量路径后取分位数。
+    </p>
+    <div class="controls-row">
+        <div class="btn-group">
+            <button class="btn active" data-var-method="historical">历史模拟</button>
+            <button class="btn" data-var-method="parametric">参数法(正态)</button>
+            <button class="btn" data-var-method="montecarlo">蒙特卡洛</button>
+        </div>
+        <div class="slider-group" style="min-width:260px">
+            <label>置信水平:</label>
+            <input type="range" id="varConfSlider" min="90" max="99.5" step="0.5" value="95">
+            <span class="slider-value" id="varConfValue">95%</span>
+        </div>
+        <div class="slider-group" style="min-width:240px">
+            <label>组合价值:</label>
+            <input type="range" id="varPortSlider" min="100000" max="10000000" step="100000" value="1000000">
+            <span class="slider-value" id="varPortValue">$1M</span>
+        </div>
+    </div>
+    <div class="canvas-wrap" style="height:400px">
+        <canvas id="cvVar"></canvas>
+    </div>
+    <div class="metrics-row" id="varMetrics"></div>
+</div>
+
+<!-- ============================================================ -->
+<!-- Section 2: Expected Shortfall (CVaR)                          -->
+<!-- ============================================================ -->
+<div class="section" id="sec-cvar">
+    <div class="section-title">
+        <div class="icon">📉</div>
+        <h2>Expected Shortfall (CVaR)</h2>
+    </div>
+    <p>CVaR(条件VaR，也称Expected Shortfall)度量的是当损失超过VaR阈值时的<strong>平均损失</strong>。相比VaR，CVaR对尾部风险更加敏感，且满足一致性风险度量的次可加性。</p>
+    <div class="info-box">
+        $$\text{ES}_\alpha = E\big[-X \;\big|\; X \le -\text{VaR}_\alpha\big] = -\frac{1}{1-\alpha}\int_0^{1-\alpha}\text{VaR}_u\,du$$
+        <p>ES总是大于等于VaR。当分布具有厚尾特征时，ES与VaR的差距更为显著。</p>
+    </div>
+    <p class="formula-note">
+        切换正态分布与Student-t分布对比：Student-t分布具有更厚的尾部(leptokurtic)，
+        自由度越小尾部越厚，极端事件概率越大。金融收益率通常比正态分布更厚尾，
+        因此仅使用正态分布会<strong>低估</strong>尾部风险。
+    </p>
+    <div class="controls-row">
+        <div class="btn-group">
+            <button class="btn active" data-dist="normal">正态分布</button>
+            <button class="btn" data-dist="student">Student-t (厚尾)</button>
+        </div>
+        <div class="slider-group" style="min-width:220px">
+            <label>自由度(t分布):</label>
+            <input type="range" id="cvarDfSlider" min="2" max="30" step="1" value="4">
+            <span class="slider-value" id="cvarDfValue">4</span>
+        </div>
+    </div>
+    <div class="canvas-wrap" style="height:400px">
+        <canvas id="cvCvar"></canvas>
+    </div>
+    <div class="metrics-row" id="cvarMetrics"></div>
+</div>
+
+<!-- ============================================================ -->
+<!-- Section 3: 头寸管理                                            -->
+<!-- ============================================================ -->
+<div class="section" id="sec-position">
+    <div class="section-title">
+        <div class="icon">📐</div>
+        <h2>头寸管理</h2>
+    </div>
+    <p>头寸大小(Position Sizing)直接决定了风险暴露水平和长期资本增长率。过大的仓位会因一次巨亏而毁灭账户，过小则浪费了盈利机会。</p>
+    <div class="info-box">
+        $$f^* = \frac{p \cdot b - (1-p)}{b}$$
+        <p>其中 \(f^*\) 为Kelly最优仓位比例，\(p\) 为胜率，\(b\) 为盈亏比(平均盈利/平均亏损)。</p>
+    </div>
+    <p class="formula-note">
+        <strong>Kelly公式</strong>使得对数资产增长率 \(G = p\ln(1+fb) + (1-p)\ln(1-f)\) 最大化。
+        实际应用中常使用<strong>半Kelly</strong>(Half-Kelly)以降低波动率，牺牲少量增长换取更平稳的权益曲线。
+        固定手数法不考虑账户规模变化，固定比例法按账户百分比下注。
+    </p>
+    <div class="controls-row">
+        <div class="slider-group" style="min-width:200px">
+            <label>胜率:</label>
+            <input type="range" id="posWinSlider" min="0.3" max="0.8" step="0.01" value="0.55">
+            <span class="slider-value" id="posWinValue">55%</span>
+        </div>
+        <div class="slider-group" style="min-width:200px">
+            <label>盈亏比:</label>
+            <input type="range" id="posPaySlider" min="0.5" max="4" step="0.1" value="1.5">
+            <span class="slider-value" id="posPayValue">1.5</span>
+        </div>
+        <button class="btn btn-primary" id="posRunBtn">模拟100笔交易</button>
+    </div>
+    <div class="canvas-wrap" style="height:420px">
+        <canvas id="cvPos"></canvas>
+    </div>
+    <div class="metrics-row" id="posMetrics"></div>
+</div>
+
+<!-- ============================================================ -->
+<!-- Section 4: 止损策略                                            -->
+<!-- ============================================================ -->
+<div class="section" id="sec-stoploss">
+    <div class="section-title">
+        <div class="icon">🛑</div>
+        <h2>止损策略</h2>
+    </div>
+    <p>止损(Stop Loss)限制单笔交易的最大亏损幅度。不同止损方式在灵活性和频率之间存在权衡：固定止损简单但不适应波动，移动止损能锁定利润，ATR止损根据市场波动自适应。</p>
+    <div class="info-box warning">
+        <p><strong>止损的权衡：</strong>止损减少了大额亏损的频率，但会增加小额亏损(被假突破震出)的次数。过紧的止损 = 更多小亏损 + 错过反弹；过松的止损 = 偶尔大亏损。</p>
+    </div>
+    <div class="controls-row">
+        <div class="toggle-row">
+            <label class="toggle" title="固定百分比止损">
+                <input type="checkbox" id="stopFixed" checked><span class="track"></span>
+            </label>
+            <span class="text-sm">固定止损(5%)</span>
+        </div>
+        <div class="toggle-row">
+            <label class="toggle" title="移动止损">
+                <input type="checkbox" id="stopTrailing"><span class="track"></span>
+            </label>
+            <span class="text-sm">移动止损(5%)</span>
+        </div>
+        <div class="toggle-row">
+            <label class="toggle" title="波动率止损">
+                <input type="checkbox" id="stopATR"><span class="track"></span>
+            </label>
+            <span class="text-sm">ATR止损(2x)</span>
+        </div>
+        <button class="btn btn-primary" id="slGenBtn">生成新价格路径</button>
+    </div>
+    <div class="canvas-wrap" style="height:420px">
+        <canvas id="cvStop"></canvas>
+    </div>
+    <div class="metrics-row" id="stopMetrics"></div>
+</div>
+
+<!-- ============================================================ -->
+<!-- Section 5: 组合风险监控                                        -->
+<!-- ============================================================ -->
+<div class="section" id="sec-dashboard">
+    <div class="section-title">
+        <div class="icon">🛡</div>
+        <h2>组合风险监控</h2>
+    </div>
+    <p>实时监控投资组合的各维度风险指标：单资产VaR贡献、资产间相关性、板块暴露集中度及杠杆水平。</p>
+    <div class="dash-grid">
+        <div class="dash-cell">
+            <h4>资产VaR贡献</h4>
+            <canvas id="cvDashBar"></canvas>
+        </div>
+        <div class="dash-cell">
+            <h4>相关性矩阵</h4>
+            <canvas id="cvDashCorr"></canvas>
+        </div>
+        <div class="dash-cell">
+            <h4>板块暴露</h4>
+            <canvas id="cvDashPie"></canvas>
+        </div>
+        <div class="dash-cell">
+            <h4>杠杆仪表盘</h4>
+            <canvas id="cvDashGauge"></canvas>
+        </div>
+    </div>
+    <h3 class="mt-3">压力测试 (Stress Test)</h3>
+    <p>假设市场指数发生不同幅度的下跌冲击，基于资产Beta和杠杆率估算组合盈亏：</p>
+    <div class="stress-row" id="stressRow"></div>
+    <div class="info-box mt-2">
+        <p><strong>压力测试公式：</strong>组合P&amp;L = \(\sum_{i} w_i \cdot \beta_i \cdot \Delta_{\text{market}}\) \(\times\) 杠杆率。此处假设各资产对市场因子的敏感度由Beta决定。</p>
+    </div>
+</div>
+
+</div><!-- end page-container -->
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+
+/* ================================================================
+   Utility functions
+   ================================================================ */
+const DPR = window.devicePixelRatio || 1;
+
+function initCanvas(cv, w, h) {
+    cv.width = w * DPR;
+    cv.height = h * DPR;
+    cv.style.width = w + 'px';
+    cv.style.height = h + 'px';
+    const c = cv.getContext('2d');
+    c.scale(DPR, DPR);
+    return c;
+}
+
+function sizeCanvas(cv) {
+    const r = cv.parentElement.getBoundingClientRect();
+    return initCanvas(cv, r.width, r.height);
+}
+
+/* Color palette matching the dark theme */
+const C = {
+    bg: '#1a1a2e', bg2: '#16213e', card: '#0f3460',
+    green: '#16c79a', blue: '#4fc3f7', purple: '#b388ff',
+    orange: '#ffab40', red: '#ff5252', yellow: '#ffd740',
+    pink: '#ff80ab', text: '#e8e8e8', muted: '#6c6c7c',
+    border: '#2a2a4a'
+};
+
+/* Box-Muller transform for standard normal random */
+function randn() {
+    let u = 0, v = 0;
+    while (u === 0) u = Math.random();
+    while (v === 0) v = Math.random();
+    return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+}
+
+/* Student-t random via normal/chi-squared ratio */
+function randt(df) {
+    const n = randn();
+    const c = randChi2(df);
+    return n / Math.sqrt(c / df);
+}
+
+/* Chi-squared random (sum of squared normals) */
+function randChi2(df) {
+    let s = 0;
+    for (let i = 0; i < df; i++) {
+        const n = randn();
+        s += n * n;
+    }
+    return s;
+}
+
+/* Array statistics */
+function percentile(arr, p) {
+    const s = [...arr].sort((a, b) => a - b);
+    const i = (s.length - 1) * p;
+    const lo = Math.floor(i), hi = Math.ceil(i);
+    if (lo === hi) return s[lo];
+    return s[lo] + (s[hi] - s[lo]) * (i - lo);
+}
+
+function mean(a) {
+    return a.reduce((s, v) => s + v, 0) / a.length;
+}
+
+function std(a) {
+    const m = mean(a);
+    return Math.sqrt(a.reduce((s, v) => s + (v - m) ** 2, 0) / a.length);
+}
+
+/* Probability density functions */
+function normalPDF(x, mu, sig) {
+    return Math.exp(-0.5 * ((x - mu) / sig) ** 2) / (sig * Math.sqrt(2 * Math.PI));
+}
+
+function tPDF(x, df) {
+    const g1 = gamma((df + 1) / 2);
+    const g2 = gamma(df / 2);
+    return (g1 / (Math.sqrt(df * Math.PI) * g2)) *
+        Math.pow(1 + x * x / df, -(df + 1) / 2);
+}
+
+/* Lanczos approximation of the Gamma function */
+function gamma(z) {
+    if (z < 0.5) return Math.PI / (Math.sin(Math.PI * z) * gamma(1 - z));
+    z -= 1;
+    const g = 7;
+    const coeff = [
+        0.99999999999980993, 676.5203681218851, -1259.1392167224028,
+        771.32342877765313, -176.61502916214059, 12.507343278686905,
+        -0.13857109526572012, 9.9843695780195716e-6, 1.5056327351493116e-7
+    ];
+    let x = coeff[0];
+    for (let i = 1; i < g + 2; i++) x += coeff[i] / (z + i);
+    const t = z + g + 0.5;
+    return Math.sqrt(2 * Math.PI) * Math.pow(t, z + 0.5) * Math.exp(-t) * x;
+}
+
+/* Rational approximation for inverse normal CDF (Abramowitz & Stegun) */
+function normalQuantile(p) {
+    if (p <= 0) return -Infinity;
+    if (p >= 1) return Infinity;
+    if (p < 0.5) return -normalQuantile(1 - p);
+    const t = Math.sqrt(-2 * Math.log(1 - p));
+    const c0 = 2.515517, c1 = 0.802853, c2 = 0.010328;
+    const d1 = 1.432788, d2 = 0.189269, d3 = 0.001308;
+    return t - (c0 + c1 * t + c2 * t * t) / (1 + d1 * t + d2 * t * t + d3 * t * t * t);
+}
+
+/* Formatting helpers */
+function fmt$(v) {
+    if (Math.abs(v) >= 1e6) return '$' + (v / 1e6).toFixed(2) + 'M';
+    if (Math.abs(v) >= 1e3) return '$' + (v / 1e3).toFixed(1) + 'K';
+    return '$' + v.toFixed(0);
+}
+
+function fmtPct(v) {
+    return (v * 100).toFixed(2) + '%';
+}
+
+/* Rounded rectangle helper */
+function roundRect(ctx, x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+    ctx.lineTo(x + w, y + h - r);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    ctx.lineTo(x + r, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+    ctx.lineTo(x, y + r);
+    ctx.quadraticCurveTo(x, y, x + r, y);
+    ctx.closePath();
+}
+
+/* Draw axes helper */
+function drawAxes(ctx, pad, W, H) {
+    ctx.strokeStyle = C.border;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(pad.l, pad.t);
+    ctx.lineTo(pad.l, H - pad.b);
+    ctx.lineTo(W - pad.r, H - pad.b);
+    ctx.stroke();
+}
+
+/* Draw horizontal grid lines */
+function drawGrid(ctx, pad, W, H, n) {
+    const ph = H - pad.t - pad.b;
+    ctx.strokeStyle = 'rgba(42,42,74,0.4)';
+    ctx.lineWidth = 0.5;
+    for (let i = 1; i < n; i++) {
+        const y = pad.t + ph * i / n;
+        ctx.beginPath();
+        ctx.moveTo(pad.l, y);
+        ctx.lineTo(W - pad.r, y);
+        ctx.stroke();
+    }
+}
+
+/* ================================================================
+   Section 1: VaR
+   ================================================================ */
+let varMethod = 'historical';
+let varConf = 0.95;
+let varPort = 1000000;
+let varReturns = [];
+
+function genReturns() {
+    varReturns = [];
+    for (let i = 0; i < 1000; i++) {
+        varReturns.push(randn() * 0.02 - 0.0005);
+    }
+}
+genReturns();
+
+/* Method toggle buttons */
+document.querySelectorAll('[data-var-method]').forEach(b => {
+    b.addEventListener('click', () => {
+        document.querySelectorAll('[data-var-method]').forEach(x => x.classList.remove('active'));
+        b.classList.add('active');
+        varMethod = b.dataset.varMethod;
+        if (varMethod === 'montecarlo') genReturns();
+        drawVaR();
+    });
+});
+
+/* Sliders */
+const varConfSl = document.getElementById('varConfSlider');
+const varConfV = document.getElementById('varConfValue');
+const varPortSl = document.getElementById('varPortSlider');
+const varPortV = document.getElementById('varPortValue');
+
+varConfSl.addEventListener('input', () => {
+    varConf = +varConfSl.value / 100;
+    varConfV.textContent = varConfSl.value + '%';
+    drawVaR();
+});
+
+varPortSl.addEventListener('input', () => {
+    varPort = +varPortSl.value;
+    varPortV.textContent = fmt$(varPort);
+    drawVaR();
+});
+
+function drawVaR() {
+    const cv = document.getElementById('cvVar');
+    const ctx = sizeCanvas(cv);
+    const W = cv.width / DPR, H = cv.height / DPR;
+    const pad = { t: 35, r: 30, b: 55, l: 60 };
+    const pw = W - pad.l - pad.r, ph = H - pad.t - pad.b;
+
+    /* Get or generate data based on method */
+    let data;
+    if (varMethod === 'montecarlo') {
+        data = [];
+        for (let i = 0; i < 5000; i++) data.push(randn() * 0.02 - 0.0005);
+    } else {
+        data = [...varReturns];
+    }
+
+    const mu = mean(data);
+    const sig = std(data);
+    let var95, var99, varC;
+
+    if (varMethod === 'parametric') {
+        /* Parametric (normal) method */
+        const z95 = 1.645, z99 = 2.326;
+        var95 = -(mu - z95 * sig);
+        var99 = -(mu - z99 * sig);
+        const zC = normalQuantile(1 - varConf);
+        varC = -(mu + zC * sig);
+    } else {
+        /* Historical / Monte Carlo method */
+        var95 = -percentile(data, 1 - 0.95);
+        var99 = -percentile(data, 1 - 0.99);
+        varC = -percentile(data, 1 - varConf);
+    }
+
+    /* Build histogram */
+    const bins = 50;
+    const sorted = [...data].sort((a, b) => a - b);
+    const lo = sorted[0], hi = sorted[sorted.length - 1];
+    const bw = (hi - lo) / bins;
+    const counts = new Array(bins).fill(0);
+    data.forEach(v => {
+        let bi = Math.floor((v - lo) / bw);
+        if (bi >= bins) bi = bins - 1;
+        if (bi < 0) bi = 0;
+        counts[bi]++;
+    });
+    const maxC = Math.max(...counts);
+
+    ctx.clearRect(0, 0, W, H);
+    drawAxes(ctx, pad, W, H);
+    drawGrid(ctx, pad, W, H, 5);
+
+    /* Histogram bars */
+    const barW = pw / bins;
+    for (let i = 0; i < bins; i++) {
+        const x = pad.l + i * barW;
+        const bh = (counts[i] / maxC) * ph;
+        const retVal = lo + i * bw;
+        const isVarZone = retVal <= -varC;
+        ctx.fillStyle = isVarZone
+            ? 'rgba(255,82,82,0.6)'
+            : 'rgba(79,195,247,0.45)';
+        ctx.fillRect(x, H - pad.b - bh, barW - 1, bh);
+    }
+
+    /* VaR marker lines */
+    function drawVarLine(val, color, label, yOff) {
+        const xPos = pad.l + (((-val) - lo) / (hi - lo)) * pw;
+        if (xPos < pad.l || xPos > W - pad.r) return;
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.setLineDash([6, 4]);
+        ctx.beginPath();
+        ctx.moveTo(xPos, pad.t);
+        ctx.lineTo(xPos, H - pad.b);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = color;
+        ctx.font = 'bold 11px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(label, xPos, pad.t - 5 + yOff);
+        ctx.font = '10px monospace';
+        ctx.fillText(fmtPct(val), xPos, pad.t + 10 + yOff);
+    }
+
+    drawVarLine(varC, C.red, 'VaR ' + varConfSl.value + '%', 0);
+    if (Math.abs(varConf - 0.95) > 0.001) drawVarLine(var95, C.orange, 'VaR 95%', 22);
+    if (Math.abs(varConf - 0.99) > 0.001) drawVarLine(var99, C.purple, 'VaR 99%', 22);
+
+    /* X axis labels */
+    ctx.fillStyle = C.muted;
+    ctx.font = '10px monospace';
+    ctx.textAlign = 'center';
+    for (let i = 0; i <= 5; i++) {
+        const v = lo + (hi - lo) * i / 5;
+        ctx.fillText((v * 100).toFixed(1) + '%', pad.l + i * pw / 5, H - pad.b + 18);
+    }
+    ctx.fillText('日收益率', pad.l + pw / 2, H - pad.b + 40);
+
+    /* Y axis label */
+    ctx.save();
+    ctx.translate(14, H / 2);
+    ctx.rotate(-Math.PI / 2);
+    ctx.textAlign = 'center';
+    ctx.fillText('频率', 0, 0);
+    ctx.restore();
+
+    /* Method label */
+    const methodLabel = varMethod === 'historical' ? '历史模拟法'
+        : varMethod === 'parametric' ? '参数法(正态假设)'
+        : '蒙特卡洛模拟(' + data.length + '次)';
+    ctx.fillStyle = C.text;
+    ctx.font = 'bold 12px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText('方法: ' + methodLabel, pad.l + 5, pad.t - 10);
+
+    /* Legend */
+    const lx = W - pad.r - 150, ly = pad.t + 5;
+    ctx.fillStyle = 'rgba(79,195,247,0.45)';
+    ctx.fillRect(lx, ly, 12, 12);
+    ctx.fillStyle = C.text;
+    ctx.font = '10px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText('收益分布', lx + 16, ly + 10);
+    ctx.fillStyle = 'rgba(255,82,82,0.6)';
+    ctx.fillRect(lx, ly + 16, 12, 12);
+    ctx.fillStyle = C.text;
+    ctx.fillText('VaR区域(尾部)', lx + 16, ly + 26);
+
+    /* Update metrics display */
+    const metricsEl = document.getElementById('varMetrics');
+    metricsEl.innerHTML = `
+        <div class="metric-box"><span class="label">VaR (${varConfSl.value}%)</span><span class="value red">${fmtPct(varC)}</span></div>
+        <div class="metric-box"><span class="label">美元VaR</span><span class="value red">${fmt$(varC * varPort)}</span></div>
+        <div class="metric-box"><span class="label">VaR 95%</span><span class="value orange">${fmtPct(var95)}</span></div>
+        <div class="metric-box"><span class="label">VaR 99%</span><span class="value purple">${fmtPct(var99)}</span></div>
+        <div class="metric-box"><span class="label">日均值</span><span class="value blue">${fmtPct(mu)}</span></div>
+        <div class="metric-box"><span class="label">日波动率</span><span class="value">${fmtPct(sig)}</span></div>
+        <div class="metric-box"><span class="label">样本数</span><span class="value blue">${data.length}</span></div>`;
+}
+
+/* ================================================================
+   Section 2: CVaR / Expected Shortfall
+   ================================================================ */
+let cvarDist = 'normal';
+let cvarDf = 4;
+
+document.querySelectorAll('[data-dist]').forEach(b => {
+    b.addEventListener('click', () => {
+        document.querySelectorAll('[data-dist]').forEach(x => x.classList.remove('active'));
+        b.classList.add('active');
+        cvarDist = b.dataset.dist;
+        drawCVaR();
+    });
+});
+
+const cvarDfSl = document.getElementById('cvarDfSlider');
+const cvarDfV = document.getElementById('cvarDfValue');
+cvarDfSl.addEventListener('input', () => {
+    cvarDf = +cvarDfSl.value;
+    cvarDfV.textContent = cvarDf;
+    drawCVaR();
+});
+
+function drawCVaR() {
+    const cv = document.getElementById('cvCvar');
+    const ctx = sizeCanvas(cv);
+    const W = cv.width / DPR, H = cv.height / DPR;
+    const pad = { t: 35, r: 30, b: 55, l: 60 };
+    const pw = W - pad.l - pad.r, ph = H - pad.t - pad.b;
+
+    /* Generate samples */
+    const N = 5000;
+    let samples = [];
+    const targetSig = 0.02;
+    if (cvarDist === 'normal') {
+        for (let i = 0; i < N; i++) samples.push(randn() * targetSig);
+    } else {
+        /* Scale Student-t to have same variance as normal */
+        const scale = cvarDf > 2 ? targetSig / Math.sqrt(cvarDf / (cvarDf - 2)) : targetSig * 0.5;
+        for (let i = 0; i < N; i++) samples.push(randt(cvarDf) * scale);
+    }
+
+    const sorted = [...samples].sort((a, b) => a - b);
+    const alpha = 0.95;
+    const varIdx = Math.floor(N * (1 - alpha));
+    const varVal = -sorted[varIdx];
+    const tailSamples = sorted.slice(0, varIdx);
+    const esVal = -mean(tailSamples);
+
+    /* Compute PDF curve for display */
+    const xMin = -0.08, xMax = 0.08;
+    const steps = 300;
+    let maxY = 0;
+    const pts = [];
+    for (let i = 0; i <= steps; i++) {
+        const x = xMin + (xMax - xMin) * i / steps;
+        let y;
+        if (cvarDist === 'normal') {
+            y = normalPDF(x, 0, targetSig);
+        } else {
+            const scale = cvarDf > 2 ? targetSig / Math.sqrt(cvarDf / (cvarDf - 2)) : targetSig * 0.5;
+            y = tPDF(x / scale, cvarDf) / scale;
+        }
+        pts.push({ x, y });
+        if (y > maxY) maxY = y;
+    }
+
+    ctx.clearRect(0, 0, W, H);
+    drawAxes(ctx, pad, W, H);
+
+    function xPx(v) { return pad.l + ((v - xMin) / (xMax - xMin)) * pw; }
+    function yPx(v) { return H - pad.b - (v / maxY) * ph; }
+
+    /* Fill VaR tail area (light red) */
+    const varX = -varVal;
+    ctx.beginPath();
+    let started = false;
+    for (const p of pts) {
+        if (p.x <= varX) {
+            if (!started) { ctx.moveTo(xPx(p.x), H - pad.b); started = true; }
+            ctx.lineTo(xPx(p.x), yPx(p.y));
+        }
+    }
+    if (started) {
+        ctx.lineTo(xPx(varX), H - pad.b);
+        ctx.closePath();
+        ctx.fillStyle = 'rgba(255,82,82,0.25)';
+        ctx.fill();
+    }
+
+    /* Fill ES area (darker red) */
+    const esX = -esVal;
+    ctx.beginPath();
+    started = false;
+    for (const p of pts) {
+        if (p.x <= esX) {
+            if (!started) { ctx.moveTo(xPx(p.x), H - pad.b); started = true; }
+            ctx.lineTo(xPx(p.x), yPx(p.y));
+        }
+    }
+    if (started) {
+        ctx.lineTo(xPx(esX), H - pad.b);
+        ctx.closePath();
+        ctx.fillStyle = 'rgba(255,82,82,0.50)';
+        ctx.fill();
+    }
+
+    /* Main PDF curve */
+    ctx.beginPath();
+    pts.forEach((p, i) => {
+        i === 0 ? ctx.moveTo(xPx(p.x), yPx(p.y)) : ctx.lineTo(xPx(p.x), yPx(p.y));
+    });
+    ctx.strokeStyle = C.blue;
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+
+    /* If Student-t, draw normal reference */
+    if (cvarDist === 'student') {
+        ctx.beginPath();
+        for (let i = 0; i <= steps; i++) {
+            const x = xMin + (xMax - xMin) * i / steps;
+            const y = normalPDF(x, 0, targetSig);
+            i === 0 ? ctx.moveTo(xPx(x), yPx(y)) : ctx.lineTo(xPx(x), yPx(y));
+        }
+        ctx.strokeStyle = 'rgba(79,195,247,0.3)';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([5, 5]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+    }
+
+    /* VaR vertical line */
+    ctx.strokeStyle = C.orange;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6, 3]);
+    ctx.beginPath();
+    ctx.moveTo(xPx(varX), pad.t);
+    ctx.lineTo(xPx(varX), H - pad.b);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = C.orange;
+    ctx.font = 'bold 11px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('VaR 95%', xPx(varX), pad.t - 8);
+
+    /* ES vertical line */
+    ctx.strokeStyle = C.red;
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6, 3]);
+    ctx.beginPath();
+    ctx.moveTo(xPx(esX), pad.t);
+    ctx.lineTo(xPx(esX), H - pad.b);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = C.red;
+    ctx.font = 'bold 11px sans-serif';
+    ctx.fillText('ES/CVaR', xPx(esX), pad.t + 8);
+
+    /* X axis labels */
+    ctx.fillStyle = C.muted;
+    ctx.font = '10px monospace';
+    ctx.textAlign = 'center';
+    for (let i = 0; i <= 6; i++) {
+        const v = xMin + (xMax - xMin) * i / 6;
+        ctx.fillText((v * 100).toFixed(1) + '%', xPx(v), H - pad.b + 18);
+    }
+    ctx.fillText('收益率', pad.l + pw / 2, H - pad.b + 40);
+
+    /* Distribution label */
+    ctx.fillStyle = C.text;
+    ctx.font = 'bold 12px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText(
+        cvarDist === 'normal' ? '正态分布 N(0, 0.02)' : 'Student-t 分布 (df=' + cvarDf + ')',
+        pad.l + 5, pad.t - 10
+    );
+
+    /* Legend box */
+    const lx = W - pad.r - 170, ly = pad.t + 5;
+    ctx.font = '10px sans-serif';
+
+    ctx.fillStyle = 'rgba(255,82,82,0.25)';
+    ctx.fillRect(lx, ly, 12, 12);
+    ctx.fillStyle = C.text;
+    ctx.textAlign = 'left';
+    ctx.fillText('VaR尾部区域', lx + 18, ly + 10);
+
+    ctx.fillStyle = 'rgba(255,82,82,0.50)';
+    ctx.fillRect(lx, ly + 18, 12, 12);
+    ctx.fillStyle = C.text;
+    ctx.fillText('ES区域(平均尾部损失)', lx + 18, ly + 28);
+
+    if (cvarDist === 'student') {
+        ctx.strokeStyle = 'rgba(79,195,247,0.3)';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([5, 5]);
+        ctx.beginPath();
+        ctx.moveTo(lx, ly + 42);
+        ctx.lineTo(lx + 12, ly + 42);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = C.muted;
+        ctx.fillText('正态分布参考线', lx + 18, ly + 46);
+    }
+
+    /* Metrics */
+    const metricsEl = document.getElementById('cvarMetrics');
+    metricsEl.innerHTML = `
+        <div class="metric-box"><span class="label">VaR 95%</span><span class="value orange">${fmtPct(varVal)}</span></div>
+        <div class="metric-box"><span class="label">ES/CVaR 95%</span><span class="value red">${fmtPct(esVal)}</span></div>
+        <div class="metric-box"><span class="label">ES - VaR 差值</span><span class="value purple">${fmtPct(esVal - varVal)}</span></div>
+        <div class="metric-box"><span class="label">ES / VaR 比值</span><span class="value blue">${(esVal / varVal).toFixed(3)}x</span></div>
+        <div class="metric-box"><span class="label">分布类型</span><span class="value">${cvarDist === 'normal' ? '正态' : 't(df=' + cvarDf + ')'}</span></div>
+        <div class="metric-box"><span class="label">尾部样本数</span><span class="value blue">${tailSamples.length}</span></div>`;
+}
+
+/* ================================================================
+   Section 3: Position Sizing
+   ================================================================ */
+const posWinSl = document.getElementById('posWinSlider');
+const posWinV = document.getElementById('posWinValue');
+const posPaySl = document.getElementById('posPaySlider');
+const posPayV = document.getElementById('posPayValue');
+
+posWinSl.addEventListener('input', () => {
+    posWinV.textContent = Math.round(+posWinSl.value * 100) + '%';
+    drawPosition();
+});
+
+posPaySl.addEventListener('input', () => {
+    posPayV.textContent = (+posPaySl.value).toFixed(1);
+    drawPosition();
+});
+
+document.getElementById('posRunBtn').addEventListener('click', () => {
+    posTradeSeq = generateTradeSeq();
+    drawPosition();
+});
+
+let posTradeSeq = generateTradeSeq();
+
+function generateTradeSeq() {
+    const a = [];
+    for (let i = 0; i < 100; i++) a.push(Math.random());
+    return a;
+}
+
+function drawPosition() {
+    const cv = document.getElementById('cvPos');
+    const ctx = sizeCanvas(cv);
+    const W = cv.width / DPR, H = cv.height / DPR;
+    const pad = { t: 35, r: 30, b: 55, l: 75 };
+    const pw = W - pad.l - pad.r, ph = H - pad.t - pad.b;
+
+    const p = +posWinSl.value;
+    const b = +posPaySl.value;
+    const kelly = Math.max(0, (p * b - (1 - p)) / b);
+    const halfKelly = kelly / 2;
+    const fixedFrac = 0.02;
+
+    const methods = [
+        { name: '固定手数(100)', color: C.blue, frac: null, fixed: true },
+        { name: '固定比例(2%)', color: C.orange, frac: fixedFrac },
+        { name: '半Kelly(' + (halfKelly * 100).toFixed(0) + '%)', color: C.green, frac: halfKelly },
+        { name: 'Kelly(' + (kelly * 100).toFixed(0) + '%)', color: C.purple, frac: kelly },
+    ];
+
+    /* Simulate equity curves */
+    const curves = methods.map(m => {
+        const eq = [10000];
+        for (let i = 0; i < 100; i++) {
+            const cur = eq[eq.length - 1];
+            if (cur <= 0) { eq.push(0); continue; }
+            const win = posTradeSeq[i] < p;
+            let bet;
+            if (m.fixed) {
+                bet = 100;
+            } else {
+                bet = cur * m.frac;
+            }
+            bet = Math.min(bet, cur); /* cannot bet more than we have */
+            if (win) eq.push(cur + bet * b);
+            else eq.push(cur - bet);
+        }
+        return eq;
+    });
+
+    /* Determine y range */
+    const allVals = curves.flat().filter(v => v > 0);
+    let yMin = Math.min(...allVals) * 0.9;
+    let yMax = Math.max(...allVals) * 1.1;
+    if (yMin <= 0) yMin = 1;
+
+    ctx.clearRect(0, 0, W, H);
+    drawAxes(ctx, pad, W, H);
+    drawGrid(ctx, pad, W, H, 5);
+
+    /* Starting line */
+    const startY = H - pad.b - ((10000 - yMin) / (yMax - yMin)) * ph;
+    ctx.strokeStyle = 'rgba(42,42,74,0.6)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(pad.l, startY);
+    ctx.lineTo(W - pad.r, startY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = C.muted;
+    ctx.font = '9px monospace';
+    ctx.textAlign = 'left';
+    ctx.fillText('初始$10K', W - pad.r - 55, startY - 4);
+
+    /* Draw each equity curve */
+    curves.forEach((eq, ci) => {
+        ctx.beginPath();
+        eq.forEach((v, i) => {
+            if (v <= 0) return;
+            const x = pad.l + i * pw / 100;
+            const y = H - pad.b - ((v - yMin) / (yMax - yMin)) * ph;
+            i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+        });
+        ctx.strokeStyle = methods[ci].color;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        /* End dot */
+        const finalVal = eq[100];
+        if (finalVal > 0) {
+            const ex = pad.l + pw;
+            const ey = H - pad.b - ((finalVal - yMin) / (yMax - yMin)) * ph;
+            ctx.beginPath();
+            ctx.arc(ex, ey, 4, 0, Math.PI * 2);
+            ctx.fillStyle = methods[ci].color;
+            ctx.fill();
+        }
+    });
+
+    /* Legend */
+    methods.forEach((m, i) => {
+        const lx = pad.l + 10, ly = pad.t + 8 + i * 20;
+        ctx.strokeStyle = m.color;
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.moveTo(lx, ly);
+        ctx.lineTo(lx + 22, ly);
+        ctx.stroke();
+        ctx.fillStyle = C.text;
+        ctx.font = '11px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText(m.name, lx + 28, ly + 4);
+    });
+
+    /* Y axis labels */
+    ctx.fillStyle = C.muted;
+    ctx.font = '10px monospace';
+    ctx.textAlign = 'right';
+    for (let i = 0; i <= 5; i++) {
+        const v = yMin + (yMax - yMin) * i / 5;
+        const y = H - pad.b - i * ph / 5;
+        ctx.fillText(fmt$(v), pad.l - 5, y + 3);
+    }
+
+    /* X axis labels */
+    ctx.textAlign = 'center';
+    for (let i = 0; i <= 5; i++) {
+        ctx.fillText(i * 20 + '', pad.l + i * pw / 5, H - pad.b + 18);
+    }
+    ctx.fillText('交易次数', pad.l + pw / 2, H - pad.b + 40);
+
+    /* Title */
+    ctx.fillStyle = C.text;
+    ctx.font = 'bold 12px sans-serif';
+    ctx.textAlign = 'right';
+    ctx.fillText('Kelly = ' + (kelly * 100).toFixed(1) + '%', W - pad.r - 5, pad.t - 10);
+
+    /* Metrics */
+    const maxDD = methods.map((m, ci) => {
+        const eq = curves[ci];
+        let peak = eq[0], mdd = 0;
+        for (const v of eq) {
+            if (v > peak) peak = v;
+            const dd = (peak - v) / peak;
+            if (dd > mdd) mdd = dd;
+        }
+        return mdd;
+    });
+
+    const metricsEl = document.getElementById('posMetrics');
+    metricsEl.innerHTML = `
+        <div class="metric-box"><span class="label">Kelly最优比例</span><span class="value purple">${(kelly * 100).toFixed(1)}%</span></div>
+        <div class="metric-box"><span class="label">半Kelly</span><span class="value">${(halfKelly * 100).toFixed(1)}%</span></div>
+        ${curves.map((eq, i) => `
+            <div class="metric-box">
+                <span class="label">${methods[i].name}</span>
+                <span class="value" style="color:${methods[i].color}">${fmt$(eq[100])}</span>
+            </div>
+        `).join('')}
+        ${maxDD.map((dd, i) => `
+            <div class="metric-box">
+                <span class="label">${methods[i].name.split('(')[0]}最大回撤</span>
+                <span class="value red">${(dd * 100).toFixed(1)}%</span>
+            </div>
+        `).join('')}`;
+}
+
+/* ================================================================
+   Section 4: Stop Loss Strategies
+   ================================================================ */
+let slPrices = [];
+let slATR = [];
+
+function genPricePath() {
+    slPrices = [100];
+    slATR = [2];
+    for (let i = 1; i < 200; i++) {
+        const drift = 0.0003;
+        const vol = 0.018;
+        const r = drift + vol * randn();
+        slPrices.push(slPrices[i - 1] * (1 + r));
+        const tr = Math.abs(slPrices[i] - slPrices[i - 1]);
+        slATR.push(slATR[i - 1] * 0.93 + tr * 0.07);
+    }
+}
+genPricePath();
+
+document.getElementById('slGenBtn').addEventListener('click', () => {
+    genPricePath();
+    drawStopLoss();
+});
+document.getElementById('stopFixed').addEventListener('change', drawStopLoss);
+document.getElementById('stopTrailing').addEventListener('change', drawStopLoss);
+document.getElementById('stopATR').addEventListener('change', drawStopLoss);
+
+function drawStopLoss() {
+    const cv = document.getElementById('cvStop');
+    const ctx = sizeCanvas(cv);
+    const W = cv.width / DPR, H = cv.height / DPR;
+    const pad = { t: 35, r: 30, b: 55, l: 65 };
+    const pw = W - pad.l - pad.r, ph = H - pad.t - pad.b;
+    const N = slPrices.length;
+
+    const showFixed = document.getElementById('stopFixed').checked;
+    const showTrail = document.getElementById('stopTrailing').checked;
+    const showATR = document.getElementById('stopATR').checked;
+
+    /* Compute stop levels */
+    const fixPct = 0.05;
+    const entryPrice = slPrices[0];
+    const fixedStop = entryPrice * (1 - fixPct);
+
+    /* Trailing stop: follows highest price */
+    const trailStops = [];
+    let peak = slPrices[0];
+    for (let i = 0; i < N; i++) {
+        if (slPrices[i] > peak) peak = slPrices[i];
+        trailStops.push(peak * (1 - fixPct));
+    }
+
+    /* ATR stop: price - 2 * ATR */
+    const atrStops = [];
+    for (let i = 0; i < N; i++) {
+        atrStops.push(slPrices[i] - 2 * slATR[i]);
+    }
+
+    /* Find trigger points */
+    let fixTrig = -1, trailTrig = -1, atrTrig = -1;
+    for (let i = 1; i < N; i++) {
+        if (fixTrig < 0 && slPrices[i] <= fixedStop) fixTrig = i;
+        if (trailTrig < 0 && slPrices[i] <= trailStops[i]) trailTrig = i;
+        if (atrTrig < 0 && slPrices[i] <= atrStops[i]) atrTrig = i;
+    }
+
+    /* Y range */
+    const allP = [...slPrices];
+    if (showFixed) allP.push(fixedStop);
+    if (showTrail) allP.push(...trailStops);
+    if (showATR) allP.push(...atrStops);
+    let yMin = Math.min(...allP) * 0.995;
+    let yMax = Math.max(...allP) * 1.005;
+
+    ctx.clearRect(0, 0, W, H);
+    drawAxes(ctx, pad, W, H);
+    drawGrid(ctx, pad, W, H, 5);
+
+    function xPx(i) { return pad.l + i * pw / (N - 1); }
+    function yPx(v) { return H - pad.b - ((v - yMin) / (yMax - yMin)) * ph; }
+
+    /* Price line (main) */
+    ctx.beginPath();
+    slPrices.forEach((v, i) => {
+        i === 0 ? ctx.moveTo(xPx(i), yPx(v)) : ctx.lineTo(xPx(i), yPx(v));
+    });
+    ctx.strokeStyle = C.blue;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    /* Fixed stop line */
+    if (showFixed) {
+        ctx.strokeStyle = C.red;
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([8, 4]);
+        ctx.beginPath();
+        ctx.moveTo(xPx(0), yPx(fixedStop));
+        ctx.lineTo(xPx(N - 1), yPx(fixedStop));
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        if (fixTrig >= 0) {
+            ctx.fillStyle = C.red;
+            ctx.beginPath();
+            ctx.arc(xPx(fixTrig), yPx(slPrices[fixTrig]), 6, 0, Math.PI * 2);
+            ctx.fill();
+            /* White cross inside dot */
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.moveTo(xPx(fixTrig) - 3, yPx(slPrices[fixTrig]) - 3);
+            ctx.lineTo(xPx(fixTrig) + 3, yPx(slPrices[fixTrig]) + 3);
+            ctx.moveTo(xPx(fixTrig) + 3, yPx(slPrices[fixTrig]) - 3);
+            ctx.lineTo(xPx(fixTrig) - 3, yPx(slPrices[fixTrig]) + 3);
+            ctx.stroke();
+            ctx.fillStyle = C.text;
+            ctx.font = '10px sans-serif';
+            ctx.textAlign = 'left';
+            ctx.fillText('固定止损', xPx(fixTrig) + 10, yPx(slPrices[fixTrig]) - 5);
+        }
+    }
+
+    /* Trailing stop line */
+    if (showTrail) {
+        ctx.beginPath();
+        trailStops.forEach((v, i) => {
+            i === 0 ? ctx.moveTo(xPx(i), yPx(v)) : ctx.lineTo(xPx(i), yPx(v));
+        });
+        ctx.strokeStyle = C.orange;
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([5, 3]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        if (trailTrig >= 0) {
+            ctx.fillStyle = C.orange;
+            ctx.beginPath();
+            ctx.arc(xPx(trailTrig), yPx(slPrices[trailTrig]), 6, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = C.text;
+            ctx.font = '10px sans-serif';
+            ctx.textAlign = 'left';
+            ctx.fillText('移动止损', xPx(trailTrig) + 10, yPx(slPrices[trailTrig]) + 14);
+        }
+    }
+
+    /* ATR stop line */
+    if (showATR) {
+        ctx.beginPath();
+        atrStops.forEach((v, i) => {
+            i === 0 ? ctx.moveTo(xPx(i), yPx(v)) : ctx.lineTo(xPx(i), yPx(v));
+        });
+        ctx.strokeStyle = C.green;
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([3, 3]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        if (atrTrig >= 0) {
+            ctx.fillStyle = C.green;
+            ctx.beginPath();
+            ctx.arc(xPx(atrTrig), yPx(slPrices[atrTrig]), 6, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = C.text;
+            ctx.font = '10px sans-serif';
+            ctx.textAlign = 'left';
+            ctx.fillText('ATR止损', xPx(atrTrig) + 10, yPx(slPrices[atrTrig]) + 5);
+        }
+    }
+
+    /* Legend */
+    const items = [{ c: C.blue, l: '价格走势' }];
+    if (showFixed) items.push({ c: C.red, l: '固定止损(5%)' });
+    if (showTrail) items.push({ c: C.orange, l: '移动止损(5%)' });
+    if (showATR) items.push({ c: C.green, l: 'ATR止损(2x)' });
+    items.forEach((it, i) => {
+        const lx = W - pad.r - 145, ly = pad.t + 8 + i * 18;
+        ctx.strokeStyle = it.c;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(lx, ly);
+        ctx.lineTo(lx + 18, ly);
+        ctx.stroke();
+        ctx.fillStyle = C.text;
+        ctx.font = '11px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText(it.l, lx + 24, ly + 4);
+    });
+
+    /* Y axis labels */
+    ctx.fillStyle = C.muted;
+    ctx.font = '10px monospace';
+    ctx.textAlign = 'right';
+    for (let i = 0; i <= 5; i++) {
+        const v = yMin + (yMax - yMin) * i / 5;
+        ctx.fillText('$' + v.toFixed(1), pad.l - 5, H - pad.b - i * ph / 5 + 3);
+    }
+
+    /* X axis */
+    ctx.textAlign = 'center';
+    for (let i = 0; i <= 4; i++) {
+        const idx = Math.round(i * (N - 1) / 4);
+        ctx.fillText('T' + idx, xPx(idx), H - pad.b + 18);
+    }
+    ctx.fillText('时间(交易日)', pad.l + pw / 2, H - pad.b + 40);
+
+    /* Title */
+    ctx.fillStyle = C.text;
+    ctx.font = 'bold 12px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText('入场价: $' + entryPrice.toFixed(2), pad.l + 5, pad.t - 10);
+
+    /* Metrics: backtest comparison */
+    const finalNoStop = slPrices[N - 1] - entryPrice;
+    const finalFixed = fixTrig >= 0 ? (slPrices[fixTrig] - entryPrice) : (slPrices[N - 1] - entryPrice);
+    const finalTrail = trailTrig >= 0 ? (slPrices[trailTrig] - entryPrice) : (slPrices[N - 1] - entryPrice);
+    const finalATR = atrTrig >= 0 ? (slPrices[atrTrig] - entryPrice) : (slPrices[N - 1] - entryPrice);
+
+    const metricsEl = document.getElementById('stopMetrics');
+    metricsEl.innerHTML = `
+        <div class="metric-box">
+            <span class="label">无止损 P&L</span>
+            <span class="value ${finalNoStop >= 0 ? '' : 'red'}">${finalNoStop >= 0 ? '+' : ''}$${finalNoStop.toFixed(2)}</span>
+        </div>
+        <div class="metric-box">
+            <span class="label">固定止损 P&L</span>
+            <span class="value ${finalFixed >= 0 ? 'orange' : 'red'}">${finalFixed >= 0 ? '+' : ''}$${finalFixed.toFixed(2)}${fixTrig >= 0 ? ' (T' + fixTrig + ')' : ' (未触发)'}</span>
+        </div>
+        <div class="metric-box">
+            <span class="label">移动止损 P&L</span>
+            <span class="value ${finalTrail >= 0 ? 'orange' : 'red'}">${finalTrail >= 0 ? '+' : ''}$${finalTrail.toFixed(2)}${trailTrig >= 0 ? ' (T' + trailTrig + ')' : ' (未触发)'}</span>
+        </div>
+        <div class="metric-box">
+            <span class="label">ATR止损 P&L</span>
+            <span class="value ${finalATR >= 0 ? '' : 'red'}">${finalATR >= 0 ? '+' : ''}$${finalATR.toFixed(2)}${atrTrig >= 0 ? ' (T' + atrTrig + ')' : ' (未触发)'}</span>
+        </div>
+        <div class="metric-box">
+            <span class="label">最终价格</span>
+            <span class="value blue">$${slPrices[N - 1].toFixed(2)}</span>
+        </div>
+        <div class="metric-box">
+            <span class="label">平均ATR</span>
+            <span class="value">${mean(slATR).toFixed(3)}</span>
+        </div>`;
+}
+
+/* ================================================================
+   Section 5: Portfolio Risk Dashboard
+   ================================================================ */
+const assets = ['沪深300', '中证500', '国债10Y', '黄金', '原油'];
+const weights = [0.30, 0.25, 0.20, 0.15, 0.10];
+const assetVol = [0.22, 0.28, 0.04, 0.16, 0.35];
+const sectors = ['金融', '科技', '消费', '医药', '能源', '其他'];
+const sectorW = [0.25, 0.20, 0.18, 0.15, 0.12, 0.10];
+const corrMatrix = [
+    [1.00, 0.85, -0.20, 0.10, 0.15],
+    [0.85, 1.00, -0.15, 0.08, 0.20],
+    [-0.20, -0.15, 1.00, 0.25, -0.10],
+    [0.10, 0.08, 0.25, 1.00, 0.30],
+    [0.15, 0.20, -0.10, 0.30, 1.00]
+];
+const betas = [1.0, 1.2, 0.05, 0.3, 0.6];
+const leverage = 1.35;
+
+/* --- Asset VaR Bar Chart --- */
+function drawDashBar() {
+    const cv = document.getElementById('cvDashBar');
+    const ctx = sizeCanvas(cv);
+    const W = cv.width / DPR, H = cv.height / DPR;
+    const pad = { t: 10, r: 20, b: 30, l: 75 };
+    const pw = W - pad.l - pad.r, ph = H - pad.t - pad.b;
+    const n = assets.length;
+    const componentVaR = assets.map((_, i) => weights[i] * assetVol[i] * 1.645);
+    const maxV = Math.max(...componentVaR) * 1.3;
+    const gap = ph / n;
+    const barH = gap * 0.65;
+    const colors = [C.blue, C.orange, C.green, C.yellow, C.red];
+
+    ctx.clearRect(0, 0, W, H);
+
+    for (let i = 0; i < n; i++) {
+        const y = pad.t + i * gap + (gap - barH) / 2;
+        const bw = (componentVaR[i] / maxV) * pw;
+
+        /* Bar with gradient */
+        const grad = ctx.createLinearGradient(pad.l, 0, pad.l + bw, 0);
+        grad.addColorStop(0, colors[i]);
+        grad.addColorStop(1, colors[i] + '88');
+        ctx.fillStyle = grad;
+        roundRect(ctx, pad.l, y, bw, barH, 4);
+        ctx.fill();
+
+        /* Asset label */
+        ctx.fillStyle = C.text;
+        ctx.font = '11px sans-serif';
+        ctx.textAlign = 'right';
+        ctx.fillText(assets[i], pad.l - 8, y + barH / 2 + 4);
+
+        /* Value label */
+        ctx.fillStyle = C.text;
+        ctx.font = '10px monospace';
+        ctx.textAlign = 'left';
+        ctx.fillText((componentVaR[i] * 100).toFixed(2) + '%', pad.l + bw + 6, y + barH / 2 + 4);
+
+        /* Weight label */
+        ctx.fillStyle = C.muted;
+        ctx.font = '9px sans-serif';
+        ctx.fillText('w=' + (weights[i] * 100).toFixed(0) + '%', pad.l + bw + 6, y + barH / 2 + 16);
+    }
+
+    /* Total VaR */
+    const totalVaR = componentVaR.reduce((s, v) => s + v, 0);
+    ctx.fillStyle = C.muted;
+    ctx.font = '10px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText('组合VaR(简单加总): ' + (totalVaR * 100).toFixed(2) + '%', pad.l, H - 5);
+}
+
+/* --- Correlation Matrix Heatmap --- */
+function drawDashCorr() {
+    const cv = document.getElementById('cvDashCorr');
+    const ctx = sizeCanvas(cv);
+    const W = cv.width / DPR, H = cv.height / DPR;
+    const n = assets.length;
+    const pad = { t: 10, r: 10, b: 45, l: 60 };
+    const cellW = (W - pad.l - pad.r) / n;
+    const cellH = (H - pad.t - pad.b) / n;
+
+    ctx.clearRect(0, 0, W, H);
+
+    for (let i = 0; i < n; i++) {
+        for (let j = 0; j < n; j++) {
+            const v = corrMatrix[i][j];
+            /* Color mapping: positive = green, negative = red */
+            let r, g, b2;
+            if (v >= 0) {
+                r = 22; g = Math.round(100 + v * 99); b2 = Math.round(80 + v * 74);
+            } else {
+                r = Math.round(255 * Math.abs(v)); g = 30; b2 = 30;
+            }
+            const alpha = Math.abs(v) * 0.6 + 0.15;
+            ctx.fillStyle = `rgba(${r},${g},${b2},${alpha})`;
+            ctx.fillRect(pad.l + j * cellW, pad.t + i * cellH, cellW - 1, cellH - 1);
+
+            /* Value text */
+            ctx.fillStyle = Math.abs(v) > 0.5 ? '#fff' : C.text;
+            ctx.font = 'bold 10px monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText(
+                v.toFixed(2),
+                pad.l + j * cellW + cellW / 2,
+                pad.t + i * cellH + cellH / 2 + 4
+            );
+        }
+
+        /* Row labels */
+        ctx.fillStyle = C.muted;
+        ctx.font = '10px sans-serif';
+        ctx.textAlign = 'right';
+        ctx.fillText(assets[i].slice(0, 4), pad.l - 5, pad.t + i * cellH + cellH / 2 + 4);
+
+        /* Column labels (rotated) */
+        ctx.save();
+        ctx.translate(pad.l + i * cellW + cellW / 2, H - pad.b + 8);
+        ctx.rotate(-Math.PI / 5);
+        ctx.textAlign = 'right';
+        ctx.fillText(assets[i].slice(0, 4), 0, 0);
+        ctx.restore();
+    }
+}
+
+/* --- Sector Pie Chart --- */
+function drawDashPie() {
+    const cv = document.getElementById('cvDashPie');
+    const ctx = sizeCanvas(cv);
+    const W = cv.width / DPR, H = cv.height / DPR;
+    const cx = W / 2, cy = H / 2;
+    const r = Math.min(W, H) / 2 - 35;
+    const colors = [C.blue, C.green, C.orange, C.purple, C.red, C.yellow];
+
+    ctx.clearRect(0, 0, W, H);
+    let startAngle = -Math.PI / 2;
+
+    sectorW.forEach((w, i) => {
+        const endAngle = startAngle + w * Math.PI * 2;
+
+        /* Pie slice */
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.arc(cx, cy, r, startAngle, endAngle);
+        ctx.closePath();
+        ctx.fillStyle = colors[i];
+        ctx.fill();
+        ctx.strokeStyle = C.bg;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        /* Labels */
+        const midA = (startAngle + endAngle) / 2;
+        const labelR = r * 0.68;
+        const lx = cx + Math.cos(midA) * labelR;
+        const ly = cy + Math.sin(midA) * labelR;
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 11px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(sectors[i], lx, ly - 3);
+        ctx.font = '9px monospace';
+        ctx.fillText(Math.round(w * 100) + '%', lx, ly + 11);
+
+        startAngle = endAngle;
+    });
+}
+
+/* --- Leverage Gauge --- */
+function drawDashGauge() {
+    const cv = document.getElementById('cvDashGauge');
+    const ctx = sizeCanvas(cv);
+    const W = cv.width / DPR, H = cv.height / DPR;
+    const cx = W / 2, cy = H * 0.58;
+    const r = Math.min(W, H) * 0.36;
+
+    ctx.clearRect(0, 0, W, H);
+
+    /* Arc parameters */
+    const startA = Math.PI * 0.8;
+    const endA = Math.PI * 2.2;
+    const range = endA - startA;
+
+    /* Background track */
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, startA, endA);
+    ctx.lineWidth = 20;
+    ctx.strokeStyle = C.border;
+    ctx.lineCap = 'round';
+    ctx.stroke();
+
+    /* Colored segments: green (safe), orange (caution), red (danger) */
+    const seg1 = startA + range * (1 / 3);
+    const seg2 = startA + range * (2 / 3);
+
+    ctx.lineWidth = 20;
+    ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.arc(cx, cy, r, startA, seg1);
+    ctx.strokeStyle = C.green; ctx.stroke();
+
+    ctx.lineCap = 'butt';
+    ctx.beginPath(); ctx.arc(cx, cy, r, seg1, seg2);
+    ctx.strokeStyle = C.orange; ctx.stroke();
+
+    ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.arc(cx, cy, r, seg2, endA);
+    ctx.strokeStyle = C.red; ctx.stroke();
+
+    /* Needle */
+    const maxLev = 3;
+    const frac = Math.min(leverage / maxLev, 1);
+    const needleA = startA + frac * range;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(
+        cx + Math.cos(needleA) * (r - 16),
+        cy + Math.sin(needleA) * (r - 16)
+    );
+    ctx.strokeStyle = C.text;
+    ctx.lineWidth = 3;
+    ctx.lineCap = 'round';
+    ctx.stroke();
+
+    /* Center dot */
+    ctx.beginPath();
+    ctx.arc(cx, cy, 7, 0, Math.PI * 2);
+    ctx.fillStyle = C.text;
+    ctx.fill();
+
+    /* Value label */
+    ctx.fillStyle = C.text;
+    ctx.font = 'bold 22px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(leverage.toFixed(2) + 'x', cx, cy + r * 0.48);
+
+    ctx.fillStyle = C.muted;
+    ctx.font = '12px sans-serif';
+    ctx.fillText('杠杆率', cx, cy + r * 0.48 + 20);
+
+    /* Scale labels around the arc */
+    ctx.font = '10px monospace';
+    ctx.fillStyle = C.muted;
+    [0, 1, 2, 3].forEach(v => {
+        const a = startA + (v / maxLev) * range;
+        const lx = cx + Math.cos(a) * (r + 22);
+        const ly = cy + Math.sin(a) * (r + 22);
+        ctx.textAlign = 'center';
+        ctx.fillText(v + 'x', lx, ly + 4);
+    });
+
+    /* Status text */
+    let status, statusColor;
+    if (leverage < 1) { status = '安全'; statusColor = C.green; }
+    else if (leverage < 2) { status = '适中'; statusColor = C.orange; }
+    else { status = '高风险'; statusColor = C.red; }
+    ctx.font = 'bold 13px sans-serif';
+    ctx.fillStyle = statusColor;
+    ctx.fillText(status, cx, cy - r * 0.15);
+}
+
+/* --- Stress Test --- */
+function drawStressTest() {
+    const scenarios = [-0.05, -0.10, -0.20, -0.30];
+    const portValue = 1000000;
+    const el = document.getElementById('stressRow');
+    el.innerHTML = '';
+
+    scenarios.forEach(drop => {
+        let pnl = 0;
+        assets.forEach((_, i) => {
+            pnl += portValue * weights[i] * betas[i] * drop;
+        });
+        pnl *= leverage;
+
+        const card = document.createElement('div');
+        card.className = 'stress-card';
+        card.innerHTML = `
+            <div class="scenario">市场 ${(drop * 100).toFixed(0)}%</div>
+            <div class="pnl ${pnl < 0 ? 'loss' : 'gain'}">
+                ${pnl >= 0 ? '+' : ''}${fmt$(pnl)}
+            </div>
+            <div style="font-size:0.75rem;color:var(--text-muted);margin-top:0.25rem">
+                ${(pnl / portValue * 100).toFixed(1)}% 组合价值
+            </div>
+            <div style="font-size:0.7rem;color:var(--text-muted);margin-top:0.15rem">
+                剩余 ${fmt$(portValue + pnl)}
+            </div>`;
+        el.appendChild(card);
+    });
+}
+
+/* ================================================================
+   Initial Render & Resize Handler
+   ================================================================ */
+function drawAll() {
+    drawVaR();
+    drawCVaR();
+    drawPosition();
+    drawStopLoss();
+    drawDashBar();
+    drawDashCorr();
+    drawDashPie();
+    drawDashGauge();
+    drawStressTest();
+}
+
+drawAll();
+
+let resizeTimer;
+window.addEventListener('resize', () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(drawAll, 150);
+});
+
+/* ================================================================
+   KaTeX Auto-Render
+   ================================================================ */
+if (typeof renderMathInElement === 'function') {
+    renderMathInElement(document.body, {
+        delimiters: [
+            { left: '$$', right: '$$', display: true },
+            { left: '\\(', right: '\\)', display: false },
+            { left: '$', right: '$', display: false }
+        ]
+    });
+}
+
+}); /* end DOMContentLoaded */
+
+/* KaTeX fallback for deferred script loading */
+window.addEventListener('load', () => {
+    if (typeof renderMathInElement === 'function') {
+        renderMathInElement(document.body, {
+            delimiters: [
+                { left: '$$', right: '$$', display: true },
+                { left: '\\(', right: '\\)', display: false },
+                { left: '$', right: '$', display: false }
+            ]
+        });
+    }
+});
+</script>
+</body>
+</html>

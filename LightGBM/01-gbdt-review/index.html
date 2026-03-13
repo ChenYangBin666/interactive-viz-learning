@@ -1,0 +1,1519 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GBDT 回顾 — LightGBM</title>
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+    <script defer src="../shared/scripts/nav.js"></script>
+    <script defer src="../shared/scripts/lgbm-utils.js"></script>
+    <style>
+        /* ===== Page Header ===== */
+        .page-header {
+            text-align: center;
+            padding: 2rem 0 1rem;
+        }
+        .page-header h1 {
+            font-size: 2.2rem;
+            background: linear-gradient(135deg, var(--accent-green), var(--accent-blue));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .page-header p {
+            max-width: 720px;
+            margin: 0.5rem auto 0;
+        }
+
+        /* ===== Canvas wrappers ===== */
+        .canvas-wrap {
+            position: relative;
+            width: 100%;
+            border-radius: var(--radius-md);
+            overflow: hidden;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+        }
+        .canvas-wrap canvas {
+            display: block;
+            width: 100%;
+            height: auto;
+        }
+
+        /* ===== Split viz: scatter + tree ===== */
+        .dual-canvas {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+        }
+
+        /* ===== Controls row ===== */
+        .controls-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1rem;
+            align-items: center;
+            padding: 0.75rem 1rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            margin-top: 0.75rem;
+        }
+        .controls-row .slider-group {
+            flex: 1;
+            min-width: 180px;
+        }
+
+        /* ===== Residual section ===== */
+        .residual-stages {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+            margin-bottom: 0.75rem;
+        }
+        .residual-stages .stage-btn {
+            padding: 0.35rem 0.8rem;
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            background: transparent;
+            color: var(--text-secondary);
+            font-family: inherit;
+            font-size: 0.8rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .residual-stages .stage-btn.active {
+            background: rgba(22, 199, 154, 0.2);
+            border-color: var(--accent-green);
+            color: var(--accent-green);
+        }
+
+        /* ===== Metric display ===== */
+        .metric-row {
+            display: flex;
+            gap: 1.5rem;
+            margin-top: 0.5rem;
+        }
+        .metric {
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+        }
+        .metric .label { color: var(--text-muted); }
+        .metric .value { color: var(--accent-green); font-weight: 600; }
+
+        /* ===== Ensemble section ===== */
+        .ensemble-layout {
+            display: grid;
+            grid-template-columns: 1.3fr 1fr;
+            gap: 1rem;
+        }
+
+        /* ===== Learning rate comparison ===== */
+        .lr-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 1rem;
+        }
+        .lr-col {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 0.75rem;
+        }
+        .lr-col h4 {
+            text-align: center;
+            margin-bottom: 0.5rem;
+            font-family: var(--font-mono);
+        }
+        .lr-col .lr-value {
+            color: var(--accent-orange);
+        }
+
+        /* ===== Gradient analogy ===== */
+        .analogy-split {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+        }
+        .analogy-panel {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1rem;
+        }
+        .analogy-panel h4 {
+            text-align: center;
+            margin-bottom: 0.5rem;
+        }
+
+        /* ===== Formula box ===== */
+        .formula-box {
+            background: rgba(22, 199, 154, 0.05);
+            border: 1px solid rgba(22, 199, 154, 0.2);
+            border-radius: var(--radius-md);
+            padding: 1rem 1.5rem;
+            margin: 1rem 0;
+            text-align: center;
+        }
+
+        /* ===== Responsive ===== */
+        @media (max-width: 1024px) {
+            .dual-canvas, .ensemble-layout, .analogy-split {
+                grid-template-columns: 1fr;
+            }
+        }
+        @media (max-width: 768px) {
+            .lr-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="page-container">
+        <!-- Header -->
+        <div class="page-header">
+            <h1>GBDT 回顾</h1>
+            <p>梯度提升决策树 (Gradient Boosting Decision Trees) 是 LightGBM 的基础。本模块通过交互可视化，帮助你直观理解 GBDT 的核心思想。</p>
+        </div>
+
+        <!-- Section 1: Decision Tree Basics -->
+        <div class="section" id="sec-tree">
+            <div class="section-title">
+                <div class="icon">1</div>
+                <h2>决策树基础</h2>
+            </div>
+            <p>点击下方左侧散点图添加数据点（左键添加蓝色类，右键添加红色类）。决策树将实时寻找最优分割线，右侧同步显示对应的树结构。</p>
+            <div class="dual-canvas">
+                <div class="canvas-wrap">
+                    <canvas id="cvScatter" width="560" height="420"></canvas>
+                </div>
+                <div class="canvas-wrap">
+                    <canvas id="cvTree" width="560" height="420"></canvas>
+                </div>
+            </div>
+            <div class="controls-row">
+                <div class="slider-group">
+                    <label>最大深度</label>
+                    <input type="range" id="sliderDepth" min="1" max="6" value="3">
+                    <span class="slider-value" id="valDepth">3</span>
+                </div>
+                <div class="slider-group">
+                    <label>最少样本</label>
+                    <input type="range" id="sliderMinSamples" min="1" max="10" value="2">
+                    <span class="slider-value" id="valMinSamples">2</span>
+                </div>
+                <button class="btn" id="btnClearTree">清空数据</button>
+            </div>
+        </div>
+
+        <!-- Section 2: Residual Fitting Animation -->
+        <div class="section" id="sec-residual">
+            <div class="section-title">
+                <div class="icon">2</div>
+                <h2>残差拟合动画</h2>
+            </div>
+            <p>GBDT 的核心思想：每棵新树拟合前面所有树的残差（预测误差）。观察随着树的叠加，预测曲线如何逐步逼近真实数据。</p>
+            <div class="formula-box">
+                $$F_m(x) = F_{m-1}(x) + \eta \cdot h_m(x), \quad h_m \text{ 拟合残差 } r_m = y - F_{m-1}(x)$$
+            </div>
+            <div class="residual-stages" id="residualStages"></div>
+            <div class="canvas-wrap">
+                <canvas id="cvResidual" width="1120" height="400"></canvas>
+            </div>
+            <div class="controls-row">
+                <button class="btn" id="btnResidualPlay">&#9654; 播放</button>
+                <button class="btn" id="btnResidualStep">下一步</button>
+                <button class="btn" id="btnResidualReset">重置</button>
+                <div class="metric-row">
+                    <div class="metric"><span class="label">当前树: </span><span class="value" id="metricTreeIdx">0</span></div>
+                    <div class="metric"><span class="label">MSE: </span><span class="value" id="metricMSE">-</span></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Section 3: Ensemble Effect -->
+        <div class="section" id="sec-ensemble">
+            <div class="section-title">
+                <div class="icon">3</div>
+                <h2>集成效果</h2>
+            </div>
+            <p>拖动滑块改变参与集成的树数量，观察左侧决策边界如何逐渐复杂化，以及右侧每棵树的贡献权重。弱学习器的组合构成强学习器。</p>
+            <div class="ensemble-layout">
+                <div class="canvas-wrap">
+                    <canvas id="cvBoundary" width="640" height="480"></canvas>
+                </div>
+                <div class="canvas-wrap">
+                    <canvas id="cvContrib" width="480" height="480"></canvas>
+                </div>
+            </div>
+            <div class="controls-row">
+                <div class="slider-group">
+                    <label>树的数量</label>
+                    <input type="range" id="sliderNumTrees" min="1" max="20" value="1">
+                    <span class="slider-value" id="valNumTrees">1</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Section 4: Learning Rate Effect -->
+        <div class="section" id="sec-lr">
+            <div class="section-title">
+                <div class="icon">4</div>
+                <h2>学习率影响</h2>
+            </div>
+            <p>比较三种学习率下的训练效果。较小的学习率收敛更平滑但需要更多树；较大的学习率收敛快但容易过拟合。</p>
+            <div class="lr-grid">
+                <div class="lr-col">
+                    <h4><span class="lr-value">lr = 0.1</span></h4>
+                    <div class="canvas-wrap"><canvas id="cvLR01" width="360" height="250"></canvas></div>
+                    <div class="canvas-wrap mt-1"><canvas id="cvLoss01" width="360" height="150"></canvas></div>
+                </div>
+                <div class="lr-col">
+                    <h4><span class="lr-value">lr = 0.3</span></h4>
+                    <div class="canvas-wrap"><canvas id="cvLR03" width="360" height="250"></canvas></div>
+                    <div class="canvas-wrap mt-1"><canvas id="cvLoss03" width="360" height="150"></canvas></div>
+                </div>
+                <div class="lr-col">
+                    <h4><span class="lr-value">lr = 1.0</span></h4>
+                    <div class="canvas-wrap"><canvas id="cvLR10" width="360" height="250"></canvas></div>
+                    <div class="canvas-wrap mt-1"><canvas id="cvLoss10" width="360" height="150"></canvas></div>
+                </div>
+            </div>
+            <div class="controls-row">
+                <div class="slider-group">
+                    <label>树的数量</label>
+                    <input type="range" id="sliderLRTrees" min="1" max="30" value="10">
+                    <span class="slider-value" id="valLRTrees">10</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Section 5: Gradient Descent Analogy -->
+        <div class="section" id="sec-analogy">
+            <div class="section-title">
+                <div class="icon">5</div>
+                <h2>梯度下降类比</h2>
+            </div>
+            <p>梯度下降在参数空间中沿负梯度更新参数；GBDT 在函数空间中沿负梯度方向添加新的基学习器。两者的思想完全类似。</p>
+            <div class="formula-box">
+                $$\underbrace{\theta_{t+1} = \theta_t - \eta \nabla L(\theta_t)}_{\text{参数空间梯度下降}} \quad \longleftrightarrow \quad \underbrace{F_m(x) = F_{m-1}(x) + \eta \cdot h_m(x)}_{\text{函数空间梯度下降}}$$
+            </div>
+            <div class="analogy-split">
+                <div class="analogy-panel">
+                    <h4 style="color:var(--accent-blue)">参数空间：梯度下降</h4>
+                    <div class="canvas-wrap"><canvas id="cvGD" width="520" height="400"></canvas></div>
+                </div>
+                <div class="analogy-panel">
+                    <h4 style="color:var(--accent-purple)">函数空间：GBDT 逐步逼近</h4>
+                    <div class="canvas-wrap"><canvas id="cvFS" width="520" height="400"></canvas></div>
+                </div>
+            </div>
+            <div class="controls-row">
+                <button class="btn btn-primary" id="btnAnalogyPlay">&#9654; 同步动画</button>
+                <button class="btn" id="btnAnalogyReset">重置</button>
+                <div class="metric-row">
+                    <div class="metric"><span class="label">步骤: </span><span class="value" id="metricAnalogyStep">0</span></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== JavaScript ===== -->
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+
+    /* ============================================================
+       Utility helpers
+       ============================================================ */
+    function getCtx(id) {
+        const cv = document.getElementById(id);
+        const dpr = window.devicePixelRatio || 1;
+        const rect = cv.getBoundingClientRect();
+        cv.width = rect.width * dpr;
+        cv.height = rect.height * dpr;
+        const ctx = cv.getContext('2d');
+        ctx.scale(dpr, dpr);
+        cv._w = rect.width;
+        cv._h = rect.height;
+        return ctx;
+    }
+
+    function clearCanvas(ctx) {
+        ctx.clearRect(0, 0, ctx.canvas._w, ctx.canvas._h);
+    }
+
+    const COLORS = {
+        blue: '#4fc3f7',
+        red: '#ff5252',
+        green: '#16c79a',
+        orange: '#ffab40',
+        purple: '#b388ff',
+        yellow: '#ffd740',
+        grid: 'rgba(255,255,255,0.06)',
+        axis: 'rgba(255,255,255,0.15)',
+        text: '#a8a8b8'
+    };
+
+    /* ============================================================
+       SECTION 1 — Decision Tree Basics
+       ============================================================ */
+    (function() {
+        const points = []; // {x, y, cls: 0|1}
+        let maxDepth = 3, minSamples = 2;
+        let ctxS, ctxT;
+
+        function init() {
+            ctxS = getCtx('cvScatter');
+            ctxT = getCtx('cvTree');
+            const cv = document.getElementById('cvScatter');
+
+            cv.addEventListener('click', function(e) {
+                addPoint(e, 0);
+            });
+            cv.addEventListener('contextmenu', function(e) {
+                e.preventDefault();
+                addPoint(e, 1);
+            });
+
+            document.getElementById('sliderDepth').addEventListener('input', function() {
+                maxDepth = +this.value;
+                document.getElementById('valDepth').textContent = maxDepth;
+                rebuild();
+            });
+            document.getElementById('sliderMinSamples').addEventListener('input', function() {
+                minSamples = +this.value;
+                document.getElementById('valMinSamples').textContent = minSamples;
+                rebuild();
+            });
+            document.getElementById('btnClearTree').addEventListener('click', function() {
+                points.length = 0;
+                rebuild();
+            });
+
+            // seed some initial data
+            var rng = LGBMUtils.seededRandom(42);
+            for (var i = 0; i < 20; i++) {
+                var cls = i < 10 ? 0 : 1;
+                var cx = cls === 0 ? 0.3 : 0.7;
+                var cy = cls === 0 ? 0.35 : 0.65;
+                points.push({ x: cx + (rng() - 0.5) * 0.35, y: cy + (rng() - 0.5) * 0.35, cls: cls });
+            }
+            rebuild();
+        }
+
+        function addPoint(e, cls) {
+            const rect = e.target.getBoundingClientRect();
+            const x = (e.clientX - rect.left) / rect.width;
+            const y = (e.clientY - rect.top) / rect.height;
+            if (x < 0.05 || x > 0.95 || y < 0.05 || y > 0.95) return;
+            points.push({ x: x, y: y, cls: cls });
+            rebuild();
+        }
+
+        function rebuild() {
+            drawScatter();
+            drawTree();
+        }
+
+        function buildClassTree() {
+            if (points.length < 2) return null;
+            var data = points.map(function(p) { return [p.x, p.y]; });
+            var labels = points.map(function(p) { return p.cls; });
+            return LGBMUtils.buildTree(data, labels, maxDepth, minSamples);
+        }
+
+        function drawScatter() {
+            var ctx = ctxS;
+            var w = ctx.canvas._w, h = ctx.canvas._h;
+            clearCanvas(ctx);
+
+            // background grid
+            ctx.strokeStyle = COLORS.grid;
+            ctx.lineWidth = 1;
+            for (var i = 0; i <= 10; i++) {
+                var px = w * (0.05 + i * 0.09);
+                ctx.beginPath(); ctx.moveTo(px, h * 0.05); ctx.lineTo(px, h * 0.95); ctx.stroke();
+                var py = h * (0.05 + i * 0.09);
+                ctx.beginPath(); ctx.moveTo(w * 0.05, py); ctx.lineTo(w * 0.95, py); ctx.stroke();
+            }
+
+            // draw split regions if tree exists
+            var tree = buildClassTree();
+            if (tree) {
+                drawRegions(ctx, tree, w, h);
+                drawSplitLines(ctx, tree, 0.05, 0.95, 0.05, 0.95, w, h);
+            }
+
+            // draw points
+            for (var i = 0; i < points.length; i++) {
+                var p = points[i];
+                ctx.beginPath();
+                ctx.arc(p.x * w, p.y * h, 6, 0, Math.PI * 2);
+                ctx.fillStyle = p.cls === 0 ? COLORS.blue : COLORS.red;
+                ctx.fill();
+                ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+            }
+
+            // axis labels
+            ctx.fillStyle = COLORS.text;
+            ctx.font = '12px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('X1', w / 2, h - 4);
+            ctx.save();
+            ctx.translate(12, h / 2);
+            ctx.rotate(-Math.PI / 2);
+            ctx.fillText('X2', 0, 0);
+            ctx.restore();
+
+            // legend
+            ctx.font = '11px sans-serif';
+            ctx.fillStyle = COLORS.blue;
+            ctx.fillText('左键: 蓝色类', w * 0.25, h * 0.03 + 10);
+            ctx.fillStyle = COLORS.red;
+            ctx.fillText('右键: 红色类', w * 0.75, h * 0.03 + 10);
+        }
+
+        function drawRegions(ctx, tree, w, h) {
+            // paint decision regions at low resolution
+            var step = 8;
+            for (var px = 0; px < w; px += step) {
+                for (var py = 0; py < h; py += step) {
+                    var fx = px / w, fy = py / h;
+                    if (fx < 0.05 || fx > 0.95 || fy < 0.05 || fy > 0.95) continue;
+                    var pred = LGBMUtils.predictTree(tree, [fx, fy]);
+                    if (pred < 0.5) {
+                        ctx.fillStyle = 'rgba(79,195,247,0.08)';
+                    } else {
+                        ctx.fillStyle = 'rgba(255,82,82,0.08)';
+                    }
+                    ctx.fillRect(px, py, step, step);
+                }
+            }
+        }
+
+        function drawSplitLines(ctx, node, x0, x1, y0, y1, w, h) {
+            if (node.feature === undefined) return;
+            ctx.strokeStyle = COLORS.yellow;
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([4, 4]);
+            if (node.feature === 0) {
+                // vertical line at threshold
+                var sx = node.threshold * w;
+                ctx.beginPath();
+                ctx.moveTo(sx, y0 * h);
+                ctx.lineTo(sx, y1 * h);
+                ctx.stroke();
+                drawSplitLines(ctx, node.left, x0, node.threshold, y0, y1, w, h);
+                drawSplitLines(ctx, node.right, node.threshold, x1, y0, y1, w, h);
+            } else {
+                // horizontal line
+                var sy = node.threshold * h;
+                ctx.beginPath();
+                ctx.moveTo(x0 * w, sy);
+                ctx.lineTo(x1 * w, sy);
+                ctx.stroke();
+                drawSplitLines(ctx, node.left, x0, x1, y0, node.threshold, w, h);
+                drawSplitLines(ctx, node.right, x0, x1, node.threshold, y1, w, h);
+            }
+            ctx.setLineDash([]);
+        }
+
+        function drawTree() {
+            var ctx = ctxT;
+            var w = ctx.canvas._w, h = ctx.canvas._h;
+            clearCanvas(ctx);
+
+            var tree = buildClassTree();
+            if (!tree) {
+                ctx.fillStyle = COLORS.text;
+                ctx.font = '14px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('添加数据点后，树结构将在此显示', w / 2, h / 2);
+                return;
+            }
+
+            var nodes = LGBMUtils.treeToNodes(tree);
+            // compute layout positions
+            var maxD = 0;
+            for (var i = 0; i < nodes.length; i++) {
+                if (nodes[i].depth > maxD) maxD = nodes[i].depth;
+            }
+            var levelCounts = new Array(maxD + 1).fill(0);
+            var levelIdx = new Array(nodes.length);
+            for (var i = 0; i < nodes.length; i++) {
+                levelIdx[i] = levelCounts[nodes[i].depth]++;
+            }
+
+            var padX = 40, padY = 40;
+            var usableW = w - padX * 2;
+            var usableH = h - padY * 2;
+
+            for (var i = 0; i < nodes.length; i++) {
+                var n = nodes[i];
+                var cols = levelCounts[n.depth];
+                n._x = padX + usableW * (levelIdx[i] + 0.5) / cols;
+                n._y = padY + usableH * n.depth / Math.max(maxD, 1);
+            }
+
+            // draw edges
+            ctx.strokeStyle = '#8899aa';
+            ctx.lineWidth = 1.5;
+            for (var i = 0; i < nodes.length; i++) {
+                if (nodes[i].parentId !== null) {
+                    var parent = nodes[nodes[i].parentId];
+                    ctx.beginPath();
+                    ctx.moveTo(parent._x, parent._y + 16);
+                    ctx.lineTo(nodes[i]._x, nodes[i]._y - 16);
+                    ctx.stroke();
+                }
+            }
+
+            // draw nodes
+            for (var i = 0; i < nodes.length; i++) {
+                var n = nodes[i];
+                var radius = 22;
+                ctx.beginPath();
+                ctx.arc(n._x, n._y, radius, 0, Math.PI * 2);
+                if (n.isLeaf) {
+                    ctx.fillStyle = n.value < 0.5 ? 'rgba(79,195,247,0.3)' : 'rgba(255,82,82,0.3)';
+                    ctx.strokeStyle = n.value < 0.5 ? COLORS.blue : COLORS.red;
+                } else {
+                    ctx.fillStyle = 'rgba(255,215,64,0.15)';
+                    ctx.strokeStyle = COLORS.yellow;
+                }
+                ctx.lineWidth = 2;
+                ctx.fill();
+                ctx.stroke();
+
+                ctx.fillStyle = '#e0e0e0';
+                ctx.font = '10px monospace';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                if (n.isLeaf) {
+                    ctx.fillText(n.value.toFixed(2), n._x, n._y);
+                } else {
+                    var fname = 'X' + (n.feature + 1);
+                    ctx.fillText(fname + '<=' + n.threshold.toFixed(2), n._x, n._y - 5);
+                    ctx.font = '9px monospace';
+                    ctx.fillStyle = COLORS.text;
+                    ctx.fillText('n=' + n.count, n._x, n._y + 8);
+                }
+            }
+        }
+
+        init();
+    })();
+
+    /* ============================================================
+       SECTION 2 — Residual Fitting Animation
+       ============================================================ */
+    (function() {
+        // Generate sine-like regression data
+        var dataset = LGBMUtils.generateSineData(60, 0.2, 77);
+        var data = dataset.data;
+        var labels = dataset.labels;
+        var n = data.length;
+
+        // Sort data by x for nice curve plotting
+        var idxSorted = [];
+        for (var i = 0; i < n; i++) idxSorted.push(i);
+        idxSorted.sort(function(a, b) { return data[a][0] - data[b][0]; });
+
+        var maxTrees = 10;
+        var lr = 0.3;
+        var trees = [];
+        var predictions = new Array(n).fill(0);
+        var lossHistory = [];
+        var currentStep = 0;
+        var animId = null;
+
+        // Pre-train all trees
+        var allTrees = [];
+        var allPredictions = [new Array(n).fill(0)];
+        var allLoss = [];
+        var tempPred = new Array(n).fill(0);
+
+        for (var t = 0; t < maxTrees; t++) {
+            var gh = LGBMUtils.computeGradients(tempPred, labels, 'mse');
+            var tree = LGBMUtils.boostingStep(data, gh.gradients, gh.hessians, { maxDepth: 3, minSamples: 2, lambda: 1 });
+            allTrees.push(tree);
+            for (var i = 0; i < n; i++) {
+                tempPred[i] += lr * LGBMUtils.predictTree(tree, data[i]);
+            }
+            allPredictions.push(tempPred.slice());
+            allLoss.push(LGBMUtils.mse(tempPred, labels));
+        }
+
+        // Build stage buttons
+        var stagesEl = document.getElementById('residualStages');
+        for (var s = 0; s <= maxTrees; s++) {
+            var btn = document.createElement('button');
+            btn.className = 'stage-btn' + (s === 0 ? ' active' : '');
+            btn.textContent = s === 0 ? '初始' : '树 ' + s;
+            btn.dataset.step = s;
+            btn.addEventListener('click', function() {
+                currentStep = +this.dataset.step;
+                stopAnim();
+                draw();
+                updateStageButtons();
+            });
+            stagesEl.appendChild(btn);
+        }
+
+        function updateStageButtons() {
+            var btns = stagesEl.querySelectorAll('.stage-btn');
+            btns.forEach(function(b) {
+                b.classList.toggle('active', +b.dataset.step === currentStep);
+            });
+            document.getElementById('metricTreeIdx').textContent = currentStep;
+            document.getElementById('metricMSE').textContent = currentStep === 0 ?
+                LGBMUtils.mse(new Array(n).fill(0), labels).toFixed(4) :
+                allLoss[currentStep - 1].toFixed(4);
+        }
+
+        var ctxR;
+        function init() {
+            ctxR = getCtx('cvResidual');
+            draw();
+            updateStageButtons();
+
+            document.getElementById('btnResidualPlay').addEventListener('click', function() {
+                if (animId) { stopAnim(); return; }
+                if (currentStep >= maxTrees) currentStep = 0;
+                startAnim();
+            });
+            document.getElementById('btnResidualStep').addEventListener('click', function() {
+                stopAnim();
+                if (currentStep < maxTrees) { currentStep++; draw(); updateStageButtons(); }
+            });
+            document.getElementById('btnResidualReset').addEventListener('click', function() {
+                stopAnim();
+                currentStep = 0;
+                draw();
+                updateStageButtons();
+            });
+        }
+
+        function startAnim() {
+            document.getElementById('btnResidualPlay').innerHTML = '&#9646;&#9646; 暂停';
+            animId = setInterval(function() {
+                if (currentStep >= maxTrees) { stopAnim(); return; }
+                currentStep++;
+                draw();
+                updateStageButtons();
+            }, 800);
+        }
+
+        function stopAnim() {
+            if (animId) { clearInterval(animId); animId = null; }
+            document.getElementById('btnResidualPlay').innerHTML = '&#9654; 播放';
+        }
+
+        function draw() {
+            var ctx = ctxR;
+            var w = ctx.canvas._w, h = ctx.canvas._h;
+            clearCanvas(ctx);
+
+            var pad = { l: 60, r: 30, t: 30, b: 40 };
+            var cw = w - pad.l - pad.r;
+            var ch = h - pad.t - pad.b;
+
+            // data range
+            var xMin = Infinity, xMax = -Infinity, yMin = Infinity, yMax = -Infinity;
+            for (var i = 0; i < n; i++) {
+                if (data[i][0] < xMin) xMin = data[i][0];
+                if (data[i][0] > xMax) xMax = data[i][0];
+                if (labels[i] < yMin) yMin = labels[i];
+                if (labels[i] > yMax) yMax = labels[i];
+            }
+            yMin -= 0.3; yMax += 0.3;
+
+            function tx(v) { return pad.l + (v - xMin) / (xMax - xMin) * cw; }
+            function ty(v) { return pad.t + (1 - (v - yMin) / (yMax - yMin)) * ch; }
+
+            // grid
+            ctx.strokeStyle = COLORS.grid;
+            ctx.lineWidth = 1;
+            for (var i = 0; i <= 5; i++) {
+                var gy = pad.t + ch * i / 5;
+                ctx.beginPath(); ctx.moveTo(pad.l, gy); ctx.lineTo(pad.l + cw, gy); ctx.stroke();
+            }
+
+            // axes
+            ctx.strokeStyle = COLORS.axis;
+            ctx.lineWidth = 1.5;
+            ctx.beginPath(); ctx.moveTo(pad.l, pad.t + ch); ctx.lineTo(pad.l + cw, pad.t + ch); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(pad.l, pad.t); ctx.lineTo(pad.l, pad.t + ch); ctx.stroke();
+
+            // axis labels
+            ctx.fillStyle = COLORS.text;
+            ctx.font = '11px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('x', pad.l + cw / 2, h - 8);
+            for (var i = 0; i <= 5; i++) {
+                var yv = yMin + (yMax - yMin) * (1 - i / 5);
+                ctx.textAlign = 'right';
+                ctx.fillText(yv.toFixed(1), pad.l - 8, pad.t + ch * i / 5 + 4);
+            }
+
+            // data points
+            for (var i = 0; i < n; i++) {
+                ctx.beginPath();
+                ctx.arc(tx(data[i][0]), ty(labels[i]), 4, 0, Math.PI * 2);
+                ctx.fillStyle = 'rgba(79,195,247,0.5)';
+                ctx.fill();
+                ctx.strokeStyle = COLORS.blue;
+                ctx.lineWidth = 1;
+                ctx.stroke();
+            }
+
+            // draw current prediction curve
+            var pred = allPredictions[currentStep];
+            ctx.strokeStyle = COLORS.green;
+            ctx.lineWidth = 2.5;
+            ctx.beginPath();
+            var first = true;
+            for (var j = 0; j < idxSorted.length; j++) {
+                var idx = idxSorted[j];
+                var px = tx(data[idx][0]);
+                var py = ty(pred[idx]);
+                if (first) { ctx.moveTo(px, py); first = false; }
+                else ctx.lineTo(px, py);
+            }
+            ctx.stroke();
+
+            // draw residuals as vertical lines
+            if (currentStep > 0 && currentStep < maxTrees) {
+                ctx.strokeStyle = 'rgba(255,171,64,0.4)';
+                ctx.lineWidth = 1;
+                ctx.setLineDash([3, 3]);
+                for (var i = 0; i < n; i++) {
+                    ctx.beginPath();
+                    ctx.moveTo(tx(data[i][0]), ty(pred[i]));
+                    ctx.lineTo(tx(data[i][0]), ty(labels[i]));
+                    ctx.stroke();
+                }
+                ctx.setLineDash([]);
+            }
+
+            // legend
+            ctx.font = '12px sans-serif';
+            ctx.textAlign = 'left';
+            ctx.fillStyle = COLORS.blue;
+            ctx.fillText('数据点', pad.l + 10, pad.t + 18);
+            ctx.fillStyle = COLORS.green;
+            ctx.fillText('预测 (树 0~' + currentStep + ')', pad.l + 80, pad.t + 18);
+            if (currentStep > 0 && currentStep < maxTrees) {
+                ctx.fillStyle = COLORS.orange;
+                ctx.fillText('残差', pad.l + 250, pad.t + 18);
+            }
+        }
+
+        init();
+    })();
+
+    /* ============================================================
+       SECTION 3 — Ensemble Effect
+       ============================================================ */
+    (function() {
+        // Generate 2D classification data
+        var dataset = LGBMUtils.generateClassificationData(80, 0.45, 99);
+        var data = dataset.data;
+        var labels = dataset.labels;
+        var n = data.length;
+
+        // Pre-train 20 trees
+        var maxEnsemble = 20;
+        var lr = 0.3;
+        var allTrees = [];
+        var tempPred = new Array(n).fill(0);
+
+        for (var t = 0; t < maxEnsemble; t++) {
+            var gh = LGBMUtils.computeGradients(tempPred, labels, 'logloss');
+            var tree = LGBMUtils.boostingStep(data, gh.gradients, gh.hessians, { maxDepth: 3, minSamples: 2, lambda: 1 });
+            allTrees.push(tree);
+            for (var i = 0; i < n; i++) {
+                tempPred[i] += lr * LGBMUtils.predictTree(tree, data[i]);
+            }
+        }
+
+        // Compute contribution (average absolute leaf value) for each tree
+        var contributions = [];
+        for (var t = 0; t < maxEnsemble; t++) {
+            var nodes = LGBMUtils.treeToNodes(allTrees[t]);
+            var sumAbs = 0, cnt = 0;
+            for (var j = 0; j < nodes.length; j++) {
+                if (nodes[j].isLeaf) { sumAbs += Math.abs(nodes[j].value); cnt++; }
+            }
+            contributions.push(cnt > 0 ? sumAbs / cnt : 0);
+        }
+
+        var ctxB, ctxC;
+        function init() {
+            ctxB = getCtx('cvBoundary');
+            ctxC = getCtx('cvContrib');
+
+            document.getElementById('sliderNumTrees').addEventListener('input', function() {
+                document.getElementById('valNumTrees').textContent = this.value;
+                draw(+this.value);
+            });
+            draw(1);
+        }
+
+        function draw(numTrees) {
+            drawBoundary(numTrees);
+            drawContributions(numTrees);
+        }
+
+        function drawBoundary(numTrees) {
+            var ctx = ctxB;
+            var w = ctx.canvas._w, h = ctx.canvas._h;
+            clearCanvas(ctx);
+
+            // data range
+            var xMin = -2, xMax = 2, yMin = -2, yMax = 2;
+            var pad = { l: 40, r: 20, t: 20, b: 30 };
+            var cw = w - pad.l - pad.r, ch = h - pad.t - pad.b;
+
+            function tx(v) { return pad.l + (v - xMin) / (xMax - xMin) * cw; }
+            function ty(v) { return pad.t + (1 - (v - yMin) / (yMax - yMin)) * ch; }
+
+            // paint decision boundary
+            var step = 6;
+            for (var px = pad.l; px < pad.l + cw; px += step) {
+                for (var py = pad.t; py < pad.t + ch; py += step) {
+                    var fx = xMin + (px - pad.l) / cw * (xMax - xMin);
+                    var fy = yMax - (py - pad.t) / ch * (yMax - yMin);
+                    var pred = LGBMUtils.gbdtPredict(allTrees.slice(0, numTrees), [fx, fy], lr);
+                    var prob = LGBMUtils.sigmoid(pred);
+                    if (prob < 0.5) {
+                        ctx.fillStyle = 'rgba(79,195,247,' + (0.03 + (0.5 - prob) * 0.2) + ')';
+                    } else {
+                        ctx.fillStyle = 'rgba(255,82,82,' + (0.03 + (prob - 0.5) * 0.2) + ')';
+                    }
+                    ctx.fillRect(px, py, step, step);
+                }
+            }
+
+            // draw boundary contour at prob=0.5
+            ctx.strokeStyle = COLORS.yellow;
+            ctx.lineWidth = 2;
+            ctx.setLineDash([5, 5]);
+            var resolution = 100;
+            for (var ix = 0; ix < resolution; ix++) {
+                for (var iy = 0; iy < resolution; iy++) {
+                    var fx1 = xMin + ix / resolution * (xMax - xMin);
+                    var fy1 = yMax - iy / resolution * (yMax - yMin);
+                    var fx2 = xMin + (ix + 1) / resolution * (xMax - xMin);
+                    var fy2 = yMax - (iy + 1) / resolution * (yMax - yMin);
+                    var p1 = LGBMUtils.sigmoid(LGBMUtils.gbdtPredict(allTrees.slice(0, numTrees), [fx1, fy1], lr));
+                    var p2 = LGBMUtils.sigmoid(LGBMUtils.gbdtPredict(allTrees.slice(0, numTrees), [fx2, fy1], lr));
+                    var p3 = LGBMUtils.sigmoid(LGBMUtils.gbdtPredict(allTrees.slice(0, numTrees), [fx1, fy2], lr));
+                    if ((p1 - 0.5) * (p2 - 0.5) < 0 || (p1 - 0.5) * (p3 - 0.5) < 0) {
+                        ctx.fillStyle = COLORS.yellow;
+                        ctx.fillRect(tx(fx1), ty(fy1), cw / resolution + 1, ch / resolution + 1);
+                    }
+                }
+            }
+            ctx.setLineDash([]);
+
+            // draw data points
+            for (var i = 0; i < n; i++) {
+                ctx.beginPath();
+                ctx.arc(tx(data[i][0]), ty(data[i][1]), 5, 0, Math.PI * 2);
+                ctx.fillStyle = labels[i] === 0 ? COLORS.blue : COLORS.red;
+                ctx.fill();
+                ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+                ctx.lineWidth = 1;
+                ctx.stroke();
+            }
+
+            // title
+            ctx.fillStyle = '#e0e0e0';
+            ctx.font = '13px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('决策边界 (' + numTrees + ' 棵树)', w / 2, pad.t + 15);
+        }
+
+        function drawContributions(numTrees) {
+            var ctx = ctxC;
+            var w = ctx.canvas._w, h = ctx.canvas._h;
+            clearCanvas(ctx);
+
+            var pad = { l: 50, r: 20, t: 30, b: 40 };
+            var cw = w - pad.l - pad.r, ch = h - pad.t - pad.b;
+
+            var maxC = 0;
+            for (var i = 0; i < maxEnsemble; i++) {
+                if (contributions[i] > maxC) maxC = contributions[i];
+            }
+            if (maxC === 0) maxC = 1;
+
+            var barW = cw / maxEnsemble * 0.7;
+            var gap = cw / maxEnsemble;
+
+            // grid
+            ctx.strokeStyle = COLORS.grid;
+            ctx.lineWidth = 1;
+            for (var i = 0; i <= 4; i++) {
+                var gy = pad.t + ch * (1 - i / 4);
+                ctx.beginPath(); ctx.moveTo(pad.l, gy); ctx.lineTo(pad.l + cw, gy); ctx.stroke();
+                ctx.fillStyle = COLORS.text;
+                ctx.font = '10px monospace';
+                ctx.textAlign = 'right';
+                ctx.fillText((maxC * i / 4).toFixed(2), pad.l - 5, gy + 3);
+            }
+
+            // bars
+            for (var i = 0; i < maxEnsemble; i++) {
+                var bx = pad.l + i * gap + (gap - barW) / 2;
+                var bh = (contributions[i] / maxC) * ch;
+                var by = pad.t + ch - bh;
+
+                if (i < numTrees) {
+                    ctx.fillStyle = i === numTrees - 1 ? COLORS.green : 'rgba(22,199,154,0.5)';
+                } else {
+                    ctx.fillStyle = 'rgba(100,100,120,0.25)';
+                }
+                ctx.fillRect(bx, by, barW, bh);
+
+                // border for active
+                if (i < numTrees) {
+                    ctx.strokeStyle = COLORS.green;
+                    ctx.lineWidth = 1;
+                    ctx.strokeRect(bx, by, barW, bh);
+                }
+
+                // label
+                ctx.fillStyle = i < numTrees ? '#e0e0e0' : COLORS.text;
+                ctx.font = '9px monospace';
+                ctx.textAlign = 'center';
+                ctx.fillText((i + 1).toString(), bx + barW / 2, pad.t + ch + 14);
+            }
+
+            // title
+            ctx.fillStyle = '#e0e0e0';
+            ctx.font = '13px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('各棵树平均贡献', w / 2, pad.t + 15);
+
+            // x label
+            ctx.fillStyle = COLORS.text;
+            ctx.font = '11px sans-serif';
+            ctx.fillText('树编号', pad.l + cw / 2, h - 5);
+        }
+
+        init();
+    })();
+
+    /* ============================================================
+       SECTION 4 — Learning Rate Effect
+       ============================================================ */
+    (function() {
+        var dataset = LGBMUtils.generateSineData(50, 0.25, 123);
+        var data = dataset.data;
+        var labels = dataset.labels;
+        var n = data.length;
+
+        var idxSorted = [];
+        for (var i = 0; i < n; i++) idxSorted.push(i);
+        idxSorted.sort(function(a, b) { return data[a][0] - data[b][0]; });
+
+        var lrs = [0.1, 0.3, 1.0];
+        var maxT = 30;
+        var allResults = {}; // lr -> { predictions: [step][i], losses: [step] }
+
+        // Pre-train for each learning rate
+        lrs.forEach(function(lr) {
+            var preds = [new Array(n).fill(0)];
+            var losses = [];
+            var tempPred = new Array(n).fill(0);
+
+            for (var t = 0; t < maxT; t++) {
+                var gh = LGBMUtils.computeGradients(tempPred, labels, 'mse');
+                var tree = LGBMUtils.boostingStep(data, gh.gradients, gh.hessians, { maxDepth: 3, minSamples: 2, lambda: 1 });
+                for (var i = 0; i < n; i++) {
+                    tempPred[i] += lr * LGBMUtils.predictTree(tree, data[i]);
+                }
+                preds.push(tempPred.slice());
+                losses.push(LGBMUtils.mse(tempPred, labels));
+            }
+            allResults[lr] = { predictions: preds, losses: losses };
+        });
+
+        var canvasIds = [
+            { pred: 'cvLR01', loss: 'cvLoss01', lr: 0.1 },
+            { pred: 'cvLR03', loss: 'cvLoss03', lr: 0.3 },
+            { pred: 'cvLR10', loss: 'cvLoss10', lr: 1.0 }
+        ];
+
+        function init() {
+            document.getElementById('sliderLRTrees').addEventListener('input', function() {
+                document.getElementById('valLRTrees').textContent = this.value;
+                drawAll(+this.value);
+            });
+            drawAll(10);
+        }
+
+        function drawAll(numTrees) {
+            canvasIds.forEach(function(c) {
+                drawPred(c.pred, c.lr, numTrees);
+                drawLoss(c.loss, c.lr, numTrees);
+            });
+        }
+
+        function drawPred(canvasId, lr, numTrees) {
+            var ctx = getCtx(canvasId);
+            var w = ctx.canvas._w, h = ctx.canvas._h;
+            clearCanvas(ctx);
+
+            var pad = { l: 35, r: 10, t: 15, b: 25 };
+            var cw = w - pad.l - pad.r, ch = h - pad.t - pad.b;
+
+            var xMin = 0, xMax = Math.PI * 2;
+            var yMin = -2, yMax = 2;
+
+            function tx(v) { return pad.l + (v - xMin) / (xMax - xMin) * cw; }
+            function ty(v) { return pad.t + (1 - (v - yMin) / (yMax - yMin)) * ch; }
+
+            // grid
+            ctx.strokeStyle = COLORS.grid;
+            ctx.lineWidth = 1;
+            for (var i = 0; i <= 4; i++) {
+                var gy = pad.t + ch * i / 4;
+                ctx.beginPath(); ctx.moveTo(pad.l, gy); ctx.lineTo(pad.l + cw, gy); ctx.stroke();
+            }
+
+            // data points
+            for (var i = 0; i < n; i++) {
+                ctx.beginPath();
+                ctx.arc(tx(data[i][0]), ty(labels[i]), 3, 0, Math.PI * 2);
+                ctx.fillStyle = 'rgba(79,195,247,0.4)';
+                ctx.fill();
+            }
+
+            // prediction curve
+            var pred = allResults[lr].predictions[Math.min(numTrees, maxT)];
+            ctx.strokeStyle = COLORS.green;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            var first = true;
+            for (var j = 0; j < idxSorted.length; j++) {
+                var idx = idxSorted[j];
+                var px = tx(data[idx][0]);
+                var py = ty(Math.max(yMin, Math.min(yMax, pred[idx])));
+                if (first) { ctx.moveTo(px, py); first = false; }
+                else ctx.lineTo(px, py);
+            }
+            ctx.stroke();
+
+            // true sine curve
+            ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([4, 4]);
+            ctx.beginPath();
+            for (var px = 0; px <= 100; px++) {
+                var xv = xMin + px / 100 * (xMax - xMin);
+                var yv = Math.sin(xv);
+                var sx = tx(xv), sy = ty(yv);
+                if (px === 0) ctx.moveTo(sx, sy);
+                else ctx.lineTo(sx, sy);
+            }
+            ctx.stroke();
+            ctx.setLineDash([]);
+        }
+
+        function drawLoss(canvasId, lr, numTrees) {
+            var ctx = getCtx(canvasId);
+            var w = ctx.canvas._w, h = ctx.canvas._h;
+            clearCanvas(ctx);
+
+            var pad = { l: 40, r: 10, t: 10, b: 25 };
+            var cw = w - pad.l - pad.r, ch = h - pad.t - pad.b;
+
+            var losses = allResults[lr].losses;
+            var maxLoss = 0;
+            for (var i = 0; i < losses.length; i++) {
+                if (losses[i] > maxLoss) maxLoss = losses[i];
+            }
+            if (maxLoss === 0) maxLoss = 1;
+            // Cap at reasonable value for display
+            maxLoss = Math.min(maxLoss, 2);
+
+            function tx(i) { return pad.l + i / (maxT - 1) * cw; }
+            function ty(v) { return pad.t + (1 - Math.min(v, maxLoss) / maxLoss) * ch; }
+
+            // grid
+            ctx.strokeStyle = COLORS.grid;
+            ctx.lineWidth = 1;
+            for (var i = 0; i <= 3; i++) {
+                var gy = pad.t + ch * i / 3;
+                ctx.beginPath(); ctx.moveTo(pad.l, gy); ctx.lineTo(pad.l + cw, gy); ctx.stroke();
+                ctx.fillStyle = COLORS.text;
+                ctx.font = '9px monospace';
+                ctx.textAlign = 'right';
+                ctx.fillText((maxLoss * (1 - i / 3)).toFixed(2), pad.l - 4, gy + 3);
+            }
+
+            // loss curve (full)
+            ctx.strokeStyle = 'rgba(255,171,64,0.3)';
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            for (var i = 0; i < losses.length; i++) {
+                var px = tx(i), py = ty(losses[i]);
+                if (i === 0) ctx.moveTo(px, py);
+                else ctx.lineTo(px, py);
+            }
+            ctx.stroke();
+
+            // loss curve (active portion)
+            ctx.strokeStyle = COLORS.orange;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            var activeLosses = Math.min(numTrees, maxT);
+            for (var i = 0; i < activeLosses; i++) {
+                var px = tx(i), py = ty(losses[i]);
+                if (i === 0) ctx.moveTo(px, py);
+                else ctx.lineTo(px, py);
+            }
+            ctx.stroke();
+
+            // current point
+            if (activeLosses > 0) {
+                var ci = activeLosses - 1;
+                ctx.beginPath();
+                ctx.arc(tx(ci), ty(losses[ci]), 4, 0, Math.PI * 2);
+                ctx.fillStyle = COLORS.orange;
+                ctx.fill();
+            }
+
+            // label
+            ctx.fillStyle = COLORS.text;
+            ctx.font = '10px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('MSE 损失', pad.l + cw / 2, h - 5);
+        }
+
+        init();
+    })();
+
+    /* ============================================================
+       SECTION 5 — Gradient Descent Analogy
+       ============================================================ */
+    (function() {
+        var maxSteps = 15;
+        var analogyStep = 0;
+        var animId = null;
+
+        // === Left: Gradient Descent on f(x) = x^2 + noise ===
+        // We trace the path of theta being updated
+        var gdLR = 0.15;
+        var thetaHistory = [2.5]; // start from theta=2.5
+        for (var s = 0; s < maxSteps; s++) {
+            var th = thetaHistory[thetaHistory.length - 1];
+            var grad = 2 * th; // d/dtheta (theta^2) = 2*theta
+            thetaHistory.push(th - gdLR * grad);
+        }
+
+        // === Right: GBDT in function space ===
+        var fsData = LGBMUtils.generateSineData(40, 0.15, 55);
+        var fsD = fsData.data, fsL = fsData.labels;
+        var fsN = fsD.length;
+        var fsIdxSorted = [];
+        for (var i = 0; i < fsN; i++) fsIdxSorted.push(i);
+        fsIdxSorted.sort(function(a, b) { return fsD[a][0] - fsD[b][0]; });
+
+        var fsLR = 0.3;
+        var fsTrees = [];
+        var fsPredictions = [new Array(fsN).fill(0)];
+        var fsTempPred = new Array(fsN).fill(0);
+
+        for (var t = 0; t < maxSteps; t++) {
+            var gh = LGBMUtils.computeGradients(fsTempPred, fsL, 'mse');
+            var tree = LGBMUtils.boostingStep(fsD, gh.gradients, gh.hessians, { maxDepth: 3, minSamples: 2, lambda: 1 });
+            fsTrees.push(tree);
+            for (var i = 0; i < fsN; i++) {
+                fsTempPred[i] += fsLR * LGBMUtils.predictTree(tree, fsD[i]);
+            }
+            fsPredictions.push(fsTempPred.slice());
+        }
+
+        var ctxGD, ctxFS;
+
+        function init() {
+            ctxGD = getCtx('cvGD');
+            ctxFS = getCtx('cvFS');
+            draw();
+
+            document.getElementById('btnAnalogyPlay').addEventListener('click', function() {
+                if (animId) { stopAnim(); return; }
+                if (analogyStep >= maxSteps) analogyStep = 0;
+                startAnim();
+            });
+            document.getElementById('btnAnalogyReset').addEventListener('click', function() {
+                stopAnim();
+                analogyStep = 0;
+                draw();
+                document.getElementById('metricAnalogyStep').textContent = '0';
+            });
+        }
+
+        function startAnim() {
+            document.getElementById('btnAnalogyPlay').innerHTML = '&#9646;&#9646; 暂停';
+            animId = setInterval(function() {
+                if (analogyStep >= maxSteps) { stopAnim(); return; }
+                analogyStep++;
+                draw();
+                document.getElementById('metricAnalogyStep').textContent = analogyStep;
+            }, 600);
+        }
+
+        function stopAnim() {
+            if (animId) { clearInterval(animId); animId = null; }
+            document.getElementById('btnAnalogyPlay').innerHTML = '&#9654; 同步动画';
+        }
+
+        function draw() {
+            drawGD();
+            drawFS();
+        }
+
+        function drawGD() {
+            var ctx = ctxGD;
+            var w = ctx.canvas._w, h = ctx.canvas._h;
+            clearCanvas(ctx);
+
+            var pad = { l: 50, r: 20, t: 30, b: 40 };
+            var cw = w - pad.l - pad.r, ch = h - pad.t - pad.b;
+
+            var xMin = -0.5, xMax = 3.0;
+            var yMin = -0.5, yMax = 7;
+
+            function tx(v) { return pad.l + (v - xMin) / (xMax - xMin) * cw; }
+            function ty(v) { return pad.t + (1 - (v - yMin) / (yMax - yMin)) * ch; }
+
+            // grid
+            ctx.strokeStyle = COLORS.grid;
+            ctx.lineWidth = 1;
+            for (var i = 0; i <= 5; i++) {
+                var gy = pad.t + ch * i / 5;
+                ctx.beginPath(); ctx.moveTo(pad.l, gy); ctx.lineTo(pad.l + cw, gy); ctx.stroke();
+            }
+
+            // draw loss curve: L(theta) = theta^2
+            ctx.strokeStyle = 'rgba(79,195,247,0.5)';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            for (var px = 0; px <= 200; px++) {
+                var xv = xMin + px / 200 * (xMax - xMin);
+                var yv = xv * xv;
+                var sx = tx(xv), sy = ty(yv);
+                if (px === 0) ctx.moveTo(sx, sy);
+                else ctx.lineTo(sx, sy);
+            }
+            ctx.stroke();
+
+            // draw GD path
+            var steps = Math.min(analogyStep + 1, thetaHistory.length);
+            if (steps > 1) {
+                ctx.strokeStyle = COLORS.orange;
+                ctx.lineWidth = 1.5;
+                ctx.setLineDash([4, 3]);
+                for (var i = 0; i < steps - 1; i++) {
+                    var th1 = thetaHistory[i], th2 = thetaHistory[i + 1];
+                    ctx.beginPath();
+                    ctx.moveTo(tx(th1), ty(th1 * th1));
+                    ctx.lineTo(tx(th2), ty(th2 * th2));
+                    ctx.stroke();
+                }
+                ctx.setLineDash([]);
+            }
+
+            // draw points along path
+            for (var i = 0; i < steps; i++) {
+                var th = thetaHistory[i];
+                ctx.beginPath();
+                ctx.arc(tx(th), ty(th * th), i === steps - 1 ? 6 : 3, 0, Math.PI * 2);
+                ctx.fillStyle = i === steps - 1 ? COLORS.orange : 'rgba(255,171,64,0.5)';
+                ctx.fill();
+                if (i === steps - 1) {
+                    ctx.strokeStyle = '#fff';
+                    ctx.lineWidth = 1.5;
+                    ctx.stroke();
+                }
+            }
+
+            // axes labels
+            ctx.fillStyle = COLORS.text;
+            ctx.font = '12px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('\u03B8 (参数)', pad.l + cw / 2, h - 8);
+            ctx.save();
+            ctx.translate(14, pad.t + ch / 2);
+            ctx.rotate(-Math.PI / 2);
+            ctx.fillText('L(\u03B8) = \u03B8\u00B2', 0, 0);
+            ctx.restore();
+
+            // current value annotation
+            if (steps > 0) {
+                var curTh = thetaHistory[steps - 1];
+                ctx.fillStyle = COLORS.orange;
+                ctx.font = '11px monospace';
+                ctx.textAlign = 'left';
+                ctx.fillText('\u03B8=' + curTh.toFixed(3), tx(curTh) + 10, ty(curTh * curTh) - 8);
+            }
+        }
+
+        function drawFS() {
+            var ctx = ctxFS;
+            var w = ctx.canvas._w, h = ctx.canvas._h;
+            clearCanvas(ctx);
+
+            var pad = { l: 45, r: 15, t: 30, b: 40 };
+            var cw = w - pad.l - pad.r, ch = h - pad.t - pad.b;
+
+            var xMin = 0, xMax = Math.PI * 2;
+            var yMin = -1.8, yMax = 1.8;
+
+            function tx(v) { return pad.l + (v - xMin) / (xMax - xMin) * cw; }
+            function ty(v) { return pad.t + (1 - (v - yMin) / (yMax - yMin)) * ch; }
+
+            // grid
+            ctx.strokeStyle = COLORS.grid;
+            ctx.lineWidth = 1;
+            for (var i = 0; i <= 4; i++) {
+                var gy = pad.t + ch * i / 4;
+                ctx.beginPath(); ctx.moveTo(pad.l, gy); ctx.lineTo(pad.l + cw, gy); ctx.stroke();
+            }
+
+            // true function (sine)
+            ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([5, 5]);
+            ctx.beginPath();
+            for (var px = 0; px <= 200; px++) {
+                var xv = xMin + px / 200 * (xMax - xMin);
+                var yv = Math.sin(xv);
+                if (px === 0) ctx.moveTo(tx(xv), ty(yv));
+                else ctx.lineTo(tx(xv), ty(yv));
+            }
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            // data points
+            for (var i = 0; i < fsN; i++) {
+                ctx.beginPath();
+                ctx.arc(tx(fsD[i][0]), ty(fsL[i]), 3, 0, Math.PI * 2);
+                ctx.fillStyle = 'rgba(179,136,255,0.4)';
+                ctx.fill();
+            }
+
+            // Draw previous predictions faintly
+            var curStep = Math.min(analogyStep, maxSteps);
+            for (var s = 0; s < curStep; s++) {
+                var pred = fsPredictions[s + 1];
+                ctx.strokeStyle = 'rgba(179,136,255,' + (0.08 + 0.02 * s) + ')';
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                var first = true;
+                for (var j = 0; j < fsIdxSorted.length; j++) {
+                    var idx = fsIdxSorted[j];
+                    var px = tx(fsD[idx][0]);
+                    var py = ty(Math.max(yMin, Math.min(yMax, pred[idx])));
+                    if (first) { ctx.moveTo(px, py); first = false; }
+                    else ctx.lineTo(px, py);
+                }
+                ctx.stroke();
+            }
+
+            // Current prediction curve
+            if (curStep > 0) {
+                var pred = fsPredictions[curStep];
+                ctx.strokeStyle = COLORS.purple;
+                ctx.lineWidth = 2.5;
+                ctx.beginPath();
+                var first = true;
+                for (var j = 0; j < fsIdxSorted.length; j++) {
+                    var idx = fsIdxSorted[j];
+                    var px = tx(fsD[idx][0]);
+                    var py = ty(Math.max(yMin, Math.min(yMax, pred[idx])));
+                    if (first) { ctx.moveTo(px, py); first = false; }
+                    else ctx.lineTo(px, py);
+                }
+                ctx.stroke();
+            }
+
+            // axes labels
+            ctx.fillStyle = COLORS.text;
+            ctx.font = '12px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('x', pad.l + cw / 2, h - 8);
+            ctx.save();
+            ctx.translate(12, pad.t + ch / 2);
+            ctx.rotate(-Math.PI / 2);
+            ctx.fillText('F(x)', 0, 0);
+            ctx.restore();
+
+            // legend
+            ctx.font = '11px sans-serif';
+            ctx.textAlign = 'left';
+            ctx.fillStyle = 'rgba(255,255,255,0.3)';
+            ctx.fillText('sin(x) 真实', pad.l + 8, pad.t + 15);
+            ctx.fillStyle = COLORS.purple;
+            ctx.fillText('F_' + curStep + '(x) 预测', pad.l + 8, pad.t + 30);
+        }
+
+        init();
+    })();
+
+    /* ============================================================
+       Handle window resize
+       ============================================================ */
+    var resizeTimer;
+    window.addEventListener('resize', function() {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(function() {
+            // Re-initialize all canvases
+            location.reload();
+        }, 300);
+    });
+
+    }); // end DOMContentLoaded
+    </script>
+
+    <!-- KaTeX auto-render -->
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+        if (typeof renderMathInElement === 'function') {
+            renderMathInElement(document.body, {
+                delimiters: [
+                    { left: '$$', right: '$$', display: true },
+                    { left: '$', right: '$', display: false }
+                ]
+            });
+        } else {
+            // Wait for KaTeX to load
+            var checkKatex = setInterval(function() {
+                if (typeof renderMathInElement === 'function') {
+                    clearInterval(checkKatex);
+                    renderMathInElement(document.body, {
+                        delimiters: [
+                            { left: '$$', right: '$$', display: true },
+                            { left: '$', right: '$', display: false }
+                        ]
+                    });
+                }
+            }, 200);
+            setTimeout(function() { clearInterval(checkKatex); }, 10000);
+        }
+    });
+    </script>
+</body>
+</html>

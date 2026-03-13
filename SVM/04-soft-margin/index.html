@@ -1,0 +1,1238 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>04 - 软间隔 Soft Margin | SVM 支持向量机</title>
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=Noto+Sans+SC:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+    <style>
+        /* ===== Page-specific ===== */
+        .page-header {
+            text-align: center;
+            padding: 1.5rem 0 2rem;
+        }
+        .page-header h1 {
+            font-size: 2.2rem;
+            background: linear-gradient(135deg, #b388ff, #7c4dff);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .page-header .subtitle {
+            color: var(--text-secondary);
+            font-size: 1rem;
+            margin-top: 0.3rem;
+        }
+
+        /* Canvas wrapper */
+        .canvas-wrap {
+            position: relative;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+        }
+        .canvas-wrap canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+
+        /* Controls panel */
+        .controls-row {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 1rem;
+            margin-top: 0.75rem;
+        }
+
+        /* Stats display */
+        .stats-bar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1.5rem;
+            margin-top: 0.75rem;
+            font-size: 0.85rem;
+        }
+        .stat-item {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+        }
+        .stat-item .stat-label {
+            color: var(--text-muted);
+        }
+        .stat-item .stat-value {
+            font-family: var(--font-mono);
+            color: var(--accent-green);
+            font-weight: 600;
+        }
+
+        /* Section layout */
+        .section-grid {
+            display: grid;
+            grid-template-columns: 1fr 1.6fr;
+            gap: 2rem;
+            align-items: start;
+        }
+        .section-grid .text-col {
+            position: sticky;
+            top: calc(var(--header-height) + 1rem);
+        }
+
+        /* Hinge loss chart */
+        .loss-chart-wrap {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5rem;
+        }
+
+        /* Xi bar */
+        .xi-bar-legend {
+            display: flex;
+            gap: 1rem;
+            margin-top: 0.5rem;
+            flex-wrap: wrap;
+            font-size: 0.8rem;
+        }
+        .xi-bar-legend .xi-item {
+            display: flex;
+            align-items: center;
+            gap: 0.3rem;
+        }
+        .xi-bar-legend .xi-swatch {
+            width: 14px;
+            height: 14px;
+            border-radius: 3px;
+        }
+
+        /* Info callout */
+        .callout {
+            padding: 0.8rem 1rem;
+            background: rgba(179, 136, 255, 0.08);
+            border-left: 3px solid var(--accent-purple);
+            border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+            margin: 1rem 0;
+            font-size: 0.9rem;
+        }
+        .callout p { margin-bottom: 0; }
+
+        /* Accuracy bars */
+        .accuracy-bars {
+            display: flex;
+            gap: 1rem;
+            margin-top: 0.75rem;
+        }
+        .accuracy-bar-item {
+            flex: 1;
+        }
+        .accuracy-bar-item .bar-label {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            margin-bottom: 0.3rem;
+        }
+        .accuracy-bar-item .bar-track {
+            height: 8px;
+            background: var(--border-color);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        .accuracy-bar-item .bar-fill {
+            height: 100%;
+            border-radius: 4px;
+            transition: width 0.4s var(--anim-ease);
+        }
+        .accuracy-bar-item .bar-value {
+            font-size: 0.8rem;
+            font-family: var(--font-mono);
+            color: var(--accent-green);
+            margin-top: 0.2rem;
+        }
+
+        /* Draggable point hint */
+        .drag-hint {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            font-style: italic;
+            margin-top: 0.5rem;
+        }
+
+        @media (max-width: 1024px) {
+            .section-grid { grid-template-columns: 1fr; }
+            .section-grid .text-col { position: static; }
+            .loss-chart-wrap { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="page-container">
+    <div class="page-header">
+        <h1>软间隔 Soft Margin</h1>
+        <p class="subtitle">允许一定的误分类，在间隔最大化与分类精度之间取得平衡</p>
+    </div>
+
+    <!-- ====== Section 1: 硬间隔的局限 ====== -->
+    <div class="section" id="sec-hard-limit">
+        <div class="section-title">
+            <div class="icon">1</div>
+            <h2>硬间隔的局限</h2>
+        </div>
+        <div class="section-grid">
+            <div class="text-col">
+                <p>在之前的模块中，我们假设数据是<strong>线性可分</strong>的。硬间隔 SVM 要求所有样本都被正确分类且位于间隔之外：</p>
+                <div class="katex-block">$$y_i(\mathbf{w} \cdot \mathbf{x}_i + b) \geq 1, \quad \forall i$$</div>
+                <p>但现实数据几乎总包含<strong>噪声和离群点</strong>，使得两类产生重叠。此时不存在能将两类完全分开的超平面。</p>
+                <div class="callout">
+                    <p>点击「添加噪声」按钮，观察原本可分的数据变得不可分，硬间隔 SVM 失败。</p>
+                </div>
+                <div class="controls-row">
+                    <button class="btn btn-primary" id="btn-add-noise">添加噪声</button>
+                    <button class="btn" id="btn-reset-hard">重置</button>
+                </div>
+                <div id="hard-status" class="stats-bar" style="margin-top:0.75rem;">
+                    <div class="stat-item">
+                        <span class="stat-label">状态：</span>
+                        <span class="stat-value" id="hard-status-text">线性可分</span>
+                    </div>
+                </div>
+            </div>
+            <div class="viz-col">
+                <div class="canvas-wrap" style="height:420px;">
+                    <canvas id="canvas-hard" width="600" height="420"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ====== Section 2: 松弛变量 ====== -->
+    <div class="section" id="sec-slack">
+        <div class="section-title">
+            <div class="icon">2</div>
+            <h2>松弛变量 \(\xi_i\)</h2>
+        </div>
+        <div class="section-grid">
+            <div class="text-col">
+                <p>为了处理不可分的情况，我们引入<strong>松弛变量</strong> $\xi_i \geq 0$，放宽约束：</p>
+                <div class="katex-block">$$y_i(\mathbf{w} \cdot \mathbf{x}_i + b) \geq 1 - \xi_i$$</div>
+                <p>松弛变量的含义：</p>
+                <ul style="color:var(--text-secondary); margin:0.5rem 0 0.5rem 1.2rem; line-height:2;">
+                    <li><strong>$\xi_i = 0$</strong>：正确分类且在间隔外</li>
+                    <li><strong>$0 < \xi_i < 1$</strong>：在间隔内，但仍正确分类</li>
+                    <li><strong>$\xi_i \geq 1$</strong>：被错误分类</li>
+                </ul>
+                <div class="xi-bar-legend">
+                    <div class="xi-item"><div class="xi-swatch" style="background:#22c55e;"></div>$\xi=0$（正确）</div>
+                    <div class="xi-item"><div class="xi-swatch" style="background:#facc15;"></div>$0<\xi<1$（间隔内）</div>
+                    <div class="xi-item"><div class="xi-swatch" style="background:#ef4444;"></div>$\xi\geq1$（错误）</div>
+                </div>
+                <div class="controls-row">
+                    <button class="btn btn-primary" id="btn-regen-slack">重新生成</button>
+                </div>
+            </div>
+            <div class="viz-col">
+                <div class="canvas-wrap" style="height:420px;">
+                    <canvas id="canvas-slack" width="600" height="420"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ====== Section 3: C 参数 ====== -->
+    <div class="section" id="sec-c-param">
+        <div class="section-title">
+            <div class="icon">3</div>
+            <h2>C 参数的作用</h2>
+        </div>
+        <div class="section-grid">
+            <div class="text-col">
+                <p>软间隔 SVM 的优化目标是：</p>
+                <div class="katex-block">$$\min_{\mathbf{w},b,\xi} \frac{1}{2}\|\mathbf{w}\|^2 + C \sum_{i=1}^n \xi_i$$</div>
+                <p>参数 <strong>C</strong> 控制着<strong>间隔大小</strong>与<strong>误分类惩罚</strong>之间的权衡：</p>
+                <ul style="color:var(--text-secondary); margin:0.5rem 0 0.5rem 1.2rem; line-height:2;">
+                    <li><strong>C 很小</strong>：容忍更多违反 → 宽间隔 → 可能欠拟合</li>
+                    <li><strong>C 很大</strong>：严格惩罚违反 → 窄间隔 → 可能过拟合</li>
+                </ul>
+                <div class="slider-group" style="margin-top:1rem;">
+                    <label>C =</label>
+                    <input type="range" id="slider-c" min="-2" max="3" step="0.05" value="0">
+                    <span class="slider-value" id="c-value">1.00</span>
+                </div>
+                <div class="stats-bar" style="margin-top:0.75rem;">
+                    <div class="stat-item">
+                        <span class="stat-label">间隔宽度：</span>
+                        <span class="stat-value" id="margin-width">—</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">支持向量：</span>
+                        <span class="stat-value" id="sv-count">—</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">违反点：</span>
+                        <span class="stat-value" id="violation-count">—</span>
+                    </div>
+                </div>
+                <div class="accuracy-bars">
+                    <div class="accuracy-bar-item">
+                        <div class="bar-label">训练集准确率</div>
+                        <div class="bar-track"><div class="bar-fill" id="train-acc-fill" style="width:0%;background:var(--accent-green);"></div></div>
+                        <div class="bar-value" id="train-acc-val">—</div>
+                    </div>
+                    <div class="accuracy-bar-item">
+                        <div class="bar-label">测试集准确率</div>
+                        <div class="bar-track"><div class="bar-fill" id="test-acc-fill" style="width:0%;background:var(--accent-blue);"></div></div>
+                        <div class="bar-value" id="test-acc-val">—</div>
+                    </div>
+                </div>
+            </div>
+            <div class="viz-col">
+                <div class="canvas-wrap" style="height:460px;">
+                    <canvas id="canvas-c" width="600" height="460"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ====== Section 4: 合页损失 ====== -->
+    <div class="section" id="sec-hinge">
+        <div class="section-title">
+            <div class="icon">4</div>
+            <h2>合页损失 Hinge Loss</h2>
+        </div>
+        <div class="section-grid">
+            <div class="text-col">
+                <p>软间隔 SVM 的损失函数可以用<strong>合页损失</strong>（hinge loss）表示：</p>
+                <div class="katex-block">$$\ell_{\text{hinge}}(y, f(x)) = \max(0, 1 - y \cdot f(x))$$</div>
+                <p>总优化目标等价于：</p>
+                <div class="katex-block">$$\min_{\mathbf{w},b} \frac{1}{2}\|\mathbf{w}\|^2 + C \sum_{i=1}^n \max(0, 1 - y_i f(x_i))$$</div>
+                <p>合页损失是 0-1 损失的<strong>凸上界</strong>，它有几个重要性质：</p>
+                <ul style="color:var(--text-secondary); margin:0.5rem 0 0.5rem 1.2rem; line-height:2;">
+                    <li>当 $y \cdot f(x) \geq 1$ 时，损失为 0</li>
+                    <li>当 $y \cdot f(x) < 1$ 时，损失线性增加</li>
+                    <li>凸函数 → 便于优化</li>
+                </ul>
+                <p class="drag-hint">拖动右侧图中的红点，观察单点的合页损失变化。</p>
+            </div>
+            <div class="viz-col">
+                <div class="loss-chart-wrap">
+                    <div class="canvas-wrap" style="height:380px;">
+                        <canvas id="canvas-losses" width="400" height="380"></canvas>
+                    </div>
+                    <div class="canvas-wrap" style="height:380px;">
+                        <canvas id="canvas-point-loss" width="400" height="380"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+</div><!-- /page-container -->
+
+<script src="../shared/scripts/nav.js"></script>
+<script src="../shared/scripts/svm-utils.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    // KaTeX auto-render
+    if (typeof renderMathInElement === 'function') {
+        renderMathInElement(document.body, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false},
+                {left: '\\(', right: '\\)', display: false},
+                {left: '\\[', right: '\\]', display: true}
+            ]
+        });
+    }
+
+    const {
+        seededRandom, dot, vecScale, vecAdd, vecNorm, sign,
+        trainLinearSVM, predictSVM, decisionFunction, computeMargin,
+        classToColor, MARGIN_COLORS
+    } = SVMUtils;
+
+    // ================================================
+    // Utility: Canvas helpers
+    // ================================================
+    function getCtx(id) {
+        const c = document.getElementById(id);
+        const dpr = window.devicePixelRatio || 1;
+        const rect = c.getBoundingClientRect();
+        c.width = rect.width * dpr;
+        c.height = rect.height * dpr;
+        const ctx = c.getContext('2d');
+        ctx.scale(dpr, dpr);
+        return { ctx, w: rect.width, h: rect.height, canvas: c };
+    }
+
+    // Map data coords [-3, 3] to canvas
+    function toCanvas(x, y, cw, ch, range = 3) {
+        return [
+            (x + range) / (2 * range) * cw,
+            (1 - (y + range) / (2 * range)) * ch
+        ];
+    }
+
+    function toData(cx, cy, cw, ch, range = 3) {
+        return [
+            cx / cw * 2 * range - range,
+            (1 - cy / ch) * 2 * range - range
+        ];
+    }
+
+    function clearCanvas(ctx, w, h) {
+        ctx.fillStyle = '#16213e';
+        ctx.fillRect(0, 0, w, h);
+    }
+
+    function drawGridLines(ctx, cw, ch, range = 3) {
+        ctx.strokeStyle = 'rgba(42,42,74,0.5)';
+        ctx.lineWidth = 0.5;
+        for (let v = -range; v <= range; v++) {
+            const [x] = toCanvas(v, 0, cw, ch, range);
+            const [, y] = toCanvas(0, v, cw, ch, range);
+            ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, ch); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(cw, y); ctx.stroke();
+        }
+    }
+
+    function drawPoint(ctx, cx, cy, r, color, outlined = false, ring = false) {
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        if (outlined) {
+            ctx.fillStyle = 'rgba(0,0,0,0.3)';
+            ctx.fill();
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 2;
+            ctx.stroke();
+        } else {
+            ctx.fillStyle = color;
+            ctx.fill();
+        }
+        if (ring) {
+            ctx.beginPath();
+            ctx.arc(cx, cy, r + 4, 0, Math.PI * 2);
+            ctx.strokeStyle = MARGIN_COLORS.supportVector;
+            ctx.lineWidth = 2;
+            ctx.stroke();
+        }
+    }
+
+    function drawLine(ctx, w, b, cw, ch, color, dash = [], lineW = 2, range = 3) {
+        // w[0]*x + w[1]*y + b = 0 => y = -(w[0]*x + b)/w[1]
+        if (Math.abs(w[1]) < 1e-8) {
+            // vertical line
+            const xv = -b / w[0];
+            const [cx] = toCanvas(xv, 0, cw, ch, range);
+            ctx.beginPath();
+            ctx.setLineDash(dash);
+            ctx.strokeStyle = color;
+            ctx.lineWidth = lineW;
+            ctx.moveTo(cx, 0);
+            ctx.lineTo(cx, ch);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            return;
+        }
+        const x1 = -range, x2 = range;
+        const y1 = -(w[0] * x1 + b) / w[1];
+        const y2 = -(w[0] * x2 + b) / w[1];
+        const [cx1, cy1] = toCanvas(x1, y1, cw, ch, range);
+        const [cx2, cy2] = toCanvas(x2, y2, cw, ch, range);
+        ctx.beginPath();
+        ctx.setLineDash(dash);
+        ctx.strokeStyle = color;
+        ctx.lineWidth = lineW;
+        ctx.moveTo(cx1, cy1);
+        ctx.lineTo(cx2, cy2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+    }
+
+    function drawMarginFill(ctx, w, b, cw, ch, range = 3) {
+        if (Math.abs(w[1]) < 1e-8) return;
+        const norm = vecNorm(w);
+        if (norm < 1e-8) return;
+        const pts1 = [], pts2 = [];
+        for (let px = 0; px <= cw; px += 4) {
+            const dx = px / cw * 2 * range - range;
+            const y_up = -(w[0] * dx + b - 1) / w[1];
+            const y_dn = -(w[0] * dx + b + 1) / w[1];
+            pts1.push(toCanvas(dx, y_up, cw, ch, range));
+            pts2.push(toCanvas(dx, y_dn, cw, ch, range));
+        }
+        ctx.beginPath();
+        pts1.forEach((p, i) => i === 0 ? ctx.moveTo(p[0], p[1]) : ctx.lineTo(p[0], p[1]));
+        pts2.reverse().forEach(p => ctx.lineTo(p[0], p[1]));
+        ctx.closePath();
+        ctx.fillStyle = MARGIN_COLORS.marginFill;
+        ctx.fill();
+    }
+
+    // ================================================
+    // Section 1: Hard Margin Limitation
+    // ================================================
+    (() => {
+        let noisy = false;
+        const rng = seededRandom(42);
+        let data = [], labels = [];
+
+        function genCleanData() {
+            data = []; labels = [];
+            const r = seededRandom(42);
+            for (let i = 0; i < 25; i++) {
+                data.push([r() * 2 - 1, r() * 1.2 + 0.8]);
+                labels.push(1);
+            }
+            for (let i = 0; i < 25; i++) {
+                data.push([r() * 2 - 1, -r() * 1.2 - 0.8]);
+                labels.push(-1);
+            }
+        }
+
+        function addNoise() {
+            const r = seededRandom(123);
+            // Add overlapping points
+            for (let i = 0; i < 6; i++) {
+                data.push([r() * 1.6 - 0.8, r() * 0.6 - 0.3]);
+                labels.push(1);
+            }
+            for (let i = 0; i < 6; i++) {
+                data.push([r() * 1.6 - 0.8, r() * 0.6 + 0.1]);
+                labels.push(-1);
+            }
+            // Move a few existing points across
+            data[0] = [data[0][0], -0.3];
+            data[25] = [data[25][0], 0.4];
+        }
+
+        function draw() {
+            const { ctx, w: cw, h: ch } = getCtx('canvas-hard');
+            clearCanvas(ctx, cw, ch);
+            drawGridLines(ctx, cw, ch);
+
+            // Try training
+            let model = null;
+            let failed = false;
+            if (!noisy) {
+                model = trainLinearSVM(data, labels, 1000, 0.01, 600);
+            } else {
+                // Check if truly separable by attempting high-C training
+                model = trainLinearSVM(data, labels, 10000, 0.005, 800);
+                // Count violations
+                let violations = 0;
+                for (let i = 0; i < data.length; i++) {
+                    const m = labels[i] * (dot(model.w, data[i]) + model.b);
+                    if (m < 1 - 0.01) violations++;
+                }
+                if (violations > 0) failed = true;
+            }
+
+            // Draw decision boundary and margin if model exists
+            if (model && !failed) {
+                drawMarginFill(ctx, model.w, model.b, cw, ch);
+                drawLine(ctx, model.w, model.b, cw, ch, MARGIN_COLORS.decisionBoundary, [], 2);
+                const norm = vecNorm(model.w);
+                if (norm > 1e-6) {
+                    drawLine(ctx, model.w, model.b - 1, cw, ch, MARGIN_COLORS.marginLine, [6, 4], 1.5);
+                    drawLine(ctx, model.w, model.b + 1, cw, ch, MARGIN_COLORS.marginLine, [6, 4], 1.5);
+                }
+            }
+
+            // If failed, draw X marks and error zone
+            if (failed) {
+                // Draw red semi-transparent overlay in overlap region
+                ctx.fillStyle = 'rgba(255, 82, 82, 0.06)';
+                ctx.fillRect(0, ch * 0.3, cw, ch * 0.4);
+
+                ctx.font = '600 16px "Noto Sans SC", sans-serif';
+                ctx.fillStyle = '#ff5252';
+                ctx.textAlign = 'center';
+                ctx.fillText('无法找到完美分隔的超平面！', cw / 2, ch * 0.32);
+
+                // Draw dashed "attempt" line
+                if (model) {
+                    drawLine(ctx, model.w, model.b, cw, ch, '#ff5252', [4, 6], 1.5);
+                }
+            }
+
+            // Draw data points
+            for (let i = 0; i < data.length; i++) {
+                const [cx, cy] = toCanvas(data[i][0], data[i][1], cw, ch);
+                const color = labels[i] === 1 ? MARGIN_COLORS.positive : MARGIN_COLORS.negative;
+                drawPoint(ctx, cx, cy, 5, color);
+
+                // Mark violations with X if noisy
+                if (failed && model) {
+                    const m = labels[i] * (dot(model.w, data[i]) + model.b);
+                    if (m < 1) {
+                        ctx.strokeStyle = '#ff5252';
+                        ctx.lineWidth = 2;
+                        ctx.beginPath();
+                        ctx.moveTo(cx - 7, cy - 7); ctx.lineTo(cx + 7, cy + 7);
+                        ctx.moveTo(cx + 7, cy - 7); ctx.lineTo(cx - 7, cy + 7);
+                        ctx.stroke();
+                    }
+                }
+            }
+
+            // Update status
+            const statusText = document.getElementById('hard-status-text');
+            if (noisy) {
+                statusText.textContent = '数据不可分 — 硬间隔失败';
+                statusText.style.color = 'var(--accent-red)';
+            } else {
+                statusText.textContent = '线性可分';
+                statusText.style.color = 'var(--accent-green)';
+            }
+        }
+
+        genCleanData();
+        draw();
+
+        document.getElementById('btn-add-noise').addEventListener('click', () => {
+            if (!noisy) {
+                noisy = true;
+                addNoise();
+                draw();
+            }
+        });
+
+        document.getElementById('btn-reset-hard').addEventListener('click', () => {
+            noisy = false;
+            genCleanData();
+            draw();
+        });
+    })();
+
+    // ================================================
+    // Section 2: Slack Variables
+    // ================================================
+    (() => {
+        let seed = 77;
+
+        function genAndDraw() {
+            const { ctx, w: cw, h: ch } = getCtx('canvas-slack');
+            clearCanvas(ctx, cw, ch);
+            drawGridLines(ctx, cw, ch);
+
+            // Generate overlapping data
+            const rng = seededRandom(seed);
+            const data = [], labels = [];
+            for (let i = 0; i < 30; i++) {
+                data.push([rng() * 3.5 - 1.75, rng() * 1.5 + 0.3]);
+                labels.push(1);
+            }
+            for (let i = 0; i < 30; i++) {
+                data.push([rng() * 3.5 - 1.75, -rng() * 1.5 - 0.3]);
+                labels.push(-1);
+            }
+            // Add noise in overlap zone
+            for (let i = 0; i < 8; i++) {
+                data.push([rng() * 2 - 1, rng() * 0.8 - 0.4]);
+                labels.push(i < 4 ? 1 : -1);
+            }
+
+            // Train soft margin
+            const model = trainLinearSVM(data, labels, 5.0, 0.01, 800);
+            const norm = vecNorm(model.w);
+
+            // Draw margin fill
+            drawMarginFill(ctx, model.w, model.b, cw, ch);
+
+            // Draw margin lines and decision boundary
+            drawLine(ctx, model.w, model.b, cw, ch, MARGIN_COLORS.decisionBoundary, [], 2);
+            if (norm > 1e-6) {
+                drawLine(ctx, model.w, model.b - 1, cw, ch, MARGIN_COLORS.marginLine, [6, 4], 1.5);
+                drawLine(ctx, model.w, model.b + 1, cw, ch, MARGIN_COLORS.marginLine, [6, 4], 1.5);
+            }
+
+            // Draw each point with xi bar
+            for (let i = 0; i < data.length; i++) {
+                const m = labels[i] * (dot(model.w, data[i]) + model.b);
+                const xi = Math.max(0, 1 - m);
+                const [cx, cy] = toCanvas(data[i][0], data[i][1], cw, ch);
+                const color = labels[i] === 1 ? MARGIN_COLORS.positive : MARGIN_COLORS.negative;
+
+                // Draw xi bar: line from point towards the decision boundary
+                if (xi > 0.01) {
+                    // Determine bar color
+                    let barColor = '#facc15'; // in margin
+                    if (xi >= 1) barColor = '#ef4444'; // misclassified
+
+                    // Calculate the point's projection onto decision boundary
+                    const funcVal = dot(model.w, data[i]) + model.b;
+                    const projDist = xi / norm;
+                    const dir = labels[i] === 1 ? 1 : -1;
+                    const tx = data[i][0] + dir * model.w[0] / norm * projDist;
+                    const ty = data[i][1] + dir * model.w[1] / norm * projDist;
+                    const [tcx, tcy] = toCanvas(tx, ty, cw, ch);
+
+                    ctx.beginPath();
+                    ctx.moveTo(cx, cy);
+                    ctx.lineTo(tcx, tcy);
+                    ctx.strokeStyle = barColor;
+                    ctx.lineWidth = 2.5;
+                    ctx.globalAlpha = 0.8;
+                    ctx.stroke();
+                    ctx.globalAlpha = 1;
+
+                    // Label xi value
+                    const mx = (cx + tcx) / 2, my = (cy + tcy) / 2;
+                    ctx.font = '600 10px "JetBrains Mono", monospace';
+                    ctx.fillStyle = barColor;
+                    ctx.textAlign = 'center';
+                    ctx.fillText('ξ=' + xi.toFixed(2), mx + 12, my - 6);
+                }
+
+                // Draw point
+                const isSV = Math.abs(m - 1) < 0.15 || xi > 0.01;
+                drawPoint(ctx, cx, cy, 5, color, false, isSV);
+            }
+        }
+
+        genAndDraw();
+
+        document.getElementById('btn-regen-slack').addEventListener('click', () => {
+            seed = Math.floor(Math.random() * 10000);
+            genAndDraw();
+        });
+    })();
+
+    // ================================================
+    // Section 3: C Parameter
+    // ================================================
+    (() => {
+        const slider = document.getElementById('slider-c');
+        const cValEl = document.getElementById('c-value');
+        const marginEl = document.getElementById('margin-width');
+        const svCountEl = document.getElementById('sv-count');
+        const violCountEl = document.getElementById('violation-count');
+        const trainFill = document.getElementById('train-acc-fill');
+        const trainVal = document.getElementById('train-acc-val');
+        const testFill = document.getElementById('test-acc-fill');
+        const testVal = document.getElementById('test-acc-val');
+
+        // Generate train & test data
+        const rng = seededRandom(55);
+        const trainData = [], trainLabels = [];
+        const testData = [], testLabels = [];
+
+        function genSet(data, labels, n, r) {
+            for (let i = 0; i < n / 2; i++) {
+                data.push([r() * 3 - 1.5, r() * 1.5 + 0.2 + r() * 0.8]);
+                labels.push(1);
+            }
+            for (let i = 0; i < n / 2; i++) {
+                data.push([r() * 3 - 1.5, -r() * 1.5 - 0.2 - r() * 0.8]);
+                labels.push(-1);
+            }
+            // Overlap noise
+            for (let i = 0; i < 8; i++) {
+                data.push([r() * 2 - 1, r() * 1.0 - 0.5]);
+                labels.push(i < 4 ? 1 : -1);
+            }
+        }
+        genSet(trainData, trainLabels, 50, rng);
+        genSet(testData, testLabels, 40, seededRandom(999));
+
+        function update() {
+            const logC = parseFloat(slider.value);
+            const C = Math.pow(10, logC);
+            cValEl.textContent = C < 1 ? C.toFixed(2) : C < 100 ? C.toFixed(1) : C.toFixed(0);
+
+            // Train
+            const epochs = C > 100 ? 1200 : 800;
+            const lr = C > 100 ? 0.003 : 0.008;
+            const model = trainLinearSVM(trainData, trainLabels, C, lr, epochs);
+            const norm = vecNorm(model.w);
+            const marginW = norm > 1e-6 ? 2 / norm : Infinity;
+
+            // Count SVs and violations
+            let svCount = 0, violCount = 0;
+            for (let i = 0; i < trainData.length; i++) {
+                const m = trainLabels[i] * (dot(model.w, trainData[i]) + model.b);
+                if (Math.abs(m - 1) < 0.2) svCount++;
+                if (m < 1 - 0.01) violCount++;
+            }
+
+            // Accuracy
+            let trainCorrect = 0, testCorrect = 0;
+            for (let i = 0; i < trainData.length; i++) {
+                if (predictSVM(trainData[i], model.w, model.b) === trainLabels[i]) trainCorrect++;
+            }
+            for (let i = 0; i < testData.length; i++) {
+                if (predictSVM(testData[i], model.w, model.b) === testLabels[i]) testCorrect++;
+            }
+            const trainAcc = trainCorrect / trainData.length;
+            const testAcc = testCorrect / testData.length;
+
+            // Update stats
+            marginEl.textContent = marginW === Infinity ? '∞' : marginW.toFixed(2);
+            svCountEl.textContent = svCount;
+            violCountEl.textContent = violCount;
+            trainFill.style.width = (trainAcc * 100) + '%';
+            trainVal.textContent = (trainAcc * 100).toFixed(1) + '%';
+            testFill.style.width = (testAcc * 100) + '%';
+            testVal.textContent = (testAcc * 100).toFixed(1) + '%';
+
+            // Draw
+            const { ctx, w: cw, h: ch } = getCtx('canvas-c');
+            clearCanvas(ctx, cw, ch);
+            drawGridLines(ctx, cw, ch);
+
+            // Decision region coloring
+            const step = 6;
+            for (let px = 0; px < cw; px += step) {
+                for (let py = 0; py < ch; py += step) {
+                    const [dx, dy] = toData(px + step / 2, py + step / 2, cw, ch);
+                    const val = decisionFunction([dx, dy], model.w, model.b);
+                    const alpha = Math.min(0.25, Math.abs(val) * 0.08);
+                    ctx.fillStyle = val > 0
+                        ? `rgba(34,197,94,${alpha})`
+                        : `rgba(239,68,68,${alpha})`;
+                    ctx.fillRect(px, py, step, step);
+                }
+            }
+
+            // Margin fill and lines
+            drawMarginFill(ctx, model.w, model.b, cw, ch);
+            drawLine(ctx, model.w, model.b, cw, ch, MARGIN_COLORS.decisionBoundary, [], 2.5);
+            if (norm > 1e-6) {
+                drawLine(ctx, model.w, model.b - 1, cw, ch, MARGIN_COLORS.marginLine, [6, 4], 1.5);
+                drawLine(ctx, model.w, model.b + 1, cw, ch, MARGIN_COLORS.marginLine, [6, 4], 1.5);
+            }
+
+            // Draw train points
+            for (let i = 0; i < trainData.length; i++) {
+                const [cx, cy] = toCanvas(trainData[i][0], trainData[i][1], cw, ch);
+                const color = trainLabels[i] === 1 ? MARGIN_COLORS.positive : MARGIN_COLORS.negative;
+                const m = trainLabels[i] * (dot(model.w, trainData[i]) + model.b);
+                const isSV = Math.abs(m - 1) < 0.2;
+                drawPoint(ctx, cx, cy, 5, color, false, isSV);
+            }
+
+            // Draw test points (outlined)
+            for (let i = 0; i < testData.length; i++) {
+                const [cx, cy] = toCanvas(testData[i][0], testData[i][1], cw, ch);
+                const color = testLabels[i] === 1 ? MARGIN_COLORS.positive : MARGIN_COLORS.negative;
+                drawPoint(ctx, cx, cy, 4, color, true);
+            }
+
+            // Legend
+            ctx.font = '12px "Noto Sans SC", sans-serif';
+            ctx.textAlign = 'left';
+            ctx.fillStyle = '#94a3b8';
+            drawPoint(ctx, 15, ch - 35, 4, MARGIN_COLORS.positive);
+            ctx.fillText('训练集', 25, ch - 31);
+            drawPoint(ctx, 75, ch - 35, 4, MARGIN_COLORS.positive, true);
+            ctx.fillText('测试集', 85, ch - 31);
+
+            // C label
+            ctx.font = '600 14px "JetBrains Mono", monospace';
+            ctx.fillStyle = 'var(--accent-purple)';
+            ctx.textAlign = 'right';
+            ctx.fillStyle = '#b388ff';
+            ctx.fillText('C = ' + cValEl.textContent, cw - 15, 25);
+        }
+
+        slider.addEventListener('input', update);
+        update();
+    })();
+
+    // ================================================
+    // Section 4: Hinge Loss
+    // ================================================
+    (() => {
+        // === Left canvas: Loss function comparison ===
+        function drawLosses() {
+            const { ctx, w: cw, h: ch } = getCtx('canvas-losses');
+            clearCanvas(ctx, cw, ch);
+
+            const padL = 50, padR = 20, padT = 30, padB = 45;
+            const plotW = cw - padL - padR;
+            const plotH = ch - padT - padB;
+
+            // Axes: x = y*f(x) from -2 to 3, y = loss from 0 to 3
+            const xMin = -2, xMax = 3, yMin = 0, yMax = 3;
+            function toPlot(x, y) {
+                return [
+                    padL + (x - xMin) / (xMax - xMin) * plotW,
+                    padT + (1 - (y - yMin) / (yMax - yMin)) * plotH
+                ];
+            }
+
+            // Grid
+            ctx.strokeStyle = 'rgba(42,42,74,0.5)';
+            ctx.lineWidth = 0.5;
+            for (let v = Math.ceil(xMin); v <= xMax; v++) {
+                const [px] = toPlot(v, 0);
+                ctx.beginPath(); ctx.moveTo(px, padT); ctx.lineTo(px, padT + plotH); ctx.stroke();
+            }
+            for (let v = Math.ceil(yMin); v <= yMax; v++) {
+                const [, py] = toPlot(0, v);
+                ctx.beginPath(); ctx.moveTo(padL, py); ctx.lineTo(padL + plotW, py); ctx.stroke();
+            }
+
+            // Axes
+            ctx.strokeStyle = '#4a4a6a';
+            ctx.lineWidth = 1.5;
+            const [ax0, ay0] = toPlot(xMin, 0);
+            const [ax1] = toPlot(xMax, 0);
+            const [, ay1] = toPlot(0, yMax);
+            ctx.beginPath(); ctx.moveTo(ax0, ay0); ctx.lineTo(ax1, ay0); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(padL, padT); ctx.lineTo(padL, padT + plotH); ctx.stroke();
+
+            // Axis labels
+            ctx.font = '12px "Noto Sans SC", sans-serif';
+            ctx.fillStyle = '#a8a8b8';
+            ctx.textAlign = 'center';
+            ctx.fillText('y·f(x)', padL + plotW / 2, padT + plotH + 35);
+            ctx.save();
+            ctx.translate(15, padT + plotH / 2);
+            ctx.rotate(-Math.PI / 2);
+            ctx.fillText('损失', 0, 0);
+            ctx.restore();
+
+            // Tick labels
+            ctx.font = '10px "JetBrains Mono", monospace';
+            ctx.fillStyle = '#6c6c7c';
+            ctx.textAlign = 'center';
+            for (let v = Math.ceil(xMin); v <= xMax; v++) {
+                const [px, py] = toPlot(v, 0);
+                ctx.fillText(v, px, py + 15);
+            }
+            ctx.textAlign = 'right';
+            for (let v = 0; v <= yMax; v++) {
+                const [px, py] = toPlot(xMin, v);
+                ctx.fillText(v, px - 5, py + 4);
+            }
+
+            // Loss functions
+            const losses = [
+                {
+                    name: '0-1 损失',
+                    color: '#6c6c7c',
+                    fn: z => z < 0 ? 1 : 0,
+                    dash: [4, 4]
+                },
+                {
+                    name: '合页损失',
+                    color: '#16c79a',
+                    fn: z => Math.max(0, 1 - z),
+                    dash: []
+                },
+                {
+                    name: 'Logistic 损失',
+                    color: '#4fc3f7',
+                    fn: z => Math.log(1 + Math.exp(-z)) / Math.log(2),
+                    dash: [8, 4]
+                }
+            ];
+
+            for (const loss of losses) {
+                ctx.beginPath();
+                ctx.setLineDash(loss.dash);
+                ctx.strokeStyle = loss.color;
+                ctx.lineWidth = 2.5;
+                let first = true;
+                for (let px = 0; px <= plotW; px += 1) {
+                    const x = xMin + px / plotW * (xMax - xMin);
+                    const y = loss.fn(x);
+                    const [sx, sy] = toPlot(x, Math.min(y, yMax));
+                    if (first) { ctx.moveTo(sx, sy); first = false; }
+                    else ctx.lineTo(sx, sy);
+                }
+                ctx.stroke();
+                ctx.setLineDash([]);
+            }
+
+            // Mark y*f(x) = 1 line
+            const [mx1, my1] = toPlot(1, 0);
+            const [, my2] = toPlot(1, yMax);
+            ctx.setLineDash([3, 3]);
+            ctx.strokeStyle = 'rgba(250,204,21,0.4)';
+            ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.moveTo(mx1, my1); ctx.lineTo(mx1, my2); ctx.stroke();
+            ctx.setLineDash([]);
+
+            ctx.font = '10px "JetBrains Mono", monospace';
+            ctx.fillStyle = '#facc15';
+            ctx.textAlign = 'center';
+            ctx.fillText('margin', mx1, my2 - 5);
+
+            // Legend
+            let ly = padT + 12;
+            for (const loss of losses) {
+                ctx.beginPath();
+                ctx.setLineDash(loss.dash);
+                ctx.strokeStyle = loss.color;
+                ctx.lineWidth = 2.5;
+                ctx.moveTo(cw - padR - 110, ly);
+                ctx.lineTo(cw - padR - 85, ly);
+                ctx.stroke();
+                ctx.setLineDash([]);
+                ctx.font = '11px "Noto Sans SC", sans-serif';
+                ctx.fillStyle = loss.color;
+                ctx.textAlign = 'left';
+                ctx.fillText(loss.name, cw - padR - 80, ly + 4);
+                ly += 20;
+            }
+        }
+
+        drawLosses();
+
+        // === Right canvas: Interactive single-point hinge loss ===
+        let pointYF = 0.5; // y*f(x) value
+        let dragging = false;
+
+        function drawPointLoss() {
+            const { ctx, w: cw, h: ch, canvas } = getCtx('canvas-point-loss');
+            clearCanvas(ctx, cw, ch);
+
+            const padL = 50, padR = 20, padT = 30, padB = 45;
+            const plotW = cw - padL - padR;
+            const plotH = ch - padT - padB;
+
+            const xMin = -2, xMax = 3, yMin = 0, yMax = 3;
+            function toPlot(x, y) {
+                return [
+                    padL + (x - xMin) / (xMax - xMin) * plotW,
+                    padT + (1 - (y - yMin) / (yMax - yMin)) * plotH
+                ];
+            }
+            function fromPlot(px, py) {
+                return [
+                    xMin + (px - padL) / plotW * (xMax - xMin),
+                    yMax - (py - padT) / plotH * (yMax - yMin)
+                ];
+            }
+
+            // Grid
+            ctx.strokeStyle = 'rgba(42,42,74,0.5)';
+            ctx.lineWidth = 0.5;
+            for (let v = Math.ceil(xMin); v <= xMax; v++) {
+                const [px] = toPlot(v, 0);
+                ctx.beginPath(); ctx.moveTo(px, padT); ctx.lineTo(px, padT + plotH); ctx.stroke();
+            }
+            for (let v = Math.ceil(yMin); v <= yMax; v++) {
+                const [, py] = toPlot(0, v);
+                ctx.beginPath(); ctx.moveTo(padL, py); ctx.lineTo(padL + plotW, py); ctx.stroke();
+            }
+
+            // Axes
+            ctx.strokeStyle = '#4a4a6a';
+            ctx.lineWidth = 1.5;
+            ctx.beginPath(); ctx.moveTo(padL, padT + plotH); ctx.lineTo(padL + plotW, padT + plotH); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(padL, padT); ctx.lineTo(padL, padT + plotH); ctx.stroke();
+
+            // Axis labels
+            ctx.font = '12px "Noto Sans SC", sans-serif';
+            ctx.fillStyle = '#a8a8b8';
+            ctx.textAlign = 'center';
+            ctx.fillText('y·f(x)', padL + plotW / 2, padT + plotH + 35);
+            ctx.save();
+            ctx.translate(15, padT + plotH / 2);
+            ctx.rotate(-Math.PI / 2);
+            ctx.fillText('损失', 0, 0);
+            ctx.restore();
+
+            // Tick labels
+            ctx.font = '10px "JetBrains Mono", monospace';
+            ctx.fillStyle = '#6c6c7c';
+            ctx.textAlign = 'center';
+            for (let v = Math.ceil(xMin); v <= xMax; v++) {
+                const [px, py] = toPlot(v, 0);
+                ctx.fillText(v, px, py + 15);
+            }
+            ctx.textAlign = 'right';
+            for (let v = 0; v <= yMax; v++) {
+                const [px, py] = toPlot(xMin, v);
+                ctx.fillText(v, px - 5, py + 4);
+            }
+
+            // Draw hinge loss curve
+            ctx.beginPath();
+            ctx.strokeStyle = '#16c79a';
+            ctx.lineWidth = 2.5;
+            let first = true;
+            for (let px = 0; px <= plotW; px += 1) {
+                const x = xMin + px / plotW * (xMax - xMin);
+                const y = Math.max(0, 1 - x);
+                const [sx, sy] = toPlot(x, Math.min(y, yMax));
+                if (first) { ctx.moveTo(sx, sy); first = false; }
+                else ctx.lineTo(sx, sy);
+            }
+            ctx.stroke();
+
+            // Current point
+            const hingeLoss = Math.max(0, 1 - pointYF);
+            const [px, py] = toPlot(pointYF, hingeLoss);
+
+            // Vertical line from x-axis to point
+            const [, baseY] = toPlot(pointYF, 0);
+            if (hingeLoss > 0.01) {
+                ctx.beginPath();
+                ctx.setLineDash([4, 3]);
+                ctx.strokeStyle = '#ff5252';
+                ctx.lineWidth = 1.5;
+                ctx.moveTo(px, baseY);
+                ctx.lineTo(px, py);
+                ctx.stroke();
+                ctx.setLineDash([]);
+            }
+
+            // Draw the draggable point
+            ctx.beginPath();
+            ctx.arc(px, py, 8, 0, Math.PI * 2);
+            ctx.fillStyle = '#ff5252';
+            ctx.fill();
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+
+            // Label
+            ctx.font = '600 12px "JetBrains Mono", monospace';
+            ctx.fillStyle = '#e8e8e8';
+            ctx.textAlign = 'left';
+            ctx.fillText(`y·f(x) = ${pointYF.toFixed(2)}`, px + 14, py - 10);
+            ctx.fillStyle = hingeLoss > 0 ? '#ff5252' : '#16c79a';
+            ctx.fillText(`ξ = ${hingeLoss.toFixed(2)}`, px + 14, py + 8);
+
+            // Zone labels
+            const [zx1, zy1] = toPlot(1, yMax * 0.85);
+            ctx.font = '11px "Noto Sans SC", sans-serif';
+            ctx.fillStyle = 'rgba(239,68,68,0.6)';
+            ctx.textAlign = 'center';
+            ctx.fillText('误分类区', padL + plotW * 0.15, padT + 20);
+            ctx.fillStyle = 'rgba(250,204,21,0.6)';
+            ctx.fillText('间隔内', padL + plotW * 0.48, padT + 20);
+            ctx.fillStyle = 'rgba(22,197,94,0.5)';
+            ctx.fillText('安全区', padL + plotW * 0.82, padT + 20);
+
+            // Zone dividers
+            const [d0] = toPlot(0, 0);
+            const [d1] = toPlot(1, 0);
+            ctx.setLineDash([3, 3]);
+            ctx.strokeStyle = 'rgba(250,204,21,0.3)';
+            ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.moveTo(d0, padT); ctx.lineTo(d0, padT + plotH); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(d1, padT); ctx.lineTo(d1, padT + plotH); ctx.stroke();
+            ctx.setLineDash([]);
+
+            // Store for hit detection
+            canvas._plotInfo = { padL, padR, padT, padB, plotW, plotH, xMin, xMax, yMin, yMax, fromPlot };
+        }
+
+        drawPointLoss();
+
+        // Drag interaction
+        const plCanvas = document.getElementById('canvas-point-loss');
+        function getMousePos(e) {
+            const rect = plCanvas.getBoundingClientRect();
+            return [e.clientX - rect.left, e.clientY - rect.top];
+        }
+
+        plCanvas.addEventListener('mousedown', (e) => {
+            const [mx, my] = getMousePos(e);
+            const info = plCanvas._plotInfo;
+            if (!info) return;
+            const hingeLoss = Math.max(0, 1 - pointYF);
+            const [px, py] = [
+                info.padL + (pointYF - info.xMin) / (info.xMax - info.xMin) * info.plotW,
+                info.padT + (1 - (hingeLoss - info.yMin) / (info.yMax - info.yMin)) * info.plotH
+            ];
+            const dist = Math.sqrt((mx - px) ** 2 + (my - py) ** 2);
+            if (dist < 20) dragging = true;
+        });
+
+        plCanvas.addEventListener('mousemove', (e) => {
+            if (!dragging) {
+                // Change cursor if near point
+                const [mx, my] = getMousePos(e);
+                const info = plCanvas._plotInfo;
+                if (!info) return;
+                const hingeLoss = Math.max(0, 1 - pointYF);
+                const [px, py] = [
+                    info.padL + (pointYF - info.xMin) / (info.xMax - info.xMin) * info.plotW,
+                    info.padT + (1 - (hingeLoss - info.yMin) / (info.yMax - info.yMin)) * info.plotH
+                ];
+                const dist = Math.sqrt((mx - px) ** 2 + (my - py) ** 2);
+                plCanvas.style.cursor = dist < 20 ? 'grab' : 'default';
+                return;
+            }
+            plCanvas.style.cursor = 'grabbing';
+            const [mx] = getMousePos(e);
+            const info = plCanvas._plotInfo;
+            if (!info) return;
+            const x = info.xMin + (mx - info.padL) / info.plotW * (info.xMax - info.xMin);
+            pointYF = Math.max(info.xMin, Math.min(info.xMax, x));
+            drawPointLoss();
+        });
+
+        window.addEventListener('mouseup', () => {
+            if (dragging) {
+                dragging = false;
+                plCanvas.style.cursor = 'default';
+            }
+        });
+
+        // Touch support
+        plCanvas.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            const touch = e.touches[0];
+            const rect = plCanvas.getBoundingClientRect();
+            const mx = touch.clientX - rect.left;
+            const my = touch.clientY - rect.top;
+            const info = plCanvas._plotInfo;
+            if (!info) return;
+            const hingeLoss = Math.max(0, 1 - pointYF);
+            const [px, py] = [
+                info.padL + (pointYF - info.xMin) / (info.xMax - info.xMin) * info.plotW,
+                info.padT + (1 - (hingeLoss - info.yMin) / (info.yMax - info.yMin)) * info.plotH
+            ];
+            if (Math.sqrt((mx - px) ** 2 + (my - py) ** 2) < 30) dragging = true;
+        }, { passive: false });
+
+        plCanvas.addEventListener('touchmove', (e) => {
+            if (!dragging) return;
+            e.preventDefault();
+            const touch = e.touches[0];
+            const rect = plCanvas.getBoundingClientRect();
+            const mx = touch.clientX - rect.left;
+            const info = plCanvas._plotInfo;
+            if (!info) return;
+            const x = info.xMin + (mx - info.padL) / info.plotW * (info.xMax - info.xMin);
+            pointYF = Math.max(info.xMin, Math.min(info.xMax, x));
+            drawPointLoss();
+        }, { passive: false });
+
+        plCanvas.addEventListener('touchend', () => { dragging = false; });
+    })();
+
+    // ================================================
+    // Resize handler
+    // ================================================
+    let resizeTimer;
+    window.addEventListener('resize', () => {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(() => {
+            // Re-trigger all draws by dispatching events
+            document.getElementById('btn-reset-hard').click();
+            document.getElementById('btn-regen-slack').click();
+            document.getElementById('slider-c').dispatchEvent(new Event('input'));
+            // Hinge loss redraws need manual calls — they're in IIFEs
+            // so we reload sections via a simple page approach:
+            // Instead, store draw functions globally
+        }, 200);
+    });
+});
+</script>
+</body>
+</html>

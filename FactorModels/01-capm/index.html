@@ -1,0 +1,1344 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CAPM — 因子模型</title>
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" defer>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" defer></script>
+    <script src="../shared/scripts/nav.js" defer></script>
+    <script src="../shared/scripts/factor-utils.js" defer></script>
+    <style>
+        /* ========== Page-specific styles ========== */
+        .fin-green { color: #2e7d32; }
+        .fin-red { color: var(--accent-red); }
+
+        .viz-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+        }
+        .viz-card h3 {
+            color: #4caf50;
+            margin-bottom: 0.5rem;
+        }
+        .viz-card .desc {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            margin-bottom: 1rem;
+        }
+        .canvas-wrap {
+            position: relative;
+            background: #111125;
+            border-radius: var(--radius-md);
+            overflow: hidden;
+            margin-bottom: 1rem;
+        }
+        .canvas-wrap canvas {
+            display: block;
+            width: 100%;
+            cursor: crosshair;
+        }
+        .controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1rem;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+        }
+        .control-group label {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+        .control-group input[type="range"] {
+            width: 160px;
+            accent-color: #2e7d32;
+        }
+        .control-group select {
+            background: var(--bg-card);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            padding: 0.35rem 0.6rem;
+            font-size: 0.85rem;
+            cursor: pointer;
+        }
+        .val-display {
+            font-family: var(--font-mono);
+            color: #4caf50;
+            font-size: 0.85rem;
+            min-width: 3.5em;
+            text-align: right;
+        }
+        .info-box {
+            background: rgba(46, 125, 50, 0.1);
+            border: 1px solid rgba(46, 125, 50, 0.3);
+            border-radius: var(--radius-md);
+            padding: 1rem;
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            margin-top: 0.75rem;
+        }
+        .info-box strong { color: #4caf50; }
+        .stock-detail {
+            background: var(--bg-card);
+            border-radius: var(--radius-sm);
+            padding: 0.75rem 1rem;
+            font-size: 0.85rem;
+            margin-top: 0.5rem;
+            display: none;
+        }
+        .stock-detail.show { display: block; }
+        .stock-detail span { margin-right: 1.2rem; }
+        .stock-detail .pos { color: #4caf50; }
+        .stock-detail .neg { color: var(--accent-red); }
+        .formula-block {
+            background: rgba(15, 52, 96, 0.5);
+            border-left: 3px solid #2e7d32;
+            padding: 1rem 1.25rem;
+            border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+            margin: 1rem 0;
+            overflow-x: auto;
+        }
+        .legend {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1rem;
+            font-size: 0.8rem;
+            margin-top: 0.5rem;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 0.35rem;
+            color: var(--text-secondary);
+        }
+        .legend-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+        .anomaly-tabs {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+        }
+        .anomaly-tab {
+            padding: 0.4rem 1rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-size: 0.85rem;
+            transition: all 0.2s;
+        }
+        .anomaly-tab:hover { border-color: #2e7d32; color: var(--text-primary); }
+        .anomaly-tab.active {
+            background: rgba(46, 125, 50, 0.2);
+            border-color: #2e7d32;
+            color: #4caf50;
+        }
+        .hero-header {
+            text-align: center;
+            padding: 2rem 0 1rem;
+        }
+        .hero-header h1 {
+            font-size: 2.2rem;
+            background: linear-gradient(135deg, #4caf50, #2e7d32);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .hero-header p {
+            max-width: 700px;
+            margin: 0.5rem auto;
+        }
+    </style>
+</head>
+<body>
+
+<div class="page-container">
+
+    <!-- Hero -->
+    <div class="hero-header">
+        <h1>CAPM 资本资产定价模型</h1>
+        <p>Capital Asset Pricing Model — 理解系统性风险与预期收益的核心关系，构建因子投资的起点。</p>
+    </div>
+
+    <!-- ===================== Section 1: SML ===================== -->
+    <div class="section" id="sml">
+        <div class="section-title">
+            <div class="icon">1</div>
+            <h2>证券市场线 (SML)</h2>
+        </div>
+        <div class="formula-block">
+            $$E(R_i) = R_f + \beta_i \, [E(R_m) - R_f]$$
+        </div>
+        <p>SML 描述的是单个资产的预期收益与其 Beta（系统性风险）之间的线性关系。在均衡状态下，所有资产应落在 SML 上。偏离 SML 的资产存在 Alpha：线上方为被低估，线下方为被高估。</p>
+        <div class="viz-card">
+            <div class="controls">
+                <div class="control-group">
+                    <label>无风险利率 R<sub>f</sub></label>
+                    <div class="flex items-center gap-sm">
+                        <input type="range" id="sml-rf" min="1" max="5" step="0.1" value="3">
+                        <span class="val-display" id="sml-rf-val">3.0%</span>
+                    </div>
+                </div>
+                <div class="control-group">
+                    <label>市场风险溢价 E(R<sub>m</sub>)-R<sub>f</sub></label>
+                    <div class="flex items-center gap-sm">
+                        <input type="range" id="sml-mp" min="3" max="10" step="0.1" value="6">
+                        <span class="val-display" id="sml-mp-val">6.0%</span>
+                    </div>
+                </div>
+            </div>
+            <div class="canvas-wrap">
+                <canvas id="smlCanvas" width="800" height="480"></canvas>
+            </div>
+            <div class="legend">
+                <div class="legend-item"><span class="legend-dot" style="background:#4caf50"></span> 被低估 (Alpha &gt; 0)</div>
+                <div class="legend-item"><span class="legend-dot" style="background:#ff5252"></span> 被高估 (Alpha &lt; 0)</div>
+                <div class="legend-item"><span class="legend-dot" style="background:#ffd740"></span> SML 线</div>
+            </div>
+            <div class="stock-detail" id="sml-detail">
+                <span id="sml-detail-name" style="color:#4caf50;font-weight:600"></span>
+                <span>Beta: <b id="sml-detail-beta"></b></span>
+                <span>实际收益: <b id="sml-detail-ret"></b></span>
+                <span>Alpha: <b id="sml-detail-alpha"></b></span>
+            </div>
+            <div class="info-box">
+                <strong>交互提示：</strong>拖动滑块改变无风险利率和市场溢价，观察 SML 如何旋转。点击任意股票查看其详情。Alpha 为正代表相对于 CAPM 预测的超额收益。
+            </div>
+        </div>
+    </div>
+
+    <!-- ===================== Section 2: CML ===================== -->
+    <div class="section" id="cml">
+        <div class="section-title">
+            <div class="icon">2</div>
+            <h2>资本市场线 (CML)</h2>
+        </div>
+        <div class="formula-block">
+            $$E(R_p) = R_f + \frac{E(R_m) - R_f}{\sigma_m} \cdot \sigma_p$$
+        </div>
+        <p>CML 连接无风险资产与市场组合（有效前沿的切点），表示有效组合的风险-收益权衡。只有有效组合才能落在 CML 上；单个资产因为承担了非系统性风险，通常在 CML 下方。</p>
+        <div class="viz-card">
+            <div class="controls">
+                <div class="control-group">
+                    <label>无风险利率 R<sub>f</sub> (拖动下方绿点亦可)</label>
+                    <div class="flex items-center gap-sm">
+                        <input type="range" id="cml-rf" min="1" max="5" step="0.1" value="2.5">
+                        <span class="val-display" id="cml-rf-val">2.5%</span>
+                    </div>
+                </div>
+            </div>
+            <div class="canvas-wrap">
+                <canvas id="cmlCanvas" width="800" height="480"></canvas>
+            </div>
+            <div class="legend">
+                <div class="legend-item"><span class="legend-dot" style="background:#4fc3f7"></span> 个别资产</div>
+                <div class="legend-item"><span class="legend-dot" style="background:#b388ff"></span> 有效前沿</div>
+                <div class="legend-item"><span class="legend-dot" style="background:#ffd740"></span> CML</div>
+                <div class="legend-item"><span class="legend-dot" style="background:#4caf50"></span> 市场组合</div>
+            </div>
+            <div class="info-box">
+                <strong>要点：</strong>CML 上的组合是无风险资产与市场组合的线性组合。位于切点右侧意味着杠杆买入（借钱投资市场组合），左侧则包含部分现金。
+            </div>
+        </div>
+    </div>
+
+    <!-- ===================== Section 3: Beta Regression ===================== -->
+    <div class="section" id="beta">
+        <div class="section-title">
+            <div class="icon">3</div>
+            <h2>Beta 的含义</h2>
+        </div>
+        <div class="formula-block">
+            $$R_i - R_f = \alpha_i + \beta_i (R_m - R_f) + \epsilon_i$$
+        </div>
+        <p>Beta 是股票收益对市场收益回归的斜率。Beta &gt; 1 的股票比市场更敏感（进攻型），Beta &lt; 1 的股票更稳定（防守型）。R² 反映市场因子解释该股票收益方差的比例。</p>
+        <div class="viz-card">
+            <div class="controls">
+                <div class="control-group">
+                    <label>选择股票</label>
+                    <select id="beta-stock">
+                        <option value="0">科技成长 (β≈1.5)</option>
+                        <option value="1">消费蓝筹 (β≈0.7)</option>
+                        <option value="2">金融地产 (β≈1.2)</option>
+                        <option value="3">公用事业 (β≈0.4)</option>
+                        <option value="4">新能源 (β≈1.8)</option>
+                    </select>
+                </div>
+                <div class="control-group">
+                    <label>显示残差</label>
+                    <select id="beta-residuals">
+                        <option value="1">是</option>
+                        <option value="0">否</option>
+                    </select>
+                </div>
+            </div>
+            <div class="canvas-wrap">
+                <canvas id="betaCanvas" width="800" height="480"></canvas>
+            </div>
+            <div id="beta-stats" class="info-box"></div>
+        </div>
+    </div>
+
+    <!-- ===================== Section 4: Risk Decomposition ===================== -->
+    <div class="section" id="risk">
+        <div class="section-title">
+            <div class="icon">4</div>
+            <h2>系统性风险 vs 非系统性风险</h2>
+        </div>
+        <div class="formula-block">
+            $$\sigma_p^2 = \beta_p^2 \sigma_m^2 + \sigma_\epsilon^2 \quad \xrightarrow{N \to \infty} \quad \sigma_\epsilon^2 \to 0$$
+        </div>
+        <p>通过分散投资，组合的非系统性风险（个股特有）可以趋近于零，但系统性风险（市场整体）无法分散。这就是为什么 CAPM 只对系统性风险给予补偿。</p>
+        <div class="viz-card">
+            <div class="controls">
+                <div class="control-group">
+                    <label>组合中股票数量 N</label>
+                    <div class="flex items-center gap-sm">
+                        <input type="range" id="risk-n" min="1" max="50" step="1" value="1">
+                        <span class="val-display" id="risk-n-val">1</span>
+                    </div>
+                </div>
+            </div>
+            <div class="canvas-wrap">
+                <canvas id="riskCanvas" width="800" height="480"></canvas>
+            </div>
+            <div class="legend">
+                <div class="legend-item"><span class="legend-dot" style="background:#ff5252"></span> 非系统性风险</div>
+                <div class="legend-item"><span class="legend-dot" style="background:#4fc3f7"></span> 系统性风险</div>
+                <div class="legend-item"><span class="legend-dot" style="background:#ffd740"></span> 总风险</div>
+            </div>
+            <div class="info-box">
+                <strong>拖动滑块</strong>增加持仓股票数量，观察非系统性风险如何迅速下降。大约持有 20-30 只股票时，可分散风险已接近极限。
+            </div>
+        </div>
+    </div>
+
+    <!-- ===================== Section 5: CAPM Limitations ===================== -->
+    <div class="section" id="limits">
+        <div class="section-title">
+            <div class="icon">5</div>
+            <h2>CAPM 的局限性</h2>
+        </div>
+        <p>实证研究发现许多 CAPM 无法解释的异象（anomaly）。这些异象表明，除了市场风险外还有其他因子在驱动资产定价，由此催生了 Fama-French 三因子、五因子等多因子模型。</p>
+        <div class="viz-card">
+            <div class="anomaly-tabs">
+                <div class="anomaly-tab active" data-anomaly="size">规模效应 (Size)</div>
+                <div class="anomaly-tab" data-anomaly="value">价值效应 (Value)</div>
+                <div class="anomaly-tab" data-anomaly="momentum">动量效应 (Momentum)</div>
+            </div>
+            <div class="canvas-wrap">
+                <canvas id="anomalyCanvas" width="800" height="440"></canvas>
+            </div>
+            <div id="anomaly-desc" class="info-box"></div>
+            <p class="mt-2" style="color:var(--accent-blue);font-size:0.9rem;">这些异象推动了多因子模型的发展 → 下一站：<a href="../02-apt/index.html">APT 套利定价理论</a> 和 <a href="../03-fama-french-3/index.html">Fama-French 三因子模型</a></p>
+        </div>
+    </div>
+
+</div> <!-- end page-container -->
+
+<script>
+// ================================================================
+// Utilities
+// ================================================================
+function seededRandom(seed) {
+    let s = seed;
+    return function() {
+        s = (s * 16807 + 0) % 2147483647;
+        return (s - 1) / 2147483646;
+    };
+}
+const DPR = window.devicePixelRatio || 1;
+
+function setupCanvas(canvas) {
+    const rect = canvas.getBoundingClientRect();
+    const w = rect.width, h = rect.height;
+    canvas.width = w * DPR;
+    canvas.height = h * DPR;
+    const ctx = canvas.getContext('2d');
+    ctx.scale(DPR, DPR);
+    return { ctx, w, h };
+}
+
+function drawAxes(ctx, ox, oy, w, h, xLabel, yLabel) {
+    ctx.strokeStyle = '#3a3a5a';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(ox, oy - h);
+    ctx.lineTo(ox, oy);
+    ctx.lineTo(ox + w, oy);
+    ctx.stroke();
+
+    ctx.fillStyle = '#6c6c7c';
+    ctx.font = '12px "Noto Sans SC", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(xLabel, ox + w / 2, oy + 36);
+    ctx.save();
+    ctx.translate(ox - 40, oy - h / 2);
+    ctx.rotate(-Math.PI / 2);
+    ctx.fillText(yLabel, 0, 0);
+    ctx.restore();
+}
+
+function drawTick(ctx, ox, oy, x, y, w, h, xRange, yRange, valX, valY) {
+    const px = ox + (x / xRange) * w;
+    const py = oy - (y / yRange) * h;
+    ctx.strokeStyle = '#2a2a4a';
+    ctx.lineWidth = 0.5;
+    if (valX !== undefined) {
+        ctx.beginPath();
+        ctx.moveTo(px, oy);
+        ctx.lineTo(px, oy + 5);
+        ctx.stroke();
+        ctx.fillStyle = '#6c6c7c';
+        ctx.font = '10px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText(valX, px, oy + 18);
+    }
+    if (valY !== undefined) {
+        ctx.beginPath();
+        ctx.moveTo(ox, py);
+        ctx.lineTo(ox - 5, py);
+        ctx.stroke();
+        ctx.fillStyle = '#6c6c7c';
+        ctx.font = '10px monospace';
+        ctx.textAlign = 'right';
+        ctx.fillText(valY, ox - 8, py + 4);
+    }
+}
+
+function toCanvas(ox, oy, w, h, x, y, xRange, yRange) {
+    return [ox + (x / xRange) * w, oy - (y / yRange) * h];
+}
+
+function fromCanvas(ox, oy, w, h, px, py, xRange, yRange) {
+    return [(px - ox) / w * xRange, (oy - py) / h * yRange];
+}
+
+// ================================================================
+// Section 1: SML
+// ================================================================
+const smlStockNames = [
+    '贵州茅台','宁德时代','招商银行','比亚迪','中国平安','海天味业',
+    '恒瑞医药','万科A','五粮液','隆基绿能','美的集团','中信证券',
+    '长江电力','药明康德','紫金矿业','东方财富','三一重工','迈瑞医疗',
+    '中国中免','牧原股份','阳光电源','海尔智家','立讯精密','韦尔股份'
+];
+
+let smlStocks = [];
+function generateSMLStocks(seed) {
+    const rng = seededRandom(seed);
+    smlStocks = smlStockNames.map((name, i) => {
+        const beta = 0.2 + rng() * 1.8;
+        const alpha = (rng() - 0.5) * 8;
+        return { name, beta, alpha, idx: i };
+    });
+}
+generateSMLStocks(42);
+
+let smlHover = -1;
+
+function drawSML() {
+    const canvas = document.getElementById('smlCanvas');
+    const { ctx, w, h } = setupCanvas(canvas);
+    const rf = parseFloat(document.getElementById('sml-rf').value);
+    const mp = parseFloat(document.getElementById('sml-mp').value);
+
+    document.getElementById('sml-rf-val').textContent = rf.toFixed(1) + '%';
+    document.getElementById('sml-mp-val').textContent = mp.toFixed(1) + '%';
+
+    const pad = { left: 60, right: 30, top: 30, bottom: 50 };
+    const ox = pad.left, oy = h - pad.bottom;
+    const cw = w - pad.left - pad.right, ch = h - pad.top - pad.bottom;
+    const xRange = 2.2, yRange = 25;
+
+    ctx.clearRect(0, 0, w, h);
+
+    // Grid
+    ctx.strokeStyle = '#1e1e3a';
+    ctx.lineWidth = 0.5;
+    for (let i = 0; i <= 5; i++) {
+        const y = oy - (i / 5) * ch;
+        ctx.beginPath(); ctx.moveTo(ox, y); ctx.lineTo(ox + cw, y); ctx.stroke();
+    }
+    for (let i = 0; i <= 4; i++) {
+        const x = ox + (i / 4) * cw;
+        ctx.beginPath(); ctx.moveTo(x, oy); ctx.lineTo(x, oy - ch); ctx.stroke();
+    }
+
+    drawAxes(ctx, ox, oy, cw, ch, 'Beta (β)', '预期收益率 (%)');
+
+    // Ticks
+    for (let b = 0; b <= 2; b += 0.5) drawTick(ctx, ox, oy, b, 0, cw, ch, xRange, yRange, b.toFixed(1), undefined);
+    for (let r = 0; r <= 25; r += 5) drawTick(ctx, ox, oy, 0, r, cw, ch, xRange, yRange, undefined, r + '%');
+
+    // SML line
+    ctx.strokeStyle = '#ffd740';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6, 3]);
+    const [x0, y0] = toCanvas(ox, oy, cw, ch, 0, rf, xRange, yRange);
+    const [x1, y1] = toCanvas(ox, oy, cw, ch, 2.2, rf + 2.2 * mp, xRange, yRange);
+    ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Label SML
+    ctx.fillStyle = '#ffd740';
+    ctx.font = 'bold 13px "Noto Sans SC", sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText('SML', x1 - 40, y1 - 8);
+
+    // Stocks
+    smlStocks.forEach((s, i) => {
+        const expectedRet = rf + s.beta * mp;
+        const actualRet = expectedRet + s.alpha;
+        const [px, py] = toCanvas(ox, oy, cw, ch, s.beta, actualRet, xRange, yRange);
+        s._px = px; s._py = py; s._actualRet = actualRet; s._expectedRet = expectedRet;
+
+        const isHover = (i === smlHover);
+        const color = s.alpha >= 0 ? '#4caf50' : '#ff5252';
+        const r = isHover ? 7 : 5;
+
+        ctx.beginPath();
+        ctx.arc(px, py, r, 0, Math.PI * 2);
+        ctx.fillStyle = color;
+        ctx.globalAlpha = isHover ? 1 : 0.75;
+        ctx.fill();
+        ctx.globalAlpha = 1;
+
+        if (isHover) {
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            // Label
+            ctx.fillStyle = '#fff';
+            ctx.font = '11px "Noto Sans SC", sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(s.name, px, py - 12);
+        }
+    });
+
+    // Rf label
+    const [rfx, rfy] = toCanvas(ox, oy, cw, ch, 0, rf, xRange, yRange);
+    ctx.fillStyle = '#4caf50';
+    ctx.font = '11px monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText('Rf=' + rf.toFixed(1) + '%', rfx - 4, rfy + 4);
+}
+
+document.getElementById('sml-rf').addEventListener('input', drawSML);
+document.getElementById('sml-mp').addEventListener('input', drawSML);
+
+document.getElementById('smlCanvas').addEventListener('mousemove', function(e) {
+    const rect = this.getBoundingClientRect();
+    const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+    let closest = -1, minD = 15;
+    smlStocks.forEach((s, i) => {
+        const d = Math.hypot(mx - s._px, my - s._py);
+        if (d < minD) { minD = d; closest = i; }
+    });
+    if (closest !== smlHover) {
+        smlHover = closest;
+        drawSML();
+    }
+});
+
+document.getElementById('smlCanvas').addEventListener('click', function() {
+    const det = document.getElementById('sml-detail');
+    if (smlHover >= 0) {
+        const s = smlStocks[smlHover];
+        det.classList.add('show');
+        document.getElementById('sml-detail-name').textContent = s.name;
+        document.getElementById('sml-detail-beta').textContent = s.beta.toFixed(2);
+        document.getElementById('sml-detail-ret').textContent = s._actualRet.toFixed(2) + '%';
+        const alphaEl = document.getElementById('sml-detail-alpha');
+        alphaEl.textContent = (s.alpha >= 0 ? '+' : '') + s.alpha.toFixed(2) + '%';
+        alphaEl.className = s.alpha >= 0 ? 'pos' : 'neg';
+    } else {
+        det.classList.remove('show');
+    }
+});
+
+// ================================================================
+// Section 2: CML
+// ================================================================
+let cmlAssets = [];
+let efficientFrontier = [];
+let cmlDragging = false;
+
+function generateCMLAssets() {
+    const rng = seededRandom(77);
+    cmlAssets = [];
+    for (let i = 0; i < 40; i++) {
+        const sigma = 5 + rng() * 30;
+        const ret = 2 + rng() * 16;
+        cmlAssets.push({ sigma, ret });
+    }
+}
+generateCMLAssets();
+
+function computeEfficientFrontier() {
+    // Simulated efficient frontier as a parabolic curve
+    efficientFrontier = [];
+    const minSig = 8, maxSig = 35;
+    for (let s = minSig; s <= maxSig; s += 0.5) {
+        // Parabolic shape: higher return requires more risk
+        const t = (s - minSig) / (maxSig - minSig);
+        const ret = 5 + 14 * Math.sqrt(t) - 2 * t * t;
+        efficientFrontier.push({ sigma: s, ret });
+    }
+}
+computeEfficientFrontier();
+
+function findTangent(rf) {
+    // Find tangent point: max Sharpe ratio along the efficient frontier
+    let bestSharpe = -Infinity, tangent = null;
+    for (const p of efficientFrontier) {
+        const sharpe = (p.ret - rf) / p.sigma;
+        if (sharpe > bestSharpe) {
+            bestSharpe = sharpe;
+            tangent = { sigma: p.sigma, ret: p.ret, sharpe };
+        }
+    }
+    return tangent;
+}
+
+function drawCML() {
+    const canvas = document.getElementById('cmlCanvas');
+    const { ctx, w, h } = setupCanvas(canvas);
+    const rf = parseFloat(document.getElementById('cml-rf').value);
+    document.getElementById('cml-rf-val').textContent = rf.toFixed(1) + '%';
+
+    const pad = { left: 60, right: 30, top: 30, bottom: 50 };
+    const ox = pad.left, oy = h - pad.bottom;
+    const cw = w - pad.left - pad.right, ch = h - pad.top - pad.bottom;
+    const xRange = 40, yRange = 22;
+
+    ctx.clearRect(0, 0, w, h);
+
+    // Grid
+    ctx.strokeStyle = '#1e1e3a';
+    ctx.lineWidth = 0.5;
+    for (let i = 0; i <= 5; i++) {
+        const y = oy - (i / 5) * ch;
+        ctx.beginPath(); ctx.moveTo(ox, y); ctx.lineTo(ox + cw, y); ctx.stroke();
+    }
+    for (let i = 0; i <= 4; i++) {
+        const x = ox + (i / 4) * cw;
+        ctx.beginPath(); ctx.moveTo(x, oy); ctx.lineTo(x, oy - ch); ctx.stroke();
+    }
+
+    drawAxes(ctx, ox, oy, cw, ch, '标准差 σ (%)', '预期收益率 (%)');
+
+    for (let s = 0; s <= 40; s += 10) drawTick(ctx, ox, oy, s, 0, cw, ch, xRange, yRange, s + '%', undefined);
+    for (let r = 0; r <= 20; r += 5) drawTick(ctx, ox, oy, 0, r, cw, ch, xRange, yRange, undefined, r + '%');
+
+    // Individual assets
+    cmlAssets.forEach(a => {
+        const [px, py] = toCanvas(ox, oy, cw, ch, a.sigma, a.ret, xRange, yRange);
+        ctx.beginPath();
+        ctx.arc(px, py, 3, 0, Math.PI * 2);
+        ctx.fillStyle = '#4fc3f7';
+        ctx.globalAlpha = 0.5;
+        ctx.fill();
+        ctx.globalAlpha = 1;
+    });
+
+    // Efficient frontier
+    ctx.beginPath();
+    ctx.strokeStyle = '#b388ff';
+    ctx.lineWidth = 2.5;
+    efficientFrontier.forEach((p, i) => {
+        const [px, py] = toCanvas(ox, oy, cw, ch, p.sigma, p.ret, xRange, yRange);
+        if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    });
+    ctx.stroke();
+
+    // Also draw the lower part of the frontier
+    ctx.beginPath();
+    ctx.strokeStyle = '#b388ff';
+    ctx.lineWidth = 1.5;
+    ctx.globalAlpha = 0.3;
+    const minSig = 8, maxSig = 35;
+    for (let s = minSig; s <= maxSig; s += 0.5) {
+        const t = (s - minSig) / (maxSig - minSig);
+        const ret = 5 + 14 * Math.sqrt(t) - 2 * t * t;
+        const retLow = 5 - 6 * Math.sqrt(t) + 2 * t;
+        const [px, py] = toCanvas(ox, oy, cw, ch, s, retLow, xRange, yRange);
+        if (s === minSig) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    }
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+
+    // Tangent point
+    const tangent = findTangent(rf);
+    if (tangent) {
+        // CML line
+        ctx.strokeStyle = '#ffd740';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([6, 3]);
+        const [rx, ry] = toCanvas(ox, oy, cw, ch, 0, rf, xRange, yRange);
+        const slope = (tangent.ret - rf) / tangent.sigma;
+        const endSig = 40;
+        const endRet = rf + slope * endSig;
+        const [ex, ey] = toCanvas(ox, oy, cw, ch, endSig, endRet, xRange, yRange);
+        ctx.beginPath(); ctx.moveTo(rx, ry); ctx.lineTo(ex, ey); ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Market portfolio dot
+        const [tx, ty] = toCanvas(ox, oy, cw, ch, tangent.sigma, tangent.ret, xRange, yRange);
+        ctx.beginPath();
+        ctx.arc(tx, ty, 7, 0, Math.PI * 2);
+        ctx.fillStyle = '#4caf50';
+        ctx.fill();
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        ctx.fillStyle = '#4caf50';
+        ctx.font = 'bold 12px "Noto Sans SC", sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText('M (市场组合)', tx + 12, ty - 4);
+        ctx.fillStyle = '#ffd740';
+        ctx.fillText('CML', ex - 45, ey - 8);
+        ctx.fillStyle = '#b388ff';
+        ctx.font = '11px "Noto Sans SC", sans-serif';
+        const efLast = efficientFrontier[efficientFrontier.length - 1];
+        const [elx, ely] = toCanvas(ox, oy, cw, ch, efLast.sigma, efLast.ret, xRange, yRange);
+        ctx.fillText('有效前沿', elx - 50, ely - 10);
+
+        // Rf point (draggable)
+        ctx.beginPath();
+        ctx.arc(rx, ry, 6, 0, Math.PI * 2);
+        ctx.fillStyle = '#4caf50';
+        ctx.fill();
+        ctx.strokeStyle = '#1a1a2e';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+    }
+}
+
+const cmlCanvas = document.getElementById('cmlCanvas');
+cmlCanvas.addEventListener('mousedown', function(e) {
+    const rect = this.getBoundingClientRect();
+    const my = e.clientY - rect.top;
+    const rf = parseFloat(document.getElementById('cml-rf').value);
+    const pad = { left: 60, bottom: 50, top: 30 };
+    const oy = rect.height - pad.bottom;
+    const ch = rect.height - pad.top - pad.bottom;
+    const [, rfy] = [0, oy - (rf / 22) * ch];
+    const rfCanvasY = oy - (rf / 22) * ch;
+    if (Math.abs(my - rfCanvasY) < 15 && e.clientX - rect.left < 80) {
+        cmlDragging = true;
+    }
+});
+cmlCanvas.addEventListener('mousemove', function(e) {
+    if (!cmlDragging) return;
+    const rect = this.getBoundingClientRect();
+    const my = e.clientY - rect.top;
+    const pad = { top: 30, bottom: 50 };
+    const oy = rect.height - pad.bottom;
+    const ch = rect.height - pad.top - pad.bottom;
+    let rf = ((oy - my) / ch) * 22;
+    rf = Math.max(1, Math.min(5, rf));
+    document.getElementById('cml-rf').value = rf.toFixed(1);
+    drawCML();
+});
+window.addEventListener('mouseup', () => { cmlDragging = false; });
+document.getElementById('cml-rf').addEventListener('input', drawCML);
+
+// ================================================================
+// Section 3: Beta Regression
+// ================================================================
+const betaStockProfiles = [
+    { name: '科技成长', beta: 1.5, alpha: 1.2, noise: 5 },
+    { name: '消费蓝筹', beta: 0.7, alpha: 0.5, noise: 3 },
+    { name: '金融地产', beta: 1.2, alpha: -0.3, noise: 4.5 },
+    { name: '公用事业', beta: 0.4, alpha: 0.8, noise: 2.5 },
+    { name: '新能源', beta: 1.8, alpha: 0.2, noise: 6 }
+];
+
+let betaData = [];
+
+function generateBetaData(profileIdx) {
+    const prof = betaStockProfiles[profileIdx];
+    const rng = seededRandom(100 + profileIdx * 37);
+    betaData = [];
+    for (let i = 0; i < 60; i++) {
+        // market excess return
+        const mkt = (rng() - 0.5) * 20;
+        const stock = prof.alpha + prof.beta * mkt + (rng() - 0.5) * prof.noise * 2;
+        betaData.push({ mkt, stock });
+    }
+}
+
+function linReg(data) {
+    const n = data.length;
+    let sx = 0, sy = 0, sxx = 0, sxy = 0, syy = 0;
+    for (const d of data) {
+        sx += d.mkt; sy += d.stock;
+        sxx += d.mkt * d.mkt; sxy += d.mkt * d.stock; syy += d.stock * d.stock;
+    }
+    const beta = (n * sxy - sx * sy) / (n * sxx - sx * sx);
+    const alpha = (sy - beta * sx) / n;
+    // R²
+    const yMean = sy / n;
+    let ssRes = 0, ssTot = 0;
+    for (const d of data) {
+        const pred = alpha + beta * d.mkt;
+        ssRes += (d.stock - pred) ** 2;
+        ssTot += (d.stock - yMean) ** 2;
+    }
+    const r2 = 1 - ssRes / ssTot;
+    return { beta, alpha, r2 };
+}
+
+function drawBeta() {
+    const canvas = document.getElementById('betaCanvas');
+    const { ctx, w, h } = setupCanvas(canvas);
+    const profileIdx = parseInt(document.getElementById('beta-stock').value);
+    const showResid = document.getElementById('beta-residuals').value === '1';
+
+    generateBetaData(profileIdx);
+    const reg = linReg(betaData);
+
+    const pad = { left: 60, right: 30, top: 30, bottom: 50 };
+    const ox = pad.left, oy = h - pad.bottom;
+    const cw = w - pad.left - pad.right, ch = h - pad.top - pad.bottom;
+    const xRange = 24, yRange = 40; // symmetric around 0
+    const xOff = xRange / 2, yOff = yRange / 2;
+
+    // Map: value to canvas, centered
+    function toC(x, y) {
+        return [ox + ((x + xOff) / xRange) * cw, oy - ((y + yOff) / yRange) * ch];
+    }
+
+    ctx.clearRect(0, 0, w, h);
+
+    // Grid
+    ctx.strokeStyle = '#1e1e3a';
+    ctx.lineWidth = 0.5;
+    for (let i = -20; i <= 20; i += 5) {
+        const [px, py] = toC(i, 0);
+        ctx.beginPath(); ctx.moveTo(px, oy - ch); ctx.lineTo(px, oy); ctx.stroke();
+    }
+    for (let i = -20; i <= 20; i += 5) {
+        const [px, py] = toC(0, i);
+        ctx.beginPath(); ctx.moveTo(ox, py); ctx.lineTo(ox + cw, py); ctx.stroke();
+    }
+
+    // Axes through zero
+    const [zeroX] = toC(0, 0);
+    const [, zeroY] = toC(0, 0);
+    ctx.strokeStyle = '#3a3a5a';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(zeroX, oy - ch); ctx.lineTo(zeroX, oy); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(ox, zeroY); ctx.lineTo(ox + cw, zeroY); ctx.stroke();
+
+    // Axis labels
+    ctx.fillStyle = '#6c6c7c';
+    ctx.font = '12px "Noto Sans SC", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('市场超额收益 (%)', ox + cw / 2, oy + 36);
+    ctx.save();
+    ctx.translate(ox - 40, oy - ch / 2);
+    ctx.rotate(-Math.PI / 2);
+    ctx.fillText('股票超额收益 (%)', 0, 0);
+    ctx.restore();
+
+    // Ticks
+    ctx.font = '10px monospace';
+    for (let v = -10; v <= 10; v += 5) {
+        if (v === 0) continue;
+        const [px] = toC(v, 0);
+        ctx.textAlign = 'center';
+        ctx.fillText(v.toString(), px, oy + 16);
+        const [, py] = toC(0, v);
+        ctx.textAlign = 'right';
+        ctx.fillText(v.toString(), ox - 8, py + 4);
+    }
+
+    // Regression line
+    ctx.strokeStyle = '#ffd740';
+    ctx.lineWidth = 2;
+    const [lx0, ly0] = toC(-12, reg.alpha + reg.beta * (-12));
+    const [lx1, ly1] = toC(12, reg.alpha + reg.beta * 12);
+    ctx.beginPath(); ctx.moveTo(lx0, ly0); ctx.lineTo(lx1, ly1); ctx.stroke();
+
+    // Residuals + data points
+    betaData.forEach(d => {
+        const [px, py] = toC(d.mkt, d.stock);
+        const pred = reg.alpha + reg.beta * d.mkt;
+        const [, predY] = toC(d.mkt, pred);
+
+        if (showResid) {
+            ctx.strokeStyle = d.stock > pred ? 'rgba(76,175,80,0.35)' : 'rgba(255,82,82,0.35)';
+            ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(px, predY); ctx.stroke();
+        }
+
+        ctx.beginPath();
+        ctx.arc(px, py, 4, 0, Math.PI * 2);
+        ctx.fillStyle = '#4fc3f7';
+        ctx.globalAlpha = 0.7;
+        ctx.fill();
+        ctx.globalAlpha = 1;
+    });
+
+    // Beta label on line
+    ctx.fillStyle = '#ffd740';
+    ctx.font = 'bold 13px monospace';
+    ctx.textAlign = 'left';
+    ctx.fillText('β = ' + reg.beta.toFixed(3), lx1 - 90, ly1 - 10);
+
+    // Stats
+    const prof = betaStockProfiles[profileIdx];
+    document.getElementById('beta-stats').innerHTML =
+        `<strong>${prof.name}</strong>回归结果：` +
+        `β = <b style="color:#ffd740">${reg.beta.toFixed(3)}</b>，` +
+        `α = <b style="color:#4caf50">${reg.alpha.toFixed(3)}%</b>，` +
+        `R² = <b style="color:#4fc3f7">${reg.r2.toFixed(3)}</b>` +
+        `<br><span style="color:var(--text-muted)">R² 表示市场因子解释了该股票 ${(reg.r2 * 100).toFixed(1)}% 的收益方差。` +
+        `${reg.r2 < 0.5 ? '较低的 R² 意味着大量非系统性风险。' : '较高的 R² 表明市场因子主导。'}</span>`;
+}
+
+document.getElementById('beta-stock').addEventListener('change', drawBeta);
+document.getElementById('beta-residuals').addEventListener('change', drawBeta);
+
+// ================================================================
+// Section 4: Risk Decomposition
+// ================================================================
+function drawRisk() {
+    const canvas = document.getElementById('riskCanvas');
+    const { ctx, w, h } = setupCanvas(canvas);
+    const N = parseInt(document.getElementById('risk-n').value);
+    document.getElementById('risk-n-val').textContent = N;
+
+    const pad = { left: 60, right: 40, top: 30, bottom: 50 };
+    const ox = pad.left, oy = h - pad.bottom;
+    const cw = w - pad.left - pad.right, ch = h - pad.top - pad.bottom;
+
+    ctx.clearRect(0, 0, w, h);
+
+    // We'll show the curve from 1 to 50, highlight current N
+    const xRange = 50, yRange = 40; // percent variance
+
+    // Grid
+    ctx.strokeStyle = '#1e1e3a';
+    ctx.lineWidth = 0.5;
+    for (let i = 0; i <= 5; i++) {
+        const y = oy - (i / 5) * ch;
+        ctx.beginPath(); ctx.moveTo(ox, y); ctx.lineTo(ox + cw, y); ctx.stroke();
+    }
+
+    drawAxes(ctx, ox, oy, cw, ch, '组合中股票数量 N', '组合风险 σ (%)');
+
+    // Ticks
+    for (let n = 0; n <= 50; n += 10) drawTick(ctx, ox, oy, n, 0, cw, ch, xRange, yRange, n.toString(), undefined);
+    for (let r = 0; r <= 40; r += 10) drawTick(ctx, ox, oy, 0, r, cw, ch, xRange, yRange, undefined, r + '%');
+
+    const sigmaM = 15; // market risk (systematic)
+    const sigmaE = 25; // average idiosyncratic std per stock
+
+    function totalRisk(n) {
+        const sysVar = sigmaM * sigmaM;
+        const idioVar = (sigmaE * sigmaE) / n;
+        return Math.sqrt(sysVar + idioVar);
+    }
+    function sysRisk() { return sigmaM; }
+    function idioRisk(n) { return Math.sqrt((sigmaE * sigmaE) / n); }
+
+    // Fill area: total risk curve
+    ctx.beginPath();
+    for (let n = 1; n <= 50; n++) {
+        const tr = totalRisk(n);
+        const [px, py] = toCanvas(ox, oy, cw, ch, n, tr, xRange, yRange);
+        if (n === 1) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    }
+    const [endX] = toCanvas(ox, oy, cw, ch, 50, 0, xRange, yRange);
+    const [startX] = toCanvas(ox, oy, cw, ch, 1, 0, xRange, yRange);
+    ctx.lineTo(endX, oy);
+    ctx.lineTo(startX, oy);
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(255, 82, 82, 0.1)';
+    ctx.fill();
+
+    // Fill systematic area
+    ctx.beginPath();
+    const sysLine = sysRisk();
+    const [sx0, sy0] = toCanvas(ox, oy, cw, ch, 1, sysLine, xRange, yRange);
+    const [sx1, sy1] = toCanvas(ox, oy, cw, ch, 50, sysLine, xRange, yRange);
+    ctx.moveTo(sx0, sy0);
+    ctx.lineTo(sx1, sy1);
+    ctx.lineTo(endX, oy);
+    ctx.lineTo(startX, oy);
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(79, 195, 247, 0.15)';
+    ctx.fill();
+
+    // Systematic risk line (constant)
+    ctx.strokeStyle = '#4fc3f7';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([5, 3]);
+    ctx.beginPath();
+    ctx.moveTo(sx0, sy0);
+    ctx.lineTo(sx1, sy1);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Total risk curve
+    ctx.strokeStyle = '#ffd740';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    for (let n = 1; n <= 50; n++) {
+        const tr = totalRisk(n);
+        const [px, py] = toCanvas(ox, oy, cw, ch, n, tr, xRange, yRange);
+        if (n === 1) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    }
+    ctx.stroke();
+
+    // Current N marker
+    const curTotal = totalRisk(N);
+    const curSys = sysRisk();
+    const curIdio = idioRisk(N);
+    const [cx, cy] = toCanvas(ox, oy, cw, ch, N, curTotal, xRange, yRange);
+    const [, csy] = toCanvas(ox, oy, cw, ch, N, curSys, xRange, yRange);
+
+    // Vertical line at N
+    ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath(); ctx.moveTo(cx, oy); ctx.lineTo(cx, cy); ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Bracket for idiosyncratic
+    ctx.strokeStyle = '#ff5252';
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(cx + 8, cy); ctx.lineTo(cx + 8, csy); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(cx + 4, cy); ctx.lineTo(cx + 12, cy); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(cx + 4, csy); ctx.lineTo(cx + 12, csy); ctx.stroke();
+
+    // Dot at current
+    ctx.beginPath();
+    ctx.arc(cx, cy, 6, 0, Math.PI * 2);
+    ctx.fillStyle = '#ffd740';
+    ctx.fill();
+    ctx.strokeStyle = '#1a1a2e';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Labels
+    ctx.fillStyle = '#ffd740';
+    ctx.font = 'bold 12px "Noto Sans SC", sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText(`总风险: ${curTotal.toFixed(1)}%`, cx + 16, cy - 2);
+    ctx.fillStyle = '#4fc3f7';
+    ctx.fillText(`系统性: ${curSys.toFixed(1)}%`, cx + 16, csy + 4);
+    ctx.fillStyle = '#ff5252';
+    ctx.fillText(`非系统性: ${curIdio.toFixed(1)}%`, cx + 16, (cy + csy) / 2 + 4);
+
+    // Right-side bar chart
+    const barX = w - pad.right - 50;
+    const barW = 30, barH = ch * 0.6;
+    const barY = oy - barH;
+
+    // Total bar
+    const totalH = (curTotal / yRange) * ch;
+    const sysH = (curSys / yRange) * ch;
+    const idioH = totalH - sysH;
+
+    // Systematic portion
+    ctx.fillStyle = 'rgba(79, 195, 247, 0.4)';
+    ctx.fillRect(barX, oy - sysH, barW, sysH);
+    ctx.strokeStyle = '#4fc3f7';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(barX, oy - sysH, barW, sysH);
+
+    // Idiosyncratic portion
+    ctx.fillStyle = 'rgba(255, 82, 82, 0.4)';
+    ctx.fillRect(barX, oy - totalH, barW, idioH);
+    ctx.strokeStyle = '#ff5252';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(barX, oy - totalH, barW, idioH);
+
+    ctx.fillStyle = '#6c6c7c';
+    ctx.font = '10px "Noto Sans SC", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('风险分解', barX + barW / 2, oy + 16);
+}
+
+document.getElementById('risk-n').addEventListener('input', drawRisk);
+
+// ================================================================
+// Section 5: Anomalies
+// ================================================================
+const anomalyData = {};
+
+function generateAnomalies() {
+    const rng = seededRandom(200);
+
+    // Size effect: small cap portfolios have higher alpha
+    anomalyData.size = [];
+    for (let i = 0; i < 10; i++) {
+        const decile = i + 1; // 1=smallest, 10=largest
+        const beta = 0.8 + rng() * 0.6;
+        const capmRet = 3 + beta * 6;
+        // Small stocks earn more than CAPM predicts
+        const alpha = 3.5 * (1 - i / 9) - 1.5 + (rng() - 0.5) * 0.8;
+        const actualRet = capmRet + alpha;
+        anomalyData.size.push({ decile, beta, capmRet, actualRet, alpha, label: `D${decile}` });
+    }
+
+    // Value effect: high B/M portfolios earn more
+    anomalyData.value = [];
+    for (let i = 0; i < 10; i++) {
+        const decile = i + 1;
+        const beta = 0.9 + rng() * 0.4;
+        const capmRet = 3 + beta * 6;
+        // High B/M (value) stocks earn more
+        const alpha = 3 * (i / 9) - 1.2 + (rng() - 0.5) * 0.6;
+        const actualRet = capmRet + alpha;
+        anomalyData.value.push({ decile, beta, capmRet, actualRet, alpha, label: `D${decile}` });
+    }
+
+    // Momentum: past winners continue to win
+    anomalyData.momentum = [];
+    for (let i = 0; i < 10; i++) {
+        const decile = i + 1;
+        const beta = 0.85 + rng() * 0.5;
+        const capmRet = 3 + beta * 6;
+        // Past winners (high decile) earn more
+        const alpha = 4 * (i / 9) - 2 + (rng() - 0.5) * 0.7;
+        const actualRet = capmRet + alpha;
+        anomalyData.momentum.push({ decile, beta, capmRet, actualRet, alpha, label: `D${decile}` });
+    }
+}
+generateAnomalies();
+
+const anomalyDescs = {
+    size: '<strong>规模效应 (Size Effect):</strong> 按市值排序的 10 个组合，小市值组合（D1）具有显著正 Alpha，大市值组合 Alpha 接近零甚至为负。CAPM 无法解释小公司的超额收益，这催生了 Fama-French 的 SMB 因子。',
+    value: '<strong>价值效应 (Value Effect):</strong> 按账面市值比（B/M）排序的 10 个组合，高 B/M（价值股，D10）具有更高的 Alpha。价值股看似"便宜"但长期回报更高，CAPM 无法捕捉这一规律，由此引出 HML 因子。',
+    momentum: '<strong>动量效应 (Momentum):</strong> 按过去 12 个月收益排序的 10 个组合，过去赢家（D10）在未来仍表现优异。这种"强者恒强"的模式完全不在 CAPM 的解释范围内，Carhart 四因子模型加入了 UMD（动量）因子。'
+};
+
+let currentAnomaly = 'size';
+
+function drawAnomaly() {
+    const canvas = document.getElementById('anomalyCanvas');
+    const { ctx, w, h } = setupCanvas(canvas);
+    const data = anomalyData[currentAnomaly];
+
+    const pad = { left: 60, right: 30, top: 30, bottom: 50 };
+    const ox = pad.left, oy = h - pad.bottom;
+    const cw = w - pad.left - pad.right, ch = h - pad.top - pad.bottom;
+
+    ctx.clearRect(0, 0, w, h);
+
+    // Split into two halves: left = alpha bar chart, right = scatter
+    const halfW = cw / 2 - 20;
+
+    // ---- Left: Alpha bar chart ----
+    const barAreaX = ox;
+    const barAreaW = halfW;
+    const maxAlpha = 4;
+
+    // Background
+    ctx.fillStyle = 'rgba(15, 15, 35, 0.5)';
+    ctx.fillRect(barAreaX, oy - ch, barAreaW, ch);
+
+    // Zero line
+    const zeroY = oy - (maxAlpha / (maxAlpha * 2)) * ch;
+    ctx.strokeStyle = '#3a3a5a';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(barAreaX, zeroY); ctx.lineTo(barAreaX + barAreaW, zeroY); ctx.stroke();
+
+    ctx.fillStyle = '#6c6c7c';
+    ctx.font = '11px "Noto Sans SC", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('Alpha (%) 按分位组合', barAreaX + barAreaW / 2, oy + 36);
+
+    // Ticks
+    ctx.font = '10px monospace';
+    ctx.textAlign = 'right';
+    for (let a = -3; a <= 3; a += 1) {
+        const y = zeroY - (a / maxAlpha) * (ch / 2);
+        ctx.fillStyle = '#6c6c7c';
+        ctx.fillText(a + '%', barAreaX - 5, y + 4);
+        ctx.strokeStyle = '#1e1e3a';
+        ctx.lineWidth = 0.5;
+        ctx.beginPath(); ctx.moveTo(barAreaX, y); ctx.lineTo(barAreaX + barAreaW, y); ctx.stroke();
+    }
+
+    const barW = barAreaW / data.length * 0.7;
+    const gap = barAreaW / data.length;
+
+    data.forEach((d, i) => {
+        const x = barAreaX + gap * i + (gap - barW) / 2;
+        const barH = (d.alpha / maxAlpha) * (ch / 2);
+        const color = d.alpha >= 0 ? '#4caf50' : '#ff5252';
+
+        ctx.fillStyle = color;
+        ctx.globalAlpha = 0.7;
+        if (d.alpha >= 0) {
+            ctx.fillRect(x, zeroY - barH, barW, barH);
+        } else {
+            ctx.fillRect(x, zeroY, barW, -barH);
+        }
+        ctx.globalAlpha = 1;
+
+        // Border
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1;
+        if (d.alpha >= 0) {
+            ctx.strokeRect(x, zeroY - barH, barW, barH);
+        } else {
+            ctx.strokeRect(x, zeroY, barW, -barH);
+        }
+
+        // Label
+        ctx.fillStyle = '#a8a8b8';
+        ctx.font = '10px "Noto Sans SC", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(d.label, x + barW / 2, oy + 16);
+    });
+
+    // ---- Right: Beta vs Return scatter ----
+    const scatterOx = ox + halfW + 40;
+    const scatterW = halfW;
+    const xRange = 1.8, yRange = 16;
+
+    ctx.fillStyle = 'rgba(15, 15, 35, 0.5)';
+    ctx.fillRect(scatterOx, oy - ch, scatterW, ch);
+
+    // Axes
+    ctx.strokeStyle = '#3a3a5a';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(scatterOx, oy - ch);
+    ctx.lineTo(scatterOx, oy);
+    ctx.lineTo(scatterOx + scatterW, oy);
+    ctx.stroke();
+
+    ctx.fillStyle = '#6c6c7c';
+    ctx.font = '11px "Noto Sans SC", sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('Beta vs 实际收益率', scatterOx + scatterW / 2, oy + 36);
+
+    // SML reference line (if all alpha = 0)
+    const rfRef = 3, mpRef = 6;
+    ctx.strokeStyle = '#ffd740';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([4, 3]);
+    const sl0 = [scatterOx + (0.5 / xRange) * scatterW, oy - ((rfRef + 0.5 * mpRef) / yRange) * ch];
+    const sl1 = [scatterOx + (1.6 / xRange) * scatterW, oy - ((rfRef + 1.6 * mpRef) / yRange) * ch];
+    ctx.beginPath(); ctx.moveTo(sl0[0], sl0[1]); ctx.lineTo(sl1[0], sl1[1]); ctx.stroke();
+    ctx.setLineDash([]);
+
+    ctx.fillStyle = '#ffd740';
+    ctx.font = '10px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText('SML (理论)', sl1[0] - 60, sl1[1] - 8);
+
+    // Data points
+    data.forEach((d, i) => {
+        const px = scatterOx + (d.beta / xRange) * scatterW;
+        const py = oy - (d.actualRet / yRange) * ch;
+        const color = d.alpha >= 0 ? '#4caf50' : '#ff5252';
+
+        ctx.beginPath();
+        ctx.arc(px, py, 5, 0, Math.PI * 2);
+        ctx.fillStyle = color;
+        ctx.globalAlpha = 0.8;
+        ctx.fill();
+        ctx.globalAlpha = 1;
+
+        ctx.fillStyle = '#e8e8e8';
+        ctx.font = '9px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(d.label, px, py - 9);
+    });
+
+    // Description
+    document.getElementById('anomaly-desc').innerHTML = anomalyDescs[currentAnomaly];
+}
+
+document.querySelectorAll('.anomaly-tab').forEach(tab => {
+    tab.addEventListener('click', function() {
+        document.querySelectorAll('.anomaly-tab').forEach(t => t.classList.remove('active'));
+        this.classList.add('active');
+        currentAnomaly = this.dataset.anomaly;
+        drawAnomaly();
+    });
+});
+
+// ================================================================
+// Init all visualizations
+// ================================================================
+function initAll() {
+    drawSML();
+    drawCML();
+    drawBeta();
+    drawRisk();
+    drawAnomaly();
+}
+
+// Handle resize
+let resizeTimer;
+window.addEventListener('resize', () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(initAll, 150);
+});
+
+// Wait for DOM + fonts
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initAll);
+} else {
+    initAll();
+}
+</script>
+
+<!-- KaTeX auto-render -->
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    if (typeof renderMathInElement !== 'undefined') {
+        renderMathInElement(document.body, {
+            delimiters: [
+                { left: '$$', right: '$$', display: true },
+                { left: '$', right: '$', display: false }
+            ],
+            throwOnError: false
+        });
+    } else {
+        // Retry after scripts load
+        window.addEventListener('load', function() {
+            if (typeof renderMathInElement !== 'undefined') {
+                renderMathInElement(document.body, {
+                    delimiters: [
+                        { left: '$$', right: '$$', display: true },
+                        { left: '$', right: '$', display: false }
+                    ],
+                    throwOnError: false
+                });
+            }
+        });
+    }
+});
+</script>
+
+</body>
+</html>

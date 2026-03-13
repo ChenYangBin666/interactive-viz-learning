@@ -1,0 +1,1224 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>交易执行 — 量化交易策略</title>
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" defer>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" defer></script>
+    <script src="../shared/scripts/nav.js" defer></script>
+    <style>
+        .canvas-wrap {
+            position: relative;
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+        }
+        .canvas-wrap canvas {
+            display: block;
+            width: 100%;
+        }
+        .controls-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1rem;
+            margin-top: 1rem;
+            align-items: center;
+        }
+        .controls-row .slider-group {
+            flex: 1;
+            min-width: 180px;
+        }
+        .metric-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 0.75rem;
+            margin-top: 1rem;
+        }
+        .metric-box {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            padding: 0.6rem 0.8rem;
+            text-align: center;
+        }
+        .metric-box .label {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            margin-bottom: 0.2rem;
+        }
+        .metric-box .value {
+            font-family: var(--font-mono);
+            font-size: 1.1rem;
+            color: var(--accent-green);
+            font-weight: 600;
+        }
+        .metric-box .value.negative { color: var(--accent-red); }
+        .metric-box .value.warn { color: var(--accent-orange); }
+        .metric-box .value.blue { color: var(--accent-blue); }
+        .legend-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1rem;
+            margin-top: 0.5rem;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 0.35rem;
+        }
+        .legend-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 2px;
+        }
+        .algo-btns {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            margin-top: 0.75rem;
+        }
+        .formula-block {
+            background: rgba(22, 199, 154, 0.05);
+            border-left: 3px solid var(--accent-green);
+            padding: 0.75rem 1rem;
+            margin: 0.75rem 0;
+            border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+            font-size: 0.95rem;
+        }
+    </style>
+</head>
+<body>
+<div class="page-container">
+    <!-- ============ Section 1: 执行成本分解 ============ -->
+    <section class="section" id="sec-cost">
+        <div class="section-title">
+            <div class="icon">1</div>
+            <h2>执行成本分解</h2>
+        </div>
+        <p>交易执行质量直接决定策略的实际收益。从预期的 <strong>总Alpha</strong> 出发，经过佣金、价差、市场冲击、滑点等层层损耗，最终到手的只是 <strong>净Alpha</strong>。瀑布图清晰展示了每一层成本如何侵蚀收益。</p>
+        <p style="font-size:0.85rem; color:var(--text-muted);">
+            <strong>佣金</strong>：券商收取的交易手续费，通常固定比例。
+            <strong>价差</strong>：买卖报价之间的价差，即执行的隐性成本。
+            <strong>市场冲击</strong>：大额订单推动价格的不利变动。
+            <strong>滑点</strong>：从决策到成交之间的价格漂移。
+            调整下方滑块，观察各项成本如何影响策略的最终可行性。
+        </p>
+        <div class="formula-block">
+            $$\text{Net Alpha} = \text{Gross Alpha} - \text{Commission} - \text{Spread} - \text{Market Impact} - \text{Slippage}$$
+        </div>
+        <div class="split-layout">
+            <div class="text-panel">
+                <div class="controls-row" style="flex-direction:column; align-items:stretch;">
+                    <div class="slider-group">
+                        <label>总Alpha (bps)</label>
+                        <input type="range" id="sl-gross" min="20" max="100" value="60" step="1">
+                        <span class="slider-value" id="sv-gross">60</span>
+                    </div>
+                    <div class="slider-group">
+                        <label>佣金 (bps)</label>
+                        <input type="range" id="sl-comm" min="0" max="20" value="5" step="1">
+                        <span class="slider-value" id="sv-comm">5</span>
+                    </div>
+                    <div class="slider-group">
+                        <label>价差 (bps)</label>
+                        <input type="range" id="sl-spread" min="0" max="20" value="8" step="1">
+                        <span class="slider-value" id="sv-spread">8</span>
+                    </div>
+                    <div class="slider-group">
+                        <label>市场冲击 (bps)</label>
+                        <input type="range" id="sl-impact" min="0" max="30" value="15" step="1">
+                        <span class="slider-value" id="sv-impact">15</span>
+                    </div>
+                    <div class="slider-group">
+                        <label>滑点 (bps)</label>
+                        <input type="range" id="sl-slip" min="0" max="20" value="7" step="1">
+                        <span class="slider-value" id="sv-slip">7</span>
+                    </div>
+                </div>
+                <div class="metric-grid" id="cost-metrics"></div>
+            </div>
+            <div class="viz-panel">
+                <div class="canvas-wrap">
+                    <canvas id="cv-cost" width="700" height="420"></canvas>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ============ Section 2: TWAP 与 VWAP ============ -->
+    <section class="section" id="sec-twap-vwap">
+        <div class="section-title">
+            <div class="icon">2</div>
+            <h2>TWAP 与 VWAP</h2>
+        </div>
+        <p><strong>TWAP</strong>（时间加权平均价格）将订单在时间段内均匀拆分执行；<strong>VWAP</strong>（成交量加权平均价格）按历史成交量曲线分配执行量。VWAP 通常更优，因为在高流动性时段执行更多，减少市场冲击。</p>
+        <div class="formula-block">
+            $$\text{VWAP} = \frac{\sum_{t} P_t \cdot V_t}{\sum_t V_t}, \quad \text{TWAP} = \frac{1}{N}\sum_{t=1}^{N} P_t$$
+        </div>
+        <div class="split-layout">
+            <div class="text-panel">
+                <div class="controls-row" style="flex-direction:column; align-items:stretch;">
+                    <div class="slider-group">
+                        <label>总股数 (万股)</label>
+                        <input type="range" id="sl-shares" min="5" max="50" value="20" step="1">
+                        <span class="slider-value" id="sv-shares">20</span>
+                    </div>
+                    <div class="slider-group">
+                        <label>执行时段 (小时)</label>
+                        <input type="range" id="sl-horizon" min="1" max="8" value="4" step="1">
+                        <span class="slider-value" id="sv-horizon">4</span>
+                    </div>
+                    <button class="btn btn-primary" id="btn-regen-twap" style="align-self:flex-start; margin-top:0.5rem;">重新生成价格路径</button>
+                </div>
+                <p style="font-size:0.85rem; color:var(--text-muted); margin-top:0.75rem;">
+                    TWAP 在每个时间区间均匀分配执行量，实现简单但可能在低流动性时段产生较大冲击。
+                    VWAP 按历史成交量曲线分配，在开盘和收盘的高流动性时段执行更多，在午间低迷期执行更少，
+                    因此通常能获得更接近市场 VWAP 基准的成交价格。
+                </p>
+                <div class="legend-row" style="margin-top:0.75rem;">
+                    <div class="legend-item"><div class="legend-dot" style="background:#4fc3f7;"></div>成交量曲线</div>
+                    <div class="legend-item"><div class="legend-dot" style="background:#16c79a;"></div>TWAP 执行</div>
+                    <div class="legend-item"><div class="legend-dot" style="background:#ffab40;"></div>VWAP 执行</div>
+                    <div class="legend-item"><div class="legend-dot" style="background:#ff5252; border-radius:50%;"></div>市场价格</div>
+                </div>
+                <div class="metric-grid" id="twap-metrics"></div>
+            </div>
+            <div class="viz-panel">
+                <div class="canvas-wrap">
+                    <canvas id="cv-twap" width="700" height="440"></canvas>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ============ Section 3: 冰山订单与算法交易 ============ -->
+    <section class="section" id="sec-iceberg">
+        <div class="section-title">
+            <div class="icon">3</div>
+            <h2>冰山订单与算法交易</h2>
+        </div>
+        <p><strong>冰山订单</strong>只在市场上显示一小部分，剩余部分隐藏。当可见部分成交后自动补充。这样可以避免大单暴露意图、引发价格不利变动。下方动画对比：一次性大单 vs 冰山拆单的市场冲击差异。</p>
+        <p style="font-size:0.85rem; color:var(--text-muted);">
+            左图模拟一次性提交大额市价单：订单瞬间吃掉多个价位的流动性，导致价格大幅跳升。
+            右图模拟冰山订单：每次只暴露小额可见量（黄色高亮），成交后自动补充。
+            由于每次只消耗少量流动性，且给予订单簿恢复时间，冰山策略的整体价格冲击显著更小。
+            调整"总单量"和"显示量"的比例来观察不同参数下的冲击差异。
+        </p>
+        <div class="controls-row">
+            <div class="slider-group">
+                <label>总单量</label>
+                <input type="range" id="sl-icetotal" min="500" max="5000" value="2000" step="100">
+                <span class="slider-value" id="sv-icetotal">2000</span>
+            </div>
+            <div class="slider-group">
+                <label>显示量</label>
+                <input type="range" id="sl-iceshow" min="50" max="500" value="200" step="50">
+                <span class="slider-value" id="sv-iceshow">200</span>
+            </div>
+            <button class="btn btn-primary" id="btn-ice-run">开始模拟</button>
+            <button class="btn" id="btn-ice-reset">重置</button>
+        </div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem; margin-top:1rem;">
+            <div>
+                <h4 style="text-align:center; margin-bottom:0.5rem; color:var(--accent-red);">一次性大单</h4>
+                <div class="canvas-wrap">
+                    <canvas id="cv-bulk" width="440" height="380"></canvas>
+                </div>
+            </div>
+            <div>
+                <h4 style="text-align:center; margin-bottom:0.5rem; color:var(--accent-green);">冰山订单</h4>
+                <div class="canvas-wrap">
+                    <canvas id="cv-iceberg" width="440" height="380"></canvas>
+                </div>
+            </div>
+        </div>
+        <div class="metric-grid" id="ice-metrics" style="margin-top:1rem;"></div>
+    </section>
+
+    <!-- ============ Section 4: 滑点分析 ============ -->
+    <section class="section" id="sec-slippage">
+        <div class="section-title">
+            <div class="icon">4</div>
+            <h2>滑点分析</h2>
+        </div>
+        <p><strong>滑点</strong>是信号价格与实际成交价格之间的差异。主要来源：延迟（latency）、市场运动和订单规模。延迟越高、订单越大，滑点越严重。</p>
+        <div class="formula-block">
+            $$\text{Slippage} = P_{\text{fill}} - P_{\text{signal}} = f(\text{Latency}, \text{Volatility}, \text{Order Size})$$
+        </div>
+        <div class="split-layout">
+            <div class="text-panel">
+                <div class="controls-row" style="flex-direction:column; align-items:stretch;">
+                    <div class="slider-group">
+                        <label>延迟 (ms)</label>
+                        <input type="range" id="sl-latency" min="1" max="200" value="50" step="1">
+                        <span class="slider-value" id="sv-latency">50</span>
+                    </div>
+                    <div class="slider-group">
+                        <label>波动率 (%)</label>
+                        <input type="range" id="sl-vol" min="5" max="60" value="20" step="1">
+                        <span class="slider-value" id="sv-vol">20</span>
+                    </div>
+                    <div class="slider-group">
+                        <label>订单大小 (手)</label>
+                        <input type="range" id="sl-ordsize" min="10" max="500" value="100" step="10">
+                        <span class="slider-value" id="sv-ordsize">100</span>
+                    </div>
+                    <button class="btn btn-primary" id="btn-slip-sim" style="align-self:flex-start;">模拟 500 次交易</button>
+                </div>
+                <div class="metric-grid" id="slip-metrics"></div>
+            </div>
+            <div class="viz-panel">
+                <div class="canvas-wrap">
+                    <canvas id="cv-slip" width="700" height="440"></canvas>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ============ Section 5: 交易成本分析 (TCA) ============ -->
+    <section class="section" id="sec-tca">
+        <div class="section-title">
+            <div class="icon">5</div>
+            <h2>交易成本分析 (TCA)</h2>
+        </div>
+        <p><strong>实施缺口（Implementation Shortfall）</strong>分析将总成本分解为：延迟成本、市场冲击成本、时机成本和机会成本。不同的执行算法在各维度上表现不同。</p>
+        <div class="formula-block">
+            $$\text{IS} = \text{Delay Cost} + \text{Market Impact} + \text{Timing Cost} + \text{Opportunity Cost}$$
+        </div>
+        <p style="font-size:0.85rem; color:var(--text-muted);">
+            <strong>延迟成本</strong>：从决策到开始执行期间的价格变动。
+            <strong>市场冲击</strong>：执行本身对价格造成的不利推动。
+            <strong>时机成本</strong>：执行过程中市场自然运动引起的成本偏离。
+            <strong>机会成本</strong>：未能完全执行（部分未成交）导致的收益损失。
+            点击不同算法按钮查看各自的成本结构差异 — IS 最优算法总成本最低，而激进策略虽然延迟成本低，但市场冲击极大。
+        </p>
+        <div class="algo-btns" id="algo-btns">
+            <button class="btn active" data-algo="twap">TWAP</button>
+            <button class="btn" data-algo="vwap">VWAP</button>
+            <button class="btn" data-algo="is">IS 最优</button>
+            <button class="btn" data-algo="pov">POV</button>
+            <button class="btn" data-algo="aggressive">激进</button>
+        </div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:1.5rem; margin-top:1rem;">
+            <div>
+                <div class="canvas-wrap">
+                    <canvas id="cv-tca-bar" width="440" height="380"></canvas>
+                </div>
+            </div>
+            <div>
+                <div class="canvas-wrap">
+                    <canvas id="cv-tca-compare" width="440" height="380"></canvas>
+                </div>
+            </div>
+        </div>
+        <div class="metric-grid" id="tca-metrics" style="margin-top:1rem;"></div>
+    </section>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    // ========== Utility ==========
+    const $ = id => document.getElementById(id);
+    const C = {
+        green: '#16c79a', blue: '#4fc3f7', purple: '#b388ff',
+        orange: '#ffab40', red: '#ff5252', yellow: '#ffd740',
+        pink: '#ff80ab', text: '#e8e8e8', muted: '#6c6c7c',
+        bg: '#1a1a2e', bgSec: '#16213e', bgCard: '#0f3460',
+        border: '#2a2a4a'
+    };
+
+    function initCanvas(id) {
+        const cv = $(id);
+        const dpr = window.devicePixelRatio || 1;
+        const rect = cv.getBoundingClientRect();
+        const w = rect.width || cv.width;
+        const h = rect.height || cv.height;
+        cv.width = w * dpr;
+        cv.height = h * dpr;
+        cv.style.width = w + 'px';
+        cv.style.height = h + 'px';
+        const ctx = cv.getContext('2d');
+        ctx.scale(dpr, dpr);
+        return { ctx, w, h };
+    }
+
+    function bindSlider(sliderId, valueId, cb) {
+        const sl = $(sliderId), sv = $(valueId);
+        const handler = () => { sv.textContent = sl.value; cb(); };
+        sl.addEventListener('input', handler);
+    }
+
+    function setMetrics(containerId, items) {
+        const el = $(containerId);
+        el.innerHTML = items.map(m =>
+            `<div class="metric-box"><div class="label">${m.label}</div><div class="value ${m.cls || ''}">${m.value}</div></div>`
+        ).join('');
+    }
+
+    function roundTo(v, d=2) { return Math.round(v * 10**d) / 10**d; }
+
+    // ========== Section 1: 执行成本分解 ==========
+    function drawCostWaterfall() {
+        const { ctx, w, h } = initCanvas('cv-cost');
+        const gross = +$('sl-gross').value;
+        const comm = +$('sl-comm').value;
+        const spread = +$('sl-spread').value;
+        const impact = +$('sl-impact').value;
+        const slip = +$('sl-slip').value;
+        const net = gross - comm - spread - impact - slip;
+
+        const items = [
+            { label: '总Alpha', val: gross, color: C.blue, type: 'start' },
+            { label: '佣金', val: -comm, color: C.red, type: 'cost' },
+            { label: '价差', val: -spread, color: C.orange, type: 'cost' },
+            { label: '市场冲击', val: -impact, color: C.purple, type: 'cost' },
+            { label: '滑点', val: -slip, color: C.pink, type: 'cost' },
+            { label: '净Alpha', val: net, color: net >= 0 ? C.green : C.red, type: 'end' }
+        ];
+
+        const pad = { top: 40, right: 30, bottom: 60, left: 50 };
+        const chartW = w - pad.left - pad.right;
+        const chartH = h - pad.top - pad.bottom;
+        const barW = chartW / items.length * 0.6;
+        const gap = chartW / items.length;
+        const maxVal = gross * 1.15;
+        const yScale = chartH / maxVal;
+
+        ctx.clearRect(0, 0, w, h);
+
+        // Grid
+        ctx.strokeStyle = C.border;
+        ctx.lineWidth = 0.5;
+        for (let i = 0; i <= 5; i++) {
+            const y = pad.top + (chartH / 5) * i;
+            ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(w - pad.right, y); ctx.stroke();
+            ctx.fillStyle = C.muted; ctx.font = '11px monospace'; ctx.textAlign = 'right';
+            ctx.fillText(roundTo(maxVal - (maxVal / 5) * i, 0) + '', pad.left - 8, y + 4);
+        }
+
+        let running = gross;
+        items.forEach((item, i) => {
+            const x = pad.left + i * gap + (gap - barW) / 2;
+            let top, barH;
+
+            if (item.type === 'start') {
+                top = pad.top + chartH - item.val * yScale;
+                barH = item.val * yScale;
+            } else if (item.type === 'end') {
+                const v = Math.max(item.val, 0);
+                top = pad.top + chartH - v * yScale;
+                barH = v * yScale;
+                if (item.val < 0) { top = pad.top + chartH; barH = Math.abs(item.val) * yScale; top -= barH; }
+            } else {
+                const costAbs = Math.abs(item.val);
+                running += item.val;
+                top = pad.top + chartH - (running + costAbs) * yScale;
+                barH = costAbs * yScale;
+            }
+
+            // Bar
+            ctx.fillStyle = item.color;
+            ctx.globalAlpha = 0.85;
+            ctx.beginPath();
+            ctx.roundRect(x, top, barW, barH, 3);
+            ctx.fill();
+            ctx.globalAlpha = 1;
+
+            // Value label
+            ctx.fillStyle = C.text; ctx.font = 'bold 12px monospace'; ctx.textAlign = 'center';
+            const labelY = item.type === 'cost' ? top - 6 : top - 6;
+            ctx.fillText((item.val >= 0 ? '+' : '') + item.val + ' bps', x + barW / 2, labelY);
+
+            // Connector line
+            if (item.type === 'cost') {
+                ctx.strokeStyle = item.color;
+                ctx.globalAlpha = 0.4;
+                ctx.setLineDash([4, 3]);
+                ctx.beginPath();
+                ctx.moveTo(x + barW, top + barH);
+                if (i < items.length - 1) {
+                    ctx.lineTo(pad.left + (i + 1) * gap + (gap - barW) / 2, top + barH);
+                }
+                ctx.stroke();
+                ctx.setLineDash([]);
+                ctx.globalAlpha = 1;
+            }
+
+            // X label
+            ctx.fillStyle = C.text; ctx.font = '12px sans-serif'; ctx.textAlign = 'center';
+            ctx.fillText(item.label, x + barW / 2, h - pad.bottom + 20);
+        });
+
+        // Title
+        ctx.fillStyle = C.text; ctx.font = 'bold 14px sans-serif'; ctx.textAlign = 'center';
+        ctx.fillText('执行成本瀑布图 (bps)', w / 2, 24);
+
+        const totalCost = comm + spread + impact + slip;
+        const pctLost = gross > 0 ? roundTo(totalCost / gross * 100) : 0;
+        setMetrics('cost-metrics', [
+            { label: '总成本', value: totalCost + ' bps', cls: 'negative' },
+            { label: '净Alpha', value: net + ' bps', cls: net >= 0 ? '' : 'negative' },
+            { label: '损耗比', value: pctLost + '%', cls: 'warn' },
+            { label: '策略可行性', value: net > 10 ? '可行' : net > 0 ? '边际' : '不可行', cls: net > 10 ? '' : 'negative' }
+        ]);
+    }
+
+    ['sl-gross', 'sl-comm', 'sl-spread', 'sl-impact', 'sl-slip'].forEach(id => {
+        bindSlider(id, id.replace('sl-', 'sv-'), drawCostWaterfall);
+    });
+    drawCostWaterfall();
+
+    // ========== Section 2: TWAP & VWAP ==========
+    // Generate intraday volume profile (U-shape)
+    function genVolumeProfile(periods) {
+        const v = [];
+        for (let i = 0; i < periods; i++) {
+            const t = i / (periods - 1);
+            const vol = 3 + 8 * Math.exp(-((t - 0.05) ** 2) / 0.005)
+                + 5 * Math.exp(-((t - 0.95) ** 2) / 0.005)
+                + 2 * Math.sin(t * Math.PI) + Math.random() * 1.5;
+            v.push(vol);
+        }
+        const sum = v.reduce((a, b) => a + b, 0);
+        return v.map(x => x / sum);
+    }
+
+    function genPricePath(periods, startPrice, vol) {
+        const prices = [startPrice];
+        for (let i = 1; i < periods; i++) {
+            const drift = (Math.random() - 0.48) * vol * startPrice / 100;
+            prices.push(prices[i - 1] + drift);
+        }
+        return prices;
+    }
+
+    let volumeProfile, pricePath;
+
+    function drawTwapVwap() {
+        const { ctx, w, h } = initCanvas('cv-twap');
+        const totalShares = +$('sl-shares').value * 10000;
+        const horizon = +$('sl-horizon').value;
+        const periods = horizon * 12; // 5-min bars
+
+        volumeProfile = genVolumeProfile(periods);
+        pricePath = genPricePath(periods, 50, 2);
+
+        const pad = { top: 40, right: 50, bottom: 55, left: 55 };
+        const chartW = w - pad.left - pad.right;
+        const chartH = h - pad.top - pad.bottom;
+        const volH = chartH * 0.35;
+        const priceH = chartH * 0.55;
+        const gapH = chartH * 0.1;
+
+        ctx.clearRect(0, 0, w, h);
+
+        // --- Volume chart (bottom) ---
+        const volTop = pad.top + priceH + gapH;
+        const maxVol = Math.max(...volumeProfile) * 1.1;
+        const barW = chartW / periods * 0.8;
+
+        // TWAP schedule
+        const twapPerBar = totalShares / periods;
+        // VWAP schedule
+        const horizonBars = periods;
+        const vwapProfile = volumeProfile.slice(0, horizonBars);
+        const vwapSum = vwapProfile.reduce((a, b) => a + b, 0);
+        const vwapSchedule = vwapProfile.map(v => totalShares * v / vwapSum);
+
+        const maxSched = Math.max(twapPerBar, ...vwapSchedule) * 1.1;
+
+        for (let i = 0; i < periods; i++) {
+            const x = pad.left + (i / periods) * chartW;
+
+            // Volume background bar
+            const vh = (volumeProfile[i] / maxVol) * volH;
+            ctx.fillStyle = C.blue;
+            ctx.globalAlpha = 0.25;
+            ctx.fillRect(x, volTop + volH - vh, barW, vh);
+            ctx.globalAlpha = 1;
+
+            // TWAP bar
+            const tw = barW * 0.4;
+            const th = (twapPerBar / maxSched) * volH;
+            ctx.fillStyle = C.green;
+            ctx.globalAlpha = 0.7;
+            ctx.fillRect(x, volTop + volH - th, tw, th);
+
+            // VWAP bar
+            const vw2 = barW * 0.4;
+            const vwh = (vwapSchedule[i] / maxSched) * volH;
+            ctx.fillStyle = C.orange;
+            ctx.globalAlpha = 0.7;
+            ctx.fillRect(x + tw, volTop + volH - vwh, vw2, vwh);
+            ctx.globalAlpha = 1;
+        }
+
+        // Volume axis labels
+        ctx.fillStyle = C.muted; ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
+        ctx.fillText('执行调度 & 成交量分布', pad.left + chartW / 2, volTop - 4);
+
+        // --- Price chart (top) ---
+        const priceMin = Math.min(...pricePath) * 0.999;
+        const priceMax = Math.max(...pricePath) * 1.001;
+        const priceRange = priceMax - priceMin;
+
+        // Grid
+        ctx.strokeStyle = C.border; ctx.lineWidth = 0.5;
+        for (let i = 0; i <= 4; i++) {
+            const y = pad.top + (priceH / 4) * i;
+            ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(w - pad.right, y); ctx.stroke();
+            ctx.fillStyle = C.muted; ctx.font = '10px monospace'; ctx.textAlign = 'right';
+            const pv = priceMax - (priceRange / 4) * i;
+            ctx.fillText(pv.toFixed(2), pad.left - 6, y + 3);
+        }
+
+        // Price line
+        ctx.strokeStyle = C.red; ctx.lineWidth = 2;
+        ctx.beginPath();
+        for (let i = 0; i < periods; i++) {
+            const x = pad.left + (i / (periods - 1)) * chartW;
+            const y = pad.top + priceH - ((pricePath[i] - priceMin) / priceRange) * priceH;
+            i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+
+        // Compute execution prices
+        let twapCost = 0, vwapCost = 0;
+        let twapShares = 0, vwapShares = 0;
+        for (let i = 0; i < periods; i++) {
+            twapCost += twapPerBar * pricePath[i];
+            twapShares += twapPerBar;
+            vwapCost += vwapSchedule[i] * pricePath[i];
+            vwapShares += vwapSchedule[i];
+        }
+        const twapAvg = twapCost / twapShares;
+        const vwapAvg = vwapCost / vwapShares;
+        const marketVwap = pricePath.reduce((s, p, i) => s + p * volumeProfile[i], 0) / volumeProfile.reduce((a, b) => a + b, 0);
+
+        // Benchmark lines
+        [{ val: twapAvg, color: C.green, label: 'TWAP' },
+         { val: vwapAvg, color: C.orange, label: 'VWAP' }].forEach(line => {
+            const y = pad.top + priceH - ((line.val - priceMin) / priceRange) * priceH;
+            ctx.strokeStyle = line.color; ctx.lineWidth = 1.5; ctx.setLineDash([6, 4]);
+            ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(w - pad.right, y); ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.fillStyle = line.color; ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'left';
+            ctx.fillText(line.label + ': ' + line.val.toFixed(2), w - pad.right + 4, y + 4);
+        });
+
+        // Title
+        ctx.fillStyle = C.text; ctx.font = 'bold 14px sans-serif'; ctx.textAlign = 'center';
+        ctx.fillText('TWAP vs VWAP 执行对比', w / 2, 24);
+
+        // X axis
+        ctx.fillStyle = C.muted; ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
+        for (let hr = 0; hr <= horizon; hr++) {
+            const x = pad.left + (hr / horizon) * chartW;
+            ctx.fillText(hr + 'h', x, h - 10);
+        }
+
+        const twapSlip = roundTo((twapAvg - pricePath[0]) / pricePath[0] * 10000);
+        const vwapSlip = roundTo((vwapAvg - pricePath[0]) / pricePath[0] * 10000);
+        setMetrics('twap-metrics', [
+            { label: 'TWAP 均价', value: twapAvg.toFixed(2), cls: 'blue' },
+            { label: 'VWAP 均价', value: vwapAvg.toFixed(2), cls: 'warn' },
+            { label: '市场VWAP', value: marketVwap.toFixed(2) },
+            { label: 'TWAP 滑点', value: twapSlip + ' bps', cls: twapSlip > 0 ? 'negative' : '' },
+            { label: 'VWAP 滑点', value: vwapSlip + ' bps', cls: vwapSlip > 0 ? 'negative' : '' }
+        ]);
+    }
+
+    bindSlider('sl-shares', 'sv-shares', drawTwapVwap);
+    bindSlider('sl-horizon', 'sv-horizon', drawTwapVwap);
+    $('btn-regen-twap').addEventListener('click', drawTwapVwap);
+    drawTwapVwap();
+
+    // ========== Section 3: 冰山订单 ==========
+    let iceAnim = null;
+
+    function drawOrderBook(ctx, w, h, bids, asks, title, highlightAsk) {
+        ctx.clearRect(0, 0, w, h);
+        const pad = { top: 35, right: 15, bottom: 30, left: 15 };
+        const mid = w / 2;
+        const chartH = h - pad.top - pad.bottom;
+        const levels = bids.length;
+        const rowH = Math.min(chartH / levels, 24);
+
+        ctx.fillStyle = C.text; ctx.font = 'bold 12px sans-serif'; ctx.textAlign = 'center';
+        ctx.fillText(title, mid, 20);
+
+        const maxQty = Math.max(...bids.map(b => b.qty), ...asks.map(a => a.qty)) * 1.1;
+
+        // Column headers
+        ctx.fillStyle = C.muted; ctx.font = '10px sans-serif';
+        ctx.textAlign = 'right'; ctx.fillText('买量', mid - 8, pad.top - 4);
+        ctx.textAlign = 'center'; ctx.fillText('价格', mid, pad.top - 4);
+        ctx.textAlign = 'left'; ctx.fillText('卖量', mid + 8, pad.top - 4);
+
+        for (let i = 0; i < levels; i++) {
+            const y = pad.top + i * rowH;
+
+            // Ask side (right)
+            const askW = (asks[i].qty / maxQty) * (mid - 30);
+            ctx.fillStyle = asks[i].highlight ? C.yellow : C.red;
+            ctx.globalAlpha = asks[i].highlight ? 0.8 : 0.4;
+            ctx.fillRect(mid + 5, y + 2, askW, rowH - 4);
+            ctx.globalAlpha = 1;
+
+            // Bid side (left)
+            const bidW = (bids[i].qty / maxQty) * (mid - 30);
+            ctx.fillStyle = C.green; ctx.globalAlpha = 0.4;
+            ctx.fillRect(mid - 5 - bidW, y + 2, bidW, rowH - 4);
+            ctx.globalAlpha = 1;
+
+            // Price
+            ctx.fillStyle = C.text; ctx.font = '10px monospace'; ctx.textAlign = 'center';
+            ctx.fillText(asks[i].price.toFixed(2), mid, y + rowH / 2 + 3);
+
+            // Quantities
+            ctx.textAlign = 'right';
+            ctx.fillStyle = C.green;
+            ctx.fillText(bids[i].qty.toString(), mid - 8, y + rowH / 2 + 3);
+            ctx.textAlign = 'left';
+            ctx.fillStyle = asks[i].highlight ? C.yellow : C.red;
+            ctx.fillText(asks[i].qty.toString(), mid + 8, y + rowH / 2 + 3);
+        }
+    }
+
+    function generateBook(basePrice, levels) {
+        const bids = [], asks = [];
+        for (let i = 0; i < levels; i++) {
+            bids.push({ price: basePrice - 0.01 * (i + 1), qty: Math.floor(100 + Math.random() * 400) });
+            asks.push({ price: basePrice + 0.01 * (i + 1), qty: Math.floor(100 + Math.random() * 400), highlight: false });
+        }
+        return { bids, asks };
+    }
+
+    function runIcebergSim() {
+        if (iceAnim) { cancelAnimationFrame(iceAnim); iceAnim = null; }
+
+        const totalOrder = +$('sl-icetotal').value;
+        const showSize = +$('sl-iceshow').value;
+        const levels = 12;
+        const basePrice = 50.00;
+
+        // Bulk simulation state
+        let bulkBook = generateBook(basePrice, levels);
+        let bulkRemaining = totalOrder;
+        let bulkPriceImpact = 0;
+        let bulkFills = [];
+        let bulkDone = false;
+
+        // Iceberg simulation state
+        let iceBook = generateBook(basePrice, levels);
+        let iceRemaining = totalOrder;
+        let iceShowing = Math.min(showSize, iceRemaining);
+        let icePriceImpact = 0;
+        let iceFills = [];
+        let iceDone = false;
+
+        let step = 0;
+        const maxSteps = 60;
+
+        function tick() {
+            step++;
+
+            // --- Bulk: execute all at once in first few steps ---
+            if (!bulkDone) {
+                const { ctx, w, h } = initCanvas('cv-bulk');
+                if (step <= 3) {
+                    // Big market order hits the book
+                    let toFill = bulkRemaining;
+                    for (let i = 0; i < bulkBook.asks.length && toFill > 0; i++) {
+                        const fill = Math.min(toFill, bulkBook.asks[i].qty);
+                        toFill -= fill;
+                        bulkFills.push({ price: bulkBook.asks[i].price, qty: fill });
+                        bulkBook.asks[i].qty -= fill;
+                        bulkPriceImpact = bulkBook.asks[i].price - basePrice;
+                    }
+                    bulkRemaining = toFill;
+                    // Price moves up significantly
+                    if (bulkRemaining > 0) {
+                        const extraImpact = bulkRemaining * 0.0002;
+                        bulkPriceImpact += extraImpact;
+                        bulkFills.push({ price: basePrice + bulkPriceImpact, qty: bulkRemaining });
+                        bulkRemaining = 0;
+                    }
+                    bulkDone = true;
+                }
+                // Redraw book with impact
+                const impactBook = generateBook(basePrice + bulkPriceImpact, levels);
+                impactBook.asks.forEach(a => a.highlight = false);
+                drawOrderBook(ctx, w, h, impactBook.bids, impactBook.asks, '大单冲击后的订单簿');
+
+                // Show impact arrow
+                ctx.fillStyle = C.red; ctx.font = 'bold 13px sans-serif'; ctx.textAlign = 'center';
+                ctx.fillText('价格冲击: +' + (bulkPriceImpact * 100).toFixed(1) + ' bps', w / 2, h - 10);
+            }
+
+            // --- Iceberg: drip feed ---
+            if (!iceDone) {
+                const { ctx, w, h } = initCanvas('cv-iceberg');
+                if (step % 3 === 0 && iceRemaining > 0) {
+                    const chunk = Math.min(iceShowing, iceRemaining);
+                    // Fill from top of book
+                    let toFill = chunk;
+                    for (let i = 0; i < iceBook.asks.length && toFill > 0; i++) {
+                        const fill = Math.min(toFill, iceBook.asks[i].qty);
+                        toFill -= fill;
+                        iceFills.push({ price: iceBook.asks[i].price + icePriceImpact, qty: fill });
+                        iceBook.asks[i].qty -= fill;
+                    }
+                    iceRemaining -= (chunk - toFill);
+                    icePriceImpact += 0.005 * Math.random();
+
+                    // Book regenerates somewhat
+                    for (let i = 0; i < iceBook.asks.length; i++) {
+                        iceBook.asks[i].qty += Math.floor(30 + Math.random() * 80);
+                    }
+
+                    if (iceRemaining <= 0) iceDone = true;
+                }
+
+                const dispBook = JSON.parse(JSON.stringify(iceBook));
+                // Highlight the iceberg visible portion
+                if (!iceDone && dispBook.asks.length > 0) {
+                    dispBook.asks[0].highlight = true;
+                    dispBook.asks[0].qty = Math.min(showSize, iceRemaining);
+                }
+                const offsetBook = {
+                    bids: dispBook.bids.map(b => ({ ...b, price: b.price + icePriceImpact })),
+                    asks: dispBook.asks.map(a => ({ ...a, price: a.price + icePriceImpact }))
+                };
+                drawOrderBook(ctx, w, h, offsetBook.bids, offsetBook.asks, '冰山订单 (黄色=可见部分)');
+
+                ctx.fillStyle = C.green; ctx.font = 'bold 13px sans-serif'; ctx.textAlign = 'center';
+                ctx.fillText('价格冲击: +' + (icePriceImpact * 100).toFixed(1) + ' bps | 剩余: ' + Math.max(0, iceRemaining), w / 2, h - 10);
+            }
+
+            // Metrics
+            const bulkAvg = bulkFills.length > 0 ? bulkFills.reduce((s, f) => s + f.price * f.qty, 0) / bulkFills.reduce((s, f) => s + f.qty, 0) : basePrice;
+            const iceAvg = iceFills.length > 0 ? iceFills.reduce((s, f) => s + f.price * f.qty, 0) / iceFills.reduce((s, f) => s + f.qty, 0) : basePrice;
+            setMetrics('ice-metrics', [
+                { label: '大单均价', value: bulkAvg.toFixed(3), cls: 'negative' },
+                { label: '冰山均价', value: iceAvg.toFixed(3), cls: '' },
+                { label: '大单冲击', value: '+' + (bulkPriceImpact * 100).toFixed(1) + ' bps', cls: 'negative' },
+                { label: '冰山冲击', value: '+' + (icePriceImpact * 100).toFixed(1) + ' bps', cls: '' },
+                { label: '节省成本', value: ((bulkAvg - iceAvg) / basePrice * 10000).toFixed(1) + ' bps' }
+            ]);
+
+            if (step < maxSteps && !iceDone) {
+                iceAnim = requestAnimationFrame(tick);
+            }
+        }
+        tick();
+    }
+
+    $('btn-ice-run').addEventListener('click', runIcebergSim);
+    $('btn-ice-reset').addEventListener('click', () => {
+        if (iceAnim) cancelAnimationFrame(iceAnim);
+        iceAnim = null;
+        ['cv-bulk', 'cv-iceberg'].forEach(id => {
+            const { ctx, w, h } = initCanvas(id);
+            ctx.fillStyle = C.muted; ctx.font = '14px sans-serif'; ctx.textAlign = 'center';
+            ctx.fillText('点击"开始模拟"查看对比', w / 2, h / 2);
+        });
+        setMetrics('ice-metrics', []);
+    });
+    // Initial placeholder
+    $('btn-ice-reset').click();
+
+    // ========== Section 4: 滑点分析 ==========
+    let slipData = [];
+
+    function simulateSlippage() {
+        const latency = +$('sl-latency').value;
+        const vol = +$('sl-vol').value;
+        const ordSize = +$('sl-ordsize').value;
+        slipData = [];
+
+        for (let i = 0; i < 500; i++) {
+            // Slippage model: latency effect + volatility + size impact + noise
+            const latencyEffect = latency * 0.02 * (0.5 + Math.random());
+            const volEffect = vol * 0.15 * (Math.random() - 0.3);
+            const sizeEffect = Math.sqrt(ordSize) * 0.3 * Math.random();
+            const noise = (Math.random() - 0.4) * 2;
+            const slip = latencyEffect + volEffect + sizeEffect + noise;
+            const sz = ordSize * (0.3 + Math.random() * 1.4);
+            slipData.push({ slip: roundTo(slip, 1), size: roundTo(sz, 0), latency: latency * (0.5 + Math.random()) });
+        }
+        drawSlippage();
+    }
+
+    function drawSlippage() {
+        const { ctx, w, h } = initCanvas('cv-slip');
+        if (slipData.length === 0) {
+            ctx.fillStyle = C.muted; ctx.font = '14px sans-serif'; ctx.textAlign = 'center';
+            ctx.fillText('点击"模拟 500 次交易"生成数据', w / 2, h / 2);
+            return;
+        }
+
+        const pad = { top: 35, right: 20, bottom: 55, left: 50 };
+        const chartW = w - pad.left - pad.right;
+        const chartH = h - pad.top - pad.bottom;
+
+        // Split: histogram on left half, scatter on right half
+        const halfW = chartW / 2 - 10;
+
+        ctx.clearRect(0, 0, w, h);
+        ctx.fillStyle = C.text; ctx.font = 'bold 14px sans-serif'; ctx.textAlign = 'center';
+        ctx.fillText('滑点分布直方图', pad.left + halfW / 2, 22);
+        ctx.fillText('滑点 vs 订单大小', pad.left + halfW + 20 + halfW / 2, 22);
+
+        // --- Histogram ---
+        const slips = slipData.map(d => d.slip);
+        const minSlip = Math.floor(Math.min(...slips));
+        const maxSlip = Math.ceil(Math.max(...slips));
+        const bins = 25;
+        const binW = (maxSlip - minSlip) / bins;
+        const hist = new Array(bins).fill(0);
+        slips.forEach(s => {
+            const idx = Math.min(Math.floor((s - minSlip) / binW), bins - 1);
+            hist[idx]++;
+        });
+        const maxCount = Math.max(...hist) * 1.1;
+        const barWidth = halfW / bins;
+
+        for (let i = 0; i < bins; i++) {
+            const x = pad.left + i * barWidth;
+            const barH = (hist[i] / maxCount) * chartH;
+            const slipVal = minSlip + i * binW;
+            ctx.fillStyle = slipVal > 5 ? C.red : slipVal > 2 ? C.orange : C.blue;
+            ctx.globalAlpha = 0.7;
+            ctx.fillRect(x, pad.top + chartH - barH, barWidth - 1, barH);
+            ctx.globalAlpha = 1;
+        }
+
+        // Mean line on histogram
+        const meanSlip = slips.reduce((a, b) => a + b, 0) / slips.length;
+        const meanX = pad.left + ((meanSlip - minSlip) / (maxSlip - minSlip)) * halfW;
+        ctx.strokeStyle = C.green; ctx.lineWidth = 2; ctx.setLineDash([5, 3]);
+        ctx.beginPath(); ctx.moveTo(meanX, pad.top); ctx.lineTo(meanX, pad.top + chartH); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = C.green; ctx.font = '10px sans-serif'; ctx.textAlign = 'left';
+        ctx.fillText('均值=' + meanSlip.toFixed(1), meanX + 4, pad.top + 12);
+
+        // Histogram x-axis
+        ctx.fillStyle = C.muted; ctx.font = '10px monospace'; ctx.textAlign = 'center';
+        for (let i = 0; i <= 4; i++) {
+            const v = minSlip + (maxSlip - minSlip) * i / 4;
+            const x = pad.left + (i / 4) * halfW;
+            ctx.fillText(v.toFixed(1), x, h - pad.bottom + 18);
+        }
+        ctx.fillText('滑点 (bps)', pad.left + halfW / 2, h - 8);
+
+        // --- Scatter ---
+        const scatterLeft = pad.left + halfW + 20;
+        const sizes = slipData.map(d => d.size);
+        const minSize = Math.min(...sizes);
+        const maxSize = Math.max(...sizes);
+
+        // Grid
+        ctx.strokeStyle = C.border; ctx.lineWidth = 0.5;
+        for (let i = 0; i <= 4; i++) {
+            const y = pad.top + (chartH / 4) * i;
+            ctx.beginPath(); ctx.moveTo(scatterLeft, y); ctx.lineTo(scatterLeft + halfW, y); ctx.stroke();
+        }
+
+        slipData.forEach(d => {
+            const x = scatterLeft + ((d.size - minSize) / (maxSize - minSize + 1)) * halfW;
+            const y = pad.top + chartH - ((d.slip - minSlip) / (maxSlip - minSlip + 0.01)) * chartH;
+            ctx.fillStyle = d.slip > 5 ? C.red : d.slip > 2 ? C.orange : C.blue;
+            ctx.globalAlpha = 0.5;
+            ctx.beginPath(); ctx.arc(x, y, 3, 0, Math.PI * 2); ctx.fill();
+            ctx.globalAlpha = 1;
+        });
+
+        // Regression line (simple linear fit)
+        const n = slipData.length;
+        const sumX = slipData.reduce((s, d) => s + d.size, 0);
+        const sumY = slipData.reduce((s, d) => s + d.slip, 0);
+        const sumXY = slipData.reduce((s, d) => s + d.size * d.slip, 0);
+        const sumX2 = slipData.reduce((s, d) => s + d.size * d.size, 0);
+        const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
+        const intercept = (sumY - slope * sumX) / n;
+        const fitY0 = slope * minSize + intercept;
+        const fitY1 = slope * maxSize + intercept;
+        const toScreenX = v => scatterLeft + ((v - minSize) / (maxSize - minSize + 1)) * halfW;
+        const toScreenY = v => pad.top + chartH - ((v - minSlip) / (maxSlip - minSlip + 0.01)) * chartH;
+        ctx.strokeStyle = C.yellow; ctx.lineWidth = 2; ctx.setLineDash([6, 4]);
+        ctx.beginPath();
+        ctx.moveTo(toScreenX(minSize), toScreenY(fitY0));
+        ctx.lineTo(toScreenX(maxSize), toScreenY(fitY1));
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = C.yellow; ctx.font = '10px sans-serif'; ctx.textAlign = 'right';
+        ctx.fillText('回归线: y=' + slope.toFixed(3) + 'x+' + intercept.toFixed(1), scatterLeft + halfW - 4, pad.top + 14);
+
+        // Scatter axes
+        ctx.fillStyle = C.muted; ctx.font = '10px monospace'; ctx.textAlign = 'center';
+        ctx.fillText('订单大小 (手)', scatterLeft + halfW / 2, h - 8);
+        ctx.save(); ctx.translate(scatterLeft - 12, pad.top + chartH / 2);
+        ctx.rotate(-Math.PI / 2); ctx.fillText('滑点 (bps)', 0, 0); ctx.restore();
+
+        // Scatter axis labels
+        for (let i = 0; i <= 4; i++) {
+            const x = scatterLeft + (i / 4) * halfW;
+            const v = minSize + (maxSize - minSize) * i / 4;
+            ctx.fillText(v.toFixed(0), x, h - pad.bottom + 18);
+        }
+        for (let i = 0; i <= 4; i++) {
+            const y = pad.top + (chartH / 4) * i;
+            const v = maxSlip - (maxSlip - minSlip) * i / 4;
+            ctx.textAlign = 'right';
+            ctx.fillText(v.toFixed(1), scatterLeft - 4, y + 3);
+        }
+
+        // Metrics
+        const avgSlip = roundTo(slips.reduce((a, b) => a + b, 0) / slips.length);
+        const medSlip = roundTo(slips.sort((a, b) => a - b)[250]);
+        const p95 = roundTo(slips[Math.floor(slips.length * 0.95)]);
+        const stdSlip = roundTo(Math.sqrt(slips.reduce((s, v) => s + (v - avgSlip) ** 2, 0) / slips.length));
+        setMetrics('slip-metrics', [
+            { label: '平均滑点', value: avgSlip + ' bps', cls: 'warn' },
+            { label: '中位数', value: medSlip + ' bps', cls: 'blue' },
+            { label: '95%分位', value: p95 + ' bps', cls: 'negative' },
+            { label: '标准差', value: stdSlip + ' bps' },
+            { label: '正滑点比例', value: roundTo(slips.filter(s => s > 0).length / 5) + '%', cls: 'warn' }
+        ]);
+    }
+
+    bindSlider('sl-latency', 'sv-latency', () => {});
+    bindSlider('sl-vol', 'sv-vol', () => {});
+    bindSlider('sl-ordsize', 'sv-ordsize', () => {});
+    $('btn-slip-sim').addEventListener('click', simulateSlippage);
+    drawSlippage();
+
+    // ========== Section 5: TCA ==========
+    const algoProfiles = {
+        twap: { name: 'TWAP', delay: 8, impact: 12, timing: 6, opp: 4, color: C.green },
+        vwap: { name: 'VWAP', delay: 6, impact: 10, timing: 8, opp: 3, color: C.orange },
+        is: { name: 'IS 最优', delay: 3, impact: 8, timing: 10, opp: 2, color: C.blue },
+        pov: { name: 'POV', delay: 10, impact: 7, timing: 5, opp: 6, color: C.purple },
+        aggressive: { name: '激进', delay: 2, impact: 22, timing: 3, opp: 1, color: C.red }
+    };
+
+    let currentAlgo = 'twap';
+
+    function drawTCA() {
+        const algo = algoProfiles[currentAlgo];
+        const components = [
+            { label: '延迟成本', value: algo.delay, color: C.blue },
+            { label: '市场冲击', value: algo.impact, color: C.red },
+            { label: '时机成本', value: algo.timing, color: C.orange },
+            { label: '机会成本', value: algo.opp, color: C.purple }
+        ];
+        const total = components.reduce((s, c) => s + c.value, 0);
+
+        // --- Stacked bar chart ---
+        {
+            const { ctx, w, h } = initCanvas('cv-tca-bar');
+            const pad = { top: 45, right: 30, bottom: 50, left: 100 };
+            const chartW = w - pad.left - pad.right;
+            const chartH = h - pad.top - pad.bottom;
+
+            ctx.clearRect(0, 0, w, h);
+            ctx.fillStyle = C.text; ctx.font = 'bold 13px sans-serif'; ctx.textAlign = 'center';
+            ctx.fillText(algo.name + ' — 成本分解', w / 2, 24);
+
+            const barH = 36;
+            const maxVal = total * 1.2;
+
+            // Stacked horizontal bar
+            let xOffset = 0;
+            const barY = pad.top + 10;
+            components.forEach(c => {
+                const barW = (c.value / maxVal) * chartW;
+                ctx.fillStyle = c.color; ctx.globalAlpha = 0.8;
+                ctx.fillRect(pad.left + xOffset, barY, barW, barH);
+                ctx.globalAlpha = 1;
+
+                if (barW > 30) {
+                    ctx.fillStyle = '#fff'; ctx.font = 'bold 11px monospace'; ctx.textAlign = 'center';
+                    ctx.fillText(c.value + '', pad.left + xOffset + barW / 2, barY + barH / 2 + 4);
+                }
+                xOffset += barW;
+            });
+
+            // Total label
+            ctx.fillStyle = C.text; ctx.font = 'bold 12px sans-serif'; ctx.textAlign = 'left';
+            ctx.fillText('总计: ' + total + ' bps', pad.left + xOffset + 8, barY + barH / 2 + 4);
+
+            // Individual bars below
+            const indBarH = 28;
+            const startY = barY + barH + 30;
+            components.forEach((c, i) => {
+                const y = startY + i * (indBarH + 12);
+                const bw = (c.value / maxVal) * chartW;
+
+                // Label
+                ctx.fillStyle = C.text; ctx.font = '12px sans-serif'; ctx.textAlign = 'right';
+                ctx.fillText(c.label, pad.left - 10, y + indBarH / 2 + 4);
+
+                // Bar bg
+                ctx.fillStyle = C.border;
+                ctx.fillRect(pad.left, y, chartW, indBarH);
+
+                // Bar value
+                ctx.fillStyle = c.color; ctx.globalAlpha = 0.8;
+                ctx.beginPath(); ctx.roundRect(pad.left, y, bw, indBarH, 3); ctx.fill();
+                ctx.globalAlpha = 1;
+
+                // Value
+                ctx.fillStyle = C.text; ctx.font = '11px monospace'; ctx.textAlign = 'left';
+                ctx.fillText(c.value + ' bps (' + roundTo(c.value / total * 100) + '%)', pad.left + bw + 8, y + indBarH / 2 + 4);
+            });
+        }
+
+        // --- Comparison chart ---
+        {
+            const { ctx, w, h } = initCanvas('cv-tca-compare');
+            const pad = { top: 45, right: 20, bottom: 55, left: 70 };
+            const chartW = w - pad.left - pad.right;
+            const chartH = h - pad.top - pad.bottom;
+
+            ctx.clearRect(0, 0, w, h);
+            ctx.fillStyle = C.text; ctx.font = 'bold 13px sans-serif'; ctx.textAlign = 'center';
+            ctx.fillText('算法对比 — 堆叠成本', w / 2, 24);
+
+            const algos = Object.keys(algoProfiles);
+            const barW = chartW / algos.length * 0.65;
+            const gap = chartW / algos.length;
+            const allTotals = algos.map(k => {
+                const a = algoProfiles[k];
+                return a.delay + a.impact + a.timing + a.opp;
+            });
+            const maxTotal = Math.max(...allTotals) * 1.15;
+
+            // Grid
+            ctx.strokeStyle = C.border; ctx.lineWidth = 0.5;
+            for (let i = 0; i <= 5; i++) {
+                const y = pad.top + (chartH / 5) * i;
+                ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(w - pad.right, y); ctx.stroke();
+                ctx.fillStyle = C.muted; ctx.font = '10px monospace'; ctx.textAlign = 'right';
+                ctx.fillText(roundTo(maxTotal - (maxTotal / 5) * i, 0) + '', pad.left - 6, y + 3);
+            }
+
+            const compColors = [C.blue, C.red, C.orange, C.purple];
+            const compLabels = ['延迟', '冲击', '时机', '机会'];
+
+            algos.forEach((key, i) => {
+                const a = algoProfiles[key];
+                const vals = [a.delay, a.impact, a.timing, a.opp];
+                const x = pad.left + i * gap + (gap - barW) / 2;
+                let yOff = 0;
+
+                vals.forEach((v, j) => {
+                    const bh = (v / maxTotal) * chartH;
+                    ctx.fillStyle = compColors[j];
+                    ctx.globalAlpha = key === currentAlgo ? 0.9 : 0.45;
+                    ctx.fillRect(x, pad.top + chartH - yOff - bh, barW, bh);
+                    ctx.globalAlpha = 1;
+                    yOff += bh;
+                });
+
+                // Total on top
+                const totalH = (allTotals[i] / maxTotal) * chartH;
+                ctx.fillStyle = C.text; ctx.font = 'bold 11px monospace'; ctx.textAlign = 'center';
+                ctx.fillText(allTotals[i] + '', x + barW / 2, pad.top + chartH - totalH - 6);
+
+                // Highlight current
+                if (key === currentAlgo) {
+                    ctx.strokeStyle = C.yellow; ctx.lineWidth = 2;
+                    ctx.strokeRect(x - 2, pad.top + chartH - totalH - 2, barW + 4, totalH + 4);
+                }
+
+                // Name
+                ctx.fillStyle = key === currentAlgo ? C.yellow : C.text;
+                ctx.font = '11px sans-serif'; ctx.textAlign = 'center';
+                ctx.fillText(a.name, x + barW / 2, h - pad.bottom + 18);
+            });
+
+            // Legend
+            const legY = h - 12;
+            let legX = pad.left;
+            compLabels.forEach((label, i) => {
+                ctx.fillStyle = compColors[i];
+                ctx.fillRect(legX, legY - 8, 10, 10);
+                ctx.fillStyle = C.muted; ctx.font = '10px sans-serif'; ctx.textAlign = 'left';
+                ctx.fillText(label, legX + 13, legY);
+                legX += 60;
+            });
+        }
+
+        setMetrics('tca-metrics', [
+            { label: '延迟成本', value: algo.delay + ' bps', cls: 'blue' },
+            { label: '市场冲击', value: algo.impact + ' bps', cls: 'negative' },
+            { label: '时机成本', value: algo.timing + ' bps', cls: 'warn' },
+            { label: '机会成本', value: algo.opp + ' bps', cls: '' },
+            { label: '总实施缺口', value: total + ' bps', cls: total > 25 ? 'negative' : 'warn' },
+            { label: '排名', value: Object.keys(algoProfiles).sort((a, b) => {
+                const ta = algoProfiles[a]; const tb = algoProfiles[b];
+                return (ta.delay + ta.impact + ta.timing + ta.opp) - (tb.delay + tb.impact + tb.timing + tb.opp);
+            }).indexOf(currentAlgo) + 1 + ' / 5' }
+        ]);
+    }
+
+    // Algo buttons
+    document.querySelectorAll('#algo-btns .btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('#algo-btns .btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            currentAlgo = btn.dataset.algo;
+            drawTCA();
+        });
+    });
+    drawTCA();
+
+    // ========== Resize handler ==========
+    let resizeTimer;
+    window.addEventListener('resize', () => {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(() => {
+            drawCostWaterfall();
+            drawTwapVwap();
+            drawSlippage();
+            drawTCA();
+        }, 200);
+    });
+});
+</script>
+
+<!-- KaTeX auto-render -->
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    if (typeof renderMathInElement === 'function') {
+        renderMathInElement(document.body, {
+            delimiters: [
+                { left: '$$', right: '$$', display: true },
+                { left: '$', right: '$', display: false }
+            ]
+        });
+    } else {
+        window.addEventListener('load', () => {
+            if (typeof renderMathInElement === 'function') {
+                renderMathInElement(document.body, {
+                    delimiters: [
+                        { left: '$$', right: '$$', display: true },
+                        { left: '$', right: '$', display: false }
+                    ]
+                });
+            }
+        });
+    }
+});
+</script>
+</body>
+</html>

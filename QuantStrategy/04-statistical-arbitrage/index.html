@@ -1,0 +1,1272 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>统计套利 — 量化交易策略</title>
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" defer>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" defer></script>
+    <script src="../shared/scripts/nav.js" defer></script>
+    <style>
+        .canvas-wrap { position: relative; width: 100%; border-radius: var(--radius-md); overflow: hidden; }
+        .canvas-wrap canvas { display: block; width: 100%; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: var(--radius-md); }
+        .controls-row { display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; margin: 1rem 0; }
+        .metric-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 0.75rem; margin: 1rem 0; }
+        .metric-card { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 0.75rem; text-align: center; }
+        .metric-card .value { font-family: var(--font-mono); font-size: 1.3rem; font-weight: 700; color: var(--accent-green); }
+        .metric-card .label { font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem; }
+        .formula-box { background: rgba(15, 52, 96, 0.5); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 1rem; margin: 0.75rem 0; text-align: center; font-size: 1.05rem; }
+        .compare-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin: 1rem 0; }
+        .compare-table th, .compare-table td { padding: 0.6rem 0.8rem; border: 1px solid var(--border-color); text-align: center; }
+        .compare-table th { background: var(--bg-card); color: var(--accent-green); font-weight: 600; }
+        .compare-table td { color: var(--text-secondary); }
+        .heatmap-grid { display: grid; gap: 2px; margin: 0.5rem 0; }
+        .heatmap-cell { aspect-ratio: 1; display: flex; align-items: center; justify-content: center; font-family: var(--font-mono); font-size: 0.65rem; border-radius: 2px; color: var(--text-primary); }
+        .stock-row { display: flex; align-items: center; gap: 0.5rem; margin: 0.3rem 0; font-size: 0.85rem; }
+        .stock-row .name { min-width: 60px; color: var(--text-secondary); }
+        .stock-row input[type="number"] { width: 80px; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-sm); color: var(--text-primary); padding: 0.3rem 0.5rem; font-family: var(--font-mono); font-size: 0.85rem; }
+        .stock-row .beta-val { font-family: var(--font-mono); color: var(--accent-blue); min-width: 50px; }
+        .insight { display: inline-block; padding: 0.3rem 0.6rem; background: rgba(22,199,154,0.1); border-radius: var(--radius-sm); font-size: 0.8rem; color: var(--accent-green); margin: 0.25rem 0; }
+    </style>
+</head>
+<body>
+<div class="page-container">
+
+    <!-- Section 1: 统计套利概述 -->
+    <section class="section" id="sec-overview">
+        <div class="section-title">
+            <div class="icon">📊</div>
+            <h2>统计套利概述</h2>
+        </div>
+        <p>统计套利（Statistical Arbitrage）是一类市场中性策略，通过同时做多被低估的资产组合、做空被高估的资产组合，使净市场敞口接近零。策略收益来自资产间的<strong>相对价值回归</strong>，而非市场方向判断。</p>
+
+        <div class="formula-box">
+            $$R_{portfolio} = \sum_i w_i^{long} R_i - \sum_j w_j^{short} R_j, \quad \beta_{portfolio} \approx 0$$
+        </div>
+
+        <div class="canvas-wrap">
+            <canvas id="cvOverview" height="420"></canvas>
+        </div>
+
+        <div class="metric-cards" id="overviewMetrics">
+            <div class="metric-card"><div class="value" id="metLongBeta">+0.95</div><div class="label">多头组合 Beta</div></div>
+            <div class="metric-card"><div class="value" id="metShortBeta">-0.93</div><div class="label">空头组合 Beta</div></div>
+            <div class="metric-card"><div class="value" style="color:var(--accent-blue)" id="metNetBeta">+0.02</div><div class="label">净 Beta</div></div>
+            <div class="metric-card"><div class="value" style="color:var(--accent-orange)" id="metNetExposure">2%</div><div class="label">净市场敞口</div></div>
+        </div>
+
+        <h3>统计套利 vs 方向性策略</h3>
+        <table class="compare-table">
+            <thead><tr><th>维度</th><th>方向性策略（如动量）</th><th>统计套利</th></tr></thead>
+            <tbody>
+                <tr><td>市场敞口</td><td>高（Beta ≈ 0.5~1.5）</td><td>极低（Beta ≈ 0）</td></tr>
+                <tr><td>收益来源</td><td>市场趋势 + Alpha</td><td>纯 Alpha（相对价值）</td></tr>
+                <tr><td>牛市表现</td><td>优秀</td><td>一般</td></tr>
+                <tr><td>熊市表现</td><td>亏损</td><td>可能盈利</td></tr>
+                <tr><td>策略容量</td><td>较大</td><td>中等</td></tr>
+                <tr><td>换手率</td><td>中</td><td>高</td></tr>
+            </tbody>
+        </table>
+        <div class="info-box">
+            <p><strong>核心思想：</strong>统计套利不依赖对市场走势的判断。无论牛熊，只要多头组合跑赢空头组合，策略即可盈利。这种"市场中性"特性使其成为对冲基金的核心策略之一。</p>
+        </div>
+    </section>
+
+    <!-- Section 2: PCA 策略 -->
+    <section class="section" id="sec-pca">
+        <div class="section-title">
+            <div class="icon">🧮</div>
+            <h2>PCA 策略</h2>
+        </div>
+        <p>主成分分析（PCA）将股票收益率分解为若干正交的统计因子。用前几个主成分重构"公允价值"，实际价格与公允价值之差即为残差（residual）。当残差偏离过大时，预期其回归，从而产生交易信号。</p>
+
+        <div class="formula-box">
+            $$R = F \cdot \Lambda^T + \epsilon, \quad \hat{R}_i = \sum_{k=1}^{K} f_k \lambda_{ik}, \quad \text{residual}_i = R_i - \hat{R}_i$$
+        </div>
+
+        <div class="controls-row">
+            <div class="slider-group">
+                <label>保留主成分数 K:</label>
+                <input type="range" id="sliderK" min="1" max="5" value="3" step="1">
+                <span class="slider-value" id="valK">3</span>
+            </div>
+            <button class="btn btn-primary" id="btnRegenPCA">重新生成数据</button>
+        </div>
+
+        <div class="canvas-wrap">
+            <canvas id="cvEigen" height="260"></canvas>
+        </div>
+        <p style="font-size:0.85rem;color:var(--text-muted);text-align:center;">特征值谱 — 前 K 个主成分解释的方差占比（蓝色为选中）</p>
+
+        <h3>因子载荷热力图</h3>
+        <div class="canvas-wrap">
+            <canvas id="cvHeatmap" height="280"></canvas>
+        </div>
+        <p style="font-size:0.85rem;color:var(--text-muted);text-align:center;">每只股票在各主成分上的载荷（红=正，蓝=负）</p>
+
+        <h3>残差序列与交易信号</h3>
+        <div class="controls-row">
+            <div class="slider-group">
+                <label>信号阈值 (σ):</label>
+                <input type="range" id="sliderThresh" min="1.0" max="3.0" value="2.0" step="0.1">
+                <span class="slider-value" id="valThresh">2.0</span>
+            </div>
+        </div>
+        <div class="canvas-wrap">
+            <canvas id="cvResidual" height="300"></canvas>
+        </div>
+        <div class="legend">
+            <div class="legend-item"><span class="swatch" style="background:var(--accent-blue)"></span>残差序列</div>
+            <div class="legend-item"><span class="swatch" style="background:var(--accent-orange)"></span>+/- 阈值线</div>
+            <div class="legend-item"><span class="swatch" style="background:var(--accent-green)"></span>做多信号</div>
+            <div class="legend-item"><span class="swatch" style="background:var(--accent-red)"></span>做空信号</div>
+        </div>
+    </section>
+
+    <!-- Section 3: 均值回归篮子 -->
+    <section class="section" id="sec-basket">
+        <div class="section-title">
+            <div class="icon">🧺</div>
+            <h2>均值回归篮子</h2>
+        </div>
+        <p>单个配对交易风险集中，一旦价差发散则损失巨大。统计套利的关键改进是同时交易<strong>多个均值回归价差</strong>，形成"篮子"。分散化大幅降低单个价差失败的影响。</p>
+
+        <div class="formula-box">
+            $$\sigma_{basket} = \frac{\sigma_{single}}{\sqrt{N}} \cdot \sqrt{1 + (N-1)\rho}, \quad \rho \approx 0 \Rightarrow \sigma_{basket} \approx \frac{\sigma_{single}}{\sqrt{N}}$$
+        </div>
+
+        <div class="controls-row">
+            <button class="btn" id="btnBasket1">1 个配对</button>
+            <button class="btn" id="btnBasket5">5 个配对</button>
+            <button class="btn active" id="btnBasket20">20 个配对</button>
+            <button class="btn btn-primary" id="btnRegenBasket">重新模拟</button>
+        </div>
+
+        <div class="canvas-wrap">
+            <canvas id="cvBasket" height="380"></canvas>
+        </div>
+        <div class="legend">
+            <div class="legend-item"><span class="swatch" style="background:rgba(255,82,82,0.7)"></span>1 个配对</div>
+            <div class="legend-item"><span class="swatch" style="background:var(--accent-orange)"></span>5 个配对</div>
+            <div class="legend-item"><span class="swatch" style="background:var(--accent-green)"></span>20 个配对</div>
+        </div>
+
+        <div class="metric-cards" id="basketMetrics">
+            <div class="metric-card"><div class="value" id="metSharpe1" style="color:var(--accent-red)">—</div><div class="label">1配对 Sharpe</div></div>
+            <div class="metric-card"><div class="value" id="metSharpe5" style="color:var(--accent-orange)">—</div><div class="label">5配对 Sharpe</div></div>
+            <div class="metric-card"><div class="value" id="metSharpe20">—</div><div class="label">20配对 Sharpe</div></div>
+            <div class="metric-card"><div class="value" id="metMaxDD" style="color:var(--accent-red)">—</div><div class="label">最大回撤 (1配对)</div></div>
+            <div class="metric-card"><div class="value" id="metMaxDD20" style="color:var(--accent-blue)">—</div><div class="label">最大回撤 (20配对)</div></div>
+        </div>
+
+        <div class="info-box success">
+            <p><strong>分散化的力量：</strong>当各价差之间相关性较低时，20 个配对的组合波动率仅为单个配对的约 1/√20 ≈ 22%，Sharpe 比率可提升数倍。这正是统计套利优于简单配对交易的核心优势。</p>
+        </div>
+    </section>
+
+    <!-- Section 4: 市场中性构建 -->
+    <section class="section" id="sec-neutral">
+        <div class="section-title">
+            <div class="icon">⚖️</div>
+            <h2>市场中性构建</h2>
+        </div>
+        <p>市场中性要求组合对市场因子的敞口为零，即组合 Beta = 0。实际操作中，通过调整股票仓位或加入指数对冲头寸来实现。</p>
+
+        <div class="formula-box">
+            $$\beta_{portfolio} = \frac{\sum_i w_i \beta_i}{\sum_i |w_i|} = 0 \quad \Rightarrow \quad w_{hedge} = -\frac{\sum_i w_i \beta_i}{\beta_{hedge}}$$
+        </div>
+
+        <h3>互动：调整持仓实现中性</h3>
+        <p style="font-size:0.85rem;color:var(--text-muted)">调整各股票的持仓权重，观察组合 Beta 变化。点击"自动对冲"让系统计算所需的对冲头寸。</p>
+
+        <div id="stockPositions" style="margin:1rem 0;">
+            <!-- Generated by JS -->
+        </div>
+        <div class="controls-row">
+            <button class="btn btn-primary" id="btnAutoHedge">自动对冲（加入 ETF 空头）</button>
+            <button class="btn" id="btnResetPositions">重置持仓</button>
+        </div>
+
+        <div class="metric-cards">
+            <div class="metric-card"><div class="value" id="metPortBeta">—</div><div class="label">组合 Beta</div></div>
+            <div class="metric-card"><div class="value" id="metHedgeAmt" style="color:var(--accent-orange)">—</div><div class="label">ETF 对冲头寸</div></div>
+            <div class="metric-card"><div class="value" id="metGrossExp" style="color:var(--accent-blue)">—</div><div class="label">总敞口</div></div>
+            <div class="metric-card"><div class="value" id="metNetExp" style="color:var(--accent-purple)">—</div><div class="label">净敞口</div></div>
+        </div>
+
+        <h3>组合收益 vs 市场收益（对冲前后）</h3>
+        <div class="canvas-wrap">
+            <canvas id="cvScatter" height="380"></canvas>
+        </div>
+        <div class="legend">
+            <div class="legend-item"><span class="swatch" style="background:var(--accent-red)"></span>对冲前（高Beta）</div>
+            <div class="legend-item"><span class="swatch" style="background:var(--accent-green)"></span>对冲后（Beta≈0）</div>
+            <div class="legend-item"><span class="swatch" style="background:var(--accent-blue);opacity:0.4"></span>回归线</div>
+        </div>
+    </section>
+
+    <!-- Section 5: 容量与衰减 -->
+    <section class="section" id="sec-capacity">
+        <div class="section-title">
+            <div class="icon">📉</div>
+            <h2>容量与衰减</h2>
+        </div>
+        <p>统计套利策略的收益并非无限可扩展。随着管理资产规模（AUM）增长，市场冲击成本上升，可交易的信号减少，策略 Sharpe 比率不断下降。同时，随着时间推移和其他参与者的模仿，Alpha 信号的预测力逐渐衰减。</p>
+
+        <h3>策略容量：AUM 与 Sharpe 关系</h3>
+        <div class="controls-row">
+            <div class="slider-group">
+                <label>AUM（亿元）:</label>
+                <input type="range" id="sliderAUM" min="1" max="100" value="5" step="1">
+                <span class="slider-value" id="valAUM">5</span>
+            </div>
+        </div>
+        <div class="canvas-wrap">
+            <canvas id="cvCapacity" height="300"></canvas>
+        </div>
+        <div class="metric-cards">
+            <div class="metric-card"><div class="value" id="metCapSharpe">—</div><div class="label">预期 Sharpe</div></div>
+            <div class="metric-card"><div class="value" id="metCapReturn" style="color:var(--accent-blue)">—</div><div class="label">预期年化收益</div></div>
+            <div class="metric-card"><div class="value" id="metCapCost" style="color:var(--accent-red)">—</div><div class="label">市场冲击成本</div></div>
+            <div class="metric-card"><div class="value" id="metCapOptimal" style="color:var(--accent-orange)">—</div><div class="label">最优 AUM</div></div>
+        </div>
+
+        <h3>Alpha 衰减：信号半衰期</h3>
+        <div class="controls-row">
+            <div class="slider-group">
+                <label>初始 IC:</label>
+                <input type="range" id="sliderIC" min="0.02" max="0.10" value="0.05" step="0.005">
+                <span class="slider-value" id="valIC">0.05</span>
+            </div>
+            <div class="slider-group">
+                <label>半衰期（月）:</label>
+                <input type="range" id="sliderHL" min="3" max="36" value="12" step="1">
+                <span class="slider-value" id="valHL">12</span>
+            </div>
+        </div>
+        <div class="canvas-wrap">
+            <canvas id="cvDecay" height="300"></canvas>
+        </div>
+        <div class="legend">
+            <div class="legend-item"><span class="swatch" style="background:var(--accent-green)"></span>信息系数 (IC)</div>
+            <div class="legend-item"><span class="swatch" style="background:var(--accent-orange)"></span>有效期限（IC > 0.02）</div>
+            <div class="legend-item"><span class="swatch" style="background:var(--accent-red);opacity:0.3"></span>信号失效区</div>
+        </div>
+
+        <div class="info-box warning">
+            <p><strong>实战考量：</strong>统计套利的典型容量为 1-20 亿元。超过此范围，滑点和冲击成本将显著侵蚀收益。同时，成功的信号通常在 6-18 个月后显著衰减，策略需要持续的研究与迭代。</p>
+        </div>
+
+        <div class="formula-box">
+            $$IC(t) = IC_0 \cdot 2^{-t/h}, \quad \text{有效寿命} = h \cdot \log_2\left(\frac{IC_0}{IC_{min}}\right)$$
+        </div>
+    </section>
+
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+
+    /* ===== Utilities ===== */
+    const dpr = window.devicePixelRatio || 1;
+    function setupCanvas(id) {
+        const c = document.getElementById(id);
+        const rect = c.getBoundingClientRect();
+        c.width = rect.width * dpr;
+        c.height = rect.height * dpr;
+        const ctx = c.getContext('2d');
+        ctx.scale(dpr, dpr);
+        return { c, ctx, w: rect.width, h: rect.height };
+    }
+
+    function randn() {
+        let u = 0, v = 0;
+        while (u === 0) u = Math.random();
+        while (v === 0) v = Math.random();
+        return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+    }
+
+    const colors = {
+        green: '#16c79a', blue: '#4fc3f7', purple: '#b388ff',
+        orange: '#ffab40', red: '#ff5252', yellow: '#ffd740', pink: '#ff80ab',
+        text: '#e8e8e8', muted: '#6c6c7c', border: '#2a2a4a', bg: '#16213e', bgCard: '#0f3460'
+    };
+
+    function drawAxes(ctx, x0, y0, xEnd, yEnd, xlabel, ylabel) {
+        ctx.strokeStyle = colors.border;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(x0, yEnd); ctx.lineTo(xEnd, yEnd);
+        ctx.moveTo(x0, yEnd); ctx.lineTo(x0, y0);
+        ctx.stroke();
+        ctx.fillStyle = colors.muted;
+        ctx.font = '11px "Noto Sans SC", sans-serif';
+        if (xlabel) { ctx.textAlign = 'center'; ctx.fillText(xlabel, (x0 + xEnd) / 2, yEnd + 30); }
+        if (ylabel) { ctx.save(); ctx.translate(x0 - 30, (y0 + yEnd) / 2); ctx.rotate(-Math.PI / 2); ctx.textAlign = 'center'; ctx.fillText(ylabel, 0, 0); ctx.restore(); }
+    }
+
+    /* ===== Section 1: Overview Diagram ===== */
+    function drawOverview() {
+        const { ctx, w, h } = setupCanvas('cvOverview');
+        ctx.clearRect(0, 0, w, h);
+
+        // Draw long basket, short basket, and net
+        const cx = w / 2, cy = h / 2;
+        const boxW = 160, boxH = 140, gap = 100;
+
+        // Long basket
+        const lx = cx - gap - boxW;
+        ctx.fillStyle = 'rgba(22,199,154,0.12)';
+        ctx.strokeStyle = colors.green;
+        ctx.lineWidth = 2;
+        roundRect(ctx, lx, cy - boxH / 2, boxW, boxH, 10);
+        ctx.fill(); ctx.stroke();
+        ctx.fillStyle = colors.green;
+        ctx.font = 'bold 15px "Noto Sans SC", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('多头篮子', lx + boxW / 2, cy - boxH / 2 + 28);
+        ctx.font = '12px "Noto Sans SC", sans-serif';
+        ctx.fillStyle = colors.text;
+        const longStocks = ['贵州茅台 +3.2%', '宁德时代 +1.8%', '招商银行 +2.1%', '比亚迪 +4.0%'];
+        longStocks.forEach((s, i) => {
+            ctx.fillStyle = colors.green;
+            ctx.fillText(s, lx + boxW / 2, cy - boxH / 2 + 52 + i * 22);
+        });
+
+        // Short basket
+        const sx = cx + gap;
+        ctx.fillStyle = 'rgba(255,82,82,0.12)';
+        ctx.strokeStyle = colors.red;
+        ctx.lineWidth = 2;
+        roundRect(ctx, sx, cy - boxH / 2, boxW, boxH, 10);
+        ctx.fill(); ctx.stroke();
+        ctx.fillStyle = colors.red;
+        ctx.font = 'bold 15px "Noto Sans SC", sans-serif';
+        ctx.fillText('空头篮子', sx + boxW / 2, cy - boxH / 2 + 28);
+        ctx.font = '12px "Noto Sans SC", sans-serif';
+        const shortStocks = ['中国石油 -0.5%', '工商银行 -1.2%', '中国建筑 -0.8%', '中国神华 -1.5%'];
+        shortStocks.forEach((s, i) => {
+            ctx.fillStyle = colors.red;
+            ctx.fillText(s, sx + boxW / 2, cy - boxH / 2 + 52 + i * 22);
+        });
+
+        // Arrows and center net exposure
+        ctx.strokeStyle = colors.muted;
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([5, 3]);
+        // Arrow from long to center
+        ctx.beginPath();
+        ctx.moveTo(lx + boxW + 5, cy);
+        ctx.lineTo(cx - 35, cy);
+        ctx.stroke();
+        // Arrow from short to center
+        ctx.beginPath();
+        ctx.moveTo(sx - 5, cy);
+        ctx.lineTo(cx + 35, cy);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Center circle
+        ctx.beginPath();
+        ctx.arc(cx, cy, 32, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(79,195,247,0.15)';
+        ctx.strokeStyle = colors.blue;
+        ctx.lineWidth = 2;
+        ctx.fill(); ctx.stroke();
+        ctx.fillStyle = colors.blue;
+        ctx.font = 'bold 12px "Noto Sans SC", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('净敞口', cx, cy - 5);
+        ctx.font = 'bold 16px "JetBrains Mono", monospace';
+        ctx.fillText('≈ 0', cx, cy + 16);
+
+        // Beta bar at bottom
+        const barY = h - 60, barH = 20, barW = w - 120, barX = 60;
+        ctx.fillStyle = colors.bgCard;
+        roundRect(ctx, barX, barY, barW, barH, 4);
+        ctx.fill();
+
+        // Beta scale
+        const betaMid = barX + barW / 2;
+        ctx.fillStyle = colors.muted;
+        ctx.font = '10px "JetBrains Mono", monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText('-1.0', barX, barY + barH + 14);
+        ctx.fillText('0', betaMid, barY + barH + 14);
+        ctx.fillText('+1.0', barX + barW, barY + barH + 14);
+        ctx.fillText('组合 Beta', betaMid, barY - 8);
+
+        // Long beta marker
+        const longBetaX = betaMid + 0.95 * (barW / 2);
+        ctx.fillStyle = colors.green;
+        ctx.beginPath(); ctx.arc(longBetaX, barY + barH / 2, 6, 0, Math.PI * 2); ctx.fill();
+
+        // Short beta marker
+        const shortBetaX = betaMid - 0.93 * (barW / 2);
+        ctx.fillStyle = colors.red;
+        ctx.beginPath(); ctx.arc(shortBetaX, barY + barH / 2, 6, 0, Math.PI * 2); ctx.fill();
+
+        // Net beta marker
+        const netBetaX = betaMid + 0.02 * (barW / 2);
+        ctx.fillStyle = colors.blue;
+        ctx.beginPath(); ctx.arc(netBetaX, barY + barH / 2, 8, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#1a1a2e';
+        ctx.font = 'bold 8px "JetBrains Mono", monospace';
+        ctx.fillText('β', netBetaX, barY + barH / 2 + 3);
+
+        // Zero line
+        ctx.strokeStyle = colors.muted;
+        ctx.lineWidth = 1;
+        ctx.setLineDash([3, 3]);
+        ctx.beginPath(); ctx.moveTo(betaMid, barY); ctx.lineTo(betaMid, barY + barH); ctx.stroke();
+        ctx.setLineDash([]);
+    }
+
+    function roundRect(ctx, x, y, w, h, r) {
+        ctx.beginPath();
+        ctx.moveTo(x + r, y);
+        ctx.lineTo(x + w - r, y);
+        ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+        ctx.lineTo(x + w, y + h - r);
+        ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+        ctx.lineTo(x + r, y + h);
+        ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+        ctx.lineTo(x, y + r);
+        ctx.quadraticCurveTo(x, y, x + r, y);
+        ctx.closePath();
+    }
+
+    /* ===== Section 2: PCA Strategy ===== */
+    const stockNames = ['贵州茅台', '宁德时代', '招商银行', '比亚迪', '中国平安', '隆基绿能', '万科A', '海尔智家'];
+    let pcaData = null;
+
+    function generatePCAData() {
+        const n = 8, t = 200;
+        // Generate factor returns (5 factors)
+        const factors = [];
+        for (let k = 0; k < 5; k++) {
+            const f = [];
+            const vol = 0.03 * (1 - k * 0.15);
+            for (let i = 0; i < t; i++) f.push(randn() * vol);
+            factors.push(f);
+        }
+        // Generate loadings
+        const loadings = [];
+        for (let i = 0; i < n; i++) {
+            const row = [];
+            for (let k = 0; k < 5; k++) row.push(randn() * (0.8 - k * 0.1));
+            loadings.push(row);
+        }
+        // Generate returns
+        const returns = [];
+        for (let i = 0; i < n; i++) {
+            const r = [];
+            for (let ti = 0; ti < t; ti++) {
+                let val = 0;
+                for (let k = 0; k < 5; k++) val += loadings[i][k] * factors[k][ti];
+                val += randn() * 0.01;
+                r.push(val);
+            }
+            returns.push(r);
+        }
+        // Eigenvalues (proportional to factor variance * sum of squared loadings)
+        const eigenvalues = [];
+        for (let k = 0; k < 5; k++) {
+            let sumSqLoad = 0;
+            for (let i = 0; i < n; i++) sumSqLoad += loadings[i][k] ** 2;
+            const factorVar = factors[k].reduce((s, v) => s + v * v, 0) / t;
+            eigenvalues.push(factorVar * sumSqLoad * 1000);
+        }
+        eigenvalues.sort((a, b) => b - a);
+
+        pcaData = { factors, loadings, returns, eigenvalues, n, t };
+    }
+
+    function drawEigenChart() {
+        const { ctx, w, h } = setupCanvas('cvEigen');
+        const K = parseInt(document.getElementById('sliderK').value);
+        const { eigenvalues } = pcaData;
+        const total = eigenvalues.reduce((s, v) => s + v, 0);
+        const pcts = eigenvalues.map(v => v / total);
+
+        const pad = { l: 60, r: 30, t: 20, b: 40 };
+        const plotW = w - pad.l - pad.r, plotH = h - pad.t - pad.b;
+
+        drawAxes(ctx, pad.l, pad.t, pad.l + plotW, pad.t + plotH, '主成分', '方差占比 (%)');
+
+        const barW = Math.min(50, plotW / pcts.length - 10);
+        const maxPct = Math.max(...pcts) * 1.1;
+
+        // Cumulative line
+        let cum = 0;
+        ctx.beginPath();
+        ctx.strokeStyle = colors.orange;
+        ctx.lineWidth = 2;
+        pcts.forEach((p, i) => {
+            cum += p;
+            const x = pad.l + (i + 0.5) * (plotW / pcts.length);
+            const y = pad.t + plotH - (cum * plotH);
+            if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+
+        // Bars
+        pcts.forEach((p, i) => {
+            const x = pad.l + (i + 0.5) * (plotW / pcts.length) - barW / 2;
+            const barH = p / maxPct * plotH * 0.9;
+            const y = pad.t + plotH - barH;
+            ctx.fillStyle = i < K ? colors.blue : 'rgba(79,195,247,0.2)';
+            roundRect(ctx, x, y, barW, barH, 3);
+            ctx.fill();
+            // Label
+            ctx.fillStyle = i < K ? colors.text : colors.muted;
+            ctx.font = '11px "JetBrains Mono", monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText((p * 100).toFixed(1) + '%', x + barW / 2, y - 6);
+            ctx.fillText('PC' + (i + 1), x + barW / 2, pad.t + plotH + 16);
+        });
+
+        // Cumulative pct for selected K
+        cum = 0;
+        for (let i = 0; i < K; i++) cum += pcts[i];
+        ctx.fillStyle = colors.orange;
+        ctx.font = 'bold 12px "Noto Sans SC", sans-serif';
+        ctx.textAlign = 'right';
+        ctx.fillText('前 ' + K + ' 个: ' + (cum * 100).toFixed(1) + '% 方差', w - pad.r, pad.t + 16);
+    }
+
+    function drawHeatmap() {
+        const { ctx, w, h } = setupCanvas('cvHeatmap');
+        const { loadings, n } = pcaData;
+        const pad = { l: 80, r: 20, t: 30, b: 20 };
+        const nf = 5;
+        const cellW = Math.min(60, (w - pad.l - pad.r) / nf);
+        const cellH = Math.min(28, (h - pad.t - pad.b) / n);
+
+        // Find max absolute value for color scaling
+        let maxAbs = 0;
+        loadings.forEach(row => row.forEach(v => { if (Math.abs(v) > maxAbs) maxAbs = Math.abs(v); }));
+
+        // Column headers
+        ctx.fillStyle = colors.muted;
+        ctx.font = '11px "JetBrains Mono", monospace';
+        ctx.textAlign = 'center';
+        for (let k = 0; k < nf; k++) {
+            ctx.fillText('PC' + (k + 1), pad.l + (k + 0.5) * cellW, pad.t - 8);
+        }
+
+        // Row labels and cells
+        for (let i = 0; i < n; i++) {
+            ctx.fillStyle = colors.text;
+            ctx.font = '11px "Noto Sans SC", sans-serif';
+            ctx.textAlign = 'right';
+            ctx.fillText(stockNames[i], pad.l - 8, pad.t + (i + 0.5) * cellH + 4);
+
+            for (let k = 0; k < nf; k++) {
+                const v = loadings[i][k];
+                const norm = v / maxAbs; // -1 to 1
+                let r, g, b;
+                if (norm > 0) { r = 255; g = Math.round(82 + (1 - norm) * 173); b = Math.round(82 + (1 - norm) * 173); }
+                else { r = Math.round(79 + (1 + norm) * 176); g = Math.round(195 + (1 + norm) * 60); b = 247; }
+                ctx.fillStyle = `rgba(${r},${g},${b},${0.3 + Math.abs(norm) * 0.7})`;
+                roundRect(ctx, pad.l + k * cellW + 1, pad.t + i * cellH + 1, cellW - 2, cellH - 2, 3);
+                ctx.fill();
+
+                ctx.fillStyle = Math.abs(norm) > 0.3 ? colors.text : colors.muted;
+                ctx.font = '10px "JetBrains Mono", monospace';
+                ctx.textAlign = 'center';
+                ctx.fillText(v.toFixed(2), pad.l + (k + 0.5) * cellW, pad.t + (i + 0.5) * cellH + 4);
+            }
+        }
+    }
+
+    function drawResidual() {
+        const { ctx, w, h } = setupCanvas('cvResidual');
+        const K = parseInt(document.getElementById('sliderK').value);
+        const thresh = parseFloat(document.getElementById('sliderThresh').value);
+        const { returns, loadings, factors, t } = pcaData;
+
+        // Compute residual for first stock
+        const residual = [];
+        for (let ti = 0; ti < t; ti++) {
+            let predicted = 0;
+            for (let k = 0; k < K; k++) predicted += loadings[0][k] * factors[k][ti];
+            residual.push(returns[0][ti] - predicted);
+        }
+
+        const mean = residual.reduce((s, v) => s + v, 0) / t;
+        const std = Math.sqrt(residual.reduce((s, v) => s + (v - mean) ** 2, 0) / t);
+
+        const pad = { l: 55, r: 20, t: 20, b: 35 };
+        const plotW = w - pad.l - pad.r, plotH = h - pad.t - pad.b;
+
+        drawAxes(ctx, pad.l, pad.t, pad.l + plotW, pad.t + plotH, '时间 (天)', '残差');
+
+        const maxAbs = Math.max(Math.abs(Math.min(...residual)), Math.abs(Math.max(...residual)), thresh * std) * 1.2;
+        const yMid = pad.t + plotH / 2;
+        const yScale = plotH / 2 / maxAbs;
+
+        // Threshold bands
+        ctx.fillStyle = 'rgba(255,82,82,0.05)';
+        const thUpper = yMid - thresh * std * yScale;
+        const thLower = yMid + thresh * std * yScale;
+        ctx.fillRect(pad.l, pad.t, plotW, thUpper - pad.t);
+        ctx.fillRect(pad.l, thLower, plotW, pad.t + plotH - thLower);
+
+        // Threshold lines
+        ctx.strokeStyle = colors.orange;
+        ctx.lineWidth = 1;
+        ctx.setLineDash([5, 3]);
+        ctx.beginPath();
+        ctx.moveTo(pad.l, thUpper); ctx.lineTo(pad.l + plotW, thUpper);
+        ctx.moveTo(pad.l, thLower); ctx.lineTo(pad.l + plotW, thLower);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Zero line
+        ctx.strokeStyle = colors.muted;
+        ctx.lineWidth = 0.5;
+        ctx.beginPath(); ctx.moveTo(pad.l, yMid); ctx.lineTo(pad.l + plotW, yMid); ctx.stroke();
+
+        // Residual line
+        ctx.strokeStyle = colors.blue;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        residual.forEach((v, i) => {
+            const x = pad.l + (i / (t - 1)) * plotW;
+            const y = yMid - v * yScale;
+            if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+
+        // Signals
+        residual.forEach((v, i) => {
+            const x = pad.l + (i / (t - 1)) * plotW;
+            const y = yMid - v * yScale;
+            const zScore = (v - mean) / std;
+            if (zScore < -thresh) {
+                ctx.fillStyle = colors.green;
+                ctx.beginPath();
+                ctx.moveTo(x, y + 12); ctx.lineTo(x - 5, y + 20); ctx.lineTo(x + 5, y + 20);
+                ctx.closePath(); ctx.fill();
+            } else if (zScore > thresh) {
+                ctx.fillStyle = colors.red;
+                ctx.beginPath();
+                ctx.moveTo(x, y - 12); ctx.lineTo(x - 5, y - 20); ctx.lineTo(x + 5, y - 20);
+                ctx.closePath(); ctx.fill();
+            }
+        });
+
+        // Labels
+        ctx.fillStyle = colors.orange;
+        ctx.font = '10px "JetBrains Mono", monospace';
+        ctx.textAlign = 'left';
+        ctx.fillText('+' + thresh.toFixed(1) + 'σ', pad.l + plotW + 3, thUpper + 4);
+        ctx.fillText('-' + thresh.toFixed(1) + 'σ', pad.l + plotW + 3, thLower + 4);
+
+        ctx.fillStyle = colors.text;
+        ctx.font = '11px "Noto Sans SC", sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText(stockNames[0] + ' 残差序列', pad.l + 5, pad.t + 14);
+    }
+
+    /* ===== Section 3: Basket Mean Reversion ===== */
+    let basketData = {};
+
+    function generateBasketData() {
+        const T = 252;
+        function simPairEquity(T) {
+            const equity = [1];
+            const hl = 10 + Math.random() * 20; // half-life
+            let spread = 0;
+            const kappa = Math.log(2) / hl;
+            for (let t = 1; t < T; t++) {
+                spread = spread * (1 - kappa) + randn() * 0.02;
+                const signal = -spread;
+                const pnl = signal * (randn() * 0.01 + 0.0003);
+                equity.push(equity[t - 1] * (1 + pnl));
+            }
+            return equity;
+        }
+
+        function simBasket(nPairs, T) {
+            const pairs = [];
+            for (let i = 0; i < nPairs; i++) pairs.push(simPairEquity(T));
+            const combined = [1];
+            for (let t = 1; t < T; t++) {
+                let avgRet = 0;
+                for (let i = 0; i < nPairs; i++) avgRet += (pairs[i][t] / pairs[i][t - 1] - 1);
+                avgRet /= nPairs;
+                combined.push(combined[t - 1] * (1 + avgRet));
+            }
+            return combined;
+        }
+
+        basketData = {
+            e1: simBasket(1, T),
+            e5: simBasket(5, T),
+            e20: simBasket(20, T),
+            T
+        };
+    }
+
+    function calcSharpe(equity) {
+        const rets = [];
+        for (let i = 1; i < equity.length; i++) rets.push(equity[i] / equity[i - 1] - 1);
+        const mean = rets.reduce((s, v) => s + v, 0) / rets.length;
+        const std = Math.sqrt(rets.reduce((s, v) => s + (v - mean) ** 2, 0) / rets.length);
+        return std > 0 ? (mean / std) * Math.sqrt(252) : 0;
+    }
+
+    function calcMaxDD(equity) {
+        let peak = equity[0], maxDD = 0;
+        for (const v of equity) {
+            if (v > peak) peak = v;
+            const dd = (peak - v) / peak;
+            if (dd > maxDD) maxDD = dd;
+        }
+        return maxDD;
+    }
+
+    let activeBasketView = 20;
+
+    function drawBasket() {
+        const { ctx, w, h } = setupCanvas('cvBasket');
+        const { e1, e5, e20, T } = basketData;
+
+        const pad = { l: 55, r: 20, t: 20, b: 35 };
+        const plotW = w - pad.l - pad.r, plotH = h - pad.t - pad.b;
+
+        drawAxes(ctx, pad.l, pad.t, pad.l + plotW, pad.t + plotH, '交易日', '累计净值');
+
+        const allVals = [...e1, ...e5, ...e20];
+        const yMin = Math.min(...allVals) * 0.98;
+        const yMax = Math.max(...allVals) * 1.02;
+
+        function toX(i) { return pad.l + (i / (T - 1)) * plotW; }
+        function toY(v) { return pad.t + plotH - ((v - yMin) / (yMax - yMin)) * plotH; }
+
+        // Y axis labels
+        const yTicks = 5;
+        for (let i = 0; i <= yTicks; i++) {
+            const v = yMin + (yMax - yMin) * (i / yTicks);
+            const y = toY(v);
+            ctx.fillStyle = colors.muted;
+            ctx.font = '10px "JetBrains Mono", monospace';
+            ctx.textAlign = 'right';
+            ctx.fillText(v.toFixed(2), pad.l - 5, y + 3);
+            ctx.strokeStyle = 'rgba(42,42,74,0.5)';
+            ctx.lineWidth = 0.5;
+            ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(pad.l + plotW, y); ctx.stroke();
+        }
+
+        function drawLine(data, color, lw) {
+            ctx.strokeStyle = color;
+            ctx.lineWidth = lw;
+            ctx.beginPath();
+            data.forEach((v, i) => {
+                const x = toX(i), y = toY(v);
+                if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+            });
+            ctx.stroke();
+        }
+
+        // Draw all three with varying opacity
+        drawLine(e1, 'rgba(255,82,82,0.6)', 1.5);
+        drawLine(e5, colors.orange, 1.5);
+        drawLine(e20, colors.green, 2.5);
+
+        // Highlight active
+        if (activeBasketView === 1) drawLine(e1, colors.red, 3);
+        else if (activeBasketView === 5) drawLine(e5, colors.orange, 3);
+        else drawLine(e20, colors.green, 3);
+
+        // Update metrics
+        document.getElementById('metSharpe1').textContent = calcSharpe(e1).toFixed(2);
+        document.getElementById('metSharpe5').textContent = calcSharpe(e5).toFixed(2);
+        document.getElementById('metSharpe20').textContent = calcSharpe(e20).toFixed(2);
+        document.getElementById('metMaxDD').textContent = (calcMaxDD(e1) * 100).toFixed(1) + '%';
+        document.getElementById('metMaxDD20').textContent = (calcMaxDD(e20) * 100).toFixed(1) + '%';
+    }
+
+    /* ===== Section 4: Market Neutral ===== */
+    const stocks = [
+        { name: '贵州茅台', beta: 0.85, weight: 20 },
+        { name: '宁德时代', beta: 1.35, weight: 15 },
+        { name: '招商银行', beta: 1.10, weight: 10 },
+        { name: '比亚迪', beta: 1.25, weight: 12 },
+        { name: '中国平安', beta: 1.05, weight: 8 },
+    ];
+    let hedgeWeight = 0;
+    const hedgeBeta = 1.0; // ETF beta
+
+    function buildPositionUI() {
+        const container = document.getElementById('stockPositions');
+        container.innerHTML = '';
+        stocks.forEach((s, i) => {
+            const row = document.createElement('div');
+            row.className = 'stock-row';
+            row.innerHTML = `
+                <span class="name">${s.name}</span>
+                <span class="beta-val">β=${s.beta.toFixed(2)}</span>
+                <label style="font-size:0.8rem;color:var(--text-muted)">权重(万):</label>
+                <input type="number" class="stock-weight" data-idx="${i}" value="${s.weight}" step="1">
+            `;
+            container.appendChild(row);
+        });
+        // Hedge row
+        const hrow = document.createElement('div');
+        hrow.className = 'stock-row';
+        hrow.style.borderTop = '1px solid var(--border-color)';
+        hrow.style.paddingTop = '0.5rem';
+        hrow.style.marginTop = '0.5rem';
+        hrow.innerHTML = `
+            <span class="name" style="color:var(--accent-orange)">ETF对冲</span>
+            <span class="beta-val">β=${hedgeBeta.toFixed(2)}</span>
+            <label style="font-size:0.8rem;color:var(--text-muted)">权重(万):</label>
+            <input type="number" id="hedgeInput" value="${hedgeWeight}" step="1">
+        `;
+        container.appendChild(hrow);
+
+        // Event listeners
+        container.querySelectorAll('.stock-weight').forEach(inp => {
+            inp.addEventListener('input', () => {
+                stocks[parseInt(inp.dataset.idx)].weight = parseFloat(inp.value) || 0;
+                updateNeutral();
+            });
+        });
+        document.getElementById('hedgeInput').addEventListener('input', (e) => {
+            hedgeWeight = parseFloat(e.target.value) || 0;
+            updateNeutral();
+        });
+    }
+
+    function updateNeutral() {
+        const longBetaSum = stocks.reduce((s, st) => s + st.weight * st.beta, 0);
+        const totalLongWeight = stocks.reduce((s, st) => s + Math.abs(st.weight), 0);
+        const netBetaExposure = longBetaSum + hedgeWeight * hedgeBeta;
+        const totalWeight = totalLongWeight + Math.abs(hedgeWeight);
+        const portBeta = totalWeight > 0 ? netBetaExposure / totalWeight : 0;
+        const netExp = totalWeight > 0 ? (stocks.reduce((s, st) => s + st.weight, 0) + hedgeWeight) / totalWeight : 0;
+        const grossExp = totalWeight;
+
+        document.getElementById('metPortBeta').textContent = portBeta.toFixed(3);
+        document.getElementById('metPortBeta').style.color = Math.abs(portBeta) < 0.05 ? colors.green : colors.red;
+        document.getElementById('metHedgeAmt').textContent = hedgeWeight.toFixed(0) + '万';
+        document.getElementById('metGrossExp').textContent = grossExp.toFixed(0) + '万';
+        document.getElementById('metNetExp').textContent = (netExp * 100).toFixed(1) + '%';
+
+        drawScatter(portBeta, longBetaSum / totalLongWeight);
+    }
+
+    function drawScatter(hedgedBeta, unhedgedBeta) {
+        const { ctx, w, h } = setupCanvas('cvScatter');
+        const pad = { l: 60, r: 30, t: 30, b: 45 };
+        const plotW = w - pad.l - pad.r, plotH = h - pad.t - pad.b;
+
+        drawAxes(ctx, pad.l, pad.t, pad.l + plotW, pad.t + plotH, '市场收益 (%)', '组合收益 (%)');
+
+        const nPts = 60;
+        const mktReturns = [];
+        for (let i = 0; i < nPts; i++) mktReturns.push(randn() * 2);
+
+        const range = 5;
+        function toX(v) { return pad.l + ((v + range) / (2 * range)) * plotW; }
+        function toY(v) { return pad.t + plotH - ((v + range) / (2 * range)) * plotH; }
+
+        // Grid
+        for (let v = -4; v <= 4; v += 2) {
+            ctx.strokeStyle = 'rgba(42,42,74,0.4)';
+            ctx.lineWidth = 0.5;
+            ctx.beginPath(); ctx.moveTo(toX(v), pad.t); ctx.lineTo(toX(v), pad.t + plotH); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(pad.l, toY(v)); ctx.lineTo(pad.l + plotW, toY(v)); ctx.stroke();
+            ctx.fillStyle = colors.muted;
+            ctx.font = '9px "JetBrains Mono", monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText(v.toString(), toX(v), pad.t + plotH + 14);
+            ctx.textAlign = 'right';
+            ctx.fillText(v.toString(), pad.l - 5, toY(v) + 3);
+        }
+
+        // Zero lines
+        ctx.strokeStyle = 'rgba(42,42,74,0.8)';
+        ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(toX(0), pad.t); ctx.lineTo(toX(0), pad.t + plotH); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(pad.l, toY(0)); ctx.lineTo(pad.l + plotW, toY(0)); ctx.stroke();
+
+        // Unhedged points
+        const alphaUnhedged = 0.5;
+        mktReturns.forEach(mr => {
+            const pr = unhedgedBeta * mr + alphaUnhedged + randn() * 0.8;
+            ctx.fillStyle = 'rgba(255,82,82,0.5)';
+            ctx.beginPath(); ctx.arc(toX(mr), toY(pr), 4, 0, Math.PI * 2); ctx.fill();
+        });
+
+        // Unhedged regression line
+        ctx.strokeStyle = 'rgba(255,82,82,0.4)';
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([5, 3]);
+        ctx.beginPath();
+        ctx.moveTo(toX(-range), toY(-range * unhedgedBeta + alphaUnhedged));
+        ctx.lineTo(toX(range), toY(range * unhedgedBeta + alphaUnhedged));
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Hedged points
+        const alphaHedged = 0.3;
+        mktReturns.forEach(mr => {
+            const pr = hedgedBeta * mr + alphaHedged + randn() * 0.6;
+            ctx.fillStyle = 'rgba(22,199,154,0.6)';
+            ctx.beginPath(); ctx.arc(toX(mr), toY(pr), 4, 0, Math.PI * 2); ctx.fill();
+        });
+
+        // Hedged regression line
+        ctx.strokeStyle = 'rgba(79,195,247,0.5)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(toX(-range), toY(-range * hedgedBeta + alphaHedged));
+        ctx.lineTo(toX(range), toY(range * hedgedBeta + alphaHedged));
+        ctx.stroke();
+
+        // Labels
+        ctx.fillStyle = colors.red;
+        ctx.font = '11px "Noto Sans SC", sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText('对冲前 β=' + unhedgedBeta.toFixed(2), pad.l + 10, pad.t + 18);
+        ctx.fillStyle = colors.green;
+        ctx.fillText('对冲后 β=' + hedgedBeta.toFixed(3), pad.l + 10, pad.t + 34);
+    }
+
+    /* ===== Section 5: Capacity & Decay ===== */
+    function drawCapacity() {
+        const { ctx, w, h } = setupCanvas('cvCapacity');
+        const aum = parseInt(document.getElementById('sliderAUM').value);
+
+        const pad = { l: 55, r: 30, t: 20, b: 40 };
+        const plotW = w - pad.l - pad.r, plotH = h - pad.t - pad.b;
+
+        drawAxes(ctx, pad.l, pad.t, pad.l + plotW, pad.t + plotH, 'AUM（亿元）', 'Sharpe 比率');
+
+        // Model: Sharpe = S0 / (1 + alpha * AUM^1.5), Impact cost = gamma * AUM^1.2
+        const S0 = 2.8, alpha = 0.008, gamma = 0.0015;
+        const maxAUM = 100;
+
+        function sharpeAt(a) { return S0 / (1 + alpha * Math.pow(a, 1.5)); }
+        function costAt(a) { return gamma * Math.pow(a, 1.2); }
+        function returnAt(a) { return (sharpeAt(a) * 0.15 - costAt(a)) * 100; } // annualized %
+
+        // Find optimal AUM (max net return)
+        let bestAUM = 1, bestRet = -Infinity;
+        for (let a = 1; a <= maxAUM; a++) {
+            const r = returnAt(a);
+            if (r > bestRet) { bestRet = r; bestAUM = a; }
+        }
+
+        const maxSharpe = S0 * 1.05;
+        function toX(a) { return pad.l + (a / maxAUM) * plotW; }
+        function toYS(s) { return pad.t + plotH - (s / maxSharpe) * plotH; }
+
+        // Y axis labels
+        for (let s = 0; s <= 3; s += 0.5) {
+            const y = toYS(s);
+            ctx.fillStyle = colors.muted;
+            ctx.font = '10px "JetBrains Mono", monospace';
+            ctx.textAlign = 'right';
+            ctx.fillText(s.toFixed(1), pad.l - 5, y + 3);
+            ctx.strokeStyle = 'rgba(42,42,74,0.4)';
+            ctx.lineWidth = 0.5;
+            ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(pad.l + plotW, y); ctx.stroke();
+        }
+
+        // X axis labels
+        for (let a = 0; a <= maxAUM; a += 20) {
+            ctx.fillStyle = colors.muted;
+            ctx.font = '10px "JetBrains Mono", monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText(a.toString(), toX(a), pad.t + plotH + 16);
+        }
+
+        // Sharpe curve
+        ctx.strokeStyle = colors.green;
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        for (let a = 1; a <= maxAUM; a++) {
+            const x = toX(a), y = toYS(sharpeAt(a));
+            if (a === 1) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+
+        // Fill area below curve
+        ctx.lineTo(toX(maxAUM), pad.t + plotH);
+        ctx.lineTo(toX(1), pad.t + plotH);
+        ctx.closePath();
+        ctx.fillStyle = 'rgba(22,199,154,0.08)';
+        ctx.fill();
+
+        // Current AUM marker
+        const curS = sharpeAt(aum);
+        const cx = toX(aum), cy = toYS(curS);
+        ctx.fillStyle = colors.green;
+        ctx.beginPath(); ctx.arc(cx, cy, 7, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#1a1a2e';
+        ctx.font = 'bold 8px "JetBrains Mono", monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText('●', cx, cy + 3);
+
+        // Vertical line
+        ctx.strokeStyle = colors.green;
+        ctx.lineWidth = 1;
+        ctx.setLineDash([3, 3]);
+        ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx, pad.t + plotH); ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Optimal marker
+        ctx.strokeStyle = colors.orange;
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath(); ctx.moveTo(toX(bestAUM), pad.t); ctx.lineTo(toX(bestAUM), pad.t + plotH); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = colors.orange;
+        ctx.font = '10px "Noto Sans SC", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('最优 ' + bestAUM + '亿', toX(bestAUM), pad.t + 14);
+
+        // Info label
+        ctx.fillStyle = colors.text;
+        ctx.font = '12px "Noto Sans SC", sans-serif';
+        ctx.textAlign = 'right';
+        ctx.fillText('AUM=' + aum + '亿  Sharpe=' + curS.toFixed(2), pad.l + plotW, pad.t + 14);
+
+        // Update metrics
+        document.getElementById('metCapSharpe').textContent = curS.toFixed(2);
+        document.getElementById('metCapSharpe').style.color = curS > 1.5 ? colors.green : (curS > 1.0 ? colors.orange : colors.red);
+        document.getElementById('metCapReturn').textContent = returnAt(aum).toFixed(1) + '%';
+        document.getElementById('metCapCost').textContent = (costAt(aum) * 100).toFixed(2) + '%';
+        document.getElementById('metCapOptimal').textContent = bestAUM + '亿';
+    }
+
+    function drawDecay() {
+        const { ctx, w, h } = setupCanvas('cvDecay');
+        const ic0 = parseFloat(document.getElementById('sliderIC').value);
+        const halfLife = parseInt(document.getElementById('sliderHL').value);
+        const icMin = 0.02;
+
+        const pad = { l: 55, r: 30, t: 20, b: 40 };
+        const plotW = w - pad.l - pad.r, plotH = h - pad.t - pad.b;
+        const maxMonths = 48;
+
+        drawAxes(ctx, pad.l, pad.t, pad.l + plotW, pad.t + plotH, '月份', '信息系数 (IC)');
+
+        function icAt(t) { return ic0 * Math.pow(2, -t / halfLife); }
+        const effectiveLife = halfLife * Math.log2(ic0 / icMin);
+
+        function toX(t) { return pad.l + (t / maxMonths) * plotW; }
+        function toY(v) { return pad.t + plotH - (v / (ic0 * 1.2)) * plotH; }
+
+        // Y axis
+        for (let v = 0; v <= ic0 * 1.2; v += 0.01) {
+            const y = toY(v);
+            ctx.fillStyle = colors.muted;
+            ctx.font = '10px "JetBrains Mono", monospace';
+            ctx.textAlign = 'right';
+            ctx.fillText(v.toFixed(2), pad.l - 5, y + 3);
+            ctx.strokeStyle = 'rgba(42,42,74,0.3)';
+            ctx.lineWidth = 0.5;
+            ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(pad.l + plotW, y); ctx.stroke();
+        }
+
+        // X axis labels
+        for (let t = 0; t <= maxMonths; t += 6) {
+            ctx.fillStyle = colors.muted;
+            ctx.font = '10px "JetBrains Mono", monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText(t.toString(), toX(t), pad.t + plotH + 16);
+        }
+
+        // Invalid zone (IC < icMin)
+        const yThresh = toY(icMin);
+        ctx.fillStyle = 'rgba(255,82,82,0.06)';
+        ctx.fillRect(pad.l, yThresh, plotW, pad.t + plotH - yThresh);
+
+        // Threshold line
+        ctx.strokeStyle = colors.red;
+        ctx.lineWidth = 1;
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath(); ctx.moveTo(pad.l, yThresh); ctx.lineTo(pad.l + plotW, yThresh); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = colors.red;
+        ctx.font = '10px "Noto Sans SC", sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText('IC最低阈值 = ' + icMin.toFixed(2), pad.l + 5, yThresh + 14);
+
+        // Effective life marker
+        if (effectiveLife > 0 && effectiveLife < maxMonths) {
+            ctx.fillStyle = 'rgba(255,171,64,0.1)';
+            ctx.fillRect(pad.l, pad.t, toX(effectiveLife) - pad.l, plotH);
+
+            ctx.strokeStyle = colors.orange;
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([4, 4]);
+            ctx.beginPath(); ctx.moveTo(toX(effectiveLife), pad.t); ctx.lineTo(toX(effectiveLife), pad.t + plotH); ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.fillStyle = colors.orange;
+            ctx.font = '11px "Noto Sans SC", sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('有效期 ' + effectiveLife.toFixed(0) + ' 月', toX(effectiveLife), pad.t + 14);
+        }
+
+        // IC decay curve
+        ctx.strokeStyle = colors.green;
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        for (let t = 0; t <= maxMonths; t += 0.5) {
+            const x = toX(t), y = toY(icAt(t));
+            if (t === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+
+        // Half-life marker
+        const hlY = toY(ic0 / 2);
+        ctx.fillStyle = colors.blue;
+        ctx.beginPath(); ctx.arc(toX(halfLife), hlY, 5, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = colors.blue;
+        ctx.font = '10px "Noto Sans SC", sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText('半衰期 t=' + halfLife + '月', toX(halfLife) + 8, hlY + 4);
+
+        // Info
+        ctx.fillStyle = colors.text;
+        ctx.font = '12px "Noto Sans SC", sans-serif';
+        ctx.textAlign = 'right';
+        ctx.fillText('IC₀=' + ic0.toFixed(3) + '  半衰期=' + halfLife + '月  有效期≈' + Math.max(0, effectiveLife).toFixed(0) + '月', pad.l + plotW, pad.t + 14);
+    }
+
+    /* ===== Initialize ===== */
+    generatePCAData();
+    generateBasketData();
+
+    drawOverview();
+    drawEigenChart();
+    drawHeatmap();
+    drawResidual();
+    drawBasket();
+    buildPositionUI();
+    updateNeutral();
+    drawCapacity();
+    drawDecay();
+
+    /* ===== Event Listeners ===== */
+    document.getElementById('sliderK').addEventListener('input', e => {
+        document.getElementById('valK').textContent = e.target.value;
+        drawEigenChart();
+        drawHeatmap();
+        drawResidual();
+    });
+
+    document.getElementById('sliderThresh').addEventListener('input', e => {
+        document.getElementById('valThresh').textContent = parseFloat(e.target.value).toFixed(1);
+        drawResidual();
+    });
+
+    document.getElementById('btnRegenPCA').addEventListener('click', () => {
+        generatePCAData();
+        drawEigenChart();
+        drawHeatmap();
+        drawResidual();
+    });
+
+    [1, 5, 20].forEach(n => {
+        document.getElementById('btnBasket' + n).addEventListener('click', (e) => {
+            document.querySelectorAll('#sec-basket .btn').forEach(b => b.classList.remove('active'));
+            e.target.classList.add('active');
+            activeBasketView = n;
+            drawBasket();
+        });
+    });
+
+    document.getElementById('btnRegenBasket').addEventListener('click', () => {
+        generateBasketData();
+        drawBasket();
+    });
+
+    document.getElementById('btnAutoHedge').addEventListener('click', () => {
+        const longBetaSum = stocks.reduce((s, st) => s + st.weight * st.beta, 0);
+        hedgeWeight = -longBetaSum / hedgeBeta;
+        document.getElementById('hedgeInput').value = hedgeWeight.toFixed(1);
+        updateNeutral();
+    });
+
+    document.getElementById('btnResetPositions').addEventListener('click', () => {
+        stocks[0].weight = 20; stocks[1].weight = 15; stocks[2].weight = 10;
+        stocks[3].weight = 12; stocks[4].weight = 8;
+        hedgeWeight = 0;
+        buildPositionUI();
+        updateNeutral();
+    });
+
+    document.getElementById('sliderAUM').addEventListener('input', e => {
+        document.getElementById('valAUM').textContent = e.target.value;
+        drawCapacity();
+    });
+
+    document.getElementById('sliderIC').addEventListener('input', e => {
+        document.getElementById('valIC').textContent = parseFloat(e.target.value).toFixed(3);
+        drawDecay();
+    });
+
+    document.getElementById('sliderHL').addEventListener('input', e => {
+        document.getElementById('valHL').textContent = e.target.value;
+        drawDecay();
+    });
+
+    /* ===== Resize handler ===== */
+    let resizeTimer;
+    window.addEventListener('resize', () => {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(() => {
+            drawOverview();
+            drawEigenChart();
+            drawHeatmap();
+            drawResidual();
+            drawBasket();
+            updateNeutral();
+            drawCapacity();
+            drawDecay();
+        }, 200);
+    });
+
+});
+</script>
+
+<!-- KaTeX auto-render -->
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    if (typeof renderMathInElement === 'function') {
+        renderMathInElement(document.body, {
+            delimiters: [
+                { left: '$$', right: '$$', display: true },
+                { left: '$', right: '$', display: false }
+            ]
+        });
+    } else {
+        const check = setInterval(() => {
+            if (typeof renderMathInElement === 'function') {
+                clearInterval(check);
+                renderMathInElement(document.body, {
+                    delimiters: [
+                        { left: '$$', right: '$$', display: true },
+                        { left: '$', right: '$', display: false }
+                    ]
+                });
+            }
+        }, 100);
+        setTimeout(() => clearInterval(check), 5000);
+    }
+});
+</script>
+
+</body>
+</html>

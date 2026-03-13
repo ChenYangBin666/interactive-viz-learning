@@ -1,0 +1,1249 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AutoML 流水线 — AI 量化</title>
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+    <script defer src="../shared/scripts/nav.js"></script>
+    <script defer src="../shared/scripts/aiquant-utils.js"></script>
+    <style>
+        .module-intro { margin-bottom: 2rem; }
+        .module-intro h1 span { color: var(--accent-green); }
+        .controls-row {
+            display: flex; flex-wrap: wrap; align-items: center;
+            gap: 0.75rem; margin-bottom: 1rem;
+        }
+        .toggle-btn {
+            padding: 0.35rem 0.8rem; border-radius: var(--radius-sm);
+            border: 1px solid var(--border-color); background: var(--bg-secondary);
+            color: var(--text-secondary); font-size: 0.8rem; cursor: pointer;
+            transition: all 0.2s; font-family: inherit;
+        }
+        .toggle-btn.active {
+            border-color: var(--accent-green); color: var(--accent-green);
+            background: rgba(22,199,154,0.15);
+        }
+        .toggle-btn:hover { border-color: var(--accent-green); }
+        canvas { display: block; border-radius: var(--radius-sm); }
+        .canvas-wrap {
+            background: var(--bg-secondary); border: 1px solid var(--border-color);
+            border-radius: var(--radius-md); padding: 1rem; position: relative;
+        }
+        .canvas-wrap canvas { width: 100%; }
+        .stat-grid {
+            display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+            gap: 0.5rem; margin-top: 0.75rem;
+        }
+        .stat-item {
+            background: var(--bg-card); border-radius: var(--radius-sm);
+            padding: 0.5rem 0.75rem; text-align: center;
+        }
+        .stat-item .label { font-size: 0.72rem; color: var(--text-muted); }
+        .stat-item .value {
+            font-family: var(--font-mono); font-size: 0.9rem;
+            color: var(--accent-green); font-weight: 600;
+        }
+        .detail-panel {
+            background: var(--bg-card); border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm); padding: 1rem; margin-top: 0.75rem;
+            min-height: 80px; font-size: 0.85rem;
+        }
+        .detail-panel h4 { color: var(--accent-green); margin-bottom: 0.5rem; }
+        .detail-panel p { font-size: 0.83rem; margin-bottom: 0.4rem; }
+        .method-tag {
+            display: inline-block; padding: 0.2rem 0.5rem; border-radius: 4px;
+            font-size: 0.75rem; margin: 0.15rem; cursor: pointer;
+            border: 1px solid var(--border-color); transition: all 0.2s;
+        }
+        .method-tag.active { border-color: var(--accent-blue); color: var(--accent-blue); background: rgba(79,195,247,0.12); }
+        .method-tag:hover { border-color: var(--accent-green); }
+        .compare-table {
+            width: 100%; border-collapse: collapse; font-size: 0.8rem; margin-top: 0.5rem;
+        }
+        .compare-table th, .compare-table td {
+            padding: 0.4rem 0.6rem; border: 1px solid var(--border-color); text-align: center;
+        }
+        .compare-table th { background: var(--bg-card); color: var(--accent-green); }
+        .compare-table td { color: var(--text-secondary); }
+    </style>
+</head>
+<body>
+<div class="page-container">
+    <!-- Intro -->
+    <div class="module-intro">
+        <h1><span>07</span> AutoML 流水线</h1>
+        <p>端到端自动化机器学习流水线：从数据摄取、特征选择、超参数优化到模型部署与监控，实现量化策略的全自动迭代。</p>
+    </div>
+
+    <!-- Section 1: End-to-End Pipeline -->
+    <div class="section">
+        <div class="section-title"><div class="icon">🔗</div><h2>端到端流水线</h2></div>
+        <p>完整的 AutoML 流水线涵盖七个阶段，数据在各阶段间自动流转。点击任一阶段查看详情。</p>
+        <div class="canvas-wrap">
+            <canvas id="cvPipeline" width="1200" height="360"></canvas>
+        </div>
+        <div class="detail-panel" id="pipelineDetail">
+            <h4>点击上方流水线阶段查看详情</h4>
+            <p>每个阶段均可自动化执行，减少人工干预，提升策略迭代速度。</p>
+        </div>
+    </div>
+
+    <!-- Section 2: Feature Selection -->
+    <div class="section">
+        <div class="section-title"><div class="icon">🎯</div><h2>自动特征选择</h2></div>
+        <p>从 120+ 候选特征中自动筛选最优子集。选择方法对比：</p>
+        <div class="controls-row">
+            <button class="toggle-btn active" onclick="setFeatureMethod('mutual')">互信息</button>
+            <button class="toggle-btn" onclick="setFeatureMethod('forward')">前向选择</button>
+            <button class="toggle-btn" onclick="setFeatureMethod('lasso')">LASSO</button>
+            <button class="btn btn-primary btn-sm" onclick="runFeatureSelection()">运行筛选</button>
+            <button class="btn btn-sm" onclick="resetFeatureSelection()">重置</button>
+        </div>
+        <div class="split-layout">
+            <div class="text-panel">
+                <div class="info-box">
+                    <p><strong>互信息 (Mutual Information)</strong>：衡量特征与目标之间的非线性依赖关系。</p>
+                    <p>$$I(X;Y) = \sum_{x,y} p(x,y) \log \frac{p(x,y)}{p(x)p(y)}$$</p>
+                </div>
+                <div class="info-box">
+                    <p><strong>前向选择 (Forward Selection)</strong>：逐步添加最能提升模型性能的特征。</p>
+                    <p>$$S_{k+1} = S_k \cup \{\arg\max_{f \notin S_k} \text{Score}(S_k \cup \{f\})\}$$</p>
+                </div>
+                <div class="info-box">
+                    <p><strong>LASSO 正则化</strong>：通过 L1 惩罚自动将不重要的特征系数压缩为零。</p>
+                    <p>$$\min_\beta \|y - X\beta\|_2^2 + \lambda \|\beta\|_1$$</p>
+                </div>
+                <div id="featureStats" class="stat-grid"></div>
+            </div>
+            <div class="viz-panel">
+                <div class="canvas-wrap">
+                    <canvas id="cvFeature" width="700" height="480"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Section 3: Hyperparameter Optimization -->
+    <div class="section">
+        <div class="section-title"><div class="icon">🔍</div><h2>超参数优化</h2></div>
+        <p>对比网格搜索、随机搜索与贝叶斯优化在超参数空间中的搜索效率。</p>
+        <div class="controls-row">
+            <button class="toggle-btn active" onclick="setHPOMethod('grid')">网格搜索</button>
+            <button class="toggle-btn" onclick="setHPOMethod('random')">随机搜索</button>
+            <button class="toggle-btn" onclick="setHPOMethod('bayesian')">贝叶斯优化</button>
+            <button class="btn btn-primary btn-sm" onclick="runHPO()">开始搜索</button>
+            <button class="btn btn-sm" onclick="resetHPO()">重置</button>
+        </div>
+        <div class="split-layout">
+            <div class="text-panel">
+                <div class="info-box">
+                    <p><strong>贝叶斯优化</strong>使用高斯过程建模目标函数，通过采集函数决定下一个采样点：</p>
+                    <p>$$\alpha(\mathbf{x}) = \mu(\mathbf{x}) + \kappa \cdot \sigma(\mathbf{x})$$</p>
+                    <p>其中 \(\mu\) 为预测均值，\(\sigma\) 为预测不确定性，\(\kappa\) 控制探索与利用的平衡。</p>
+                </div>
+                <div id="hpoStats" class="stat-grid"></div>
+                <table class="compare-table" id="hpoCompare">
+                    <thead><tr><th>方法</th><th>已评估</th><th>最佳得分</th><th>效率</th></tr></thead>
+                    <tbody>
+                        <tr><td>网格搜索</td><td id="gridEval">0</td><td id="gridBest">-</td><td id="gridEff">-</td></tr>
+                        <tr><td>随机搜索</td><td id="randEval">0</td><td id="randBest">-</td><td id="randEff">-</td></tr>
+                        <tr><td>贝叶斯优化</td><td id="bayesEval">0</td><td id="bayesBest">-</td><td id="bayesEff">-</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="viz-panel">
+                <div class="canvas-wrap">
+                    <canvas id="cvHPO" width="700" height="500"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Section 4: Model Monitoring & Drift -->
+    <div class="section">
+        <div class="section-title"><div class="icon">📉</div><h2>模型监控与漂移</h2></div>
+        <p>实时监控模型预测质量，检测概念漂移并触发告警。</p>
+        <div class="controls-row">
+            <button class="btn btn-primary btn-sm" onclick="startMonitor()">启动监控</button>
+            <button class="btn btn-sm" style="border-color:var(--accent-orange);color:var(--accent-orange)" onclick="injectDrift()">注入漂移</button>
+            <button class="btn btn-sm" onclick="resetMonitor()">重置</button>
+            <span class="badge badge-green" id="monitorStatus">正常</span>
+        </div>
+        <div class="canvas-wrap">
+            <canvas id="cvMonitor" width="1200" height="400"></canvas>
+        </div>
+        <div class="stat-grid" id="monitorStats">
+            <div class="stat-item"><div class="label">当前准确率</div><div class="value" id="curAccuracy">--</div></div>
+            <div class="stat-item"><div class="label">基线准确率</div><div class="value" id="baseAccuracy">92.3%</div></div>
+            <div class="stat-item"><div class="label">PSI 指标</div><div class="value" id="psiValue">--</div></div>
+            <div class="stat-item"><div class="label">漂移状态</div><div class="value" id="driftState">未检测</div></div>
+            <div class="stat-item"><div class="label">告警次数</div><div class="value" id="alertCount">0</div></div>
+        </div>
+    </div>
+
+    <!-- Section 5: Platform Architecture -->
+    <div class="section">
+        <div class="section-title"><div class="icon">🏗</div><h2>平台架构</h2></div>
+        <p>四层平台架构：数据层、计算层、策略层、执行层。对比手动 vs 自动化的效率提升。</p>
+        <div class="controls-row">
+            <button class="toggle-btn active" onclick="setArchView('auto')">自动化模式</button>
+            <button class="toggle-btn" onclick="setArchView('manual')">手动模式</button>
+        </div>
+        <div class="canvas-wrap">
+            <canvas id="cvArch" width="1200" height="450"></canvas>
+        </div>
+        <div class="stat-grid" id="archStats">
+            <div class="stat-item"><div class="label">策略迭代周期</div><div class="value" id="iterTime">2 小时</div></div>
+            <div class="stat-item"><div class="label">特征筛选</div><div class="value" id="featTime">5 分钟</div></div>
+            <div class="stat-item"><div class="label">模型训练</div><div class="value" id="trainTime">15 分钟</div></div>
+            <div class="stat-item"><div class="label">回测验证</div><div class="value" id="btTime">10 分钟</div></div>
+            <div class="stat-item"><div class="label">效率提升</div><div class="value" id="speedup">12x</div></div>
+        </div>
+    </div>
+</div>
+
+<script>
+/* ============================================================
+   Section 1: End-to-End Pipeline
+   ============================================================ */
+const pipelineStages = [
+    { name: '数据摄取', icon: '📊', color: '#4fc3f7', desc: '从交易所、新闻源、另类数据等多个数据源自动拉取实时与历史数据，清洗并存入统一数据仓库。', detail: '支持增量更新、数据质量校验、缺失值处理。' },
+    { name: '特征仓库', icon: '🗄', color: '#b388ff', desc: '将原始数据转化为标准化特征，存入特征仓库，实现特征的版本管理与复用。', detail: '特征存储采用列式存储，支持时间序列切片查询。' },
+    { name: '特征选择', icon: '🎯', color: '#16c79a', desc: '自动评估特征重要性，筛选出对预测目标贡献最大的特征子集。', detail: '使用互信息、LASSO、前向选择等方法组合筛选。' },
+    { name: '模型训练', icon: '🧠', color: '#ffab40', desc: '在候选模型集上进行超参数搜索与交叉验证，选出最优模型。', detail: '支持 XGBoost、LightGBM、LSTM 等多种模型。' },
+    { name: '回测验证', icon: '📈', color: '#ff80ab', desc: '在历史数据上模拟交易，验证模型在不同市场环境下的表现。', detail: '滚动窗口回测，考虑交易成本、滑点等因素。' },
+    { name: '部署上线', icon: '🚀', color: '#ffd740', desc: '将通过验证的模型容器化部署，接入实盘交易系统。', detail: '蓝绿部署、灰度发布，支持快速回滚。' },
+    { name: '监控告警', icon: '🔔', color: '#ff5252', desc: '持续监控模型预测效果，检测数据漂移和概念漂移，触发重训。', detail: 'PSI、KS 检验等多维度监控指标。' }
+];
+
+let pipelineAnim = { active: -1, flowOffset: 0, particles: [] };
+
+function drawPipeline() {
+    const cv = document.getElementById('cvPipeline');
+    const ctx = cv.getContext('2d');
+    const W = cv.width, H = cv.height;
+    ctx.clearRect(0, 0, W, H);
+
+    const n = pipelineStages.length;
+    const boxW = 120, boxH = 70;
+    const gap = (W - n * boxW) / (n + 1);
+    const cy = H / 2;
+
+    // Flow offset animation
+    pipelineAnim.flowOffset = (pipelineAnim.flowOffset + 0.5) % 20;
+
+    // Draw connections
+    for (let i = 0; i < n - 1; i++) {
+        const x1 = gap + i * (boxW + gap) + boxW;
+        const x2 = gap + (i + 1) * (boxW + gap);
+        const midY = cy;
+
+        ctx.strokeStyle = 'rgba(22,199,154,0.3)';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([6, 4]);
+        ctx.lineDashOffset = -pipelineAnim.flowOffset;
+        ctx.beginPath();
+        ctx.moveTo(x1, midY);
+        ctx.lineTo(x2, midY);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Arrow
+        const ax = x2 - 6;
+        ctx.fillStyle = 'rgba(22,199,154,0.5)';
+        ctx.beginPath();
+        ctx.moveTo(ax, midY - 5);
+        ctx.lineTo(x2, midY);
+        ctx.lineTo(ax, midY + 5);
+        ctx.fill();
+    }
+
+    // Draw particles flowing
+    if (pipelineAnim.particles.length < 5) {
+        pipelineAnim.particles.push({ x: gap, progress: Math.random() });
+    }
+    pipelineAnim.particles.forEach(p => {
+        p.x += 1.5;
+        if (p.x > W - gap) p.x = gap;
+        ctx.fillStyle = 'rgba(22,199,154,0.6)';
+        ctx.beginPath();
+        ctx.arc(p.x, cy, 3, 0, Math.PI * 2);
+        ctx.fill();
+    });
+
+    // Draw boxes
+    for (let i = 0; i < n; i++) {
+        const s = pipelineStages[i];
+        const x = gap + i * (boxW + gap);
+        const y = cy - boxH / 2;
+        const isActive = pipelineAnim.active === i;
+
+        // Glow
+        if (isActive) {
+            ctx.shadowColor = s.color;
+            ctx.shadowBlur = 20;
+        }
+
+        // Box
+        ctx.fillStyle = isActive ? 'rgba(15,52,96,0.95)' : 'rgba(22,33,62,0.85)';
+        ctx.strokeStyle = isActive ? s.color : 'rgba(42,42,74,0.8)';
+        ctx.lineWidth = isActive ? 2 : 1;
+        roundRect(ctx, x, y, boxW, boxH, 8);
+        ctx.fill();
+        ctx.stroke();
+        ctx.shadowBlur = 0;
+
+        // Icon
+        ctx.font = '20px serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(s.icon, x + boxW / 2, y + 28);
+
+        // Label
+        ctx.font = '12px "Noto Sans SC", sans-serif';
+        ctx.fillStyle = isActive ? s.color : '#a8a8b8';
+        ctx.fillText(s.name, x + boxW / 2, y + 50);
+
+        // Stage number
+        ctx.font = '10px monospace';
+        ctx.fillStyle = '#6c6c7c';
+        ctx.fillText(`Stage ${i + 1}`, x + boxW / 2, y + 65);
+    }
+
+    // Feedback loop arrow (Monitor -> Data)
+    ctx.strokeStyle = 'rgba(255,82,82,0.3)';
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([4, 4]);
+    ctx.lineDashOffset = -pipelineAnim.flowOffset;
+    const lastX = gap + (n - 1) * (boxW + gap) + boxW / 2;
+    const firstX = gap + boxW / 2;
+    ctx.beginPath();
+    ctx.moveTo(lastX, cy + boxH / 2 + 5);
+    ctx.quadraticCurveTo(W / 2, H - 15, firstX, cy + boxH / 2 + 5);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Feedback label
+    ctx.font = '10px "Noto Sans SC", sans-serif';
+    ctx.fillStyle = 'rgba(255,82,82,0.6)';
+    ctx.fillText('漂移检测 → 自动重训', W / 2, H - 20);
+
+    requestAnimationFrame(drawPipeline);
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y);
+    ctx.arcTo(x + w, y, x + w, y + r, r);
+    ctx.lineTo(x + w, y + h - r);
+    ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
+    ctx.lineTo(x + r, y + h);
+    ctx.arcTo(x, y + h, x, y + h - r, r);
+    ctx.lineTo(x, y + r);
+    ctx.arcTo(x, y, x + r, y, r);
+    ctx.closePath();
+}
+
+// Click handler for pipeline stages
+document.getElementById('cvPipeline').addEventListener('click', function(e) {
+    const rect = this.getBoundingClientRect();
+    const scaleX = this.width / rect.width;
+    const mx = (e.clientX - rect.left) * scaleX;
+    const n = pipelineStages.length;
+    const boxW = 120, gap = (this.width - n * boxW) / (n + 1);
+
+    for (let i = 0; i < n; i++) {
+        const x = gap + i * (boxW + gap);
+        if (mx >= x && mx <= x + boxW) {
+            pipelineAnim.active = i;
+            const s = pipelineStages[i];
+            document.getElementById('pipelineDetail').innerHTML = `
+                <h4>${s.icon} ${s.name} (Stage ${i + 1})</h4>
+                <p>${s.desc}</p>
+                <p style="color:var(--text-muted)">${s.detail}</p>`;
+            return;
+        }
+    }
+});
+
+/* ============================================================
+   Section 2: Feature Selection
+   ============================================================ */
+const NUM_FEATURES = 120;
+let featureState = {
+    method: 'mutual',
+    features: [],
+    running: false,
+    step: 0,
+    selected: [],
+    eliminated: []
+};
+
+function initFeatures() {
+    featureState.features = [];
+    for (let i = 0; i < NUM_FEATURES; i++) {
+        const importance = Math.random() * 0.5 + (i < 20 ? 0.5 : 0);
+        featureState.features.push({
+            id: i,
+            name: `F${String(i).padStart(3, '0')}`,
+            importance: importance + Math.random() * 0.2,
+            selected: true,
+            x: 0, y: 0, targetY: 0, opacity: 1
+        });
+    }
+    featureState.features.sort(() => Math.random() - 0.5);
+    featureState.step = 0;
+    featureState.selected = [];
+    featureState.eliminated = [];
+    featureState.running = false;
+}
+
+function setFeatureMethod(m) {
+    featureState.method = m;
+    document.querySelectorAll('#cvFeature').closest('.section').querySelectorAll('.toggle-btn').forEach(b => b.classList.remove('active'));
+    event.target.classList.add('active');
+    resetFeatureSelection();
+}
+
+function resetFeatureSelection() {
+    initFeatures();
+    drawFeatures();
+    updateFeatureStats();
+}
+
+function runFeatureSelection() {
+    if (featureState.running) return;
+    featureState.running = true;
+    initFeatures();
+
+    // Sort by importance
+    const sorted = [...featureState.features].sort((a, b) => b.importance - a.importance);
+    const thresholds = { mutual: 0.45, forward: 0.42, lasso: 0.40 };
+    const threshold = thresholds[featureState.method];
+    const keepCount = { mutual: 25, forward: 20, lasso: 18 };
+
+    let step = 0;
+    const totalSteps = NUM_FEATURES;
+    const eliminateOrder = sorted.map(f => f.id).reverse(); // eliminate worst first
+
+    function animStep() {
+        if (step >= totalSteps) {
+            featureState.running = false;
+            // Mark final selected
+            const keep = keepCount[featureState.method];
+            const topFeatures = sorted.slice(0, keep);
+            featureState.selected = topFeatures.map(f => f.id);
+            featureState.features.forEach(f => {
+                f.selected = featureState.selected.includes(f.id);
+                if (!f.selected) f.opacity = 0.15;
+            });
+            updateFeatureStats();
+            return;
+        }
+
+        // Eliminate one feature at a time
+        if (step >= keepCount[featureState.method]) {
+            const fIdx = eliminateOrder[step - keepCount[featureState.method]];
+            if (fIdx !== undefined) {
+                const feat = featureState.features.find(f => f.id === fIdx);
+                if (feat) {
+                    feat.selected = false;
+                    feat.opacity = 0.15;
+                    featureState.eliminated.push(fIdx);
+                }
+            }
+        }
+
+        featureState.step = step;
+        step++;
+        updateFeatureStats();
+        setTimeout(animStep, 30);
+    }
+    animStep();
+}
+
+function updateFeatureStats() {
+    const remaining = featureState.features.filter(f => f.selected).length;
+    const eliminated = featureState.features.filter(f => !f.selected).length;
+    const topImportance = featureState.features.filter(f => f.selected)
+        .reduce((max, f) => Math.max(max, f.importance), 0);
+    document.getElementById('featureStats').innerHTML = `
+        <div class="stat-item"><div class="label">候选特征</div><div class="value">${NUM_FEATURES}</div></div>
+        <div class="stat-item"><div class="label">保留</div><div class="value" style="color:var(--accent-green)">${remaining}</div></div>
+        <div class="stat-item"><div class="label">淘汰</div><div class="value" style="color:var(--accent-red)">${eliminated}</div></div>
+        <div class="stat-item"><div class="label">最高重要度</div><div class="value">${topImportance.toFixed(3)}</div></div>`;
+}
+
+function drawFeatures() {
+    const cv = document.getElementById('cvFeature');
+    const ctx = cv.getContext('2d');
+    const W = cv.width, H = cv.height;
+    ctx.clearRect(0, 0, W, H);
+
+    // Draw feature grid
+    const cols = 15, rows = Math.ceil(NUM_FEATURES / cols);
+    const cellW = (W - 60) / cols, cellH = (H - 120) / rows;
+    const offsetX = 30, offsetY = 40;
+
+    // Title
+    ctx.font = '13px "Noto Sans SC", sans-serif';
+    ctx.fillStyle = '#a8a8b8';
+    ctx.textAlign = 'left';
+    const methodNames = { mutual: '互信息筛选', forward: '前向选择', lasso: 'LASSO 正则化' };
+    ctx.fillText(`方法: ${methodNames[featureState.method]}`, 10, 20);
+
+    // Feature cells
+    featureState.features.forEach((f, idx) => {
+        const col = idx % cols, row = Math.floor(idx / cols);
+        const x = offsetX + col * cellW, y = offsetY + row * cellH;
+        f.x = x; f.y = y;
+
+        // Color based on importance
+        const imp = f.importance;
+        let r, g, b;
+        if (f.selected) {
+            r = Math.floor(22 + imp * 50);
+            g = Math.floor(100 + imp * 155);
+            b = Math.floor(100 + imp * 54);
+        } else {
+            r = 60; g = 60; b = 80;
+        }
+
+        ctx.globalAlpha = f.opacity;
+        ctx.fillStyle = `rgb(${r},${g},${b})`;
+        roundRect(ctx, x + 1, y + 1, cellW - 2, cellH - 2, 3);
+        ctx.fill();
+
+        // Label
+        if (cellW > 20) {
+            ctx.font = '8px monospace';
+            ctx.fillStyle = f.selected ? '#e8e8e8' : '#4a4a5a';
+            ctx.textAlign = 'center';
+            ctx.fillText(f.name, x + cellW / 2, y + cellH / 2 + 3);
+        }
+        ctx.globalAlpha = 1;
+    });
+
+    // Importance bar chart at bottom
+    const barArea = { x: 30, y: H - 65, w: W - 60, h: 55 };
+    ctx.fillStyle = 'rgba(22,33,62,0.5)';
+    roundRect(ctx, barArea.x - 5, barArea.y - 5, barArea.w + 10, barArea.h + 10, 4);
+    ctx.fill();
+
+    // Sort features by importance for bar chart
+    const sortedFeats = [...featureState.features].sort((a, b) => b.importance - a.importance);
+    const barW = barArea.w / Math.min(sortedFeats.length, 60);
+
+    ctx.font = '9px "Noto Sans SC", sans-serif';
+    ctx.fillStyle = '#6c6c7c';
+    ctx.textAlign = 'left';
+    ctx.fillText('特征重要度排序 (Top 60)', barArea.x, barArea.y - 8);
+
+    for (let i = 0; i < Math.min(sortedFeats.length, 60); i++) {
+        const f = sortedFeats[i];
+        const bh = f.importance * barArea.h * 0.8;
+        const bx = barArea.x + i * barW;
+        const by = barArea.y + barArea.h - bh;
+
+        ctx.globalAlpha = f.selected ? 0.9 : 0.2;
+        ctx.fillStyle = f.selected ? '#16c79a' : '#4a4a5a';
+        ctx.fillRect(bx, by, barW - 1, bh);
+        ctx.globalAlpha = 1;
+    }
+
+    requestAnimationFrame(drawFeatures);
+}
+
+/* ============================================================
+   Section 3: Hyperparameter Optimization
+   ============================================================ */
+let hpoState = {
+    method: 'grid',
+    running: false,
+    points: { grid: [], random: [], bayesian: [] },
+    best: { grid: -Infinity, random: -Infinity, bayesian: -Infinity },
+    evalCount: { grid: 0, random: 0, bayesian: 0 }
+};
+
+// Synthetic objective function (2D landscape)
+function objective(x, y) {
+    return 0.6 * Math.exp(-((x-0.3)**2 + (y-0.7)**2) / 0.05) +
+           0.4 * Math.exp(-((x-0.7)**2 + (y-0.3)**2) / 0.08) +
+           0.2 * Math.sin(x * 6) * Math.cos(y * 6) * 0.3;
+}
+
+function setHPOMethod(m) {
+    hpoState.method = m;
+    document.querySelectorAll('#cvHPO').closest('.section').querySelectorAll('.toggle-btn').forEach(b => b.classList.remove('active'));
+    event.target.classList.add('active');
+}
+
+function resetHPO() {
+    hpoState.running = false;
+    hpoState.points = { grid: [], random: [], bayesian: [] };
+    hpoState.best = { grid: -Infinity, random: -Infinity, bayesian: -Infinity };
+    hpoState.evalCount = { grid: 0, random: 0, bayesian: 0 };
+    updateHPOTable();
+}
+
+function runHPO() {
+    if (hpoState.running) return;
+    hpoState.running = true;
+    const method = hpoState.method;
+    hpoState.points[method] = [];
+    hpoState.best[method] = -Infinity;
+    hpoState.evalCount[method] = 0;
+
+    let queue = [];
+
+    if (method === 'grid') {
+        const steps = 10;
+        for (let i = 0; i < steps; i++)
+            for (let j = 0; j < steps; j++)
+                queue.push([i / (steps - 1), j / (steps - 1)]);
+    } else if (method === 'random') {
+        for (let i = 0; i < 50; i++)
+            queue.push([Math.random(), Math.random()]);
+    } else {
+        // Bayesian: start random, then exploit near best
+        for (let i = 0; i < 8; i++)
+            queue.push([Math.random(), Math.random()]);
+    }
+
+    let idx = 0;
+    function step() {
+        if (!hpoState.running) return;
+
+        let px, py;
+        if (method === 'bayesian' && idx >= queue.length) {
+            // Find near best point with some exploration
+            const bestPt = hpoState.points.bayesian.reduce((a, b) => a.val > b.val ? a : b);
+            px = Math.max(0, Math.min(1, bestPt.x + (Math.random() - 0.5) * 0.15));
+            py = Math.max(0, Math.min(1, bestPt.y + (Math.random() - 0.5) * 0.15));
+            if (Math.random() < 0.2) { px = Math.random(); py = Math.random(); } // explore
+        } else if (idx < queue.length) {
+            [px, py] = queue[idx];
+        } else {
+            hpoState.running = false;
+            updateHPOTable();
+            return;
+        }
+
+        const val = objective(px, py);
+        hpoState.points[method].push({ x: px, y: py, val: val, order: idx });
+        if (val > hpoState.best[method]) hpoState.best[method] = val;
+        hpoState.evalCount[method]++;
+        idx++;
+        updateHPOTable();
+
+        const maxEvals = method === 'bayesian' ? 40 : (method === 'grid' ? 100 : 50);
+        if (idx < maxEvals) {
+            setTimeout(step, method === 'grid' ? 50 : (method === 'random' ? 80 : 120));
+        } else {
+            hpoState.running = false;
+            updateHPOTable();
+        }
+    }
+    step();
+}
+
+function updateHPOTable() {
+    ['grid', 'random', 'bayesian'].forEach(m => {
+        const prefix = m === 'random' ? 'rand' : (m === 'bayesian' ? 'bayes' : 'grid');
+        document.getElementById(`${prefix}Eval`).textContent = hpoState.evalCount[m];
+        document.getElementById(`${prefix}Best`).textContent = hpoState.best[m] > -Infinity ? hpoState.best[m].toFixed(4) : '-';
+        const eff = hpoState.evalCount[m] > 0 ? (hpoState.best[m] / hpoState.evalCount[m] * 100).toFixed(2) : '-';
+        document.getElementById(`${prefix}Eff`).textContent = eff;
+    });
+}
+
+function drawHPO() {
+    const cv = document.getElementById('cvHPO');
+    const ctx = cv.getContext('2d');
+    const W = cv.width, H = cv.height;
+    ctx.clearRect(0, 0, W, H);
+
+    const margin = 50;
+    const plotW = W - margin * 2, plotH = H - margin * 2;
+
+    // Draw heatmap background
+    const res = 40;
+    const cellW = plotW / res, cellH = plotH / res;
+    for (let i = 0; i < res; i++) {
+        for (let j = 0; j < res; j++) {
+            const val = objective(i / res, j / res);
+            const intensity = Math.floor(val * 255);
+            ctx.fillStyle = `rgb(${Math.floor(intensity * 0.1)}, ${Math.floor(intensity * 0.5)}, ${Math.floor(intensity * 0.8)})`;
+            ctx.fillRect(margin + i * cellW, margin + j * cellH, cellW + 1, cellH + 1);
+        }
+    }
+
+    // Axes
+    ctx.strokeStyle = '#4a4a6a';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(margin, margin);
+    ctx.lineTo(margin, margin + plotH);
+    ctx.lineTo(margin + plotW, margin + plotH);
+    ctx.stroke();
+
+    ctx.font = '11px "Noto Sans SC", sans-serif';
+    ctx.fillStyle = '#a8a8b8';
+    ctx.textAlign = 'center';
+    ctx.fillText('学习率 (log scale)', margin + plotW / 2, H - 8);
+    ctx.save();
+    ctx.translate(12, margin + plotH / 2);
+    ctx.rotate(-Math.PI / 2);
+    ctx.fillText('正则化强度', 0, 0);
+    ctx.restore();
+
+    // Draw search points for all methods
+    const colors = { grid: '#4fc3f7', random: '#ffab40', bayesian: '#16c79a' };
+    const labels = { grid: '网格', random: '随机', bayesian: '贝叶斯' };
+
+    ['grid', 'random', 'bayesian'].forEach(m => {
+        const pts = hpoState.points[m];
+        if (pts.length === 0) return;
+
+        // Draw trajectory
+        if (pts.length > 1) {
+            ctx.strokeStyle = colors[m] + '40';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(margin + pts[0].x * plotW, margin + pts[0].y * plotH);
+            for (let i = 1; i < pts.length; i++) {
+                ctx.lineTo(margin + pts[i].x * plotW, margin + pts[i].y * plotH);
+            }
+            ctx.stroke();
+        }
+
+        // Draw points
+        pts.forEach((p, i) => {
+            const px = margin + p.x * plotW;
+            const py = margin + p.y * plotH;
+            const isLatest = i === pts.length - 1;
+            const radius = isLatest ? 5 : 3;
+
+            ctx.fillStyle = colors[m];
+            ctx.globalAlpha = isLatest ? 1 : 0.6;
+            ctx.beginPath();
+            ctx.arc(px, py, radius, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Best point highlight
+            if (p.val === hpoState.best[m]) {
+                ctx.strokeStyle = colors[m];
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.arc(px, py, 8, 0, Math.PI * 2);
+                ctx.stroke();
+            }
+            ctx.globalAlpha = 1;
+        });
+    });
+
+    // Legend
+    let lx = margin + 10;
+    ['grid', 'random', 'bayesian'].forEach(m => {
+        if (hpoState.points[m].length === 0) return;
+        ctx.fillStyle = colors[m];
+        ctx.beginPath();
+        ctx.arc(lx, margin + 15, 5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.font = '11px "Noto Sans SC", sans-serif';
+        ctx.fillStyle = '#a8a8b8';
+        ctx.textAlign = 'left';
+        ctx.fillText(`${labels[m]} (${hpoState.points[m].length})`, lx + 10, margin + 19);
+        lx += 90;
+    });
+
+    // Color bar
+    const cbx = W - 30, cby = margin, cbh = plotH;
+    for (let i = 0; i < cbh; i++) {
+        const val = 1 - i / cbh;
+        const intensity = Math.floor(val * 255);
+        ctx.fillStyle = `rgb(${Math.floor(intensity * 0.1)}, ${Math.floor(intensity * 0.5)}, ${Math.floor(intensity * 0.8)})`;
+        ctx.fillRect(cbx, cby + i, 15, 1);
+    }
+    ctx.font = '9px monospace';
+    ctx.fillStyle = '#6c6c7c';
+    ctx.textAlign = 'left';
+    ctx.fillText('高', cbx + 18, cby + 8);
+    ctx.fillText('低', cbx + 18, cby + cbh);
+
+    requestAnimationFrame(drawHPO);
+}
+
+/* ============================================================
+   Section 4: Model Monitoring & Drift
+   ============================================================ */
+let monitorState = {
+    running: false,
+    data: [],
+    baseline: 0.923,
+    driftInjected: false,
+    driftPoint: -1,
+    alerts: 0,
+    detected: false,
+    timer: null
+};
+
+function startMonitor() {
+    if (monitorState.running) return;
+    monitorState.running = true;
+    monitorState.data = [];
+    monitorState.driftInjected = false;
+    monitorState.driftPoint = -1;
+    monitorState.alerts = 0;
+    monitorState.detected = false;
+    updateMonitorStatus('正常', 'badge-green');
+
+    function tick() {
+        if (!monitorState.running) return;
+
+        const t = monitorState.data.length;
+        let accuracy, psi;
+
+        if (monitorState.driftInjected && t > monitorState.driftPoint) {
+            const decay = Math.min((t - monitorState.driftPoint) * 0.008, 0.25);
+            accuracy = monitorState.baseline - decay + (Math.random() - 0.5) * 0.03;
+            psi = 0.05 + decay * 2 + Math.random() * 0.03;
+        } else {
+            accuracy = monitorState.baseline + (Math.random() - 0.5) * 0.02;
+            psi = 0.02 + Math.random() * 0.03;
+        }
+
+        accuracy = Math.max(0.5, Math.min(1, accuracy));
+        const driftDetected = psi > 0.2;
+
+        if (driftDetected && !monitorState.detected) {
+            monitorState.detected = true;
+            monitorState.alerts++;
+            updateMonitorStatus('漂移告警', 'badge-orange');
+        }
+
+        monitorState.data.push({ t, accuracy, psi, alert: driftDetected });
+
+        // Update stats
+        document.getElementById('curAccuracy').textContent = (accuracy * 100).toFixed(1) + '%';
+        document.getElementById('psiValue').textContent = psi.toFixed(3);
+        document.getElementById('driftState').textContent = driftDetected ? '已检测' : '未检测';
+        document.getElementById('driftState').style.color = driftDetected ? 'var(--accent-red)' : 'var(--accent-green)';
+        document.getElementById('alertCount').textContent = monitorState.alerts;
+
+        if (monitorState.data.length < 300) {
+            monitorState.timer = setTimeout(tick, 60);
+        } else {
+            monitorState.running = false;
+        }
+    }
+    tick();
+}
+
+function injectDrift() {
+    if (!monitorState.running) { startMonitor(); setTimeout(injectDrift, 500); return; }
+    monitorState.driftInjected = true;
+    monitorState.driftPoint = monitorState.data.length;
+    updateMonitorStatus('漂移注入中...', 'badge-orange');
+}
+
+function resetMonitor() {
+    monitorState.running = false;
+    if (monitorState.timer) clearTimeout(monitorState.timer);
+    monitorState.data = [];
+    monitorState.driftInjected = false;
+    monitorState.alerts = 0;
+    monitorState.detected = false;
+    document.getElementById('curAccuracy').textContent = '--';
+    document.getElementById('psiValue').textContent = '--';
+    document.getElementById('driftState').textContent = '未检测';
+    document.getElementById('driftState').style.color = 'var(--accent-green)';
+    document.getElementById('alertCount').textContent = '0';
+    updateMonitorStatus('正常', 'badge-green');
+}
+
+function updateMonitorStatus(text, cls) {
+    const el = document.getElementById('monitorStatus');
+    el.textContent = text;
+    el.className = 'badge ' + cls;
+}
+
+function drawMonitor() {
+    const cv = document.getElementById('cvMonitor');
+    const ctx = cv.getContext('2d');
+    const W = cv.width, H = cv.height;
+    ctx.clearRect(0, 0, W, H);
+
+    const data = monitorState.data;
+    const margin = { l: 60, r: 60, t: 30, b: 40 };
+    const pw = W - margin.l - margin.r;
+    const ph = H - margin.t - margin.b;
+
+    // Background grid
+    ctx.strokeStyle = 'rgba(42,42,74,0.4)';
+    ctx.lineWidth = 0.5;
+    for (let i = 0; i <= 5; i++) {
+        const y = margin.t + (ph / 5) * i;
+        ctx.beginPath();
+        ctx.moveTo(margin.l, y);
+        ctx.lineTo(margin.l + pw, y);
+        ctx.stroke();
+    }
+
+    // Axes labels
+    ctx.font = '10px "Noto Sans SC", sans-serif';
+    ctx.fillStyle = '#6c6c7c';
+    ctx.textAlign = 'right';
+    for (let i = 0; i <= 5; i++) {
+        const val = (1 - i * 0.1).toFixed(1);
+        ctx.fillText(val, margin.l - 8, margin.t + (ph / 5) * i + 4);
+    }
+    ctx.textAlign = 'center';
+    ctx.fillText('时间步', margin.l + pw / 2, H - 5);
+
+    // Left axis label
+    ctx.save();
+    ctx.translate(14, margin.t + ph / 2);
+    ctx.rotate(-Math.PI / 2);
+    ctx.fillText('准确率', 0, 0);
+    ctx.restore();
+
+    if (data.length < 2) {
+        ctx.font = '14px "Noto Sans SC", sans-serif';
+        ctx.fillStyle = '#6c6c7c';
+        ctx.textAlign = 'center';
+        ctx.fillText('点击 "启动监控" 开始', W / 2, H / 2);
+        requestAnimationFrame(drawMonitor);
+        return;
+    }
+
+    const maxT = Math.max(data.length, 50);
+    const xScale = pw / maxT;
+
+    // Baseline
+    const baseY = margin.t + ph * (1 - monitorState.baseline) / 0.5;
+    ctx.strokeStyle = 'rgba(22,199,154,0.4)';
+    ctx.setLineDash([6, 4]);
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(margin.l, baseY);
+    ctx.lineTo(margin.l + pw, baseY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    ctx.font = '10px monospace';
+    ctx.fillStyle = '#16c79a';
+    ctx.textAlign = 'left';
+    ctx.fillText('基线 92.3%', margin.l + pw + 5, baseY + 4);
+
+    // Drift injection point
+    if (monitorState.driftInjected && monitorState.driftPoint >= 0) {
+        const dx = margin.l + monitorState.driftPoint * xScale;
+        ctx.strokeStyle = 'rgba(255,171,64,0.6)';
+        ctx.setLineDash([4, 3]);
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(dx, margin.t);
+        ctx.lineTo(dx, margin.t + ph);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = '#ffab40';
+        ctx.font = '10px "Noto Sans SC", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('漂移注入', dx, margin.t - 5);
+    }
+
+    // Accuracy line
+    ctx.strokeStyle = '#4fc3f7';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    data.forEach((d, i) => {
+        const x = margin.l + i * xScale;
+        const y = margin.t + ph * (1 - d.accuracy) / 0.5;
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+
+    // PSI bars on right axis
+    ctx.fillStyle = '#6c6c7c';
+    ctx.textAlign = 'left';
+    ctx.font = '10px "Noto Sans SC", sans-serif';
+    ctx.save();
+    ctx.translate(W - 14, margin.t + ph / 2);
+    ctx.rotate(Math.PI / 2);
+    ctx.fillText('PSI 指标', 0, 0);
+    ctx.restore();
+
+    // PSI line
+    ctx.strokeStyle = 'rgba(255,82,82,0.6)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    data.forEach((d, i) => {
+        const x = margin.l + i * xScale;
+        const y = margin.t + ph - d.psi * ph * 2;
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+
+    // PSI threshold
+    const psiThreshY = margin.t + ph - 0.2 * ph * 2;
+    ctx.strokeStyle = 'rgba(255,82,82,0.3)';
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath();
+    ctx.moveTo(margin.l, psiThreshY);
+    ctx.lineTo(margin.l + pw, psiThreshY);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = '#ff5252';
+    ctx.font = '9px monospace';
+    ctx.textAlign = 'left';
+    ctx.fillText('PSI=0.2 阈值', margin.l + pw + 5, psiThreshY + 4);
+
+    // Alert markers
+    data.forEach((d, i) => {
+        if (d.alert) {
+            const x = margin.l + i * xScale;
+            ctx.fillStyle = 'rgba(255,82,82,0.3)';
+            ctx.fillRect(x - 1, margin.t, 2, ph);
+        }
+    });
+
+    // Legend
+    ctx.font = '11px "Noto Sans SC", sans-serif';
+    const legendX = margin.l + 10;
+    ctx.fillStyle = '#4fc3f7';
+    ctx.fillRect(legendX, margin.t + 8, 16, 3);
+    ctx.fillStyle = '#a8a8b8';
+    ctx.textAlign = 'left';
+    ctx.fillText('准确率', legendX + 22, margin.t + 14);
+
+    ctx.fillStyle = '#ff5252';
+    ctx.fillRect(legendX + 80, margin.t + 8, 16, 3);
+    ctx.fillStyle = '#a8a8b8';
+    ctx.fillText('PSI', legendX + 102, margin.t + 14);
+
+    requestAnimationFrame(drawMonitor);
+}
+
+/* ============================================================
+   Section 5: Platform Architecture
+   ============================================================ */
+let archState = { view: 'auto', animOffset: 0 };
+
+function setArchView(v) {
+    archState.view = v;
+    document.querySelectorAll('#cvArch').closest('.section').querySelectorAll('.toggle-btn').forEach(b => b.classList.remove('active'));
+    event.target.classList.add('active');
+
+    if (v === 'auto') {
+        document.getElementById('iterTime').textContent = '2 小时';
+        document.getElementById('featTime').textContent = '5 分钟';
+        document.getElementById('trainTime').textContent = '15 分钟';
+        document.getElementById('btTime').textContent = '10 分钟';
+        document.getElementById('speedup').textContent = '12x';
+    } else {
+        document.getElementById('iterTime').textContent = '2-3 天';
+        document.getElementById('featTime').textContent = '4 小时';
+        document.getElementById('trainTime').textContent = '8 小时';
+        document.getElementById('btTime').textContent = '3 小时';
+        document.getElementById('speedup').textContent = '1x';
+    }
+}
+
+function drawArch() {
+    const cv = document.getElementById('cvArch');
+    const ctx = cv.getContext('2d');
+    const W = cv.width, H = cv.height;
+    ctx.clearRect(0, 0, W, H);
+
+    archState.animOffset = (archState.animOffset + 0.4) % 20;
+    const isAuto = archState.view === 'auto';
+
+    const layers = [
+        { name: '数据层', color: '#4fc3f7', items: ['行情数据', 'tick 数据', '基本面', '另类数据', '新闻舆情'], icon: '📊' },
+        { name: '计算层', color: '#b388ff', items: ['特征计算', '模型训练', '超参搜索', 'GPU 集群', '分布式计算'], icon: '⚡' },
+        { name: '策略层', color: '#16c79a', items: ['因子挖掘', '组合优化', '风险控制', '回测引擎', 'Alpha 池'], icon: '🧠' },
+        { name: '执行层', color: '#ffab40', items: ['订单路由', '算法交易', '风控校验', '实时监控', '报告生成'], icon: '🚀' }
+    ];
+
+    const layerH = (H - 80) / layers.length;
+    const layerW = W - 120;
+    const startX = 60;
+    const startY = 30;
+
+    layers.forEach((layer, li) => {
+        const y = startY + li * layerH;
+        const alpha = isAuto ? 0.9 : 0.5;
+
+        // Layer background
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = layer.color + '10';
+        ctx.strokeStyle = layer.color + '40';
+        ctx.lineWidth = 1;
+        roundRect(ctx, startX, y + 5, layerW, layerH - 15, 8);
+        ctx.fill();
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+
+        // Layer label
+        ctx.font = '14px "Noto Sans SC", sans-serif';
+        ctx.fillStyle = layer.color;
+        ctx.textAlign = 'left';
+        ctx.fillText(`${layer.icon} ${layer.name}`, startX + 12, y + 28);
+
+        // Items
+        const itemW = (layerW - 140) / layer.items.length;
+        layer.items.forEach((item, ii) => {
+            const ix = startX + 130 + ii * itemW;
+            const iy = y + 12;
+            const iw = itemW - 8;
+            const ih = layerH - 30;
+
+            ctx.fillStyle = isAuto ? 'rgba(22,33,62,0.8)' : 'rgba(22,33,62,0.4)';
+            ctx.strokeStyle = isAuto ? layer.color + '50' : '#2a2a4a';
+            ctx.lineWidth = 1;
+            roundRect(ctx, ix, iy, iw, ih, 5);
+            ctx.fill();
+            ctx.stroke();
+
+            // Item text
+            ctx.font = '11px "Noto Sans SC", sans-serif';
+            ctx.fillStyle = isAuto ? '#e8e8e8' : '#6c6c7c';
+            ctx.textAlign = 'center';
+            ctx.fillText(item, ix + iw / 2, iy + ih / 2 + 4);
+
+            // Auto mode: status indicator
+            if (isAuto) {
+                ctx.fillStyle = '#16c79a';
+                ctx.beginPath();
+                ctx.arc(ix + iw - 8, iy + 8, 3, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        });
+
+        // Connection arrows between layers
+        if (li < layers.length - 1) {
+            const arrowY = y + layerH - 8;
+            const nextColor = layers[li + 1].color;
+
+            if (isAuto) {
+                // Animated flow
+                ctx.strokeStyle = nextColor + '50';
+                ctx.setLineDash([5, 5]);
+                ctx.lineDashOffset = -archState.animOffset;
+                ctx.lineWidth = 2;
+
+                for (let ai = 0; ai < 3; ai++) {
+                    const ax = startX + 200 + ai * 250;
+                    ctx.beginPath();
+                    ctx.moveTo(ax, arrowY);
+                    ctx.lineTo(ax, arrowY + 10);
+                    ctx.stroke();
+
+                    // Arrow head
+                    ctx.setLineDash([]);
+                    ctx.fillStyle = nextColor + '60';
+                    ctx.beginPath();
+                    ctx.moveTo(ax - 4, arrowY + 7);
+                    ctx.lineTo(ax, arrowY + 13);
+                    ctx.lineTo(ax + 4, arrowY + 7);
+                    ctx.fill();
+                    ctx.setLineDash([5, 5]);
+                    ctx.lineDashOffset = -archState.animOffset;
+                }
+                ctx.setLineDash([]);
+            } else {
+                // Manual: dashed, static
+                ctx.strokeStyle = '#3a3a5a';
+                ctx.setLineDash([4, 6]);
+                ctx.lineWidth = 1;
+                const ax = W / 2;
+                ctx.beginPath();
+                ctx.moveTo(ax, arrowY);
+                ctx.lineTo(ax, arrowY + 10);
+                ctx.stroke();
+                ctx.setLineDash([]);
+
+                // Manual intervention indicator
+                ctx.font = '10px "Noto Sans SC", sans-serif';
+                ctx.fillStyle = '#ff5252';
+                ctx.textAlign = 'center';
+                ctx.fillText('人工介入', ax + 60, arrowY + 8);
+            }
+        }
+    });
+
+    // Mode label
+    ctx.font = 'bold 13px "Noto Sans SC", sans-serif';
+    ctx.fillStyle = isAuto ? '#16c79a' : '#ff5252';
+    ctx.textAlign = 'right';
+    ctx.fillText(isAuto ? '自动化模式' : '手动模式', W - 20, 22);
+
+    // Speed comparison bar (bottom)
+    const barY = H - 25;
+    const autoWidth = isAuto ? layerW * 0.85 : layerW * 0.15;
+    ctx.fillStyle = isAuto ? 'rgba(22,199,154,0.3)' : 'rgba(255,82,82,0.3)';
+    roundRect(ctx, startX, barY, autoWidth, 12, 3);
+    ctx.fill();
+    ctx.font = '10px monospace';
+    ctx.fillStyle = isAuto ? '#16c79a' : '#ff5252';
+    ctx.textAlign = 'left';
+    ctx.fillText(isAuto ? '效率: 12x' : '效率: 1x', startX + autoWidth + 8, barY + 10);
+
+    requestAnimationFrame(drawArch);
+}
+
+/* ============================================================
+   Initialization
+   ============================================================ */
+document.addEventListener('DOMContentLoaded', () => {
+    initFeatures();
+    drawPipeline();
+    drawFeatures();
+    drawHPO();
+    drawMonitor();
+    drawArch();
+});
+
+// KaTeX auto-render
+document.addEventListener('DOMContentLoaded', () => {
+    if (typeof renderMathInElement === 'function') {
+        renderMathInElement(document.body, {
+            delimiters: [
+                { left: '$$', right: '$$', display: true },
+                { left: '\\(', right: '\\)', display: false },
+                { left: '\\[', right: '\\]', display: true }
+            ]
+        });
+    } else {
+        document.addEventListener('katex-ready', () => {
+            renderMathInElement(document.body, {
+                delimiters: [
+                    { left: '$$', right: '$$', display: true },
+                    { left: '\\(', right: '\\)', display: false },
+                    { left: '\\[', right: '\\]', display: true }
+                ]
+            });
+        });
+        // Fallback: retry after scripts load
+        setTimeout(() => {
+            if (typeof renderMathInElement === 'function') {
+                renderMathInElement(document.body, {
+                    delimiters: [
+                        { left: '$$', right: '$$', display: true },
+                        { left: '\\(', right: '\\)', display: false },
+                        { left: '\\[', right: '\\]', display: true }
+                    ]
+                });
+            }
+        }, 1500);
+    }
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,1394 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>支持向量 — Support Vectors | SVM</title>
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+    <script src="../shared/scripts/svm-utils.js"></script>
+    <script src="../shared/scripts/nav.js"></script>
+    <style>
+        .section-grid {
+            display: grid;
+            grid-template-columns: 1fr 1.6fr;
+            gap: 1.5rem;
+            align-items: start;
+        }
+
+        .section-grid .text-col {
+            position: sticky;
+            top: calc(var(--header-height) + 1rem);
+        }
+
+        canvas {
+            display: block;
+            width: 100%;
+            border-radius: var(--radius-md);
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            cursor: crosshair;
+        }
+
+        .info-tooltip {
+            position: absolute;
+            padding: 0.5rem 0.75rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            font-size: 0.8rem;
+            color: var(--text-primary);
+            pointer-events: none;
+            z-index: 50;
+            white-space: nowrap;
+            box-shadow: var(--shadow);
+            transition: opacity 0.15s;
+        }
+
+        .stats-row {
+            display: flex;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+            margin-top: 0.75rem;
+        }
+
+        .stat-box {
+            flex: 1;
+            min-width: 80px;
+            padding: 0.5rem 0.75rem;
+            background: var(--bg-card);
+            border-radius: var(--radius-sm);
+            text-align: center;
+        }
+
+        .stat-box .stat-val {
+            font-family: var(--font-mono);
+            font-size: 1.2rem;
+            font-weight: 700;
+            color: var(--accent-green);
+        }
+
+        .stat-box .stat-label {
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            margin-top: 0.15rem;
+        }
+
+        .bar-chart {
+            display: flex;
+            align-items: flex-end;
+            gap: 3px;
+            height: 110px;
+            padding: 0.5rem;
+            background: var(--bg-card);
+            border-radius: var(--radius-sm);
+            margin-top: 0.75rem;
+            position: relative;
+        }
+
+        .bar-chart .bar {
+            flex: 1;
+            min-width: 3px;
+            border-radius: 2px 2px 0 0;
+            transition: height 0.3s, background 0.3s;
+            cursor: pointer;
+        }
+
+        .bar-chart .bar:hover {
+            opacity: 1 !important;
+            filter: brightness(1.3);
+        }
+
+        .bar-chart-label {
+            position: absolute;
+            top: 4px;
+            right: 8px;
+            font-size: 0.65rem;
+            color: var(--text-muted);
+        }
+
+        .bar-chart-threshold {
+            position: absolute;
+            left: 0;
+            right: 0;
+            border-top: 1px dashed rgba(250, 204, 21, 0.4);
+            pointer-events: none;
+        }
+
+        .kkt-legend {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.5rem;
+            margin-top: 0.75rem;
+        }
+
+        .kkt-legend-item {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            font-size: 0.78rem;
+            color: var(--text-secondary);
+        }
+
+        .kkt-legend-item .dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+
+        .drag-hint {
+            font-size: 0.75rem;
+            color: var(--accent-orange);
+            margin-top: 0.5rem;
+            font-style: italic;
+        }
+
+        .alpha-distribution {
+            display: flex;
+            height: 8px;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-top: 0.5rem;
+            gap: 2px;
+        }
+
+        .alpha-distribution .seg {
+            height: 100%;
+            transition: width 0.4s;
+            border-radius: 2px;
+        }
+
+        .point-table {
+            max-height: 150px;
+            overflow-y: auto;
+            margin-top: 0.5rem;
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+        }
+
+        .point-table table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.75rem;
+            font-family: var(--font-mono);
+        }
+
+        .point-table th {
+            background: var(--bg-card);
+            color: var(--accent-green);
+            padding: 0.3rem 0.5rem;
+            text-align: center;
+            position: sticky;
+            top: 0;
+        }
+
+        .point-table td {
+            padding: 0.2rem 0.5rem;
+            text-align: center;
+            border-top: 1px solid rgba(42, 42, 74, 0.4);
+        }
+
+        .point-table tr:hover td {
+            background: rgba(22, 199, 154, 0.05);
+        }
+
+        .highlight-pulse {
+            animation: pulse-ring 0.6s ease-out;
+        }
+
+        @keyframes pulse-ring {
+            0% { box-shadow: 0 0 0 0 rgba(249, 115, 22, 0.6); }
+            100% { box-shadow: 0 0 0 15px rgba(249, 115, 22, 0); }
+        }
+
+        @media (max-width: 1024px) {
+            .section-grid {
+                grid-template-columns: 1fr;
+            }
+            .section-grid .text-col {
+                position: static;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="page-container">
+        <h1>支持向量 — Support Vectors</h1>
+        <p>支持向量是 SVM 中最核心的概念：它们是距离决策边界最近的训练样本，完全决定了分类器的位置和方向。</p>
+
+        <!-- ==================== Section 1 ==================== -->
+        <div class="section" id="sec1">
+            <div class="section-title">
+                <div class="icon">1</div>
+                <h2>什么是支持向量</h2>
+            </div>
+            <div class="section-grid">
+                <div class="text-col">
+                    <p>训练好的 SVM 会产生一个决策超平面 $\mathbf{w} \cdot \mathbf{x} + b = 0$，以及两条间隔边界线 $\mathbf{w} \cdot \mathbf{x} + b = \pm 1$。</p>
+                    <div class="info-box success">
+                        <p><strong>支持向量</strong>是恰好落在间隔边界上的训练样本，满足条件：</p>
+                        <p>$$y_i(\mathbf{w} \cdot \mathbf{x}_i + b) = 1$$</p>
+                    </div>
+                    <p>它们"支撑"起决策边界，就像帐篷的支架一样。移走任何一个非支持向量的点，边界不会改变。</p>
+                    <p>对于支持向量，函数间隔恰好等于 1；对于正确分类的非支持向量，函数间隔大于 1；误分类的点函数间隔小于 0。</p>
+                    <p class="text-sm text-muted">点击画布中的任意数据点，查看其函数间隔值 $y_i(\mathbf{w} \cdot \mathbf{x}_i + b)$。支持向量用橙色光环标识。</p>
+                    <div class="stats-row" id="stats1">
+                        <div class="stat-box">
+                            <div class="stat-val" id="sv-count1">--</div>
+                            <div class="stat-label">支持向量数</div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="stat-val" id="total-count1">--</div>
+                            <div class="stat-label">样本总数</div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="stat-val" id="margin-val1">--</div>
+                            <div class="stat-label">间隔宽度</div>
+                        </div>
+                    </div>
+                    <div class="legend mt-1">
+                        <div class="legend-item">
+                            <div class="swatch" style="background:#f97316;border:2px solid #fff"></div>支持向量
+                        </div>
+                        <div class="legend-item">
+                            <div class="swatch" style="background:#22c55e"></div>正类 (+1)
+                        </div>
+                        <div class="legend-item">
+                            <div class="swatch" style="background:#ef4444"></div>负类 (-1)
+                        </div>
+                        <div class="legend-item">
+                            <div class="swatch" style="background:#facc15;height:3px;width:20px;border-radius:1px"></div>决策边界
+                        </div>
+                        <div class="legend-item">
+                            <div class="swatch" style="background:#94a3b8;height:2px;width:20px;border-radius:1px;border:none;border-top:2px dashed #94a3b8"></div>间隔线
+                        </div>
+                    </div>
+                    <div class="flex gap-sm mt-2">
+                        <button class="btn btn-primary btn-sm" onclick="Section1.regenerate()">重新生成数据</button>
+                    </div>
+                </div>
+                <div class="viz-col" style="position:relative">
+                    <canvas id="canvas1" width="600" height="460"></canvas>
+                    <div id="tooltip1" class="info-tooltip" style="opacity:0"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ==================== Section 2 ==================== -->
+        <div class="section" id="sec2">
+            <div class="section-title">
+                <div class="icon">2</div>
+                <h2>只有支持向量决定边界</h2>
+            </div>
+            <div class="section-grid">
+                <div class="text-col">
+                    <p>SVM 的一个重要特性是：<strong>决策边界仅由支持向量决定</strong>，与其他数据点完全无关。</p>
+                    <div class="info-box">
+                        <p>拖动<strong>非支持向量</strong>的点（小圆）-- 边界纹丝不动。<br>
+                        拖动<strong>支持向量</strong>（橙色大圆）-- 边界随之改变！</p>
+                    </div>
+                    <p>这意味着 SVM 的决策边界具有<strong>稀疏性</strong>：只需要记住少量关键样本即可完全描述分类器。这也是 SVM 在高维空间中表现优秀的原因之一。</p>
+                    <p>在对偶表示中，解向量可以写成支持向量的线性组合：</p>
+                    <p>$$\mathbf{w} = \sum_{i \in SV} \alpha_i y_i \mathbf{x}_i$$</p>
+                    <p class="drag-hint">鼠标拖动数据点试试！双击空白区域添加新的正类点。</p>
+                    <div class="stats-row">
+                        <div class="stat-box">
+                            <div class="stat-val" id="sv-count2">--</div>
+                            <div class="stat-label">支持向量数</div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="stat-val" id="total-count2">--</div>
+                            <div class="stat-label">样本总数</div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="stat-val" id="boundary-moved">否</div>
+                            <div class="stat-label">边界移动了？</div>
+                        </div>
+                    </div>
+                    <div class="flex gap-sm mt-2">
+                        <button class="btn btn-primary btn-sm" onclick="Section2.reset()">重置</button>
+                        <button class="btn btn-sm" onclick="Section2.removeNonSV()">删除非支持向量</button>
+                    </div>
+                </div>
+                <div class="viz-col" style="position:relative">
+                    <canvas id="canvas2" width="600" height="460"></canvas>
+                    <div id="tooltip2" class="info-tooltip" style="opacity:0"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ==================== Section 3 ==================== -->
+        <div class="section" id="sec3">
+            <div class="section-title">
+                <div class="icon">3</div>
+                <h2>支持向量的数量</h2>
+            </div>
+            <div class="section-grid">
+                <div class="text-col">
+                    <p>数据的复杂度和噪声程度直接影响支持向量的数量：</p>
+                    <ul style="color:var(--text-secondary);font-size:0.9rem;padding-left:1.2rem;margin-bottom:0.75rem">
+                        <li><strong>低噪声</strong>：两类数据分开明显，仅需少量支持向量</li>
+                        <li><strong>高噪声</strong>：类别重叠增多，需要更多支持向量来定义边界</li>
+                    </ul>
+                    <div class="info-box warning">
+                        <p>支持向量数量与模型复杂度成正比。过多的支持向量可能暗示数据难以线性分割，或需要引入核技巧。一般而言，SV 占比越高，模型的泛化能力越需谨慎评估。</p>
+                    </div>
+                    <div class="slider-group mt-2">
+                        <label>噪声程度：</label>
+                        <input type="range" id="noise-slider" min="0" max="100" value="20">
+                        <span class="slider-value" id="noise-val">0.20</span>
+                    </div>
+                    <div class="slider-group mt-1">
+                        <label>样本数量：</label>
+                        <input type="range" id="npoints-slider" min="20" max="100" value="60" step="5">
+                        <span class="slider-value" id="npoints-val">60</span>
+                    </div>
+                    <div class="stats-row">
+                        <div class="stat-box">
+                            <div class="stat-val" id="sv-count3">--</div>
+                            <div class="stat-label">支持向量数</div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="stat-val" id="sv-pct3">--</div>
+                            <div class="stat-label">SV 占比</div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="stat-val" id="margin-val3">--</div>
+                            <div class="stat-label">间隔宽度</div>
+                        </div>
+                    </div>
+                    <p class="text-sm text-muted mt-1">各点到超平面的距离分布（排序后）：</p>
+                    <div class="bar-chart" id="bar-chart3">
+                        <span class="bar-chart-label">距离</span>
+                    </div>
+                    <div class="legend mt-1">
+                        <div class="legend-item">
+                            <div class="swatch" style="background:#f97316"></div>支持向量（间隔内）
+                        </div>
+                        <div class="legend-item">
+                            <div class="swatch" style="background:#4fc3f7"></div>非支持向量（间隔外）
+                        </div>
+                    </div>
+                </div>
+                <div class="viz-col">
+                    <canvas id="canvas3" width="600" height="460"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- ==================== Section 4 ==================== -->
+        <div class="section" id="sec4">
+            <div class="section-title">
+                <div class="icon">4</div>
+                <h2>KKT 条件直觉</h2>
+            </div>
+            <div class="section-grid">
+                <div class="text-col">
+                    <p>KKT（Karush-Kuhn-Tucker）条件揭示了每个数据点的拉格朗日乘子 $\alpha_i$ 与其几何位置的对应关系：</p>
+                    <div class="info-box">
+                        <p>
+                            <strong>$\alpha_i = 0$</strong>：点在间隔外，不影响决策边界<br>
+                            <strong>$0 < \alpha_i < C$</strong>：恰好在间隔边界上（自由支持向量）<br>
+                            <strong>$\alpha_i = C$</strong>：在间隔内部或被误分类（受约束支持向量）
+                        </p>
+                    </div>
+                    <p>互补松弛条件告诉我们：</p>
+                    <p>$$\alpha_i \big[y_i(\mathbf{w} \cdot \mathbf{x}_i + b) - 1 + \xi_i\big] = 0$$</p>
+                    <p>即：如果 $\alpha_i > 0$，则该点必须恰在间隔边界上（或更靠近/越过边界）。反之，若点在间隔外，则 $\alpha_i$ 必为零。</p>
+                    <div class="slider-group mt-2">
+                        <label>C 值：</label>
+                        <input type="range" id="c-slider" min="1" max="100" value="50">
+                        <span class="slider-value" id="c-val">5.0</span>
+                    </div>
+                    <div class="slider-group mt-1">
+                        <label>噪声：</label>
+                        <input type="range" id="noise-slider4" min="0" max="100" value="40">
+                        <span class="slider-value" id="noise-val4">0.40</span>
+                    </div>
+                    <div class="kkt-legend">
+                        <div class="kkt-legend-item">
+                            <div class="dot" style="background:#6c6c7c"></div>$\alpha_i = 0$（非SV）
+                        </div>
+                        <div class="kkt-legend-item">
+                            <div class="dot" style="background:#22c55e"></div>$0 < \alpha_i < C$（间隔SV）
+                        </div>
+                        <div class="kkt-legend-item">
+                            <div class="dot" style="background:#f97316"></div>$\alpha_i = C$（边界/误分类）
+                        </div>
+                        <div class="kkt-legend-item">
+                            <div class="dot" style="background:#ef4444"></div>误分类标记（X）
+                        </div>
+                    </div>
+                    <p class="text-sm text-muted mt-1">$\alpha$ 值分布比例：</p>
+                    <div class="alpha-distribution" id="alpha-dist"></div>
+                    <div class="stats-row">
+                        <div class="stat-box">
+                            <div class="stat-val" id="alpha0-count">--</div>
+                            <div class="stat-label">$\alpha=0$</div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="stat-val" id="alphamid-count">--</div>
+                            <div class="stat-label">$0<\alpha<C$</div>
+                        </div>
+                        <div class="stat-box">
+                            <div class="stat-val" id="alphaC-count">--</div>
+                            <div class="stat-label">$\alpha=C$</div>
+                        </div>
+                    </div>
+                    <div class="flex gap-sm mt-2">
+                        <button class="btn btn-primary btn-sm" onclick="Section4.regenerate()">重新生成</button>
+                    </div>
+                </div>
+                <div class="viz-col" style="position:relative">
+                    <canvas id="canvas4" width="600" height="460"></canvas>
+                    <div id="tooltip4" class="info-tooltip" style="opacity:0"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+<script>
+/* ================================================================
+   KaTeX auto-render
+   ================================================================ */
+document.addEventListener('DOMContentLoaded', () => {
+    renderMathInElement(document.body, {
+        delimiters: [
+            { left: '$$', right: '$$', display: true },
+            { left: '$', right: '$', display: false }
+        ]
+    });
+});
+
+/* ================================================================
+   Shared helpers
+   ================================================================ */
+const SU = SVMUtils;
+const MC = SU.MARGIN_COLORS;
+
+/** Get canvas-space mouse coordinates */
+function getCanvasXY(canvas, e) {
+    const r = canvas.getBoundingClientRect();
+    const sx = canvas.width / r.width;
+    const sy = canvas.height / r.height;
+    return [(e.clientX - r.left) * sx, (e.clientY - r.top) * sy];
+}
+
+/** Map data coordinates to canvas pixel coordinates */
+function dataToCanvas(x, y, cw, ch, bounds) {
+    const pad = 50;
+    const px = (x - bounds.xMin) / (bounds.xMax - bounds.xMin) * (cw - 2 * pad) + pad;
+    const py = (1 - (y - bounds.yMin) / (bounds.yMax - bounds.yMin)) * (ch - 2 * pad) + pad;
+    return [px, py];
+}
+
+/** Map canvas pixel coordinates to data coordinates */
+function canvasToData(px, py, cw, ch, bounds) {
+    const pad = 50;
+    const x = (px - pad) / (cw - 2 * pad) * (bounds.xMax - bounds.xMin) + bounds.xMin;
+    const y = (1 - (py - pad) / (ch - 2 * pad)) * (bounds.yMax - bounds.yMin) + bounds.yMin;
+    return [x, y];
+}
+
+/** Compute bounds with padding */
+function computeBounds(data, pad) {
+    if (!pad) pad = 0.5;
+    let xMin = Infinity, xMax = -Infinity;
+    let yMin = Infinity, yMax = -Infinity;
+    for (const p of data) {
+        if (p[0] < xMin) xMin = p[0];
+        if (p[0] > xMax) xMax = p[0];
+        if (p[1] < yMin) yMin = p[1];
+        if (p[1] > yMax) yMax = p[1];
+    }
+    return {
+        xMin: xMin - pad, xMax: xMax + pad,
+        yMin: yMin - pad, yMax: yMax + pad
+    };
+}
+
+/** Draw subtle grid */
+function drawGrid(ctx, cw, ch, bounds) {
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255,255,255,0.04)';
+    ctx.lineWidth = 1;
+    const steps = 12;
+    const pad = 50;
+    for (let i = 0; i <= steps; i++) {
+        const x = pad + (cw - 2 * pad) * i / steps;
+        const y = pad + (ch - 2 * pad) * i / steps;
+        ctx.beginPath(); ctx.moveTo(x, pad); ctx.lineTo(x, ch - pad); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(pad, y); ctx.lineTo(cw - pad, y); ctx.stroke();
+    }
+    // Axis labels
+    ctx.fillStyle = 'rgba(255,255,255,0.15)';
+    ctx.font = '10px monospace';
+    ctx.textAlign = 'center';
+    for (let i = 0; i <= 4; i++) {
+        const x = pad + (cw - 2 * pad) * i / 4;
+        const val = bounds.xMin + (bounds.xMax - bounds.xMin) * i / 4;
+        ctx.fillText(val.toFixed(1), x, ch - pad + 14);
+    }
+    ctx.textAlign = 'right';
+    for (let i = 0; i <= 4; i++) {
+        const y = pad + (ch - 2 * pad) * i / 4;
+        const val = bounds.yMax - (bounds.yMax - bounds.yMin) * i / 4;
+        ctx.fillText(val.toFixed(1), pad - 6, y + 4);
+    }
+    ctx.restore();
+}
+
+/** Draw a linear boundary: w[0]*x + w[1]*y + offset = 0 */
+function drawHyperplane(ctx, w, offset, bounds, cw, ch, color, lineWidth, dash) {
+    if (Math.abs(w[1]) < 1e-10 && Math.abs(w[0]) < 1e-10) return;
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = lineWidth;
+    if (dash) ctx.setLineDash(dash);
+
+    const pts = [];
+    for (let px = 0; px <= cw; px += 2) {
+        const x = canvasToData(px, 0, cw, ch, bounds)[0];
+        if (Math.abs(w[1]) < 1e-10) continue;
+        const y = -(w[0] * x + offset) / w[1];
+        const [cpx, cpy] = dataToCanvas(x, y, cw, ch, bounds);
+        if (cpy >= 20 && cpy <= ch - 20) {
+            pts.push([cpx, cpy]);
+        }
+    }
+    if (pts.length > 1) {
+        ctx.beginPath();
+        ctx.moveTo(pts[0][0], pts[0][1]);
+        for (let i = 1; i < pts.length; i++) {
+            ctx.lineTo(pts[i][0], pts[i][1]);
+        }
+        ctx.stroke();
+    }
+    ctx.restore();
+}
+
+/** Fill the margin band between +1 and -1 lines */
+function drawMarginFill(ctx, w, b, bounds, cw, ch) {
+    if (Math.abs(w[1]) < 1e-10) return;
+    ctx.save();
+    ctx.fillStyle = MC.marginFill;
+    const topPts = [];
+    const botPts = [];
+    const pad = 50;
+    for (let px = pad; px <= cw - pad; px += 4) {
+        const x = canvasToData(px, 0, cw, ch, bounds)[0];
+        const yTop = -(w[0] * x + b - 1) / w[1];
+        const yBot = -(w[0] * x + b + 1) / w[1];
+        topPts.push(dataToCanvas(x, yTop, cw, ch, bounds));
+        botPts.push(dataToCanvas(x, yBot, cw, ch, bounds));
+    }
+    if (topPts.length > 1) {
+        ctx.beginPath();
+        ctx.moveTo(topPts[0][0], topPts[0][1]);
+        for (const p of topPts) ctx.lineTo(p[0], p[1]);
+        for (let i = botPts.length - 1; i >= 0; i--) {
+            ctx.lineTo(botPts[i][0], botPts[i][1]);
+        }
+        ctx.closePath();
+        ctx.fill();
+    }
+    ctx.restore();
+}
+
+/** Draw a single data point */
+function drawPoint(ctx, cx, cy, radius, fillColor, strokeColor, strokeWidth) {
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+    ctx.fillStyle = fillColor;
+    ctx.fill();
+    if (strokeColor) {
+        ctx.strokeStyle = strokeColor;
+        ctx.lineWidth = strokeWidth || 2;
+        ctx.stroke();
+    }
+}
+
+/** Draw a support-vector ring */
+function drawSVRing(ctx, cx, cy, innerR, ringColor) {
+    ctx.beginPath();
+    ctx.arc(cx, cy, innerR + 5, 0, Math.PI * 2);
+    ctx.strokeStyle = ringColor;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+}
+
+/** Find nearest point index within threshold */
+function findNearest(data, mx, my, cw, ch, bounds, threshold) {
+    let best = -1;
+    let bestD = Infinity;
+    for (let i = 0; i < data.length; i++) {
+        const [cx, cy] = dataToCanvas(data[i][0], data[i][1], cw, ch, bounds);
+        const d = Math.hypot(mx - cx, my - cy);
+        if (d < bestD) { bestD = d; best = i; }
+    }
+    return bestD < (threshold || 25) ? best : -1;
+}
+
+/* ================================================================
+   Section 1: 什么是支持向量
+   ================================================================ */
+const Section1 = (() => {
+    const canvas = document.getElementById('canvas1');
+    const ctx = canvas.getContext('2d');
+    const tooltip = document.getElementById('tooltip1');
+    const cw = canvas.width;
+    const ch = canvas.height;
+    let data, labels, model, bounds, svSet;
+    let seed = 42;
+    let clickedIdx = -1;
+
+    function init() {
+        generate();
+        canvas.addEventListener('mousemove', onMove);
+        canvas.addEventListener('mouseleave', () => {
+            tooltip.style.opacity = 0;
+        });
+        canvas.addEventListener('click', onClick);
+    }
+
+    function generate() {
+        const ds = SU.generateLinearData(40, 0.3, seed);
+        data = ds.data;
+        labels = ds.labels;
+        model = SU.trainLinearSVM(data, labels, 1.0, 0.005, 2000);
+        bounds = computeBounds(data, 0.8);
+        svSet = new Set(model.supportVectors);
+        clickedIdx = -1;
+        updateStats();
+        draw();
+    }
+
+    function regenerate() {
+        seed = Math.floor(Math.random() * 100000);
+        generate();
+    }
+
+    function updateStats() {
+        document.getElementById('sv-count1').textContent = model.supportVectors.length;
+        document.getElementById('total-count1').textContent = data.length;
+        document.getElementById('margin-val1').textContent = SU.computeMargin(model.w).toFixed(2);
+    }
+
+    function draw() {
+        ctx.clearRect(0, 0, cw, ch);
+        drawGrid(ctx, cw, ch, bounds);
+
+        // Draw margin fill and lines
+        drawMarginFill(ctx, model.w, model.b, bounds, cw, ch);
+        drawHyperplane(ctx, model.w, model.b - 1, bounds, cw, ch, MC.marginLine, 1.5, [6, 4]);
+        drawHyperplane(ctx, model.w, model.b + 1, bounds, cw, ch, MC.marginLine, 1.5, [6, 4]);
+        drawHyperplane(ctx, model.w, model.b, bounds, cw, ch, MC.decisionBoundary, 2.5, null);
+
+        // Draw non-SVs first (behind), then SVs on top
+        for (let i = 0; i < data.length; i++) {
+            if (svSet.has(i)) continue;
+            const [cx, cy] = dataToCanvas(data[i][0], data[i][1], cw, ch, bounds);
+            const color = SU.classToColor(labels[i]);
+            drawPoint(ctx, cx, cy, 5, color + '66', null);
+        }
+        for (let i = 0; i < data.length; i++) {
+            if (!svSet.has(i)) continue;
+            const [cx, cy] = dataToCanvas(data[i][0], data[i][1], cw, ch, bounds);
+            const color = SU.classToColor(labels[i]);
+            drawPoint(ctx, cx, cy, 9, color, '#fff', 2.5);
+            drawSVRing(ctx, cx, cy, 9, MC.supportVector);
+        }
+
+        // Draw clicked-point annotation
+        if (clickedIdx >= 0 && clickedIdx < data.length) {
+            const [cx, cy] = dataToCanvas(
+                data[clickedIdx][0], data[clickedIdx][1], cw, ch, bounds
+            );
+            const fm = labels[clickedIdx] * SU.decisionFunction(
+                data[clickedIdx], model.w, model.b
+            );
+
+            // Dashed selection circle
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(cx, cy, 22, 0, Math.PI * 2);
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([4, 3]);
+            ctx.stroke();
+            ctx.restore();
+
+            // Label
+            ctx.save();
+            ctx.font = 'bold 12px "Noto Sans SC", sans-serif';
+            ctx.fillStyle = fm >= 1 ? '#22c55e' : fm >= 0 ? '#facc15' : '#ef4444';
+            ctx.textAlign = 'center';
+            ctx.fillText(
+                `y(w\u00B7x+b) = ${fm.toFixed(3)}`,
+                cx, cy - 28
+            );
+            ctx.restore();
+
+            // Draw distance line to hyperplane
+            const wNorm = SU.vecNorm(model.w);
+            if (wNorm > 0) {
+                const dist = SU.decisionFunction(data[clickedIdx], model.w, model.b) / wNorm;
+                const projX = data[clickedIdx][0] - model.w[0] * dist / wNorm;
+                const projY = data[clickedIdx][1] - model.w[1] * dist / wNorm;
+                const [pcx, pcy] = dataToCanvas(projX, projY, cw, ch, bounds);
+                ctx.save();
+                ctx.beginPath();
+                ctx.moveTo(cx, cy);
+                ctx.lineTo(pcx, pcy);
+                ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+                ctx.lineWidth = 1;
+                ctx.setLineDash([3, 3]);
+                ctx.stroke();
+                ctx.restore();
+            }
+        }
+    }
+
+    function onMove(e) {
+        const [mx, my] = getCanvasXY(canvas, e);
+        const idx = findNearest(data, mx, my, cw, ch, bounds);
+        if (idx >= 0) {
+            const fm = labels[idx] * SU.decisionFunction(data[idx], model.w, model.b);
+            const isSV = svSet.has(idx);
+            const rect = canvas.getBoundingClientRect();
+            tooltip.innerHTML =
+                `函数间隔: <b style="color:${fm >= 1 ? '#22c55e' : fm >= 0 ? '#facc15' : '#ef4444'}">${fm.toFixed(3)}</b>` +
+                (isSV ? ` <span style="color:#f97316">&nbsp;[支持向量]</span>` : '') +
+                `<br><span style="color:var(--text-muted)">类别: ${labels[idx] === 1 ? '+1' : '-1'} | 坐标: (${data[idx][0].toFixed(2)}, ${data[idx][1].toFixed(2)})</span>`;
+            tooltip.style.left = (e.clientX - rect.left + 15) + 'px';
+            tooltip.style.top = (e.clientY - rect.top - 10) + 'px';
+            tooltip.style.opacity = 1;
+            canvas.style.cursor = 'pointer';
+        } else {
+            tooltip.style.opacity = 0;
+            canvas.style.cursor = 'crosshair';
+        }
+    }
+
+    function onClick(e) {
+        const [mx, my] = getCanvasXY(canvas, e);
+        const idx = findNearest(data, mx, my, cw, ch, bounds);
+        if (idx >= 0) {
+            clickedIdx = idx;
+            draw();
+        }
+    }
+
+    return { init, regenerate };
+})();
+
+/* ================================================================
+   Section 2: 只有支持向量决定边界
+   ================================================================ */
+const Section2 = (() => {
+    const canvas = document.getElementById('canvas2');
+    const ctx = canvas.getContext('2d');
+    const tooltip = document.getElementById('tooltip2');
+    const cw = canvas.width;
+    const ch = canvas.height;
+    let data, labels, model, bounds, svSet;
+    let dragIdx = -1;
+    let origW, origB;
+    const seed = 77;
+
+    function init() {
+        generateData();
+        canvas.addEventListener('mousedown', onDown);
+        canvas.addEventListener('mousemove', onMove);
+        canvas.addEventListener('mouseup', onUp);
+        canvas.addEventListener('mouseleave', () => {
+            dragIdx = -1;
+            tooltip.style.opacity = 0;
+        });
+        canvas.addEventListener('dblclick', onDblClick);
+        canvas.addEventListener('contextmenu', e => e.preventDefault());
+    }
+
+    function generateData() {
+        const ds = SU.generateLinearData(30, 0.25, seed);
+        data = ds.data.map(p => [...p]);
+        labels = [...ds.labels];
+        train();
+        origW = [...model.w];
+        origB = model.b;
+    }
+
+    function train() {
+        model = SU.trainLinearSVM(data, labels, 1.0, 0.005, 2000);
+        bounds = computeBounds(data, 0.8);
+        svSet = new Set(model.supportVectors);
+        updateStats();
+        draw();
+    }
+
+    function reset() {
+        generateData();
+        document.getElementById('boundary-moved').textContent = '否';
+        document.getElementById('boundary-moved').style.color = 'var(--accent-green)';
+    }
+
+    function removeNonSV() {
+        const newData = [];
+        const newLabels = [];
+        for (let i = 0; i < data.length; i++) {
+            if (svSet.has(i)) {
+                newData.push(data[i]);
+                newLabels.push(labels[i]);
+            }
+        }
+        data = newData;
+        labels = newLabels;
+        train();
+    }
+
+    function updateStats() {
+        document.getElementById('sv-count2').textContent = model.supportVectors.length;
+        document.getElementById('total-count2').textContent = data.length;
+    }
+
+    function checkBoundaryMoved() {
+        const wDiff = Math.hypot(
+            model.w[0] - origW[0],
+            model.w[1] - origW[1]
+        );
+        const bDiff = Math.abs(model.b - origB);
+        const moved = wDiff > 0.05 || bDiff > 0.05;
+        const el = document.getElementById('boundary-moved');
+        el.textContent = moved ? '是' : '否';
+        el.style.color = moved ? 'var(--accent-orange)' : 'var(--accent-green)';
+    }
+
+    function draw() {
+        ctx.clearRect(0, 0, cw, ch);
+        drawGrid(ctx, cw, ch, bounds);
+        drawMarginFill(ctx, model.w, model.b, bounds, cw, ch);
+        drawHyperplane(ctx, model.w, model.b - 1, bounds, cw, ch, MC.marginLine, 1.5, [6, 4]);
+        drawHyperplane(ctx, model.w, model.b + 1, bounds, cw, ch, MC.marginLine, 1.5, [6, 4]);
+        drawHyperplane(ctx, model.w, model.b, bounds, cw, ch, MC.decisionBoundary, 2.5, null);
+
+        // Original boundary as ghost line
+        if (origW) {
+            drawHyperplane(ctx, origW, origB, bounds, cw, ch, 'rgba(250,204,21,0.15)', 1.5, [2, 4]);
+        }
+
+        // Non-SVs first
+        for (let i = 0; i < data.length; i++) {
+            if (svSet.has(i)) continue;
+            const [cx, cy] = dataToCanvas(data[i][0], data[i][1], cw, ch, bounds);
+            const color = SU.classToColor(labels[i]);
+            drawPoint(ctx, cx, cy, 6, color + '88', null);
+        }
+        // SVs on top
+        for (let i = 0; i < data.length; i++) {
+            if (!svSet.has(i)) continue;
+            const [cx, cy] = dataToCanvas(data[i][0], data[i][1], cw, ch, bounds);
+            const color = SU.classToColor(labels[i]);
+            drawPoint(ctx, cx, cy, 9, color, '#fff', 2.5);
+            drawSVRing(ctx, cx, cy, 9, MC.supportVector);
+        }
+
+        // Drag handle hint
+        if (dragIdx >= 0 && dragIdx < data.length) {
+            const [cx, cy] = dataToCanvas(data[dragIdx][0], data[dragIdx][1], cw, ch, bounds);
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(cx, cy, 18, 0, Math.PI * 2);
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 1.5;
+            ctx.setLineDash([3, 3]);
+            ctx.stroke();
+            ctx.restore();
+        }
+
+        // Instructions watermark
+        ctx.save();
+        ctx.font = '11px "Noto Sans SC", sans-serif';
+        ctx.fillStyle = 'rgba(255,255,255,0.15)';
+        ctx.textAlign = 'center';
+        ctx.fillText('拖动点 | 双击添加', cw / 2, ch - 12);
+        ctx.restore();
+    }
+
+    function onDown(e) {
+        const [mx, my] = getCanvasXY(canvas, e);
+        dragIdx = findNearest(data, mx, my, cw, ch, bounds);
+    }
+
+    function onMove(e) {
+        if (dragIdx < 0) {
+            // Hover state
+            const [mx, my] = getCanvasXY(canvas, e);
+            const idx = findNearest(data, mx, my, cw, ch, bounds);
+            canvas.style.cursor = idx >= 0 ? 'grab' : 'crosshair';
+            if (idx >= 0) {
+                const isSV = svSet.has(idx);
+                const rect = canvas.getBoundingClientRect();
+                tooltip.innerHTML = isSV
+                    ? '<span style="color:#f97316">支持向量 -- 拖动会改变边界</span>'
+                    : '<span style="color:#a8a8b8">非支持向量 -- 拖动不影响边界</span>';
+                tooltip.style.left = (e.clientX - rect.left + 15) + 'px';
+                tooltip.style.top = (e.clientY - rect.top - 10) + 'px';
+                tooltip.style.opacity = 1;
+            } else {
+                tooltip.style.opacity = 0;
+            }
+            return;
+        }
+        // Dragging
+        canvas.style.cursor = 'grabbing';
+        tooltip.style.opacity = 0;
+        const [mx, my] = getCanvasXY(canvas, e);
+        const [dx, dy] = canvasToData(mx, my, cw, ch, bounds);
+        data[dragIdx] = [dx, dy];
+        train();
+        checkBoundaryMoved();
+    }
+
+    function onUp() {
+        dragIdx = -1;
+    }
+
+    function onDblClick(e) {
+        e.preventDefault();
+        const [mx, my] = getCanvasXY(canvas, e);
+        const [dx, dy] = canvasToData(mx, my, cw, ch, bounds);
+        // Left double-click = +1
+        const label = e.button === 2 ? -1 : 1;
+        data.push([dx, dy]);
+        labels.push(label);
+        train();
+        checkBoundaryMoved();
+    }
+
+    return { init, reset, removeNonSV };
+})();
+
+/* ================================================================
+   Section 3: 支持向量的数量
+   ================================================================ */
+const Section3 = (() => {
+    const canvas = document.getElementById('canvas3');
+    const ctx = canvas.getContext('2d');
+    const cw = canvas.width;
+    const ch = canvas.height;
+    const noiseSlider = document.getElementById('noise-slider');
+    const noiseVal = document.getElementById('noise-val');
+    const npointsSlider = document.getElementById('npoints-slider');
+    const npointsVal = document.getElementById('npoints-val');
+    let data, labels, model, bounds, svSet;
+
+    function init() {
+        noiseSlider.addEventListener('input', () => {
+            noiseVal.textContent = (noiseSlider.value / 100).toFixed(2);
+            generate();
+        });
+        npointsSlider.addEventListener('input', () => {
+            npointsVal.textContent = npointsSlider.value;
+            generate();
+        });
+        generate();
+    }
+
+    function generate() {
+        const noise = noiseSlider.value / 100;
+        const nPts = parseInt(npointsSlider.value);
+        const ds = SU.generateLinearData(nPts, noise * 3 + 0.1, 123);
+        data = ds.data;
+        labels = ds.labels;
+        model = SU.trainLinearSVM(data, labels, 1.0, 0.005, 2000);
+        bounds = computeBounds(data, 0.8);
+
+        // Find SVs using a wider tolerance for noisy data
+        const tol = 0.15 + noise * 0.4;
+        const svIndices = [];
+        for (let i = 0; i < data.length; i++) {
+            const fm = labels[i] * SU.decisionFunction(data[i], model.w, model.b);
+            if (fm < 1 + tol) {
+                svIndices.push(i);
+            }
+        }
+        svSet = new Set(svIndices);
+
+        updateStats(svIndices.length);
+        drawBarChart();
+        draw();
+    }
+
+    function updateStats(svCount) {
+        document.getElementById('sv-count3').textContent = svCount;
+        document.getElementById('sv-pct3').textContent =
+            (svCount / data.length * 100).toFixed(0) + '%';
+        document.getElementById('margin-val3').textContent =
+            SU.computeMargin(model.w).toFixed(2);
+    }
+
+    function drawBarChart() {
+        const container = document.getElementById('bar-chart3');
+        // Keep the label span
+        container.innerHTML = '<span class="bar-chart-label">距离</span>';
+        const wNorm = SU.vecNorm(model.w);
+        if (wNorm < 1e-10) return;
+
+        const distances = data.map((p, i) => ({
+            dist: Math.abs(SU.decisionFunction(p, model.w, model.b)) / wNorm,
+            isSV: svSet.has(i),
+            idx: i
+        }));
+        distances.sort((a, b) => a.dist - b.dist);
+        const maxDist = Math.max(...distances.map(d => d.dist), 0.01);
+
+        // Margin threshold line
+        const marginDist = 1 / wNorm;
+        const thresholdPct = Math.min(marginDist / maxDist * 100, 100);
+        const threshLine = document.createElement('div');
+        threshLine.className = 'bar-chart-threshold';
+        threshLine.style.bottom = (thresholdPct * 0.85 + 8) + '%';
+        threshLine.title = '间隔边界距离';
+        container.appendChild(threshLine);
+
+        for (const d of distances) {
+            const bar = document.createElement('div');
+            bar.className = 'bar';
+            const h = Math.max(3, (d.dist / maxDist) * 90);
+            bar.style.height = h + 'px';
+            bar.style.background = d.isSV ? '#f97316' : '#4fc3f7';
+            bar.style.opacity = d.isSV ? '1' : '0.45';
+            bar.title = `点 #${d.idx}: 距离=${d.dist.toFixed(3)}` +
+                (d.isSV ? ' [SV]' : '');
+            container.appendChild(bar);
+        }
+    }
+
+    function draw() {
+        ctx.clearRect(0, 0, cw, ch);
+        drawGrid(ctx, cw, ch, bounds);
+        drawMarginFill(ctx, model.w, model.b, bounds, cw, ch);
+        drawHyperplane(ctx, model.w, model.b - 1, bounds, cw, ch, MC.marginLine, 1.5, [6, 4]);
+        drawHyperplane(ctx, model.w, model.b + 1, bounds, cw, ch, MC.marginLine, 1.5, [6, 4]);
+        drawHyperplane(ctx, model.w, model.b, bounds, cw, ch, MC.decisionBoundary, 2.5, null);
+
+        // Draw distance lines from SVs to hyperplane
+        const wNorm = SU.vecNorm(model.w);
+        if (wNorm > 0) {
+            ctx.save();
+            ctx.strokeStyle = 'rgba(249,115,22,0.2)';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([2, 3]);
+            for (let i = 0; i < data.length; i++) {
+                if (!svSet.has(i)) continue;
+                const [cx, cy] = dataToCanvas(data[i][0], data[i][1], cw, ch, bounds);
+                const dist = SU.decisionFunction(data[i], model.w, model.b) / wNorm;
+                const projX = data[i][0] - model.w[0] * dist / wNorm;
+                const projY = data[i][1] - model.w[1] * dist / wNorm;
+                const [pcx, pcy] = dataToCanvas(projX, projY, cw, ch, bounds);
+                ctx.beginPath();
+                ctx.moveTo(cx, cy);
+                ctx.lineTo(pcx, pcy);
+                ctx.stroke();
+            }
+            ctx.restore();
+        }
+
+        // Non-SVs
+        for (let i = 0; i < data.length; i++) {
+            if (svSet.has(i)) continue;
+            const [cx, cy] = dataToCanvas(data[i][0], data[i][1], cw, ch, bounds);
+            const color = SU.classToColor(labels[i]);
+            drawPoint(ctx, cx, cy, 4, color + '55', null);
+        }
+        // SVs
+        for (let i = 0; i < data.length; i++) {
+            if (!svSet.has(i)) continue;
+            const [cx, cy] = dataToCanvas(data[i][0], data[i][1], cw, ch, bounds);
+            const color = SU.classToColor(labels[i]);
+            drawPoint(ctx, cx, cy, 8, color, '#fff', 2);
+            drawSVRing(ctx, cx, cy, 8, MC.supportVector);
+        }
+
+        // SV count label
+        ctx.save();
+        ctx.font = 'bold 13px "Noto Sans SC", sans-serif';
+        ctx.fillStyle = '#f97316';
+        ctx.textAlign = 'left';
+        ctx.fillText(
+            `SV: ${[...svSet].length} / ${data.length}  (${([...svSet].length / data.length * 100).toFixed(0)}%)`,
+            58, ch - 16
+        );
+        ctx.restore();
+    }
+
+    return { init };
+})();
+
+/* ================================================================
+   Section 4: KKT 条件直觉
+   ================================================================ */
+const Section4 = (() => {
+    const canvas = document.getElementById('canvas4');
+    const ctx = canvas.getContext('2d');
+    const tooltip = document.getElementById('tooltip4');
+    const cw = canvas.width;
+    const ch = canvas.height;
+    const cSlider = document.getElementById('c-slider');
+    const cValEl = document.getElementById('c-val');
+    const noiseSlider = document.getElementById('noise-slider4');
+    const noiseValEl = document.getElementById('noise-val4');
+    let data, labels, model, bounds, alphas, C;
+    let seed = 55;
+
+    function init() {
+        cSlider.addEventListener('input', () => {
+            cValEl.textContent = (cSlider.value / 10).toFixed(1);
+            generate();
+        });
+        noiseSlider.addEventListener('input', () => {
+            noiseValEl.textContent = (noiseSlider.value / 100).toFixed(2);
+            generate();
+        });
+        canvas.addEventListener('mousemove', onMove);
+        canvas.addEventListener('mouseleave', () => {
+            tooltip.style.opacity = 0;
+        });
+        generate();
+    }
+
+    function generate() {
+        C = cSlider.value / 10;
+        const noise = noiseSlider.value / 100;
+        const ds = SU.generateLinearData(50, noise * 4 + 0.2, seed);
+        data = ds.data;
+        labels = ds.labels;
+
+        // Train with SMO for alpha values
+        const smo = SU.trainKernelSVM(
+            data, labels, SU.linearKernel, C, 0.001, 25
+        );
+        alphas = smo.alphas;
+
+        // Also train linear for w, b visualization
+        model = SU.trainLinearSVM(data, labels, C, 0.005, 2000);
+        bounds = computeBounds(data, 0.8);
+
+        updateStats();
+        updateAlphaDist();
+        draw();
+    }
+
+    function regenerate() {
+        seed = Math.floor(Math.random() * 100000);
+        generate();
+    }
+
+    function updateStats() {
+        let a0 = 0, aMid = 0, aC = 0;
+        const tol = 1e-4;
+        for (const a of alphas) {
+            if (a < tol) a0++;
+            else if (a >= C - tol) aC++;
+            else aMid++;
+        }
+        document.getElementById('alpha0-count').textContent = a0;
+        document.getElementById('alphamid-count').textContent = aMid;
+        document.getElementById('alphaC-count').textContent = aC;
+    }
+
+    function updateAlphaDist() {
+        const container = document.getElementById('alpha-dist');
+        container.innerHTML = '';
+        let a0 = 0, aMid = 0, aC = 0;
+        const tol = 1e-4;
+        for (const a of alphas) {
+            if (a < tol) a0++;
+            else if (a >= C - tol) aC++;
+            else aMid++;
+        }
+        const total = alphas.length;
+        if (total === 0) return;
+
+        const s0 = document.createElement('div');
+        s0.className = 'seg';
+        s0.style.width = (a0 / total * 100) + '%';
+        s0.style.background = '#6c6c7c';
+        s0.title = `alpha=0: ${a0}`;
+        container.appendChild(s0);
+
+        const sM = document.createElement('div');
+        sM.className = 'seg';
+        sM.style.width = (aMid / total * 100) + '%';
+        sM.style.background = '#22c55e';
+        sM.title = `0<alpha<C: ${aMid}`;
+        container.appendChild(sM);
+
+        const sC = document.createElement('div');
+        sC.className = 'seg';
+        sC.style.width = (aC / total * 100) + '%';
+        sC.style.background = '#f97316';
+        sC.title = `alpha=C: ${aC}`;
+        container.appendChild(sC);
+    }
+
+    function getPointColor(alpha) {
+        const tol = 1e-4;
+        if (alpha < tol) return '#6c6c7c';
+        if (alpha >= C - tol) return '#f97316';
+        return '#22c55e';
+    }
+
+    function getPointRadius(alpha) {
+        const tol = 1e-4;
+        if (alpha < tol) return 5;
+        if (alpha >= C - tol) return 9;
+        return 8;
+    }
+
+    function draw() {
+        ctx.clearRect(0, 0, cw, ch);
+        drawGrid(ctx, cw, ch, bounds);
+
+        // Decision region coloring (very subtle)
+        const step = 8;
+        const pad = 50;
+        for (let px = pad; px < cw - pad; px += step) {
+            for (let py = pad; py < ch - pad; py += step) {
+                const [dx, dy] = canvasToData(px, py, cw, ch, bounds);
+                const val = SU.decisionFunction([dx, dy], model.w, model.b);
+                const absVal = Math.abs(val);
+                if (absVal < 1.2) {
+                    ctx.fillStyle = val > 0
+                        ? `rgba(34,197,94,${0.03 + (1 - absVal) * 0.04})`
+                        : `rgba(239,68,68,${0.03 + (1 - absVal) * 0.04})`;
+                    ctx.fillRect(px - step / 2, py - step / 2, step, step);
+                }
+            }
+        }
+
+        drawMarginFill(ctx, model.w, model.b, bounds, cw, ch);
+        drawHyperplane(ctx, model.w, model.b - 1, bounds, cw, ch, MC.marginLine, 1.5, [6, 4]);
+        drawHyperplane(ctx, model.w, model.b + 1, bounds, cw, ch, MC.marginLine, 1.5, [6, 4]);
+        drawHyperplane(ctx, model.w, model.b, bounds, cw, ch, MC.decisionBoundary, 2.5, null);
+
+        const tol = 1e-4;
+
+        // Draw alpha=0 points first (background)
+        for (let i = 0; i < data.length; i++) {
+            if (alphas[i] >= tol) continue;
+            const [cx, cy] = dataToCanvas(data[i][0], data[i][1], cw, ch, bounds);
+            const baseColor = SU.classToColor(labels[i]);
+            drawPoint(ctx, cx, cy, 5, baseColor + '33', null);
+        }
+
+        // Then draw alpha > 0 points
+        for (let i = 0; i < data.length; i++) {
+            if (alphas[i] < tol) continue;
+            const [cx, cy] = dataToCanvas(data[i][0], data[i][1], cw, ch, bounds);
+            const a = alphas[i];
+            const pColor = getPointColor(a);
+            const r = getPointRadius(a);
+            const fm = labels[i] * SU.decisionFunction(data[i], model.w, model.b);
+            const misclass = fm < 0;
+
+            drawPoint(ctx, cx, cy, r, pColor, '#fff', 2);
+
+            // Ring based on category
+            if (a >= C - tol) {
+                drawSVRing(ctx, cx, cy, r, misclass ? '#ef4444' : '#f97316');
+            } else {
+                drawSVRing(ctx, cx, cy, r, '#22c55e');
+            }
+
+            // Alpha value label for SVs
+            ctx.save();
+            ctx.font = '9px monospace';
+            ctx.fillStyle = 'rgba(255,255,255,0.65)';
+            ctx.textAlign = 'center';
+            ctx.fillText(
+                '\u03B1=' + a.toFixed(2),
+                cx, cy - r - 8
+            );
+            ctx.restore();
+
+            // Misclassification X marker
+            if (misclass) {
+                ctx.save();
+                ctx.strokeStyle = '#ef4444';
+                ctx.lineWidth = 2.5;
+                const s = 6;
+                ctx.beginPath();
+                ctx.moveTo(cx - s, cy - s);
+                ctx.lineTo(cx + s, cy + s);
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(cx + s, cy - s);
+                ctx.lineTo(cx - s, cy + s);
+                ctx.stroke();
+                ctx.restore();
+            }
+        }
+
+        // Legend in canvas
+        ctx.save();
+        ctx.font = '11px "Noto Sans SC", sans-serif';
+        ctx.fillStyle = 'rgba(255,255,255,0.2)';
+        ctx.textAlign = 'center';
+        ctx.fillText(`C = ${C.toFixed(1)}`, cw / 2, ch - 12);
+        ctx.restore();
+    }
+
+    function onMove(e) {
+        const [mx, my] = getCanvasXY(canvas, e);
+        const idx = findNearest(data, mx, my, cw, ch, bounds);
+        if (idx >= 0) {
+            const a = alphas[idx];
+            const fm = labels[idx] * SU.decisionFunction(data[idx], model.w, model.b);
+            const tol = 1e-4;
+
+            let type, tColor;
+            if (a < tol) {
+                type = '\u03B1 = 0（非支持向量）';
+                tColor = '#6c6c7c';
+            } else if (a >= C - tol) {
+                type = '\u03B1 = C（边界/误分类）';
+                tColor = '#f97316';
+            } else {
+                type = '0 < \u03B1 < C（间隔SV）';
+                tColor = '#22c55e';
+            }
+
+            const rect = canvas.getBoundingClientRect();
+            tooltip.innerHTML =
+                `<span style="color:${tColor}">${type}</span><br>` +
+                `\u03B1 = <b>${a.toFixed(4)}</b> | ` +
+                `函数间隔 = <b style="color:${fm >= 1 ? '#22c55e' : fm >= 0 ? '#facc15' : '#ef4444'}">${fm.toFixed(3)}</b>` +
+                `<br><span style="color:var(--text-muted)">类别: ${labels[idx] === 1 ? '+1' : '-1'}</span>`;
+            tooltip.style.left = (e.clientX - rect.left + 15) + 'px';
+            tooltip.style.top = (e.clientY - rect.top - 10) + 'px';
+            tooltip.style.opacity = 1;
+            canvas.style.cursor = 'pointer';
+        } else {
+            tooltip.style.opacity = 0;
+            canvas.style.cursor = 'crosshair';
+        }
+    }
+
+    return { init, regenerate };
+})();
+
+/* ================================================================
+   Initialize all sections
+   ================================================================ */
+Section1.init();
+Section2.init();
+Section3.init();
+Section4.init();
+</script>
+</body>
+</html>

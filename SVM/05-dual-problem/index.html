@@ -1,0 +1,1629 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>对偶问题 — Dual Problem | SVM 支持向量机</title>
+    <link rel="stylesheet" href="../shared/styles/common.css">
+    <link rel="stylesheet" href="../shared/styles/components.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+    <style>
+        /* ========== Page-specific styles ========== */
+        .page-header {
+            text-align: center;
+            margin-bottom: 2.5rem;
+            padding: 2rem 0 1.5rem;
+        }
+        .page-header h1 {
+            font-size: 2.2rem;
+            margin-bottom: 0.5rem;
+        }
+        .page-header .subtitle {
+            color: var(--text-secondary);
+            font-size: 1.05rem;
+        }
+
+        /* Derivation step cards */
+        .derivation-steps {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+        .deriv-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1.2rem 1.5rem;
+            transition: all 0.3s;
+            cursor: pointer;
+            position: relative;
+            overflow: hidden;
+        }
+        .deriv-card::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            width: 3px;
+            background: var(--border-color);
+            transition: background 0.3s;
+        }
+        .deriv-card.active::before {
+            background: var(--accent-green);
+        }
+        .deriv-card.active {
+            border-color: var(--accent-green);
+            box-shadow: var(--shadow-glow);
+        }
+        .deriv-card .step-num {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 26px;
+            height: 26px;
+            border-radius: 50%;
+            background: var(--border-color);
+            color: var(--text-muted);
+            font-size: 0.8rem;
+            font-weight: 700;
+            margin-right: 0.6rem;
+            transition: all 0.3s;
+        }
+        .deriv-card.active .step-num {
+            background: var(--accent-green);
+            color: var(--bg-primary);
+        }
+        .deriv-card h4 {
+            display: inline;
+            font-size: 0.95rem;
+        }
+        .deriv-card .formula-content {
+            margin-top: 0.75rem;
+            padding-top: 0.75rem;
+            border-top: 1px solid rgba(42, 42, 74, 0.5);
+            display: none;
+        }
+        .deriv-card.active .formula-content {
+            display: block;
+        }
+        .deriv-card .explanation {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            margin-top: 0.5rem;
+            line-height: 1.6;
+        }
+
+        /* Canvas containers */
+        .canvas-wrap {
+            position: relative;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            overflow: hidden;
+        }
+        .canvas-wrap canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+
+        /* Gram matrix heatmap */
+        .gram-matrix-grid {
+            display: grid;
+            gap: 2px;
+            margin: 0 auto;
+        }
+        .gram-cell {
+            aspect-ratio: 1;
+            border-radius: 3px;
+            cursor: pointer;
+            transition: all 0.2s;
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: var(--font-mono);
+            font-size: 0.65rem;
+            color: transparent;
+        }
+        .gram-cell:hover {
+            outline: 2px solid var(--accent-green);
+            outline-offset: -1px;
+            color: var(--text-primary);
+            z-index: 2;
+        }
+        .gram-cell.selected {
+            outline: 2px solid var(--accent-yellow);
+            outline-offset: -1px;
+            color: var(--text-primary);
+            z-index: 3;
+        }
+
+        /* Gram info panel */
+        .gram-info {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1rem 1.2rem;
+            min-height: 80px;
+        }
+        .gram-info .pair-label {
+            color: var(--accent-green);
+            font-family: var(--font-mono);
+            font-size: 0.9rem;
+            font-weight: 600;
+        }
+        .gram-info .pair-value {
+            color: var(--accent-yellow);
+            font-family: var(--font-mono);
+            font-size: 1.1rem;
+        }
+
+        /* Insight box */
+        .insight-box {
+            background: rgba(22, 199, 154, 0.08);
+            border: 1px solid rgba(22, 199, 154, 0.3);
+            border-radius: var(--radius-md);
+            padding: 1.2rem 1.5rem;
+            margin: 1rem 0;
+        }
+        .insight-box .insight-title {
+            color: var(--accent-green);
+            font-weight: 700;
+            font-size: 0.95rem;
+            margin-bottom: 0.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .insight-box p {
+            font-size: 0.9rem;
+            margin-bottom: 0.4rem;
+        }
+
+        /* SV contribution bars */
+        .sv-contribution {
+            display: flex;
+            flex-direction: column;
+            gap: 0.6rem;
+        }
+        .sv-row {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 0.5rem 0.75rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            transition: all 0.3s;
+        }
+        .sv-row.highlighted {
+            border-color: var(--accent-green);
+            background: rgba(22, 199, 154, 0.05);
+        }
+        .sv-row .sv-label {
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            min-width: 55px;
+            color: var(--text-secondary);
+        }
+        .sv-row .bar-wrap {
+            flex: 1;
+            height: 20px;
+            background: rgba(42, 42, 74, 0.5);
+            border-radius: 3px;
+            overflow: hidden;
+            position: relative;
+        }
+        .sv-row .bar-fill {
+            height: 100%;
+            border-radius: 3px;
+            transition: width 0.5s var(--anim-ease);
+        }
+        .sv-row .bar-fill.positive {
+            background: linear-gradient(90deg, rgba(34, 197, 94, 0.3), rgba(34, 197, 94, 0.8));
+        }
+        .sv-row .bar-fill.negative {
+            background: linear-gradient(90deg, rgba(239, 68, 68, 0.3), rgba(239, 68, 68, 0.8));
+        }
+        .sv-row .sv-value {
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            min-width: 60px;
+            text-align: right;
+        }
+
+        /* Test point controls */
+        .test-point-info {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1rem;
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+        }
+        .test-point-info .result-pos {
+            color: var(--accent-green);
+            font-weight: 700;
+        }
+        .test-point-info .result-neg {
+            color: var(--accent-red);
+            font-weight: 700;
+        }
+
+        /* Primal 3D surface legend */
+        .surface-legend {
+            position: absolute;
+            bottom: 0.75rem;
+            left: 0.75rem;
+            background: rgba(26, 26, 46, 0.9);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            padding: 0.5rem 0.75rem;
+            font-size: 0.75rem;
+        }
+        .surface-legend .legend-row {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            margin: 0.2rem 0;
+        }
+        .surface-legend .dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+        }
+
+        /* Section anchor spacing */
+        .section[id] {
+            scroll-margin-top: calc(var(--header-height) + 1rem);
+        }
+
+        /* Formula highlight */
+        .formula-highlight {
+            background: rgba(79, 195, 247, 0.08);
+            border: 1px solid rgba(79, 195, 247, 0.2);
+            border-radius: var(--radius-sm);
+            padding: 0.75rem 1rem;
+            margin: 0.75rem 0;
+            text-align: center;
+        }
+
+        /* Responsive overrides */
+        @media (max-width: 1024px) {
+            .split-layout {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="page-container">
+        <!-- Header -->
+        <div class="page-header">
+            <h1>对偶问题 — Dual Problem</h1>
+            <p class="subtitle">将原始优化问题转化为对偶形式，揭示核技巧的理论基础</p>
+        </div>
+
+        <!-- Section 1: 原始问题回顾 -->
+        <div class="section" id="primal">
+            <div class="section-title">
+                <div class="icon">1</div>
+                <h2>原始问题回顾</h2>
+            </div>
+            <div class="split-layout">
+                <div class="text-panel">
+                    <p>SVM 的原始优化问题（软间隔形式）：</p>
+                    <div class="formula-highlight" id="primal-formula">
+                        $$\min_{w, b, \xi} \frac{1}{2}\|w\|^2 + C\sum_{i=1}^{n}\xi_i$$
+                    </div>
+                    <p>约束条件：</p>
+                    <div class="formula-highlight">
+                        $$y_i(w \cdot x_i + b) \geq 1 - \xi_i, \quad \xi_i \geq 0$$
+                    </div>
+                    <div class="info-box mt-2">
+                        <p><strong>目标：</strong>在最大化间隔（最小化 $\|w\|^2$）和允许误分类（松弛变量 $\xi_i$）之间找到平衡。参数 $C$ 控制这一权衡。</p>
+                    </div>
+                    <div class="slider-group mt-2">
+                        <label>参数 C：</label>
+                        <input type="range" id="primal-c-slider" min="0.1" max="10" step="0.1" value="1.0">
+                        <span class="slider-value" id="primal-c-value">1.0</span>
+                    </div>
+                    <div class="legend mt-1">
+                        <div class="legend-item"><div class="swatch" style="background:#facc15"></div>最优点</div>
+                        <div class="legend-item"><div class="swatch" style="background:rgba(79,195,247,0.5)"></div>可行域</div>
+                        <div class="legend-item"><div class="swatch" style="background:#ff5252"></div>等高线</div>
+                    </div>
+                </div>
+                <div class="viz-panel">
+                    <div class="canvas-wrap" style="height:420px">
+                        <canvas id="primal-canvas"></canvas>
+                        <div class="surface-legend">
+                            <div class="legend-row"><div class="dot" style="background:#facc15"></div> 最优解</div>
+                            <div class="legend-row"><div class="dot" style="background:rgba(79,195,247,0.6)"></div> 可行域</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Section 2: 拉格朗日对偶 -->
+        <div class="section" id="lagrangian">
+            <div class="section-title">
+                <div class="icon">2</div>
+                <h2>拉格朗日对偶</h2>
+            </div>
+            <p class="mb-2">通过引入拉格朗日乘子 $\alpha_i \geq 0$，将约束优化问题转化为无约束的对偶形式。点击每一步查看推导过程：</p>
+            <div class="split-layout">
+                <div class="text-panel">
+                    <div class="derivation-steps" id="deriv-steps">
+                        <!-- Step 1 -->
+                        <div class="deriv-card active" data-step="0">
+                            <span class="step-num">1</span>
+                            <h4>构造拉格朗日函数</h4>
+                            <div class="formula-content">
+                                <div class="formula-highlight">
+                                    $$L(w,b,\alpha) = \frac{1}{2}\|w\|^2 - \sum_{i=1}^{n}\alpha_i\left[y_i(w \cdot x_i + b) - 1\right]$$
+                                </div>
+                                <p class="explanation">引入拉格朗日乘子 $\alpha_i \geq 0$，将不等式约束嵌入目标函数。原始问题等价于 $\min_{w,b}\max_{\alpha \geq 0} L$。</p>
+                            </div>
+                        </div>
+                        <!-- Step 2 -->
+                        <div class="deriv-card" data-step="1">
+                            <span class="step-num">2</span>
+                            <h4>对 $w$ 求偏导，令其为零</h4>
+                            <div class="formula-content">
+                                <div class="formula-highlight">
+                                    $$\frac{\partial L}{\partial w} = w - \sum_{i=1}^{n}\alpha_i y_i x_i = 0$$
+                                </div>
+                                <div class="formula-highlight">
+                                    $$\Rightarrow \quad w = \sum_{i=1}^{n}\alpha_i y_i x_i$$
+                                </div>
+                                <p class="explanation">最优的 $w$ 是训练样本的线性组合！权重由 $\alpha_i y_i$ 决定。只有 $\alpha_i > 0$ 的样本（支持向量）才对 $w$ 有贡献。</p>
+                            </div>
+                        </div>
+                        <!-- Step 3 -->
+                        <div class="deriv-card" data-step="2">
+                            <span class="step-num">3</span>
+                            <h4>对 $b$ 求偏导，令其为零</h4>
+                            <div class="formula-content">
+                                <div class="formula-highlight">
+                                    $$\frac{\partial L}{\partial b} = -\sum_{i=1}^{n}\alpha_i y_i = 0$$
+                                </div>
+                                <div class="formula-highlight">
+                                    $$\Rightarrow \quad \sum_{i=1}^{n}\alpha_i y_i = 0$$
+                                </div>
+                                <p class="explanation">这个条件要求正类和负类的加权系数之和相等，体现了分类器的平衡性。</p>
+                            </div>
+                        </div>
+                        <!-- Step 4 -->
+                        <div class="deriv-card" data-step="3">
+                            <span class="step-num">4</span>
+                            <h4>代回拉格朗日函数</h4>
+                            <div class="formula-content">
+                                <p class="explanation">将 $w = \sum \alpha_i y_i x_i$ 和 $\sum \alpha_i y_i = 0$ 代入 $L$：</p>
+                                <div class="formula-highlight">
+                                    $$L = \frac{1}{2}\left\|\sum_i \alpha_i y_i x_i\right\|^2 - \sum_i \alpha_i y_i \left(\sum_j \alpha_j y_j x_j\right)\cdot x_i + \sum_i \alpha_i$$
+                                </div>
+                                <p class="explanation">展开并化简后，$\|w\|^2$ 项和交叉项合并：</p>
+                            </div>
+                        </div>
+                        <!-- Step 5 -->
+                        <div class="deriv-card" data-step="4">
+                            <span class="step-num">5</span>
+                            <h4>得到对偶问题</h4>
+                            <div class="formula-content">
+                                <div class="formula-highlight">
+                                    $$\max_{\alpha} \sum_{i=1}^{n}\alpha_i - \frac{1}{2}\sum_{i=1}^{n}\sum_{j=1}^{n}\alpha_i \alpha_j y_i y_j (x_i \cdot x_j)$$
+                                </div>
+                                <div class="formula-highlight">
+                                    $$\text{s.t.} \quad \alpha_i \geq 0, \quad \sum_{i=1}^{n}\alpha_i y_i = 0$$
+                                </div>
+                                <p class="explanation">对偶问题只依赖 $\alpha_i$ 和样本之间的<strong>内积 $x_i \cdot x_j$</strong>！这是核技巧的理论基础。</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="viz-panel">
+                    <div class="canvas-wrap" style="height:420px">
+                        <canvas id="lagrangian-canvas"></canvas>
+                    </div>
+                    <p class="text-sm text-muted text-center mt-1">可视化：每一步推导对应的几何意义</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Section 3: 对偶问题的意义 -->
+        <div class="section" id="dual-meaning">
+            <div class="section-title">
+                <div class="icon">3</div>
+                <h2>对偶问题的意义</h2>
+            </div>
+            <div class="split-layout">
+                <div class="text-panel">
+                    <p>对偶形式的核心发现：</p>
+                    <div class="formula-highlight">
+                        $$\max_{\alpha} \sum_i \alpha_i - \frac{1}{2}\sum_{i,j}\alpha_i \alpha_j y_i y_j \underbrace{(x_i \cdot x_j)}_{K_{ij}}$$
+                    </div>
+                    <div class="insight-box">
+                        <div class="insight-title">&#x1f4a1; 关键洞察</div>
+                        <p>对偶问题<strong>仅依赖于样本之间的内积</strong> $x_i \cdot x_j$，而非单独的特征向量！</p>
+                        <p>这意味着我们可以用<strong>核函数</strong> $K(x_i, x_j)$ 替换内积，在高维空间中隐式计算，这就是<strong>核技巧</strong>。</p>
+                    </div>
+                    <p class="mt-2">右侧展示 <strong>Gram 矩阵</strong>（核矩阵），每个元素 $K_{ij} = x_i \cdot x_j$。点击单元格查看对应的样本对。</p>
+                    <div class="gram-info mt-1" id="gram-info">
+                        <p style="color:var(--text-muted); font-size:0.85rem">点击热力图中的单元格查看详情</p>
+                    </div>
+                    <div class="slider-group mt-2">
+                        <label>样本数量：</label>
+                        <input type="range" id="gram-n-slider" min="5" max="12" step="1" value="8">
+                        <span class="slider-value" id="gram-n-value">8</span>
+                    </div>
+                    <div class="btn-group mt-1">
+                        <button class="btn btn-sm active" data-kernel="linear" onclick="DualPage.setKernel('linear',this)">线性核</button>
+                        <button class="btn btn-sm" data-kernel="rbf" onclick="DualPage.setKernel('rbf',this)">RBF核</button>
+                        <button class="btn btn-sm" data-kernel="poly" onclick="DualPage.setKernel('poly',this)">多项式核</button>
+                    </div>
+                </div>
+                <div class="viz-panel">
+                    <div class="card" style="padding:1.5rem">
+                        <div class="flex justify-between items-center mb-1">
+                            <h4 style="margin:0">Gram 矩阵热力图</h4>
+                            <span class="badge badge-green" id="gram-kernel-badge">线性核</span>
+                        </div>
+                        <div id="gram-heatmap" style="margin:0.75rem auto; max-width:460px;"></div>
+                        <div class="canvas-wrap mt-1" style="height:220px">
+                            <canvas id="gram-scatter-canvas"></canvas>
+                        </div>
+                        <p class="text-sm text-muted text-center mt-1">上方：Gram矩阵 | 下方：数据点分布（高亮选中的点对）</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Section 4: 从对偶解到决策 -->
+        <div class="section" id="decision">
+            <div class="section-title">
+                <div class="icon">4</div>
+                <h2>从对偶解到决策</h2>
+            </div>
+            <div class="split-layout">
+                <div class="text-panel">
+                    <p>求解对偶问题后，得到最优的 $\alpha_i^*$，据此重建决策函数：</p>
+                    <div class="formula-highlight">
+                        $$w^* = \sum_{i=1}^{n}\alpha_i^* y_i x_i$$
+                    </div>
+                    <p>偏置 $b$ 从任意支持向量 $x_s$（满足 $0 < \alpha_s < C$）计算：</p>
+                    <div class="formula-highlight">
+                        $$b^* = y_s - \sum_{i \in SV}\alpha_i^* y_i (x_i \cdot x_s)$$
+                    </div>
+                    <p>最终决策函数：</p>
+                    <div class="formula-highlight">
+                        $$f(x) = \sum_{i \in SV}\alpha_i^* y_i (x_i \cdot x) + b^*$$
+                    </div>
+                    <div class="info-box success mt-1">
+                        <p>只有<strong>支持向量</strong>（$\alpha_i > 0$）参与决策！非支持向量对最终模型没有贡献。</p>
+                    </div>
+                    <p class="mt-2"><strong>每个支持向量的"投票"：</strong></p>
+                    <div class="sv-contribution mt-1" id="sv-contributions"></div>
+                    <div class="test-point-info mt-2" id="test-point-info">
+                        <p style="color:var(--text-muted)">在右侧画布上<strong>点击</strong>选择测试点，查看各支持向量的贡献</p>
+                    </div>
+                </div>
+                <div class="viz-panel">
+                    <div class="canvas-wrap" style="height:460px">
+                        <canvas id="decision-canvas"></canvas>
+                    </div>
+                    <div class="flex justify-between items-center mt-1">
+                        <div class="legend">
+                            <div class="legend-item"><div class="swatch" style="background:#22c55e"></div>正类 (+1)</div>
+                            <div class="legend-item"><div class="swatch" style="background:#ef4444"></div>负类 (-1)</div>
+                            <div class="legend-item"><div class="swatch" style="background:#f97316;border:2px solid #fff"></div>支持向量</div>
+                            <div class="legend-item"><div class="swatch" style="background:#facc15"></div>测试点</div>
+                        </div>
+                        <button class="btn btn-sm" onclick="DualPage.resetDecision()">重新训练</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="../shared/scripts/nav.js"></script>
+    <script src="../shared/scripts/svm-utils.js"></script>
+    <script>
+    /* ============================================================
+       DualPage — 对偶问题 交互模块
+       ============================================================ */
+    const DualPage = (() => {
+        // Shared state
+        let currentKernel = 'linear';
+        let gramN = 8;
+        let gramData = null;
+        let gramLabels = null;
+        let selectedGramCell = null;
+        let decisionModel = null;
+        let decisionData = null;
+        let decisionLabels = null;
+        let testPoint = null;
+
+        /* ========================================
+           Section 1: Primal Problem Surface
+           ======================================== */
+        function initPrimal() {
+            const canvas = document.getElementById('primal-canvas');
+            const ctx = canvas.getContext('2d');
+            const slider = document.getElementById('primal-c-slider');
+            const valueSpan = document.getElementById('primal-c-value');
+
+            function draw() {
+                const dpr = window.devicePixelRatio || 1;
+                const rect = canvas.parentElement.getBoundingClientRect();
+                canvas.width = rect.width * dpr;
+                canvas.height = rect.height * dpr;
+                ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+                const W = rect.width, H = rect.height;
+                const C = parseFloat(slider.value);
+                valueSpan.textContent = C.toFixed(1);
+
+                ctx.clearRect(0, 0, W, H);
+
+                // Coordinate mapping: w1 from -3 to 3, w2 from -3 to 3
+                const margin = 40;
+                const plotW = W - 2 * margin;
+                const plotH = H - 2 * margin;
+                const toCanvasX = (w1) => margin + (w1 + 3) / 6 * plotW;
+                const toCanvasY = (w2) => margin + (3 - w2) / 6 * plotH;
+
+                // Generate sample data points for constraint visualization
+                const rng = SVMUtils.seededRandom(42);
+                const pts = [];
+                const lbls = [];
+                for (let i = 0; i < 4; i++) {
+                    pts.push([rng() * 1.5 + 0.3, rng() * 1.5 + 0.3]);
+                    lbls.push(1);
+                }
+                for (let i = 0; i < 4; i++) {
+                    pts.push([-rng() * 1.5 - 0.3, -rng() * 1.5 - 0.3]);
+                    lbls.push(-1);
+                }
+
+                // Draw objective function contours (||w||^2 / 2)
+                const levels = [0.5, 1, 2, 4, 8, 12, 18];
+                ctx.lineWidth = 1;
+                for (const level of levels) {
+                    const r = Math.sqrt(2 * level);
+                    const cx = toCanvasX(0);
+                    const cy = toCanvasY(0);
+                    const rx = r / 6 * plotW;
+                    const ry = r / 6 * plotH;
+                    ctx.beginPath();
+                    ctx.ellipse(cx, cy, rx, ry, 0, 0, 2 * Math.PI);
+                    ctx.strokeStyle = `rgba(255, 82, 82, ${0.15 + level / 25})`;
+                    ctx.stroke();
+                }
+
+                // Draw feasible region approximation (filled)
+                // Simplified: shade region where all constraints approximately satisfied
+                const res = 3;
+                for (let px = margin; px < W - margin; px += res) {
+                    for (let py = margin; py < H - margin; py += res) {
+                        const w1 = (px - margin) / plotW * 6 - 3;
+                        const w2 = 3 - (py - margin) / plotH * 6;
+                        let feasible = true;
+                        let minSlack = 0;
+                        for (let k = 0; k < pts.length; k++) {
+                            const val = lbls[k] * (w1 * pts[k][0] + w2 * pts[k][1]);
+                            if (val < 1) {
+                                minSlack += (1 - val);
+                            }
+                        }
+                        const obj = 0.5 * (w1 * w1 + w2 * w2) + C * minSlack;
+                        if (obj < 12) {
+                            const alpha = Math.max(0, 0.08 - minSlack * 0.02);
+                            if (minSlack < 0.01) {
+                                ctx.fillStyle = `rgba(79, 195, 247, 0.12)`;
+                            } else {
+                                ctx.fillStyle = `rgba(79, 195, 247, ${alpha})`;
+                            }
+                            ctx.fillRect(px, py, res, res);
+                        }
+                    }
+                }
+
+                // Find the approximate optimal point via grid search
+                let bestW1 = 0, bestW2 = 0, bestObj = Infinity;
+                for (let w1 = -3; w1 <= 3; w1 += 0.05) {
+                    for (let w2 = -3; w2 <= 3; w2 += 0.05) {
+                        let slack = 0;
+                        for (let k = 0; k < pts.length; k++) {
+                            const val = lbls[k] * (w1 * pts[k][0] + w2 * pts[k][1]);
+                            if (val < 1) slack += (1 - val);
+                        }
+                        const obj = 0.5 * (w1 * w1 + w2 * w2) + C * slack;
+                        if (obj < bestObj) {
+                            bestObj = obj;
+                            bestW1 = w1;
+                            bestW2 = w2;
+                        }
+                    }
+                }
+
+                // Draw axes
+                ctx.strokeStyle = 'rgba(168, 168, 184, 0.3)';
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(toCanvasX(-3), toCanvasY(0));
+                ctx.lineTo(toCanvasX(3), toCanvasY(0));
+                ctx.moveTo(toCanvasX(0), toCanvasY(-3));
+                ctx.lineTo(toCanvasX(0), toCanvasY(3));
+                ctx.stroke();
+
+                // Axis labels
+                ctx.fillStyle = 'var(--text-muted)';
+                ctx.font = '12px "JetBrains Mono", monospace';
+                ctx.textAlign = 'center';
+                ctx.fillStyle = '#6c6c7c';
+                ctx.fillText('w₁', W - margin + 20, toCanvasY(0) + 4);
+                ctx.fillText('w₂', toCanvasX(0) - 4, margin - 10);
+
+                // Draw optimal point
+                const optX = toCanvasX(bestW1);
+                const optY = toCanvasY(bestW2);
+                // Glow
+                const grad = ctx.createRadialGradient(optX, optY, 0, optX, optY, 20);
+                grad.addColorStop(0, 'rgba(250, 204, 21, 0.5)');
+                grad.addColorStop(1, 'rgba(250, 204, 21, 0)');
+                ctx.fillStyle = grad;
+                ctx.fillRect(optX - 20, optY - 20, 40, 40);
+                // Dot
+                ctx.beginPath();
+                ctx.arc(optX, optY, 6, 0, 2 * Math.PI);
+                ctx.fillStyle = '#facc15';
+                ctx.fill();
+                ctx.strokeStyle = '#fff';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+
+                // Label
+                ctx.fillStyle = '#facc15';
+                ctx.font = '11px "JetBrains Mono", monospace';
+                ctx.textAlign = 'left';
+                ctx.fillText(`w*=(${bestW1.toFixed(1)}, ${bestW2.toFixed(1)})`, optX + 12, optY - 8);
+                ctx.fillText(`obj=${bestObj.toFixed(2)}`, optX + 12, optY + 8);
+
+                // Title
+                ctx.fillStyle = '#e8e8e8';
+                ctx.font = 'bold 13px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('目标函数等高线与可行域', W / 2, margin - 15);
+            }
+
+            slider.addEventListener('input', draw);
+            window.addEventListener('resize', draw);
+            draw();
+        }
+
+        /* ========================================
+           Section 2: Lagrangian Derivation Viz
+           ======================================== */
+        function initLagrangian() {
+            const canvas = document.getElementById('lagrangian-canvas');
+            const ctx = canvas.getContext('2d');
+            const cards = document.querySelectorAll('#deriv-steps .deriv-card');
+            let activeStep = 0;
+
+            cards.forEach((card, i) => {
+                card.addEventListener('click', () => {
+                    cards.forEach(c => c.classList.remove('active'));
+                    card.classList.add('active');
+                    activeStep = i;
+                    drawLagrangian(activeStep);
+                });
+            });
+
+            function drawLagrangian(step) {
+                const dpr = window.devicePixelRatio || 1;
+                const rect = canvas.parentElement.getBoundingClientRect();
+                canvas.width = rect.width * dpr;
+                canvas.height = rect.height * dpr;
+                ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+                const W = rect.width, H = rect.height;
+
+                ctx.clearRect(0, 0, W, H);
+
+                const margin = 50;
+                const plotW = W - 2 * margin;
+                const plotH = H - 2 * margin;
+                const cx = W / 2, cy = H / 2;
+
+                // Generate fixed sample data
+                const rng = SVMUtils.seededRandom(123);
+                const pts = [];
+                const lbls = [];
+                for (let i = 0; i < 3; i++) {
+                    pts.push([rng() * 1.5 + 0.5, rng() * 1.2 + 0.4]);
+                    lbls.push(1);
+                }
+                for (let i = 0; i < 3; i++) {
+                    pts.push([-rng() * 1.5 - 0.5, -rng() * 1.2 - 0.4]);
+                    lbls.push(-1);
+                }
+
+                const toX = (v) => margin + (v + 3) / 6 * plotW;
+                const toY = (v) => margin + (3 - v) / 6 * plotH;
+
+                // Step-dependent visualization
+                if (step === 0) {
+                    // Show Lagrangian as surface with alpha influence
+                    drawTitle(ctx, '拉格朗日函数：原始 + 约束惩罚', W, margin);
+                    drawAxes(ctx, margin, W, H, plotW, plotH, toX, toY, 'w₁', 'w₂');
+
+                    // Objective contours
+                    for (let r = 0.5; r < 3; r += 0.5) {
+                        ctx.beginPath();
+                        ctx.arc(toX(0), toY(0), r / 6 * plotW, 0, 2 * Math.PI);
+                        ctx.strokeStyle = `rgba(179, 136, 255, ${0.1 + r / 10})`;
+                        ctx.lineWidth = 1;
+                        ctx.stroke();
+                    }
+
+                    // Draw constraint lines
+                    ctx.setLineDash([5, 5]);
+                    ctx.lineWidth = 1.5;
+                    for (let k = 0; k < pts.length; k++) {
+                        const color = lbls[k] === 1 ? 'rgba(34,197,94,0.5)' : 'rgba(239,68,68,0.5)';
+                        // y(w·x) = 1 line
+                        const nx = lbls[k] * pts[k][0];
+                        const ny = lbls[k] * pts[k][1];
+                        // nx*w1 + ny*w2 = 1
+                        if (Math.abs(ny) > 0.01) {
+                            const w1a = -3, w2a = (1 - nx * w1a) / ny;
+                            const w1b = 3, w2b = (1 - nx * w1b) / ny;
+                            ctx.beginPath();
+                            ctx.moveTo(toX(w1a), toY(w2a));
+                            ctx.lineTo(toX(w1b), toY(w2b));
+                            ctx.strokeStyle = color;
+                            ctx.stroke();
+                        }
+                    }
+                    ctx.setLineDash([]);
+
+                    // Legend text
+                    ctx.fillStyle = 'rgba(179, 136, 255, 0.8)';
+                    ctx.font = '11px sans-serif';
+                    ctx.fillText('紫色圆：½||w||²等高线', margin + 10, H - 15);
+                    ctx.fillStyle = 'rgba(34,197,94,0.8)';
+                    ctx.fillText('虚线：约束边界', margin + 200, H - 15);
+
+                } else if (step === 1) {
+                    // Show w as sum of alpha_i * y_i * x_i
+                    drawTitle(ctx, 'w = Σ αᵢyᵢxᵢ：权重向量的分解', W, margin);
+                    drawAxes(ctx, margin, W, H, plotW, plotH, toX, toY, 'x₁', 'x₂');
+
+                    // Draw data points
+                    drawDataPoints(ctx, pts, lbls, toX, toY);
+
+                    // Draw arrows from origin representing alpha_i * y_i * x_i
+                    const alphas = [0.8, 0.3, 0, 0.6, 0.4, 0];
+                    let wSum = [0, 0];
+                    for (let k = 0; k < pts.length; k++) {
+                        if (alphas[k] > 0.01) {
+                            const contrib = [alphas[k] * lbls[k] * pts[k][0], alphas[k] * lbls[k] * pts[k][1]];
+                            // Draw arrow from current sum
+                            const fromX = toX(wSum[0]);
+                            const fromY = toY(wSum[1]);
+                            wSum[0] += contrib[0];
+                            wSum[1] += contrib[1];
+                            const destX = toX(wSum[0]);
+                            const destY = toY(wSum[1]);
+
+                            const color = lbls[k] === 1 ? '#22c55e' : '#ef4444';
+                            drawArrow(ctx, fromX, fromY, destX, destY, color, 2);
+
+                            ctx.fillStyle = color;
+                            ctx.font = '10px "JetBrains Mono", monospace';
+                            ctx.textAlign = 'center';
+                            ctx.fillText(`α${k+1}=${alphas[k].toFixed(1)}`, (fromX + destX) / 2 + 15, (fromY + destY) / 2 - 8);
+                        }
+                    }
+
+                    // Draw w result
+                    ctx.beginPath();
+                    ctx.arc(toX(wSum[0]), toY(wSum[1]), 6, 0, 2 * Math.PI);
+                    ctx.fillStyle = '#facc15';
+                    ctx.fill();
+                    ctx.strokeStyle = '#fff';
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+                    ctx.fillStyle = '#facc15';
+                    ctx.font = 'bold 12px sans-serif';
+                    ctx.textAlign = 'left';
+                    ctx.fillText(`w* = (${wSum[0].toFixed(2)}, ${wSum[1].toFixed(2)})`, toX(wSum[0]) + 12, toY(wSum[1]) - 10);
+
+                } else if (step === 2) {
+                    // Show balance condition
+                    drawTitle(ctx, 'Σ αᵢyᵢ = 0：正负类系数平衡', W, margin);
+
+                    // Draw balance visualization
+                    const barY = cy - 30;
+                    const barW = plotW * 0.6;
+                    const barLeft = cx - barW / 2;
+
+                    // Balance beam
+                    ctx.fillStyle = 'rgba(168, 168, 184, 0.3)';
+                    ctx.fillRect(barLeft, barY, barW, 4);
+
+                    // Fulcrum
+                    ctx.beginPath();
+                    ctx.moveTo(cx, barY + 4);
+                    ctx.lineTo(cx - 15, barY + 30);
+                    ctx.lineTo(cx + 15, barY + 30);
+                    ctx.closePath();
+                    ctx.fillStyle = 'rgba(168, 168, 184, 0.5)';
+                    ctx.fill();
+
+                    // Positive side (left)
+                    const posAlphas = [0.8, 0.3, 0.1];
+                    let posSum = 0;
+                    let xOff = barLeft + 20;
+                    for (let i = 0; i < posAlphas.length; i++) {
+                        posSum += posAlphas[i];
+                        const h = posAlphas[i] * 80;
+                        ctx.fillStyle = `rgba(34, 197, 94, ${0.4 + posAlphas[i] * 0.5})`;
+                        ctx.fillRect(xOff, barY - h, 30, h);
+                        ctx.fillStyle = '#22c55e';
+                        ctx.font = '10px "JetBrains Mono", monospace';
+                        ctx.textAlign = 'center';
+                        ctx.fillText(`α${i+1}·y${i+1}`, xOff + 15, barY - h - 8);
+                        ctx.fillText(`+${posAlphas[i].toFixed(1)}`, xOff + 15, barY - h + 15);
+                        xOff += 50;
+                    }
+
+                    // Negative side (right)
+                    const negAlphas = [0.6, 0.4, 0.2];
+                    let negSum = 0;
+                    xOff = cx + 30;
+                    for (let i = 0; i < negAlphas.length; i++) {
+                        negSum += negAlphas[i];
+                        const h = negAlphas[i] * 80;
+                        ctx.fillStyle = `rgba(239, 68, 68, ${0.4 + negAlphas[i] * 0.5})`;
+                        ctx.fillRect(xOff, barY - h, 30, h);
+                        ctx.fillStyle = '#ef4444';
+                        ctx.font = '10px "JetBrains Mono", monospace';
+                        ctx.textAlign = 'center';
+                        ctx.fillText(`α${i+4}·y${i+4}`, xOff + 15, barY - h - 8);
+                        ctx.fillText(`-${negAlphas[i].toFixed(1)}`, xOff + 15, barY - h + 15);
+                        xOff += 50;
+                    }
+
+                    // Sum labels
+                    ctx.fillStyle = '#22c55e';
+                    ctx.font = 'bold 14px sans-serif';
+                    ctx.textAlign = 'center';
+                    ctx.fillText(`Σ(正类) = +${posSum.toFixed(1)}`, cx - barW / 4, barY + 65);
+                    ctx.fillStyle = '#ef4444';
+                    ctx.fillText(`Σ(负类) = -${negSum.toFixed(1)}`, cx + barW / 4, barY + 65);
+
+                    ctx.fillStyle = '#facc15';
+                    ctx.font = 'bold 16px sans-serif';
+                    ctx.fillText(`总和 = ${(posSum - negSum).toFixed(1)} ≈ 0 ✓`, cx, barY + 100);
+
+                } else if (step === 3) {
+                    // Substitution — show matrix form
+                    drawTitle(ctx, '代入化简：展开矩阵乘积', W, margin);
+
+                    // Draw a visual matrix multiplication
+                    const matSize = 120;
+                    const matX = cx - matSize * 1.5;
+                    const matY = cy - matSize / 2 - 20;
+
+                    // alpha vector
+                    drawMatrixBlock(ctx, matX, matY, 30, matSize, 'α', '#b388ff');
+                    // y diag
+                    ctx.fillStyle = '#a8a8b8';
+                    ctx.font = '16px sans-serif';
+                    ctx.textAlign = 'center';
+                    ctx.fillText('⊙', matX + 45, matY + matSize / 2 + 5);
+                    drawMatrixBlock(ctx, matX + 60, matY, 30, matSize, 'y', '#ffab40');
+                    // x^T * x
+                    ctx.fillText('×', matX + 105, matY + matSize / 2 + 5);
+                    drawMatrixBlock(ctx, matX + 120, matY, matSize, matSize, 'X·Xᵀ', '#4fc3f7');
+                    // result arrow
+                    ctx.fillText('×', matX + 120 + matSize + 15, matY + matSize / 2 + 5);
+                    drawMatrixBlock(ctx, matX + 120 + matSize + 30, matY, 30, matSize, 'αy', '#16c79a');
+
+                    // Bottom explanation
+                    ctx.fillStyle = '#a8a8b8';
+                    ctx.font = '12px sans-serif';
+                    ctx.textAlign = 'center';
+                    ctx.fillText('½ αᵀ · diag(y) · K · diag(y) · α — 其中 K 是核矩阵', cx, matY + matSize + 40);
+                    ctx.fillStyle = '#4fc3f7';
+                    ctx.fillText('K_ij = x_i · x_j', cx, matY + matSize + 60);
+
+                } else if (step === 4) {
+                    // Final dual form — show alpha landscape
+                    drawTitle(ctx, '对偶目标函数：仅依赖 α 和内积', W, margin);
+                    drawAxes(ctx, margin, W, H, plotW, plotH, toX, toY, 'α₁', 'α₂');
+
+                    // Simplified 2D dual objective for 2 alphas
+                    // W(α1,α2) = α1+α2 - 0.5*(α1²K11 + 2α1α2y1y2K12 + α2²K22)
+                    const K11 = 2, K22 = 2, K12 = 0.5;
+                    const y1 = 1, y2 = -1;
+                    const res = 4;
+                    let maxObj = -Infinity, bestA1 = 0, bestA2 = 0;
+
+                    // First pass to find max
+                    for (let a1 = 0; a1 <= 3; a1 += 0.05) {
+                        for (let a2 = 0; a2 <= 3; a2 += 0.05) {
+                            const val = a1 + a2 - 0.5 * (a1 * a1 * K11 + 2 * a1 * a2 * y1 * y2 * K12 + a2 * a2 * K22);
+                            if (val > maxObj) { maxObj = val; bestA1 = a1; bestA2 = a2; }
+                        }
+                    }
+
+                    // Draw heatmap
+                    for (let px = margin; px < W - margin; px += res) {
+                        for (let py = margin; py < H - margin; py += res) {
+                            const a1 = (px - margin) / plotW * 3;
+                            const a2 = 3 - (py - margin) / plotH * 3;
+                            if (a1 < 0 || a2 < 0) continue;
+                            const val = a1 + a2 - 0.5 * (a1 * a1 * K11 + 2 * a1 * a2 * y1 * y2 * K12 + a2 * a2 * K22);
+                            const t = (val - (-2)) / (maxObj + 2);
+                            const clamped = Math.max(0, Math.min(1, t));
+                            const r = Math.round(22 + clamped * 100);
+                            const g = Math.round(26 + clamped * 170);
+                            const b = Math.round(46 + clamped * 100);
+                            ctx.fillStyle = `rgba(${r}, ${g}, ${b}, 0.8)`;
+                            ctx.fillRect(px, py, res, res);
+                        }
+                    }
+
+                    // Optimal point
+                    const optPx = margin + bestA1 / 3 * plotW;
+                    const optPy = margin + (3 - bestA2) / 3 * plotH;
+                    const grd = ctx.createRadialGradient(optPx, optPy, 0, optPx, optPy, 18);
+                    grd.addColorStop(0, 'rgba(250,204,21,0.7)');
+                    grd.addColorStop(1, 'rgba(250,204,21,0)');
+                    ctx.fillStyle = grd;
+                    ctx.fillRect(optPx - 18, optPy - 18, 36, 36);
+                    ctx.beginPath();
+                    ctx.arc(optPx, optPy, 5, 0, 2 * Math.PI);
+                    ctx.fillStyle = '#facc15';
+                    ctx.fill();
+                    ctx.strokeStyle = '#fff';
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+
+                    ctx.fillStyle = '#facc15';
+                    ctx.font = '11px "JetBrains Mono", monospace';
+                    ctx.textAlign = 'left';
+                    ctx.fillText(`α*=(${bestA1.toFixed(2)}, ${bestA2.toFixed(2)})`, optPx + 10, optPy - 8);
+                }
+            }
+
+            window.addEventListener('resize', () => drawLagrangian(activeStep));
+            drawLagrangian(0);
+        }
+
+        /* Drawing helpers */
+        function drawTitle(ctx, text, W, margin) {
+            ctx.fillStyle = '#e8e8e8';
+            ctx.font = 'bold 13px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(text, W / 2, margin - 15);
+        }
+
+        function drawAxes(ctx, margin, W, H, plotW, plotH, toX, toY, xLabel, yLabel) {
+            ctx.strokeStyle = 'rgba(168,168,184,0.3)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(margin, H - margin);
+            ctx.lineTo(W - margin, H - margin);
+            ctx.moveTo(margin, H - margin);
+            ctx.lineTo(margin, margin);
+            ctx.stroke();
+            ctx.fillStyle = '#6c6c7c';
+            ctx.font = '12px "JetBrains Mono", monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText(xLabel, W - margin + 18, H - margin + 4);
+            ctx.fillText(yLabel, margin - 4, margin - 10);
+        }
+
+        function drawDataPoints(ctx, pts, lbls, toX, toY) {
+            for (let k = 0; k < pts.length; k++) {
+                const color = lbls[k] === 1 ? '#22c55e' : '#ef4444';
+                ctx.beginPath();
+                ctx.arc(toX(pts[k][0]), toY(pts[k][1]), 6, 0, 2 * Math.PI);
+                ctx.fillStyle = color;
+                ctx.fill();
+                ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+            }
+        }
+
+        function drawArrow(ctx, x1, y1, x2, y2, color, lineWidth) {
+            const dx = x2 - x1, dy = y2 - y1;
+            const len = Math.sqrt(dx * dx + dy * dy);
+            if (len < 2) return;
+            const angle = Math.atan2(dy, dx);
+            const headLen = 8;
+
+            ctx.beginPath();
+            ctx.moveTo(x1, y1);
+            ctx.lineTo(x2, y2);
+            ctx.strokeStyle = color;
+            ctx.lineWidth = lineWidth;
+            ctx.stroke();
+
+            ctx.beginPath();
+            ctx.moveTo(x2, y2);
+            ctx.lineTo(x2 - headLen * Math.cos(angle - 0.4), y2 - headLen * Math.sin(angle - 0.4));
+            ctx.lineTo(x2 - headLen * Math.cos(angle + 0.4), y2 - headLen * Math.sin(angle + 0.4));
+            ctx.closePath();
+            ctx.fillStyle = color;
+            ctx.fill();
+        }
+
+        function drawMatrixBlock(ctx, x, y, w, h, label, color) {
+            ctx.fillStyle = color.replace(')', ',0.15)').replace('rgb', 'rgba');
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.roundRect(x, y, w, h, 6);
+            ctx.fill();
+            ctx.stroke();
+            ctx.fillStyle = color;
+            ctx.font = 'bold 14px "JetBrains Mono", monospace';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(label, x + w / 2, y + h / 2);
+            ctx.textBaseline = 'alphabetic';
+        }
+
+        /* ========================================
+           Section 3: Gram Matrix Heatmap
+           ======================================== */
+        function initGramMatrix() {
+            const slider = document.getElementById('gram-n-slider');
+            const valueSpan = document.getElementById('gram-n-value');
+
+            slider.addEventListener('input', () => {
+                gramN = parseInt(slider.value);
+                valueSpan.textContent = gramN;
+                buildGramMatrix();
+            });
+
+            buildGramMatrix();
+        }
+
+        function buildGramMatrix() {
+            // Generate data
+            const result = SVMUtils.generateLinearData(gramN, 0.3, 77);
+            gramData = result.data;
+            gramLabels = result.labels;
+            selectedGramCell = null;
+
+            // Compute Gram matrix
+            const n = gramData.length;
+            const K = [];
+            let kMin = Infinity, kMax = -Infinity;
+
+            for (let i = 0; i < n; i++) {
+                K[i] = [];
+                for (let j = 0; j < n; j++) {
+                    let val;
+                    if (currentKernel === 'linear') {
+                        val = SVMUtils.dot(gramData[i], gramData[j]);
+                    } else if (currentKernel === 'rbf') {
+                        val = SVMUtils.rbfKernel(gramData[i], gramData[j], 1.0);
+                    } else {
+                        val = SVMUtils.polynomialKernel(gramData[i], gramData[j], 2, 1);
+                    }
+                    K[i][j] = val;
+                    if (val < kMin) kMin = val;
+                    if (val > kMax) kMax = val;
+                }
+            }
+
+            // Build heatmap DOM
+            const container = document.getElementById('gram-heatmap');
+            container.innerHTML = '';
+            const grid = document.createElement('div');
+            grid.className = 'gram-matrix-grid';
+            grid.style.gridTemplateColumns = `repeat(${n}, 1fr)`;
+            grid.style.width = `${Math.min(n * 48, 460)}px`;
+
+            for (let i = 0; i < n; i++) {
+                for (let j = 0; j < n; j++) {
+                    const cell = document.createElement('div');
+                    cell.className = 'gram-cell';
+                    const t = kMax > kMin ? (K[i][j] - kMin) / (kMax - kMin) : 0.5;
+                    // Blue to Green to Yellow color scale
+                    let r, g, b;
+                    if (t < 0.5) {
+                        const s = t * 2;
+                        r = Math.round(22 + s * 30);
+                        g = Math.round(26 + s * 170);
+                        b = Math.round(100 + s * 50);
+                    } else {
+                        const s = (t - 0.5) * 2;
+                        r = Math.round(52 + s * 198);
+                        g = Math.round(196 + s * 8);
+                        b = Math.round(150 - s * 120);
+                    }
+                    cell.style.background = `rgb(${r},${g},${b})`;
+                    cell.textContent = K[i][j].toFixed(1);
+                    cell.dataset.i = i;
+                    cell.dataset.j = j;
+                    cell.dataset.val = K[i][j].toFixed(3);
+                    cell.addEventListener('click', () => selectGramCell(i, j, K[i][j]));
+                    grid.appendChild(cell);
+                }
+            }
+            container.appendChild(grid);
+
+            // Draw scatter plot
+            drawGramScatter();
+
+            // Reset info
+            document.getElementById('gram-info').innerHTML = '<p style="color:var(--text-muted); font-size:0.85rem">点击热力图中的单元格查看详情</p>';
+        }
+
+        function selectGramCell(i, j, val) {
+            selectedGramCell = { i, j };
+            // Update cell highlighting
+            document.querySelectorAll('.gram-cell').forEach(c => c.classList.remove('selected'));
+            const cells = document.querySelectorAll('.gram-cell');
+            cells[i * gramData.length + j].classList.add('selected');
+
+            // Update info panel
+            const info = document.getElementById('gram-info');
+            const yi = gramLabels[i] === 1 ? '+1' : '-1';
+            const yj = gramLabels[j] === 1 ? '+1' : '-1';
+            info.innerHTML = `
+                <div class="flex justify-between items-center mb-1">
+                    <span class="pair-label">K(x${i+1}, x${j+1})</span>
+                    <span class="pair-value">${val.toFixed(4)}</span>
+                </div>
+                <p class="text-sm" style="color:var(--text-secondary)">
+                    x${i+1} = (${gramData[i][0].toFixed(2)}, ${gramData[i][1].toFixed(2)}) &nbsp; y${i+1} = <span style="color:${gramLabels[i]===1?'#22c55e':'#ef4444'}">${yi}</span><br>
+                    x${j+1} = (${gramData[j][0].toFixed(2)}, ${gramData[j][1].toFixed(2)}) &nbsp; y${j+1} = <span style="color:${gramLabels[j]===1?'#22c55e':'#ef4444'}">${yj}</span>
+                </p>
+                <p class="text-sm mt-1" style="color:var(--text-muted)">
+                    ${i === j ? '对角元素：点与自身的核值（自相似度）' : (val > 0.5 ? '较大的核值表示两点在特征空间中更相似' : '较小的核值表示两点差异较大')}
+                </p>
+            `;
+
+            // Redraw scatter with highlights
+            drawGramScatter();
+        }
+
+        function drawGramScatter() {
+            const canvas = document.getElementById('gram-scatter-canvas');
+            const ctx = canvas.getContext('2d');
+            const dpr = window.devicePixelRatio || 1;
+            const rect = canvas.parentElement.getBoundingClientRect();
+            canvas.width = rect.width * dpr;
+            canvas.height = 220 * dpr;
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            const W = rect.width, H = 220;
+
+            ctx.clearRect(0, 0, W, H);
+
+            if (!gramData) return;
+            const n = gramData.length;
+            const margin = 30;
+            const plotW = W - 2 * margin;
+            const plotH = H - 2 * margin;
+
+            // Find data bounds
+            let xMin = Infinity, xMax = -Infinity, yMin = Infinity, yMax = -Infinity;
+            for (const p of gramData) {
+                if (p[0] < xMin) xMin = p[0];
+                if (p[0] > xMax) xMax = p[0];
+                if (p[1] < yMin) yMin = p[1];
+                if (p[1] > yMax) yMax = p[1];
+            }
+            const pad = 0.3;
+            xMin -= pad; xMax += pad; yMin -= pad; yMax += pad;
+
+            const toX = (v) => margin + (v - xMin) / (xMax - xMin) * plotW;
+            const toY = (v) => margin + (yMax - v) / (yMax - yMin) * plotH;
+
+            // Draw connecting line for selected pair
+            if (selectedGramCell && selectedGramCell.i !== selectedGramCell.j) {
+                const pi = gramData[selectedGramCell.i];
+                const pj = gramData[selectedGramCell.j];
+                ctx.beginPath();
+                ctx.moveTo(toX(pi[0]), toY(pi[1]));
+                ctx.lineTo(toX(pj[0]), toY(pj[1]));
+                ctx.strokeStyle = 'rgba(250,204,21,0.5)';
+                ctx.lineWidth = 2;
+                ctx.setLineDash([4, 4]);
+                ctx.stroke();
+                ctx.setLineDash([]);
+            }
+
+            // Draw points
+            for (let k = 0; k < n; k++) {
+                const color = gramLabels[k] === 1 ? '#22c55e' : '#ef4444';
+                const isSelected = selectedGramCell && (k === selectedGramCell.i || k === selectedGramCell.j);
+                const r = isSelected ? 8 : 5;
+
+                if (isSelected) {
+                    const glow = ctx.createRadialGradient(toX(gramData[k][0]), toY(gramData[k][1]), 0,
+                        toX(gramData[k][0]), toY(gramData[k][1]), 16);
+                    glow.addColorStop(0, 'rgba(250,204,21,0.4)');
+                    glow.addColorStop(1, 'rgba(250,204,21,0)');
+                    ctx.fillStyle = glow;
+                    ctx.fillRect(toX(gramData[k][0]) - 16, toY(gramData[k][1]) - 16, 32, 32);
+                }
+
+                ctx.beginPath();
+                ctx.arc(toX(gramData[k][0]), toY(gramData[k][1]), r, 0, 2 * Math.PI);
+                ctx.fillStyle = color;
+                ctx.fill();
+                if (isSelected) {
+                    ctx.strokeStyle = '#facc15';
+                    ctx.lineWidth = 2.5;
+                } else {
+                    ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+                    ctx.lineWidth = 1;
+                }
+                ctx.stroke();
+
+                // Label
+                ctx.fillStyle = '#a8a8b8';
+                ctx.font = '10px "JetBrains Mono", monospace';
+                ctx.textAlign = 'center';
+                ctx.fillText(`x${k+1}`, toX(gramData[k][0]), toY(gramData[k][1]) - r - 5);
+            }
+        }
+
+        function setKernel(kernel, btn) {
+            currentKernel = kernel;
+            document.querySelectorAll('.btn-group .btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            const badge = document.getElementById('gram-kernel-badge');
+            const names = { linear: '线性核', rbf: 'RBF核', poly: '多项式核' };
+            badge.textContent = names[kernel];
+            buildGramMatrix();
+        }
+
+        /* ========================================
+           Section 4: Decision from Dual Solution
+           ======================================== */
+        function initDecision() {
+            trainAndDrawDecision();
+            const canvas = document.getElementById('decision-canvas');
+            canvas.addEventListener('click', (e) => {
+                const rect = canvas.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+                handleTestPointClick(x, y, rect.width, rect.height);
+            });
+        }
+
+        function trainAndDrawDecision() {
+            // Generate training data
+            const result = SVMUtils.generateLinearData(20, 0.3, 55);
+            decisionData = result.data;
+            decisionLabels = result.labels;
+
+            // Train with kernel SVM (linear)
+            decisionModel = SVMUtils.trainKernelSVM(decisionData, decisionLabels, SVMUtils.linearKernel, 5.0, 0.001, 20);
+            testPoint = null;
+
+            drawDecisionViz();
+            updateSVContributions();
+        }
+
+        function drawDecisionViz() {
+            const canvas = document.getElementById('decision-canvas');
+            const ctx = canvas.getContext('2d');
+            const dpr = window.devicePixelRatio || 1;
+            const rect = canvas.parentElement.getBoundingClientRect();
+            canvas.width = rect.width * dpr;
+            canvas.height = 460 * dpr;
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            const W = rect.width, H = 460;
+
+            ctx.clearRect(0, 0, W, H);
+
+            if (!decisionModel || !decisionData) return;
+
+            const margin = 40;
+            const plotW = W - 2 * margin;
+            const plotH = H - 2 * margin;
+
+            // Data bounds
+            let xMin = Infinity, xMax = -Infinity, yMin = Infinity, yMax = -Infinity;
+            for (const p of decisionData) {
+                if (p[0] < xMin) xMin = p[0];
+                if (p[0] > xMax) xMax = p[0];
+                if (p[1] < yMin) yMin = p[1];
+                if (p[1] > yMax) yMax = p[1];
+            }
+            const pad = 0.5;
+            xMin -= pad; xMax += pad; yMin -= pad; yMax += pad;
+
+            const toX = (v) => margin + (v - xMin) / (xMax - xMin) * plotW;
+            const toY = (v) => margin + (yMax - v) / (yMax - yMin) * plotH;
+            const fromCanvasX = (px) => xMin + (px - margin) / plotW * (xMax - xMin);
+            const fromCanvasY = (py) => yMax - (py - margin) / plotH * (yMax - yMin);
+
+            // Store mapping for click handler
+            canvas._mapping = { xMin, xMax, yMin, yMax, margin, plotW, plotH, fromCanvasX, fromCanvasY };
+
+            // Decision region heatmap
+            const res = 4;
+            for (let px = margin; px < W - margin; px += res) {
+                for (let py = margin; py < H - margin; py += res) {
+                    const x = [fromCanvasX(px), fromCanvasY(py)];
+                    let score = 0;
+                    for (let i = 0; i < decisionData.length; i++) {
+                        if (decisionModel.alphas[i] > 1e-6) {
+                            score += decisionModel.alphas[i] * decisionLabels[i] * SVMUtils.linearKernel(decisionData[i], x);
+                        }
+                    }
+                    score += decisionModel.b;
+                    const t = Math.max(-3, Math.min(3, score));
+                    if (t > 0) {
+                        ctx.fillStyle = `rgba(34, 197, 94, ${Math.min(0.25, Math.abs(t) * 0.08)})`;
+                    } else {
+                        ctx.fillStyle = `rgba(239, 68, 68, ${Math.min(0.25, Math.abs(t) * 0.08)})`;
+                    }
+                    ctx.fillRect(px, py, res, res);
+                }
+            }
+
+            // Decision boundary (score = 0) and margins (score = ±1)
+            const boundaries = [
+                { level: 0, color: '#facc15', width: 2.5, dash: [] },
+                { level: 1, color: 'rgba(148,163,184,0.5)', width: 1.5, dash: [5, 5] },
+                { level: -1, color: 'rgba(148,163,184,0.5)', width: 1.5, dash: [5, 5] }
+            ];
+            for (const bd of boundaries) {
+                ctx.beginPath();
+                ctx.strokeStyle = bd.color;
+                ctx.lineWidth = bd.width;
+                ctx.setLineDash(bd.dash);
+                const step = 2;
+                for (let px = margin; px < W - margin; px += step) {
+                    for (let py = margin; py < H - margin; py += step) {
+                        const x = [fromCanvasX(px), fromCanvasY(py)];
+                        let s1 = computeScore(x);
+                        const x2 = [fromCanvasX(px + step), fromCanvasY(py)];
+                        let s2 = computeScore(x2);
+                        const x3 = [fromCanvasX(px), fromCanvasY(py + step)];
+                        let s3 = computeScore(x3);
+                        if ((s1 - bd.level) * (s2 - bd.level) <= 0 || (s1 - bd.level) * (s3 - bd.level) <= 0) {
+                            ctx.fillStyle = bd.color;
+                            ctx.fillRect(px, py, step, step);
+                        }
+                    }
+                }
+                ctx.setLineDash([]);
+            }
+
+            // Draw data points
+            const n = decisionData.length;
+            for (let k = 0; k < n; k++) {
+                const isSV = decisionModel.supportIndices.includes(k);
+                const color = decisionLabels[k] === 1 ? '#22c55e' : '#ef4444';
+                const px = toX(decisionData[k][0]);
+                const py = toY(decisionData[k][1]);
+                const r = isSV ? 8 : 5;
+
+                ctx.beginPath();
+                ctx.arc(px, py, r, 0, 2 * Math.PI);
+                ctx.fillStyle = color;
+                ctx.fill();
+
+                if (isSV) {
+                    ctx.strokeStyle = '#f97316';
+                    ctx.lineWidth = 3;
+                    ctx.stroke();
+                    // Label alpha
+                    ctx.fillStyle = '#f97316';
+                    ctx.font = '9px "JetBrains Mono", monospace';
+                    ctx.textAlign = 'center';
+                    ctx.fillText(`α=${decisionModel.alphas[k].toFixed(2)}`, px, py - r - 5);
+                } else {
+                    ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+                    ctx.lineWidth = 1;
+                    ctx.stroke();
+                }
+            }
+
+            // Draw test point if exists
+            if (testPoint) {
+                const tpx = toX(testPoint[0]);
+                const tpy = toY(testPoint[1]);
+                // Draw lines from SVs to test point
+                for (const si of decisionModel.supportIndices) {
+                    const spx = toX(decisionData[si][0]);
+                    const spy = toY(decisionData[si][1]);
+                    ctx.beginPath();
+                    ctx.moveTo(spx, spy);
+                    ctx.lineTo(tpx, tpy);
+                    ctx.strokeStyle = 'rgba(250, 204, 21, 0.2)';
+                    ctx.lineWidth = 1;
+                    ctx.stroke();
+                }
+
+                // Glow
+                const glow = ctx.createRadialGradient(tpx, tpy, 0, tpx, tpy, 15);
+                glow.addColorStop(0, 'rgba(250,204,21,0.5)');
+                glow.addColorStop(1, 'rgba(250,204,21,0)');
+                ctx.fillStyle = glow;
+                ctx.fillRect(tpx - 15, tpy - 15, 30, 30);
+
+                ctx.beginPath();
+                ctx.arc(tpx, tpy, 7, 0, 2 * Math.PI);
+                ctx.fillStyle = '#facc15';
+                ctx.fill();
+                ctx.strokeStyle = '#fff';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+
+                // Cross
+                ctx.strokeStyle = '#1a1a2e';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(tpx - 3, tpy - 3);
+                ctx.lineTo(tpx + 3, tpy + 3);
+                ctx.moveTo(tpx + 3, tpy - 3);
+                ctx.lineTo(tpx - 3, tpy + 3);
+                ctx.stroke();
+            }
+
+            // Title
+            ctx.fillStyle = '#e8e8e8';
+            ctx.font = 'bold 13px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('决策函数可视化（点击设置测试点）', W / 2, margin - 15);
+        }
+
+        function computeScore(x) {
+            let score = 0;
+            for (let i = 0; i < decisionData.length; i++) {
+                if (decisionModel.alphas[i] > 1e-6) {
+                    score += decisionModel.alphas[i] * decisionLabels[i] * SVMUtils.linearKernel(decisionData[i], x);
+                }
+            }
+            return score + decisionModel.b;
+        }
+
+        function handleTestPointClick(clickX, clickY, canvasW, canvasH) {
+            const canvas = document.getElementById('decision-canvas');
+            const m = canvas._mapping;
+            if (!m) return;
+            const x = m.fromCanvasX(clickX);
+            const y = m.fromCanvasY(clickY);
+
+            // Check if within plot bounds
+            if (x < m.xMin || x > m.xMax || y < m.yMin || y > m.yMax) return;
+
+            testPoint = [x, y];
+            drawDecisionViz();
+            updateSVContributions();
+        }
+
+        function updateSVContributions() {
+            const container = document.getElementById('sv-contributions');
+            const infoBox = document.getElementById('test-point-info');
+
+            if (!decisionModel) return;
+            const svIndices = decisionModel.supportIndices;
+
+            if (!testPoint) {
+                // Show SV list without contributions
+                let html = '';
+                for (const si of svIndices) {
+                    const yi = decisionLabels[si] === 1 ? '+1' : '-1';
+                    const color = decisionLabels[si] === 1 ? 'positive' : 'negative';
+                    const alpha = decisionModel.alphas[si];
+                    html += `
+                        <div class="sv-row">
+                            <span class="sv-label">SV x${si+1}</span>
+                            <span class="text-sm" style="color:${decisionLabels[si]===1?'#22c55e':'#ef4444'}">y=${yi}</span>
+                            <div class="bar-wrap"><div class="bar-fill ${color}" style="width:${Math.min(100, alpha * 30)}%"></div></div>
+                            <span class="sv-value">α=${alpha.toFixed(3)}</span>
+                        </div>
+                    `;
+                }
+                container.innerHTML = html || '<p class="text-sm text-muted">无支持向量</p>';
+                infoBox.innerHTML = '<p style="color:var(--text-muted)">在右侧画布上<strong>点击</strong>选择测试点，查看各支持向量的贡献</p>';
+                return;
+            }
+
+            // Compute per-SV contributions
+            let totalScore = 0;
+            const contributions = [];
+            let maxAbsContrib = 0;
+
+            for (const si of svIndices) {
+                const contrib = decisionModel.alphas[si] * decisionLabels[si] * SVMUtils.linearKernel(decisionData[si], testPoint);
+                contributions.push({ index: si, contrib });
+                totalScore += contrib;
+                if (Math.abs(contrib) > maxAbsContrib) maxAbsContrib = Math.abs(contrib);
+            }
+            totalScore += decisionModel.b;
+
+            let html = '';
+            for (const c of contributions) {
+                const yi = decisionLabels[c.index] === 1 ? '+1' : '-1';
+                const color = c.contrib >= 0 ? 'positive' : 'negative';
+                const barWidth = maxAbsContrib > 0 ? Math.abs(c.contrib) / maxAbsContrib * 100 : 0;
+                html += `
+                    <div class="sv-row highlighted">
+                        <span class="sv-label">SV x${c.index+1}</span>
+                        <span class="text-sm" style="color:${decisionLabels[c.index]===1?'#22c55e':'#ef4444'}">y=${yi}</span>
+                        <div class="bar-wrap"><div class="bar-fill ${color}" style="width:${barWidth}%"></div></div>
+                        <span class="sv-value" style="color:${c.contrib>=0?'#22c55e':'#ef4444'}">${c.contrib >= 0 ? '+' : ''}${c.contrib.toFixed(3)}</span>
+                    </div>
+                `;
+            }
+            container.innerHTML = html;
+
+            // Update info
+            const prediction = totalScore >= 0 ? 1 : -1;
+            const predClass = prediction === 1 ? 'result-pos' : 'result-neg';
+            const predLabel = prediction === 1 ? '+1 (正类)' : '-1 (负类)';
+            infoBox.innerHTML = `
+                <p>测试点: <span style="color:var(--accent-yellow)">(${testPoint[0].toFixed(2)}, ${testPoint[1].toFixed(2)})</span></p>
+                <p>f(x) = Σαᵢyᵢ(xᵢ·x) + b</p>
+                <p>SV贡献总和: ${(totalScore - decisionModel.b).toFixed(4)}</p>
+                <p>偏置 b: ${decisionModel.b.toFixed(4)}</p>
+                <p>决策值: <strong>${totalScore.toFixed(4)}</strong></p>
+                <p>预测类别: <span class="${predClass}">${predLabel}</span></p>
+            `;
+        }
+
+        function resetDecision() {
+            testPoint = null;
+            trainAndDrawDecision();
+        }
+
+        /* ========================================
+           Init all
+           ======================================== */
+        function init() {
+            initPrimal();
+            initLagrangian();
+            initGramMatrix();
+            initDecision();
+        }
+
+        return { init, setKernel, resetDecision };
+    })();
+
+    /* === Boot === */
+    document.addEventListener('DOMContentLoaded', () => {
+        DualPage.init();
+
+        // Render KaTeX
+        renderMathInElement(document.body, {
+            delimiters: [
+                { left: '$$', right: '$$', display: true },
+                { left: '$', right: '$', display: false }
+            ],
+            throwOnError: false
+        });
+
+        // Handle window resize for Gram scatter
+        let resizeTimer;
+        window.addEventListener('resize', () => {
+            clearTimeout(resizeTimer);
+            resizeTimer = setTimeout(() => {
+                DualPage.init();
+            }, 250);
+        });
+    });
+    </script>
+</body>
+</html>
